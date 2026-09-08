@@ -49,7 +49,14 @@ export default function AddApplicationForm({ open, onClose, onCreated }: AddAppl
       if (generation.current === currentGeneration && openRef.current) setError('无法读取工作区或本地恢复记录，请重试；暂未提交。');
     }
   }
-  useEffect(() => { if (open) void initialize(); }, [open]);
+  useEffect(() => {
+    if (open) {
+      // Permission to bypass an unknown attempt lasts for this opening only.
+      bypassed.current.clear();
+      setOverride(false);
+      void initialize();
+    }
+  }, [open]);
 
   const close = () => {
     generation.current++;

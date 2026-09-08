@@ -14,6 +14,7 @@ vi.mock('@/services/applications', () => ({
 const request: ApplicationCreationInput = {
   company_name: '公司 A', position_name: '工程师', status: 'pending', job_url: '', notes: '', closed_reason: '',
   idempotency_key: 'original-request-0001', initial_jd: null,
+  expected_scope_id: 'workspace-a',
 };
 const result = { ...request, id: 7, jd_version_id: null } as unknown as ApplicationCreationResult;
 let root: Root;
@@ -61,6 +62,21 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); client.clear(); vi.restoreAllMocks(); });
 
 describe('single Application intake', () => {
+  it.each(['cancel', 'external'])('reoffers a bypassed unknown submission after %s close and reopen', async (method) => {
+    savePendingCreation('workspace-a', { request, status: 'unknown' });
+    await render();
+    await act(async () => (document.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+    await flush();
+    await click('承担重复风险，另建新草稿');
+    if (method === 'cancel') await click('取消');
+    await render(false);
+    await render(true);
+    expect(loadPendingCreations('workspace-a')).toHaveLength(1);
+    expect(document.body.textContent).toContain('有一条待恢复提交');
+    await click('查询／恢复结果');
+    expect(createApplicationWithJd).toHaveBeenCalledWith(request);
+    expect(loadPendingCreations('workspace-a')).toEqual([]);
+  });
   it('draft, review and cancel never write business data', async () => {
     await render(); input('company_name', '公司 A'); input('position_name', '工程师');
     await click('核对并检查重复');
@@ -117,7 +133,7 @@ describe('single Application intake', () => {
     expect(created).toHaveBeenCalledWith(result);
   });
   it('does not read or replay another workspace pending request', async () => {
-    savePendingCreation('workspace-b', { request, status: 'unknown' });
+    savePendingCreation('workspace-b', { request: { ...request, expected_scope_id: 'workspace-b' }, status: 'unknown' });
     await render(); expect(document.body.textContent).not.toContain('有一条待恢复提交');
     expect(createApplicationWithJd).not.toHaveBeenCalled();
     expect(loadPendingCreations('workspace-b')).toHaveLength(1);
