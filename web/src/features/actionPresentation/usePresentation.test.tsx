@@ -54,6 +54,35 @@ describe('presentation request ownership', () => {
     expect(host.textContent).toBe('原始消息');
     expect(api.read).toHaveBeenCalledTimes(1);
   });
+  it('falls back to the latest persisted messages after a cached display refresh fails and can recover', async () => {
+    let fail!: (reason: Error) => void;
+    api.read.mockResolvedValueOnce(snapshot(1, '旧展示'))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }))
+      .mockResolvedValueOnce(snapshot(1, '恢复展示'));
+    await act(async () => root.render(<Owner conversationId={1} />));
+    const latest: UITurn[] = [...turns,
+      { id: 'message:20', role: 'user', content: '最新问题' },
+      { id: 'message:21', role: 'assistant', content: '最新回复' }];
+    act(() => root.render(<Owner conversationId={1} localTurns={latest} />));
+    expect(host.textContent).toBe('旧展示');
+    await act(async () => fail(new Error('offline')));
+    expect(host.textContent).toBe('原始消息最新问题最新回复');
+    expect(api.read).toHaveBeenCalledTimes(2);
+    await act(async () => (host.querySelector('button') as HTMLButtonElement).click());
+    expect(host.textContent).toBe('恢复展示');
+    expect(api.read).toHaveBeenCalledTimes(3);
+  });
+  it('does not clear a newer display when an obsolete refresh rejects', async () => {
+    let fail!: (reason: Error) => void;
+    api.read.mockResolvedValueOnce(snapshot(1, '旧展示'))
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }))
+      .mockResolvedValueOnce(snapshot(2, '新会话展示'));
+    await act(async () => root.render(<Owner conversationId={1} />));
+    act(() => (host.querySelector('button') as HTMLButtonElement).click());
+    await act(async () => root.render(<Owner conversationId={2} />));
+    await act(async () => fail(new Error('obsolete request')));
+    expect(host.textContent).toBe('新会话展示');
+  });
   it('keeps the same operation node during execution and shows the new streaming message without restoring mutation commands', async () => {
     const saved = snapshot(1, '稳定消息');
     saved.items.push({ schema_version: 1, item_id: 'agent_operation:op-1', kind: 'action', message_id: null,

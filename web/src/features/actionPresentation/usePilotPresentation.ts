@@ -15,7 +15,11 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
     if (conversationId !== undefined && !loading) {
       void getPilotPresentation(conversationId).then((snapshot) => {
         if (current) setLoaded({ snapshot, turns, pending, revision });
-      }).catch(() => { /* Original messages and confirmation owner remain available. */ });
+      }).catch(() => {
+        // A failed refresh must release the stale projection so the latest
+        // persisted messages remain visible through the original owner.
+        if (current) setLoaded(null);
+      });
     }
     return () => { current = false; };
   }, [conversationId, turns, pending, loading, revision]);
