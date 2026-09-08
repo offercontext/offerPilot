@@ -41,6 +41,10 @@ from offerpilot.ai.agent_loop import (
     PendingPresentationSnapshot,
     SegmentSurfaceGate,
 )
+from offerpilot.ai.confirmation_receipt import (
+    EDITED_CONFIRMATION_RECEIPT_STRATEGY,
+    edited_confirmation_receipt,
+)
 from offerpilot.ai.tool_authority.contracts import SegmentExecutionAuthority
 from offerpilot.ai.tool_runtime.catalog import SegmentToolCatalogLease, SegmentToolSpecHandle
 from offerpilot.ai.tool_runtime.context import ToolExecutionContext
@@ -3901,6 +3905,10 @@ class PilotRuntime:
                     event_sink=cast(Any, confirmation_event_sink),
                     runtime_signal_sink=signal_sink,
                     cancel_check=self._confirmation_cancel_check(control, cancel_check),
+                    stop_after_approved_write=(
+                        session.state.confirmation_strategy_version
+                        == EDITED_CONFIRMATION_RECEIPT_STRATEGY
+                    ),
                 )
                 self._bind_invocation_pending_persistence(
                     invocation,
@@ -4181,7 +4189,23 @@ class PilotRuntime:
                 origin_removed = True
                 continue
             continuation.append(message)
-        if not continuation and normalized.reply:
+        terminal_payload = _attribute(_attribute(state, "terminal_execution"), "payload")
+        edited_receipt: str | None = None
+        if (
+            state.confirmation_strategy_version == EDITED_CONFIRMATION_RECEIPT_STRATEGY
+            and _attribute(terminal_payload, "status") == "committed"
+        ):
+            result_json = _attribute(terminal_payload, "result_json")
+            edited_receipt = edited_confirmation_receipt(
+                result_json=result_json if isinstance(result_json, str) else None,
+                changed_fields=state.confirmation_strategy_fields,
+            )
+            # The receipt belongs to the same atomic delivery as the origin
+            # ToolMessage.  Building it only after final_delivery would make
+            # the HTTP response look successful while history stayed without
+            # the assistant message.
+            continuation.append(Message(role="assistant", content=edited_receipt))
+        elif not continuation and normalized.reply:
             continuation.append(Message(role="assistant", content=normalized.reply))
         pending = normalized.pending
         delivery = coordinator.final_delivery(
@@ -4252,13 +4276,15 @@ class PilotRuntime:
         write_status: WriteStatus = "success" if state.succeeded else "failed"
         if not state.approved:
             write_status = "cancelled"
-        visible_reply = _user_facing_assistant_content(
-            normalized.reply or continuation[-1].content if continuation else ""
-        )
-        visible_reply = _apply_exact_success_presentation(
-            visible_reply,
-            state.execution_record,
-        )
+        visible_reply = edited_receipt or ""
+        if edited_receipt is None:
+            visible_reply = _user_facing_assistant_content(
+                normalized.reply or continuation[-1].content if continuation else ""
+            )
+            visible_reply = _apply_exact_success_presentation(
+                visible_reply,
+                state.execution_record,
+            )
         return MessageOutcome(
             message=visible_reply,
             conversation_id=request.conversation_id,
@@ -6930,6 +6956,10 @@ class PilotRuntime:
                         ),
                         runtime_signal_sink=signal_sink,
                         cancel_check=self._confirmation_cancel_check(state.control, cancel_check),
+                        stop_after_approved_write=(
+                            session.state.confirmation_strategy_version
+                            == EDITED_CONFIRMATION_RECEIPT_STRATEGY
+                        ),
                     )
                     self._bind_invocation_pending_persistence(
                         invocation,

@@ -1425,6 +1425,7 @@ class AgentLoopInvocation(TransientToolRuntimeValue):
     runtime_signal_sink: AgentRuntimeSignalSink | None
     cancel_check: CancelCheck | None
     surface_gate: SegmentSurfaceGate | None = field(default=None, repr=False, compare=False)
+    stop_after_approved_write: bool = field(default=False, repr=False, compare=False)
     _catalog_ownership: _AgentLoopLeaseOwnership = field(
         init=False,
         repr=False,
@@ -1489,6 +1490,8 @@ class AgentLoopInvocation(TransientToolRuntimeValue):
             )
         if type(self.auto_approve) is not bool:
             raise TypeError("AgentLoopInvocation auto_approve must be bool")
+        if type(self.stop_after_approved_write) is not bool:
+            raise TypeError("AgentLoopInvocation stop_after_approved_write must be bool")
         if type(self.max_iterations) is not int or self.max_iterations < 0:
             raise ValueError("AgentLoopInvocation max_iterations is invalid")
         if isinstance(self.seed, ApprovedWriteSeed) and not callable(
@@ -1607,6 +1610,7 @@ class AgentLoopRunner:
                 services,
                 working_messages,
                 added_messages,
+                approved_result,
             ) = self._bootstrap_approved(
                 invocation,
                 invocation.seed.continuation,
@@ -1615,6 +1619,9 @@ class AgentLoopRunner:
                 failures,
                 owned_leases,
             )
+            if approved_result is not None:
+                services.require_active()
+                return approved_result
 
         model_steps = 0
         max_iterations = invocation.max_iterations or DEFAULT_MAX_ITERATIONS
@@ -1684,7 +1691,13 @@ class AgentLoopRunner:
         records: list[ToolExecutionRecord[Any, Any]],
         failures: list[ToolFailure],
         owned_leases: list[SegmentToolCatalogLease],
-    ) -> tuple[AgentLoopInvocation, _LoopServices, list[Message], list[Message]]:
+    ) -> tuple[
+        AgentLoopInvocation,
+        _LoopServices,
+        list[Message],
+        list[Message],
+        AgentTurnResult | None,
+    ]:
         services.raise_if_cancelled()
         seed = invocation.seed
         if not isinstance(seed, ApprovedWriteSeed):
@@ -1779,6 +1792,25 @@ class AgentLoopRunner:
         # durable delivery before cancellation stops the continuation.
         services.raise_if_cancelled()
         services.require_delivery_fence()
+        committed = (
+            record.terminal_persisted
+            and not isinstance(record.outcome, ToolFailure)
+            and record.persisted_visible_result is not None
+        )
+        if invocation.stop_after_approved_write and committed:
+            return (
+                invocation,
+                services,
+                [tool_message],
+                [tool_message],
+                AgentTurnResult(
+                    [tool_message],
+                    "",
+                    None,
+                    tuple(records),
+                    tuple(failures),
+                ),
+            )
         invocation.catalog_lease.close()
         segment = continuation.activate_continuation_segment()
         if type(segment) is not ApprovedContinuationSegment:
@@ -1834,6 +1866,7 @@ class AgentLoopRunner:
             active_services,
             list(active_seed.messages),
             [tool_message],
+            None,
         )
 
     def _dispatch(

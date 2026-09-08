@@ -2446,6 +2446,28 @@ def test_migration_rolls_back_rebuild_and_marker_when_swap_fails(
     _create_fixed_pre_0029_database(db_path)
     engine = create_engine(f"sqlite:///{db_path}")
     Base.metadata.create_all(engine)
+    # ``init_database`` installs the additive Ledger/receipt columns before
+    # the destructive 0029 rebuild.  Keep this rollback fixture at the same
+    # post-0029, pre-0030 schema so the injected failure reaches the swap.
+    database._ensure_column(
+        engine,
+        "write_operations",
+        "confirmation_strategy_version",
+        "TEXT",
+    )
+    database._ensure_column(
+        engine,
+        "write_operations",
+        "confirmation_strategy_fields_json",
+        "TEXT",
+    )
+    database._ensure_column(
+        engine,
+        "write_operations",
+        "confirmation_strategy_fingerprint",
+        "TEXT",
+    )
+    database._ensure_write_operation_ledger_schema(engine)
 
     def fail_swap(checkpoint: str) -> None:
         if checkpoint == "before_adaptive_swap":

@@ -2340,6 +2340,15 @@ class WriteOperation(Base):
     proposal_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True)
     input_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True)
     confirmation_token_fingerprint: Mapped[str | None] = mapped_column(String, nullable=True)
+    confirmation_strategy_version: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
+    confirmation_strategy_fields_json: Mapped[str | None] = mapped_column(
+        Text, nullable=True
+    )
+    confirmation_strategy_fingerprint: Mapped[str | None] = mapped_column(
+        String, nullable=True
+    )
     authorization_scope_fingerprint: Mapped[str | None] = mapped_column(
         String, nullable=True
     )

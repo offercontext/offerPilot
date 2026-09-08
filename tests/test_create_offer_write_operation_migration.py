@@ -154,6 +154,28 @@ def test_concurrent_init_database_converges_create_offer_migration_once(
     pre_0030_engine = create_engine(f"sqlite:///{db_path}")
     try:
         Base.metadata.create_all(pre_0030_engine)
+        # ``init_database`` installs the additive Ledger/receipt columns
+        # before the destructive 0029 rebuild.  Mirror that ordering here so
+        # this test starts from a genuine pre-0030, post-0029 schema.
+        database._ensure_column(
+            pre_0030_engine,
+            "write_operations",
+            "confirmation_strategy_version",
+            "TEXT",
+        )
+        database._ensure_column(
+            pre_0030_engine,
+            "write_operations",
+            "confirmation_strategy_fields_json",
+            "TEXT",
+        )
+        database._ensure_column(
+            pre_0030_engine,
+            "write_operations",
+            "confirmation_strategy_fingerprint",
+            "TEXT",
+        )
+        database._ensure_write_operation_ledger_schema(pre_0030_engine)
         database._ensure_review_to_readiness_feedback_schema(pre_0030_engine)
     finally:
         pre_0030_engine.dispose()

@@ -67,7 +67,44 @@ def init_database(db_path: Path) -> SessionFactory:
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
     _ensure_context_projector_manifest_v2_schema(engine)
+    confirmation_receipt_migrations = [
+        _ensure_column(
+            engine,
+            "write_operations",
+            "confirmation_strategy_version",
+            "TEXT",
+        ),
+        _ensure_column(
+            engine,
+            "write_operations",
+            "confirmation_strategy_fields_json",
+            "TEXT",
+        ),
+        _ensure_column(
+            engine,
+            "write_operations",
+            "confirmation_strategy_fingerprint",
+            "TEXT",
+        ),
+    ]
+    # Install the strategy columns before the Ledger helper recreates its
+    # terminal immutability trigger.  Existing databases do not receive
+    # columns from ``create_all`` and SQLite rejects a trigger that references
+    # a missing column.
     _ensure_write_operation_ledger_schema(engine)
+    with engine.begin() as conn:
+        confirmation_receipt_marker_exists = conn.scalar(
+            text(
+                "SELECT 1 FROM schema_migrations "
+                "WHERE version = '0031_edited_confirmation_receipt'"
+            )
+        )
+    if any(confirmation_receipt_migrations) or confirmation_receipt_marker_exists is None:
+        _record_migration(
+            engine,
+            "0031_edited_confirmation_receipt",
+            "Bind edited confirmation receipt strategy to terminal Ledger operations",
+        )
     _ensure_column(
         engine,
         "conversations",
@@ -1357,6 +1394,9 @@ def _ensure_write_operation_ledger_schema(engine) -> None:  # type: ignore[no-un
                     NEW.proposal_fingerprint IS NOT OLD.proposal_fingerprint OR
                     NEW.input_fingerprint IS NOT OLD.input_fingerprint OR
                     NEW.confirmation_token_fingerprint IS NOT OLD.confirmation_token_fingerprint OR
+                    NEW.confirmation_strategy_version IS NOT OLD.confirmation_strategy_version OR
+                    NEW.confirmation_strategy_fields_json IS NOT OLD.confirmation_strategy_fields_json OR
+                    NEW.confirmation_strategy_fingerprint IS NOT OLD.confirmation_strategy_fingerprint OR
                     NEW.operation_request_fingerprint IS NOT OLD.operation_request_fingerprint OR
                     NEW.result_contract IS NOT OLD.result_contract OR
                     NEW.result_json IS NOT OLD.result_json OR

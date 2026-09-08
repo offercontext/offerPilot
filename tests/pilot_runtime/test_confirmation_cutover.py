@@ -3,12 +3,17 @@ from __future__ import annotations
 import json
 from collections import Counter
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, update
 
+import offerpilot.pilot_runtime.continuation as continuation_module
+import offerpilot.pilot_runtime.service as service_module
+import offerpilot.ai.write_operations as write_operations_module
+from offerpilot.ai.agent_contracts import PendingAction
 from offerpilot.ai.types import Assistant, Message, ToolCall
 from offerpilot.ai.write_operations import WriteOperationCoordinator
 from offerpilot.api import create_app
@@ -84,6 +89,19 @@ class _RepeatingReadModel:
         )
 
 
+class _ProviderBlocksCutoverModel(_CutoverModel):
+    """Attach an opaque provider block to the origin proposal."""
+
+    def complete(self, messages: list[Message], tools: list[object]) -> Assistant:
+        assistant = super().complete(messages, tools)
+        if len(self.calls) == 1:
+            assistant.provider_blocks = {
+                "reasoning_content": "provider-specific trace that must survive",
+                "opaque": {"vendor": "preserve"},
+            }
+        return assistant
+
+
 def _application(client: TestClient, company: str, *, status: str = "applied") -> dict[str, Any]:
     response = client.post(
         "/api/applications",
@@ -114,6 +132,7 @@ def _confirm(
     pending: dict[str, Any],
     *,
     edited_args: dict[str, Any] | None = None,
+    operation_id: str | None = None,
 ) -> object:
     payload: dict[str, Any] = {
         "conversation_id": pending["conversation_id"],
@@ -122,6 +141,8 @@ def _confirm(
     }
     if edited_args is not None:
         payload["edited_args"] = edited_args
+    if operation_id is not None:
+        payload["operation_id"] = operation_id
     return client.post(endpoint, json=payload)
 
 
@@ -136,19 +157,20 @@ def test_edited_confirmation_projects_effective_call_but_preserves_proposal(tmp_
         pending = _propose(client)
         response = _confirm(client, endpoint, pending, edited_args={"status": "offer"})
         assert response.status_code == 200
-        assert len(model.calls) == 2
-        calls = [call for message in model.calls[1][0] for call in message.tool_calls if call.id == origin.id]
-        assert len(calls) == 1
-        assert json.loads(calls[0].args) == {"id": 1, "status": "offer"}
-        notices = [message for message in model.calls[1][0]
-                   if message.role == "system" and "用户主动修改并批准" in message.content]
-        assert len(notices) == 1
-        assert origin.id in notices[0].content
-        assert "不要自行恢复原提案" in notices[0].content
-        assert "以对应工具结果为准" in notices[0].content
-        assert "不要再拿旧请求做差异核对" in notices[0].content
-        assert pending['pending_action']['confirmation_token'] not in notices[0].content
-        assert not any("用户主动修改并批准" in message.content for message in model.calls[0][0])
+        assert len(model.calls) == 1
+        if endpoint.endswith("/stream"):
+            events = _sse_events(response.text)
+            assistant_messages = [
+                payload["data"]["message"]
+                for name, payload in events
+                if name == "assistant_message"
+            ]
+            assert len(assistant_messages) == 1
+            receipt = assistant_messages[0]
+        else:
+            receipt = response.json()["message"]
+        assert "已按用户最终确认值保存" in receipt
+        assert "本次确认后的自动续答已结束" in receipt
         assert client.get('/api/applications/1').json()['status'] == 'offer'
         with session_factory_for_data_dir(tmp_path)() as session:
             stored = session.scalars(select(ChatMessage).where(ChatMessage.conversation_id == pending['conversation_id'], ChatMessage.role == 'assistant')).all()
@@ -187,7 +209,7 @@ def test_confirmation_explicit_null_edited_args_remains_422(
     ("field", "proposed", "approved"),
     [("signing_bonus", 10000, 8000), ("perks", "每周远程办公两天", "每周远程办公一天")],
 )
-def test_offer_user_edit_notice_is_transient_and_replay_does_not_reexecute(
+def test_offer_user_edit_receipt_is_durable_and_replay_does_not_reexecute(
     tmp_path, endpoint, field, proposed, approved,
 ):
     origin = ToolCall("offer-user-edit", "update_offer", json.dumps({"id": 1, field: proposed}))
@@ -203,16 +225,21 @@ def test_offer_user_edit_notice_is_transient_and_replay_does_not_reexecute(
         pending = _propose(client)
         response = _confirm(client, endpoint, pending, edited_args={field: approved})
         assert response.status_code == 200
-        assert len(model.calls) == 2
-        messages = model.calls[1][0]
-        notices = [m for m in messages if m.role == "system" and "用户主动修改并批准" in m.content]
-        assert len(notices) == 1
-        assert str(proposed) not in notices[0].content
-        assert str(approved) not in notices[0].content
-        assert "不构成新的写入授权" in notices[0].content
-        effective = [c for m in messages for c in m.tool_calls if c.id == origin.id]
-        assert len(effective) == 1
-        assert json.loads(effective[0].args)[field] == approved
+        assert len(model.calls) == 1
+        if endpoint.endswith("/stream"):
+            events = _sse_events(response.text)
+            assistant_messages = [
+                payload["data"]["message"]
+                for name, payload in events
+                if name == "assistant_message"
+            ]
+            assert len(assistant_messages) == 1
+            receipt = assistant_messages[0]
+        else:
+            receipt = response.json()["message"]
+        assert "已按用户最终确认值保存" in receipt
+        assert "本次确认后的自动续答已结束" in receipt
+        assert str(approved) in receipt
         assert client.get("/api/offers/1").json()[field] == approved
         replay = client.post(endpoint, json={
             "conversation_id": pending["conversation_id"],
@@ -221,13 +248,18 @@ def test_offer_user_edit_notice_is_transient_and_replay_does_not_reexecute(
             "approved": True, "edited_args": {field: approved},
         })
         assert replay.status_code == 200
-        assert len(model.calls) == 2
+        assert len(model.calls) == 1
         with session_factory_for_data_dir(tmp_path)() as session:
             operations = list(session.scalars(select(WriteOperation)))
             assert len(operations) == 1
             assert operations[0].status == "committed"
             stored = list(session.scalars(select(ChatMessage)))
             assert not any("用户主动修改并批准" in m.content for m in stored)
+            assert sum(
+                "已按用户最终确认值保存" in m.content
+                for m in stored
+                if m.role == "assistant"
+            ) == 1
             persisted = [c for m in stored if m.tool_calls for c in json.loads(m.tool_calls)]
             original = next(c for c in persisted if c["id"] == origin.id)
             assert original["args"][field] == proposed
@@ -245,49 +277,337 @@ def test_unchanged_confirmation_does_not_claim_user_changed_values(tmp_path, edi
         assert not any("用户主动修改并批准" in m.content for m in model.calls[1][0])
 
 
-def test_edit_notice_is_mandatory_budgeted_without_reexecuting_committed_write(tmp_path, monkeypatch):
-    from offerpilot.ai.tool_runtime.contracts import materialize_provider_payloads
-    from offerpilot.context_projector import budget
-    from offerpilot.context_projector.contracts import ProjectionError, canonical_json
+def test_equivalent_numeric_edit_keeps_the_existing_provider_continuation(tmp_path):
+    """An integral float is equivalent to the integer proposal for number fields."""
+
+    origin = ToolCall(
+        "equivalent-number",
+        "update_offer",
+        json.dumps({"id": 1, "base_monthly": 24000}),
+    )
+    model = _CutoverModel(origin)
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        application = _application(client, "等价参数公司")
+        offer = client.post(
+            "/api/offers",
+            json={
+                "application_id": application["id"],
+                "company_name": "等价参数公司",
+                "position_name": "工程师",
+                "base_monthly": 24000,
+            },
+        )
+        assert offer.status_code == 201
+        pending = _propose(client)
+        response = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"base_monthly": 24000.0},
+        )
+        assert response.status_code == 200
+        assert len(model.calls) == 2
+
+
+def test_edited_confirmation_failure_keeps_failure_semantics(tmp_path):
+    """A business failure never receives the deterministic success receipt."""
+
+    model = _CutoverModel(
+        ToolCall(
+            "edited-failure",
+            "update_application_status",
+            json.dumps({"id": 1, "status": "interview"}),
+        )
+    )
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        created = client.post(
+            "/api/applications",
+            json={
+                "company_name": "已关闭公司",
+                "position_name": "工程师",
+                "status": "closed",
+                "closed_reason": "流程结束",
+            },
+        )
+        assert created.status_code == 201
+        pending = _propose(client)
+        response = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"status": "offer"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["write_status"] == "failed"
+        assert "已按用户最终确认值保存" not in body["message"]
+        assert "closed application cannot be reopened" in body["write_error"]
+        # Failed writes retain the legacy follow-up model behavior.
+        assert len(model.calls) == 2
+
+
+def test_edited_confirmation_retains_provider_blocks_and_tool_pair(tmp_path):
+    origin = ToolCall(
+        "provider-block-origin",
+        "update_application_status",
+        json.dumps({"id": 1, "status": "interview"}),
+    )
+    model = _ProviderBlocksCutoverModel(origin)
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        _application(client, "Provider Block 公司")
+        pending = _propose(client)
+        response = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"status": "offer"},
+        )
+        assert response.status_code == 200
+        assert len(model.calls) == 1
+        with session_factory_for_data_dir(tmp_path)() as session:
+            messages = list(
+                session.scalars(
+                    select(ChatMessage)
+                    .where(ChatMessage.conversation_id == pending["conversation_id"])
+                    .order_by(ChatMessage.id.asc())
+                )
+            )
+            proposal = next(
+                message
+                for message in messages
+                if message.role == "assistant" and origin.id in message.tool_calls
+            )
+            tool_result = next(
+                message
+                for message in messages
+                if message.role == "tool" and message.tool_call_id == origin.id
+            )
+            provider_blocks = json.loads(proposal.provider_blocks)
+            assert provider_blocks["reasoning_content"].startswith("provider-specific")
+            assert tool_result.operation_id
+
+
+def test_edited_confirmation_preserves_undo_route(tmp_path):
+    model = _CutoverModel(
+        ToolCall(
+            "edited-undo",
+            "update_application_status",
+            json.dumps({"id": 1, "status": "interview"}),
+        )
+    )
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        application = _application(client, "Undo Edited 公司")
+        pending = _propose(client)
+        response = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"status": "offer"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["undo"]["application_id"] == application["id"]
+        undone = client.post(
+            "/api/chat/undo-last-write",
+            json={
+                "conversation_id": pending["conversation_id"],
+                "parent_operation_id": body["operation_id"],
+            },
+        )
+        assert undone.status_code == 200
+        assert client.get(f"/api/applications/{application['id']}").json()["status"] == "applied"
+        assert len(model.calls) == 1
+
+
+def test_receipt_builder_failure_recovers_committed_write_without_provider(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A committed operation can be recovered after receipt construction fails."""
+
+    origin = ToolCall(
+        "receipt-builder-failure",
+        "update_application_status",
+        json.dumps({"id": 1, "status": "interview"}),
+    )
+    model = _CutoverModel(origin)
+    exploding_calls = 0
+
+    def exploding_receipt(*args: object, **kwargs: object) -> str:
+        nonlocal exploding_calls
+        del args, kwargs
+        exploding_calls += 1
+        raise RuntimeError("receipt builder unavailable")
+
+    monkeypatch.setattr(service_module, "edited_confirmation_receipt", exploding_receipt)
+    monkeypatch.setattr(continuation_module, "edited_confirmation_receipt", exploding_receipt)
+    monkeypatch.setattr(write_operations_module, "edited_confirmation_receipt", exploding_receipt)
+    from offerpilot.ai.confirmation_receipt import edited_confirmation_receipt as original_receipt
+
+    app = create_app(data_dir=tmp_path, chat_model=model)
+    with TestClient(
+        app,
+        raise_server_exceptions=False,
+    ) as client:
+        application = _application(client, "Receipt Recovery 公司")
+        pending = _propose(client)
+        first = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"status": "offer"},
+        )
+        assert first.status_code in {500, 502, 503}
+        assert exploding_calls >= 2
+        assert len(model.calls) == 1
+        operation_id = pending["pending_action"]["operation_id"]
+        with session_factory_for_data_dir(tmp_path)() as session:
+            operation = session.get(WriteOperation, operation_id)
+            assert operation is not None
+            assert operation.status == "committed"
+            assert operation.delivery_status == "pending"
+            # The failed response left the owner lease pending.  Expire it so
+            # the next request exercises the normal durable convergence path.
+            session.execute(
+                update(WriteOperation)
+                .where(WriteOperation.id == operation_id)
+                .values(delivery_lease_expires_at=0)
+            )
+            session.commit()
+        # Omitting an edit is a different confirmation fingerprint.  It must
+        # not silently widen the authorization or converge this operation.
+        conflict = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            operation_id=operation_id,
+        )
+        assert conflict.status_code == 409
+        assert len(model.calls) == 1
+        # Restore all aliases before exercising durable convergence.
+        monkeypatch.setattr(service_module, "edited_confirmation_receipt", original_receipt)
+        monkeypatch.setattr(continuation_module, "edited_confirmation_receipt", original_receipt)
+        monkeypatch.setattr(write_operations_module, "edited_confirmation_receipt", original_receipt)
+        repository = app.state.pilot_runtime._dependencies.confirmation_coordinator.dependencies.write_operations
+        converged = repository.converge_expired_delivery(operation_id)
+        assert getattr(converged, "operation_id", None) == operation_id
+        second = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"status": "offer"},
+            operation_id=operation_id,
+        )
+        assert second.status_code == 200
+        assert "已按用户最终确认值保存" in second.json()["message"]
+        assert len(model.calls) == 1
+        assert client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+
+
+def test_new_turn_after_edited_confirmation_still_calls_provider(tmp_path):
+    model = _CutoverModel(
+        ToolCall(
+            "edited-then-new",
+            "update_application_status",
+            json.dumps({"id": 1, "status": "interview"}),
+        ),
+        final_reply="new request response",
+    )
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        application = _application(client, "New Turn 公司")
+        pending = _propose(client)
+        confirmed = _confirm(
+            client,
+            "/api/chat/confirm",
+            pending,
+            edited_args={"status": "offer"},
+        )
+        assert confirmed.status_code == 200
+        assert len(model.calls) == 1
+        fresh = client.post(
+            "/api/chat",
+            json={"message": "这是一个新请求", "conversation_id": pending["conversation_id"]},
+        )
+        assert fresh.status_code == 200
+        assert fresh.json()["message"] == "new request response"
+        assert len(model.calls) == 2
+        assert client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+
+
+def test_receipt_builder_degrades_when_a_changed_field_is_missing():
+    from offerpilot.ai.confirmation_receipt import edited_confirmation_receipt
+
+    receipt = edited_confirmation_receipt(
+        result_json=json.dumps({"status": "offer"}),
+        changed_fields=("status", "signing_bonus"),
+    )
+
+    assert receipt == (
+        "已按用户最终确认值保存，部分明细暂不可用。"
+        "本次确认后的自动续答已结束。"
+    )
+
+
+@pytest.mark.parametrize(
+    ("original", "effective", "expected"),
+    [
+        (
+            {"deadline": "2026-01-01T09:00:00"},
+            {"deadline": "2026-01-01T09:00:00Z"},
+            (),
+        ),
+        (
+            {"deadline": "2026-01-01T17:00:00+08:00"},
+            {"deadline": "2026-01-01T09:00:00Z"},
+            (),
+        ),
+        ({}, {"deadline": None}, ("deadline",)),
+        ({"signing_bonus": False}, {"signing_bonus": 0}, ("signing_bonus",)),
+        ({"signing_bonus": None}, {"signing_bonus": 0}, ("signing_bonus",)),
+        ({}, {"signing_bonus": 0}, ("signing_bonus",)),
+    ],
+)
+def test_confirmation_field_comparison_keeps_tool_value_semantics(
+    original: dict[str, Any],
+    effective: dict[str, Any],
+    expected: tuple[str, ...],
+):
+    pending = PendingAction("field-semantics", "update_offer", json.dumps(original), "pending")
+    edited = PendingAction("field-semantics", "update_offer", json.dumps(effective), "pending")
+    spec = SimpleNamespace(
+        metadata=SimpleNamespace(
+            editable_fields=(
+                SimpleNamespace(field="deadline", value_type="datetime"),
+                SimpleNamespace(field="signing_bonus", value_type="number"),
+            )
+        )
+    )
+
+    assert continuation_module._meaningful_confirmation_fields(pending, edited, spec) == expected
+
+
+def test_edited_confirmation_does_not_need_post_terminal_projection(tmp_path, monkeypatch):
+    from offerpilot.context_projector.contracts import ProjectionError
     from offerpilot.context_projector.projector import ModelSurfaceProjector
 
-    original_project = ModelSurfaceProjector.project
-    blocked = []
+    projection_calls: list[object] = []
 
-    def project(self, request):
-        notices = [m for c in request.contributors if c.name == "active_control"
-                   for m in c.messages if "用户主动修改并批准" in m.content]
-        if not notices:
-            return original_project(self, request)
-        assert len(notices) == 1
-        without = replace(request, contributors=tuple(
-            replace(c, messages=tuple(m for m in c.messages if m not in notices))
-            if c.name == "active_control" else c for c in request.contributors
-        ))
-        mandatory = tuple(m for c in without.contributors
-                          if c.name in {"static_policy", "active_control", "current_request"}
-                          for m in c.messages)
-        cap = len(budget.canonical_messages(mandatory)) + len(canonical_json(
-            materialize_provider_payloads(request.selection.provider_contracts)
-        )) + 64
-        with monkeypatch.context() as context:
-            context.setattr(budget, "PRODUCT_INPUT_CAP", cap)
-            original_project(self, without)  # Without the notice, the same input fits.
-            with pytest.raises(ProjectionError) as failure:
-                original_project(self, request)
-            assert failure.value.code == "mandatory_surface_over_budget"
-        blocked.append(True)
-        raise failure.value
+    def fail_if_projected(self, request):
+        projection_calls.append(request)
+        raise ProjectionError("post-terminal projection should not run")
 
     model = _CutoverModel(ToolCall("budget-edit", "update_application_status", '{"id":1,"status":"interview"}'))
-    monkeypatch.setattr(ModelSurfaceProjector, "project", project)
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
         _application(client, "筱哲预算验证")
         pending = _propose(client)
+        # The proposal path may still project its ordinary pending view.  The
+        # edited confirmation must stop before any new post-terminal model
+        # input is projected.
+        monkeypatch.setattr(ModelSurfaceProjector, "project", fail_if_projected)
         response = _confirm(client, "/api/chat/confirm", pending, edited_args={"status": "offer"})
         assert response.status_code == 200
-        assert blocked == [True]
-        assert len(model.calls) == 1  # No continuation Provider call, no projection fallback.
+        assert projection_calls == []
+        assert len(model.calls) == 1
         assert client.get("/api/applications/1").json()["status"] == "offer"
         with session_factory_for_data_dir(tmp_path)() as session:
             operations = list(session.scalars(select(WriteOperation)))

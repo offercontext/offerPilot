@@ -46,12 +46,17 @@ from offerpilot.ai.tool_runtime.context import ToolExecutionContext
 from offerpilot.ai.tool_runtime.contracts import (
     JSONValue,
     PreparedToolCall,
+    ToolSpec,
     ToolExecutionRecord,
     ToolFailure,
     ToolSuccess,
     TransientToolRuntimeValue,
 )
 from offerpilot.ai.types import Message, ToolCall
+from offerpilot.ai.confirmation_receipt import (
+    EDITED_CONFIRMATION_RECEIPT_STRATEGY,
+    edited_confirmation_receipt,
+)
 from offerpilot.ai.write_operations import (
     DeliveryHeartbeat,
     DeliveryOwnership,
@@ -614,6 +619,8 @@ class ConfirmationState:
     effective_pending: PendingAction
     approved: bool
     edited_args: EditedArgs = field(repr=False)
+    confirmation_strategy_version: str | None = field(default=None, repr=False)
+    confirmation_strategy_fields: tuple[str, ...] = field(default=(), repr=False)
     rejection_feedback: str = field(default="", repr=False)
     undo_seed: Mapping[str, Any] = field(default_factory=dict, repr=False)
     claim_id: str | None = field(default=None, repr=False)
@@ -923,7 +930,14 @@ def _runtime_replay(
     changed_entities = payload_tuple("changed_entities")
     if payload.status == "committed":
         write_status = "success"
-        message = replay.final_message or "操作已完成。"
+        message = replay.final_message or (
+            edited_confirmation_receipt(
+                result_json=payload.result_json,
+                changed_fields=replay.confirmation_strategy_fields,
+            )
+            if replay.confirmation_strategy_version == EDITED_CONFIRMATION_RECEIPT_STRATEGY
+            else "操作已完成。"
+        )
     elif payload.status == "rejected":
         write_status = "cancelled"
         message = replay.final_message or "已取消本次操作。"
@@ -959,6 +973,87 @@ def _runtime_replay(
         affected_resources=affected_resources,
         changed_entities=changed_entities,
     )
+
+
+_MISSING_CONFIRMATION_VALUE = object()
+
+
+def _confirmation_json_values_equal(left: object, right: object) -> bool:
+    if left is _MISSING_CONFIRMATION_VALUE or right is _MISSING_CONFIRMATION_VALUE:
+        return left is right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, Mapping):
+        if not isinstance(right, Mapping) or left.keys() != right.keys():
+            return False
+        return all(
+            _confirmation_json_values_equal(value, right[key]) for key, value in left.items()
+        )
+    if isinstance(left, list):
+        return len(left) == len(cast(list[object], right)) and all(
+            _confirmation_json_values_equal(value, other)
+            for value, other in zip(left, cast(list[object], right), strict=True)
+        )
+    return left == right
+
+
+def _confirmation_datetime_value(value: object) -> object:
+    if not isinstance(value, str) or not value:
+        return value
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return value
+    if parsed.tzinfo is None:
+        # Tool datetime fields use the repository's canonical convention:
+        # an offset-less timestamp is interpreted as UTC.
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _meaningful_confirmation_fields(
+    pending: PendingAction,
+    effective: PendingAction,
+    spec: ToolSpec[Any, Any],
+) -> tuple[str, ...]:
+    """Compare validated Pending arguments using the tool's field semantics."""
+
+    try:
+        original = json.loads(pending.args)
+        final = json.loads(effective.args)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise WriteOperationError("operation_integrity_error") from exc
+    if not isinstance(original, Mapping) or not isinstance(final, Mapping):
+        raise WriteOperationError("operation_integrity_error")
+    editable = {
+        descriptor.field: descriptor
+        for descriptor in spec.metadata.editable_fields
+    }
+    fields = sorted(set(original) | set(final))
+    changed: list[str] = []
+    for field_name in fields:
+        left = original.get(field_name, _MISSING_CONFIRMATION_VALUE)
+        right = final.get(field_name, _MISSING_CONFIRMATION_VALUE)
+        descriptor = editable.get(field_name)
+        if descriptor is not None and descriptor.value_type == "datetime":
+            left = _confirmation_datetime_value(left)
+            right = _confirmation_datetime_value(right)
+        if (
+            descriptor is not None
+            and descriptor.value_type == "number"
+            and left is not _MISSING_CONFIRMATION_VALUE
+            and right is not _MISSING_CONFIRMATION_VALUE
+            and isinstance(left, (int, float))
+            and not isinstance(left, bool)
+            and isinstance(right, (int, float))
+            and not isinstance(right, bool)
+        ):
+            equal = left == right
+        else:
+            equal = _confirmation_json_values_equal(left, right)
+        if not equal:
+            changed.append(str(field_name))
+    return tuple(changed)
 
 
 class ConfirmationCoordinator:
@@ -1387,6 +1482,8 @@ class ConfirmationCoordinator:
         # coordinator.  ``prepare_pending_action`` above only validates the
         # public editable-field projection.
         preflight_result: object | None = None
+        confirmation_strategy_version: str | None = None
+        confirmation_strategy_fields: tuple[str, ...] = ()
         if approved:
             edited_mapping = (
                 None if edited.is_missing() else cast(dict[str, JSONValue], dict(edited.as_mapping))
@@ -1405,6 +1502,17 @@ class ConfirmationCoordinator:
                 )
             except ValueError as exc:
                 raise WriteOperationError("invalid_confirmation") from exc
+            try:
+                resolved_spec = catalog_lease.require_spec(spec_handle)
+            except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
+                raise WriteOperationError("operation_unavailable") from exc
+            confirmation_strategy_fields = _meaningful_confirmation_fields(
+                live,
+                effective,
+                resolved_spec,
+            )
+            if confirmation_strategy_fields:
+                confirmation_strategy_version = EDITED_CONFIRMATION_RECEIPT_STRATEGY
         approval_context: ToolExecutionContext | None = None
         context_resolver = self.dependencies.approval_context_resolver
         if approved and context_resolver is not None:
@@ -1464,6 +1572,8 @@ class ConfirmationCoordinator:
             effective_pending=effective,
             approved=approved,
             edited_args=edited,
+            confirmation_strategy_version=confirmation_strategy_version,
+            confirmation_strategy_fields=confirmation_strategy_fields,
             rejection_feedback=request.rejection_feedback,
             undo_seed=dict(undo_seed or {}),
             prepared_call=preflight_result,
@@ -1825,6 +1935,8 @@ class ConfirmationCoordinator:
             "edited_args": (
                 None if state.edited_args.is_missing() else state.edited_args.as_mapping
             ),
+            "confirmation_strategy_version": state.confirmation_strategy_version,
+            "confirmation_strategy_fields": state.confirmation_strategy_fields,
             "approval_decided_callback": state.approval_decided_callback,
             "parent_route_binder": bind_parent_route,
         }
@@ -2339,6 +2451,15 @@ class ConfirmationCoordinator:
     @staticmethod
     def _fallback_message(state: ConfirmationState) -> str:
         if state.succeeded:
+            if state.confirmation_strategy_version == EDITED_CONFIRMATION_RECEIPT_STRATEGY:
+                terminal = state.terminal_execution
+                payload = _attribute(terminal, "payload")
+                if _attribute(payload, "status") == "committed":
+                    result_json = _attribute(payload, "result_json")
+                    return edited_confirmation_receipt(
+                        result_json=result_json if isinstance(result_json, str) else None,
+                        changed_fields=state.confirmation_strategy_fields,
+                    )
             return "写入已完成，但暂时无法生成后续说明。你可以刷新数据查看结果。"
         if state.approved:
             return "写入未完成，错误结果已记录。请检查输入后重试。"

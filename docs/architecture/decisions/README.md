@@ -15,6 +15,10 @@
 
 Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowledge-system.md)。
 
+### Pilot 确认与交付
+
+- [ADR-0006: 修改确认成功后使用确定性回执](./0006-edited-confirmation-receipts.md) — Accepted
+
 ### 决策链
 
 ```

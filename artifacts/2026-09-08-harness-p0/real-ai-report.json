@@ -1,0 +1,481 @@
+{
+  "provider_limit": 8,
+  "provider_calls": 6,
+  "scenarios": [
+    {
+      "name": "sync",
+      "passed": false,
+      "proposal": {
+        "status_code": 200,
+        "body": {
+          "type": "message",
+          "message": "已读取到该 Offer 的当前记录，拟提出以下更新方案，请您确认后我再执行写入：\n\n**待更新 Offer（id=1，P0虚构验收公司 · 虚构后端工程师）**\n\n| 字段 | 现值 | 拟改为 |\n|------|------|--------|\n| 签字费（signing_bonus） | 0 元 | **10000 元** |\n| 福利（perks） | 无远程约定 | **每周远程办公两天** |\n\n其余字段保持不变：月薪 28000 元、每年 12 个月、状态 pending、股权与备注为空等。\n\n确认无误后请回复「确认」，我将执行该修改。",
+          "conversation_id": 1,
+          "write_status": "none"
+        }
+      },
+      "error_type": "AssertionError",
+      "provider_calls": 2,
+      "blocked_provider_attempts": 0,
+      "fixed_follow_up": {
+        "passed": true,
+        "message": "我确认这两项修改。请现在调用 update_offer 提交操作，让应用展示系统确认卡；不要只用文字请我再确认。",
+        "proposal": {
+          "status_code": 200,
+          "body": {
+            "type": "confirmation_required",
+            "conversation_id": 1,
+            "operation_id": "4dd7d7a3-a06b-404f-9ad5-3250a421c39c",
+            "pending_action": {
+              "tool_name": "update_offer",
+              "operation_id": "4dd7d7a3-a06b-404f-9ad5-3250a421c39c",
+              "human": "更新 Offer #1",
+              "args": {
+                "id": 1,
+                "signing_bonus": 10000,
+                "perks": "每周远程办公两天"
+              },
+              "confirmation_token": "[redacted]",
+              "editable_fields": [
+                {
+                  "field": "company_name",
+                  "type": "string"
+                },
+                {
+                  "field": "position_name",
+                  "type": "string"
+                },
+                {
+                  "field": "status",
+                  "type": "enum",
+                  "options": [
+                    "pending",
+                    "negotiating",
+                    "accepted",
+                    "declined",
+                    "expired"
+                  ]
+                },
+                {
+                  "field": "base_monthly",
+                  "type": "number",
+                  "clearable": true,
+                  "clear_value": 0
+                },
+                {
+                  "field": "months_per_year",
+                  "type": "number"
+                },
+                {
+                  "field": "signing_bonus",
+                  "type": "number",
+                  "clearable": true,
+                  "clear_value": 0
+                },
+                {
+                  "field": "equity",
+                  "type": "string"
+                },
+                {
+                  "field": "perks",
+                  "type": "long_text"
+                },
+                {
+                  "field": "deadline",
+                  "type": "datetime",
+                  "clearable": true,
+                  "clear_value": ""
+                },
+                {
+                  "field": "notes",
+                  "type": "long_text"
+                },
+                {
+                  "field": "assessment",
+                  "type": "long_text"
+                }
+              ]
+            }
+          }
+        },
+        "confirmation": {
+          "status_code": 200,
+          "body": {
+            "type": "message",
+            "message": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。",
+            "conversation_id": 1,
+            "write_status": "success",
+            "operation_id": "4dd7d7a3-a06b-404f-9ad5-3250a421c39c",
+            "replayed": false
+          }
+        },
+        "cross_transport_replay": {
+          "status_code": 200,
+          "events": [
+            {
+              "run_id": "87df5983-66a9-452c-9885-392f01f3d40a",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:44:45.844567Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 1,
+              "event": "meta",
+              "data": {
+                "stream_version": "pilot-sse-v1",
+                "supports_delta": false,
+                "supports_tool_events": true,
+                "supports_confirmation": true
+              }
+            },
+            {
+              "run_id": "87df5983-66a9-452c-9885-392f01f3d40a",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:44:45.844567Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 2,
+              "event": "status",
+              "data": {
+                "phase": "completed",
+                "label": "已完成"
+              }
+            },
+            {
+              "run_id": "87df5983-66a9-452c-9885-392f01f3d40a",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:44:45.844567Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 3,
+              "event": "tool_call",
+              "data": {
+                "tool_call_id": "call_00_bcyyrwVRFWtj3Mkz0aHy0242",
+                "tool_name": "update_offer",
+                "public_label": "update_offer",
+                "kind": "write",
+                "confirm_mode": "approved",
+                "summary": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:04\",\"updated_at\":\"2026-09-08T08:44:45\",\"record_type\":\"offer\",\"offer_id\":1}",
+                "args_summary": {}
+              }
+            },
+            {
+              "run_id": "87df5983-66a9-452c-9885-392f01f3d40a",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:44:45.844567Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 4,
+              "event": "tool_result",
+              "data": {
+                "tool_call_id": "call_00_bcyyrwVRFWtj3Mkz0aHy0242",
+                "tool_name": "update_offer",
+                "status": "success",
+                "summary": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:04\",\"updated_at\":\"2026-09-08T08:44:45\",\"record_type\":\"offer\",\"offer_id\":1}",
+                "evidence": [],
+                "affected_resources": [],
+                "changed_entities": [],
+                "message": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:04\",\"updated_at\":\"2026-09-08T08:44:45\",\"record_type\":\"offer\",\"offer_id\":1}",
+                "visible_result": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:04\",\"updated_at\":\"2026-09-08T08:44:45\",\"record_type\":\"offer\",\"offer_id\":1}",
+                "operation_id": "4dd7d7a3-a06b-404f-9ad5-3250a421c39c",
+                "write_status": "success"
+              }
+            },
+            {
+              "run_id": "87df5983-66a9-452c-9885-392f01f3d40a",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:44:45.844567Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 5,
+              "event": "assistant_message",
+              "data": {
+                "message": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。"
+              }
+            },
+            {
+              "run_id": "87df5983-66a9-452c-9885-392f01f3d40a",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:44:45.844567Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 6,
+              "event": "completed",
+              "data": {
+                "persisted": true,
+                "response": {
+                  "type": "message",
+                  "operation_id": "4dd7d7a3-a06b-404f-9ad5-3250a421c39c",
+                  "message": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。",
+                  "replayed": true,
+                  "conversation_id": 1,
+                  "write_status": "success"
+                }
+              }
+            }
+          ]
+        },
+        "stored_values": {
+          "signing_bonus": 8000,
+          "perks": "每周远程办公一天"
+        },
+        "ledger_status": "committed",
+        "receipt_messages": [
+          {
+            "role": "tool",
+            "content": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:04\",\"updated_at\":\"2026-09-08T08:44:45\",\"record_type\":\"offer\",\"offer_id\":1}"
+          },
+          {
+            "role": "assistant",
+            "content": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。"
+          }
+        ],
+        "provider_calls": 1,
+        "blocked_provider_attempts": 0
+      }
+    },
+    {
+      "name": "sse",
+      "passed": false,
+      "proposal": {
+        "status_code": 200,
+        "body": {
+          "type": "message",
+          "message": "已找到该 Offer，当前记录如下：\n\n- 公司 / 岗位：P0虚构验收公司 / 虚构后端工程师\n- 状态：pending（未定）\n- 月薪：28,000 × 12 个月\n- 签字费：0\n- Perks：无远程约定\n- 其他：股权、截止日、备注、评估均未填写\n\n拟执行的写操作（`id=1`，仅变更两项，其余字段保持原值不动）：\n\n```json\n{\n  \"id\": 1,\n  \"signing_bonus\": 10000,\n  \"perks\": \"每周远程办公两天\"\n}\n```\n\n## 结论\n更新后签字费为 10,000 元，Perks 改为「每周远程办公两天」，其余（月薪、岗位、状态等）均不变。\n\n## 下一步\n- 请确认是否执行该更新；确认后我将立即写入。",
+          "conversation_id": 1,
+          "write_status": "none"
+        }
+      },
+      "error_type": "AssertionError",
+      "provider_calls": 2,
+      "blocked_provider_attempts": 0,
+      "fixed_follow_up": {
+        "passed": true,
+        "message": "我确认这两项修改。请现在调用 update_offer 提交操作，让应用展示系统确认卡；不要只用文字请我再确认。",
+        "proposal": {
+          "status_code": 200,
+          "body": {
+            "type": "confirmation_required",
+            "conversation_id": 1,
+            "operation_id": "199daf69-47a3-4c39-85fe-15928f9d5f65",
+            "pending_action": {
+              "tool_name": "update_offer",
+              "operation_id": "199daf69-47a3-4c39-85fe-15928f9d5f65",
+              "human": "更新 Offer #1",
+              "args": {
+                "id": 1,
+                "signing_bonus": 10000,
+                "perks": "每周远程办公两天"
+              },
+              "confirmation_token": "[redacted]",
+              "editable_fields": [
+                {
+                  "field": "company_name",
+                  "type": "string"
+                },
+                {
+                  "field": "position_name",
+                  "type": "string"
+                },
+                {
+                  "field": "status",
+                  "type": "enum",
+                  "options": [
+                    "pending",
+                    "negotiating",
+                    "accepted",
+                    "declined",
+                    "expired"
+                  ]
+                },
+                {
+                  "field": "base_monthly",
+                  "type": "number",
+                  "clearable": true,
+                  "clear_value": 0
+                },
+                {
+                  "field": "months_per_year",
+                  "type": "number"
+                },
+                {
+                  "field": "signing_bonus",
+                  "type": "number",
+                  "clearable": true,
+                  "clear_value": 0
+                },
+                {
+                  "field": "equity",
+                  "type": "string"
+                },
+                {
+                  "field": "perks",
+                  "type": "long_text"
+                },
+                {
+                  "field": "deadline",
+                  "type": "datetime",
+                  "clearable": true,
+                  "clear_value": ""
+                },
+                {
+                  "field": "notes",
+                  "type": "long_text"
+                },
+                {
+                  "field": "assessment",
+                  "type": "long_text"
+                }
+              ]
+            }
+          }
+        },
+        "confirmation": {
+          "status_code": 200,
+          "events": [
+            {
+              "run_id": "db911adc-1c34-44d9-81e2-d073a593f6e9",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:45:03.457635Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 1,
+              "event": "meta",
+              "data": {
+                "stream_version": "pilot-sse-v1",
+                "supports_delta": false,
+                "supports_tool_events": true,
+                "supports_confirmation": true
+              }
+            },
+            {
+              "run_id": "db911adc-1c34-44d9-81e2-d073a593f6e9",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:45:03.457635Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 2,
+              "event": "status",
+              "data": {
+                "phase": "tool_running",
+                "label": "正在执行确认操作"
+              }
+            },
+            {
+              "run_id": "db911adc-1c34-44d9-81e2-d073a593f6e9",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:45:03.457635Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 3,
+              "event": "tool_call",
+              "data": {
+                "tool_call_id": "call_00_fHmSBg6jDEiFj8Cf1xLI5847",
+                "tool_name": "update_offer",
+                "public_label": "Update an offer. Missing fields keep existing values.",
+                "kind": "write",
+                "confirm_mode": "approved",
+                "summary": "更新 Offer #1",
+                "args_summary": {
+                  "id": 1,
+                  "signing_bonus": 8000,
+                  "perks": "每周远程办公一天"
+                }
+              }
+            },
+            {
+              "run_id": "db911adc-1c34-44d9-81e2-d073a593f6e9",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:45:03.457635Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 4,
+              "event": "tool_result",
+              "data": {
+                "tool_call_id": "call_00_fHmSBg6jDEiFj8Cf1xLI5847",
+                "tool_name": "update_offer",
+                "status": "success",
+                "summary": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:54\",\"updated_at\":\"2026-09-08T08:45:05\",\"record_type\":\"offer\",\"offer_id\":1}",
+                "evidence": [],
+                "affected_resources": [],
+                "changed_entities": [],
+                "operation_id": "199daf69-47a3-4c39-85fe-15928f9d5f65"
+              }
+            },
+            {
+              "run_id": "db911adc-1c34-44d9-81e2-d073a593f6e9",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:45:03.457635Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 5,
+              "event": "assistant_message",
+              "data": {
+                "message": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。"
+              }
+            },
+            {
+              "run_id": "db911adc-1c34-44d9-81e2-d073a593f6e9",
+              "conversation_id": 1,
+              "ts": "2026-09-08T08:45:03.457635Z",
+              "context_type": "workspace",
+              "context_ref": "",
+              "mode": "general",
+              "seq": 6,
+              "event": "completed",
+              "data": {
+                "persisted": true,
+                "response": {
+                  "type": "message",
+                  "message": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。",
+                  "conversation_id": 1,
+                  "write_status": "success",
+                  "operation_id": "199daf69-47a3-4c39-85fe-15928f9d5f65",
+                  "replayed": false
+                }
+              }
+            }
+          ]
+        },
+        "cross_transport_replay": {
+          "status_code": 200,
+          "body": {
+            "type": "message",
+            "operation_id": "199daf69-47a3-4c39-85fe-15928f9d5f65",
+            "message": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。",
+            "replayed": true,
+            "conversation_id": 1,
+            "write_status": "success"
+          }
+        },
+        "stored_values": {
+          "signing_bonus": 8000,
+          "perks": "每周远程办公一天"
+        },
+        "ledger_status": "committed",
+        "receipt_messages": [
+          {
+            "role": "tool",
+            "content": "{\"id\":1,\"application_id\":null,\"company_name\":\"P0虚构验收公司\",\"position_name\":\"虚构后端工程师\",\"status\":\"pending\",\"base_monthly\":28000,\"months_per_year\":12,\"signing_bonus\":8000,\"equity\":\"\",\"perks\":\"每周远程办公一天\",\"deadline\":\"\",\"notes\":\"\",\"assessment\":\"\",\"total_cash\":344000,\"created_at\":\"2026-09-08T08:32:54\",\"updated_at\":\"2026-09-08T08:45:05\",\"record_type\":\"offer\",\"offer_id\":1}"
+          },
+          {
+            "role": "assistant",
+            "content": "已按用户最终确认值保存。保存结果：福利=每周远程办公一天；签字费=8000。本次确认后的自动续答已结束。"
+          }
+        ],
+        "provider_calls": 1,
+        "blocked_provider_attempts": 0
+      }
+    }
+  ]
+}

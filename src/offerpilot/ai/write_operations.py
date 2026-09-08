@@ -39,6 +39,10 @@ from offerpilot.ai.pending_replay import (
     PendingReplayArgsDecoderV1,
     PendingReplayIntegrityError,
 )
+from offerpilot.ai.confirmation_receipt import (
+    EDITED_CONFIRMATION_RECEIPT_STRATEGY,
+    edited_confirmation_receipt,
+)
 from offerpilot.ai.tool_runtime.context import ToolExecutionContext
 from offerpilot.ai.tool_runtime.contracts import (
     JSONValue,
@@ -1100,6 +1104,8 @@ class OperationReplay(_Transient):
     delivery_outcome: str | None = None
     final_message: str | None = None
     replayed: bool = True
+    confirmation_strategy_version: str | None = None
+    confirmation_strategy_fields: tuple[str, ...] = ()
     chained_pending: VerifiedPendingReplay | None = field(default=None, repr=False)
 
 
@@ -1194,6 +1200,61 @@ def ledger_fingerprint(key: LedgerKeyDomain, domain: str, value: JSONValue | byt
         hashlib.sha256,
     ).hexdigest()
     return "hmac-sha256:" + digest
+
+
+def confirmation_strategy_fingerprint(
+    key: LedgerKeyDomain,
+    *,
+    operation_id: str,
+    request_fingerprint: str,
+    terminal_payload_sha256: str,
+    strategy_version: str,
+    fields: Sequence[str],
+) -> str:
+    """Bind a receipt strategy to one request and its immutable terminal payload."""
+
+    if strategy_version != EDITED_CONFIRMATION_RECEIPT_STRATEGY:
+        raise ValueError("unknown confirmation strategy")
+    if not operation_id or not request_fingerprint or not terminal_payload_sha256:
+        raise ValueError("confirmation strategy identity is incomplete")
+    normalized_fields = tuple(fields)
+    if not normalized_fields or any(type(field) is not str or not field for field in normalized_fields):
+        raise ValueError("confirmation strategy fields are invalid")
+    if tuple(sorted(set(normalized_fields))) != normalized_fields:
+        raise ValueError("confirmation strategy fields are not canonical")
+    return ledger_fingerprint(
+        key,
+        "write-operation-confirmation-strategy-v1",
+        {
+            "operation_id": operation_id,
+            "request_fingerprint": request_fingerprint,
+            "terminal_payload_sha256": terminal_payload_sha256,
+            "strategy_version": strategy_version,
+            "fields": list(normalized_fields),
+        },
+    )
+
+
+def _normalize_confirmation_strategy(
+    strategy_version: object,
+    fields: object,
+) -> tuple[str | None, tuple[str, ...]]:
+    if strategy_version is None:
+        if fields not in ((), [], None):
+            raise WriteOperationError("operation_integrity_error")
+        return None, ()
+    if strategy_version != EDITED_CONFIRMATION_RECEIPT_STRATEGY:
+        raise WriteOperationError("operation_integrity_error")
+    if not isinstance(fields, Sequence) or isinstance(fields, (str, bytes, bytearray)):
+        raise WriteOperationError("operation_integrity_error")
+    normalized = tuple(fields)
+    if (
+        not normalized
+        or any(type(field) is not str or not field for field in normalized)
+        or tuple(sorted(set(normalized))) != normalized
+    ):
+        raise WriteOperationError("operation_integrity_error")
+    return EDITED_CONFIRMATION_RECEIPT_STRATEGY, normalized
 
 
 def operation_request_fingerprint(
@@ -1307,7 +1368,11 @@ def build_terminal_payload(
     )
 
 
-def payload_from_operation(operation: WriteOperation) -> TerminalPayload:
+def payload_from_operation(
+    operation: WriteOperation,
+    *,
+    key: LedgerKeyDomain | None = None,
+) -> TerminalPayload:
     if operation.status not in _TERMINAL_STATUSES:
         raise WriteOperationError("operation_not_committed", retryable=True)
     payload = build_terminal_payload(
@@ -1322,7 +1387,64 @@ def payload_from_operation(operation: WriteOperation) -> TerminalPayload:
     )
     if not hmac.compare_digest(payload.digest, operation.terminal_payload_sha256 or ""):
         raise WriteOperationError("operation_integrity_error")
+    if key is not None:
+        _validate_confirmation_strategy(operation, payload, key)
     return payload
+
+
+def _validate_confirmation_strategy(
+    operation: WriteOperation,
+    payload: TerminalPayload,
+    key: LedgerKeyDomain,
+) -> tuple[str | None, tuple[str, ...]]:
+    """Validate the optional receipt policy evidence on a terminal operation."""
+
+    version = operation.confirmation_strategy_version
+    fields_json = operation.confirmation_strategy_fields_json
+    fingerprint = operation.confirmation_strategy_fingerprint
+    transport: object
+    try:
+        transport = json.loads(payload.transport_json or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise WriteOperationError("operation_integrity_error") from exc
+    if not isinstance(transport, Mapping):
+        raise WriteOperationError("operation_integrity_error")
+    marker = transport.get("confirmation_strategy_version")
+    marker_fields = transport.get("confirmation_strategy_fields")
+    if version is None:
+        if fields_json is not None or fingerprint is not None or marker is not None or marker_fields is not None:
+            raise WriteOperationError("operation_integrity_error")
+        return None, ()
+    if version != EDITED_CONFIRMATION_RECEIPT_STRATEGY:
+        raise WriteOperationError("operation_integrity_error")
+    if type(fields_json) is not str or type(fingerprint) is not str:
+        raise WriteOperationError("operation_integrity_error")
+    try:
+        decoded_fields = json.loads(fields_json)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise WriteOperationError("operation_integrity_error") from exc
+    if (
+        not isinstance(decoded_fields, list)
+        or not decoded_fields
+        or any(type(field) is not str or not field for field in decoded_fields)
+        or len(set(decoded_fields)) != len(decoded_fields)
+        or decoded_fields != sorted(decoded_fields)
+        or marker != version
+        or marker_fields != decoded_fields
+        or not operation.operation_request_fingerprint
+    ):
+        raise WriteOperationError("operation_integrity_error")
+    expected = confirmation_strategy_fingerprint(
+        key,
+        operation_id=operation.id,
+        request_fingerprint=operation.operation_request_fingerprint or "",
+        terminal_payload_sha256=payload.digest,
+        strategy_version=version,
+        fields=tuple(decoded_fields),
+    )
+    if not hmac.compare_digest(expected, fingerprint):
+        raise WriteOperationError("operation_integrity_error")
+    return version, tuple(decoded_fields)
 
 
 def _undo_digest(undo_json: str | None) -> str | None:
@@ -1590,7 +1712,12 @@ class WriteOperationRepository:
             operation.operation_request_fingerprint, request_fingerprint
         ):
             raise WriteOperationError("operation_input_conflict")
-        payload = payload_from_operation(operation)
+        payload = payload_from_operation(operation, key=self.key)
+        strategy_version, strategy_fields = _validate_confirmation_strategy(
+            operation,
+            payload,
+            self.key,
+        )
         final_message = None
         chained_pending = None
         if operation.delivery_status in {"completed", "failed"}:
@@ -1612,6 +1739,8 @@ class WriteOperationRepository:
             operation.delivery_lease_expires_at,
             operation.delivery_outcome,
             final_message,
+            confirmation_strategy_version=strategy_version,
+            confirmation_strategy_fields=strategy_fields,
             chained_pending=chained_pending,
         )
 
@@ -1967,7 +2096,12 @@ class WriteOperationRepository:
                 ):
                     session.rollback()
                     return OperationUnknown(operation_id, "operation_result_unknown", True)
-                payload = payload_from_operation(operation)
+                payload = payload_from_operation(operation, key=self.key)
+                strategy_version, strategy_fields = _validate_confirmation_strategy(
+                    operation,
+                    payload,
+                    self.key,
+                )
                 if operation.conversation_id is None:
                     session.rollback()
                     return OperationUnknown(operation_id, "operation_delivery_unknown", False)
@@ -1979,6 +2113,8 @@ class WriteOperationRepository:
                         operation.delivery_status,
                         operation.delivery_generation,
                         operation.delivery_lease_expires_at,
+                        confirmation_strategy_version=strategy_version,
+                        confirmation_strategy_fields=strategy_fields,
                     )
                 if (
                     operation.delivery_lease_expires_at is not None
@@ -2021,7 +2157,15 @@ class WriteOperationRepository:
                         conversation_id=operation.conversation_id,
                         role="assistant",
                         content=(
-                            "操作已提交，但后续说明生成失败。"
+                            edited_confirmation_receipt(
+                                result_json=payload.result_json,
+                                changed_fields=strategy_fields,
+                            )
+                            if (
+                                operation.status == "committed"
+                                and strategy_version == EDITED_CONFIRMATION_RECEIPT_STRATEGY
+                            )
+                            else "操作已提交，但后续说明生成失败。"
                             if operation.status == "committed"
                             else "操作未完成，请查看工具结果后重试。"
                         ),
@@ -2075,6 +2219,8 @@ class WriteOperationRepository:
                     "failed",
                     takeover.generation,
                     None,
+                    confirmation_strategy_version=strategy_version,
+                    confirmation_strategy_fields=strategy_fields,
                 )
         except OperationalError:
             return OperationUnknown(operation_id, "operation_busy", True)
@@ -2206,6 +2352,8 @@ class WriteOperationCoordinator:
         parent_route_binder: PrimaryParentRouteBinder | None,
         edited_args_present: bool = False,
         edited_args: Mapping[str, JSONValue] | None = None,
+        confirmation_strategy_version: str | None = None,
+        confirmation_strategy_fields: Sequence[str] = (),
         approval_decided_callback: Callable[[object | None], None] | None = None,
     ) -> tuple[OperationExecution, ToolExecutionRecord[Any, Any] | None]:
         owner = self.repository.prepare_owner(operation_id)
@@ -2224,6 +2372,16 @@ class WriteOperationCoordinator:
                     replay = self.repository.replay(operation, request_fingerprint)
                     session.rollback()
                     return replay, None
+                strategy_version, strategy_fields = _normalize_confirmation_strategy(
+                    confirmation_strategy_version,
+                    confirmation_strategy_fields,
+                )
+                if (
+                    operation.confirmation_strategy_version is not None
+                    or operation.confirmation_strategy_fields_json is not None
+                    or operation.confirmation_strategy_fingerprint is not None
+                ):
+                    raise WriteOperationError("operation_integrity_error")
                 authority = context.authority
                 if type(authority) is not ApprovalExecutionAuthority:
                     raise WriteOperationError("operation_identity_conflict")
@@ -2245,6 +2403,10 @@ class WriteOperationCoordinator:
                     edited_args_present,
                     edited_args,
                     factory,
+                )
+                operation.confirmation_strategy_version = strategy_version
+                operation.confirmation_strategy_fields_json = (
+                    canonical_json(list(strategy_fields)) if strategy_version is not None else None
                 )
                 bound_context = context.bind(session)
                 try:
@@ -2449,6 +2611,12 @@ class WriteOperationCoordinator:
                             raise WriteOperationError("operation_projection_failed")
                         visible = visible_value
                         transport = project_transport_event(prepared.spec, record)
+                        if strategy_version is not None:
+                            transport = {
+                                **transport,
+                                "confirmation_strategy_version": strategy_version,
+                                "confirmation_strategy_fields": list(strategy_fields),
+                            }
                         payload = build_terminal_payload(
                             status="committed",
                             result_contract=write_contract.result_contract,
@@ -2472,6 +2640,7 @@ class WriteOperationCoordinator:
                             {"arguments_digest": locked_pending.arguments_digest},
                         )
                         self._set_terminal(operation, payload, owner)
+                        self._seal_confirmation_strategy(operation, payload)
                         self.repository.append_transition(session, operation_id, 4, "committed")
                         session.flush()
                         if parent_route_binder is not None:
@@ -3492,12 +3661,27 @@ class WriteOperationCoordinator:
             prepared, failure, False, operation.id, False, True
         )
         visible = render_compatibility(prepared.spec, failure)
+        transport = project_transport_event(prepared.spec, resolved)
+        if operation.confirmation_strategy_version is not None:
+            try:
+                strategy_fields = json.loads(operation.confirmation_strategy_fields_json or "")
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise WriteOperationError("operation_integrity_error") from exc
+            strategy_version, normalized_fields = _normalize_confirmation_strategy(
+                operation.confirmation_strategy_version,
+                strategy_fields,
+            )
+            transport = {
+                **transport,
+                "confirmation_strategy_version": strategy_version,
+                "confirmation_strategy_fields": list(normalized_fields),
+            }
         payload = build_terminal_payload(
             status="failed",
             result_contract="typed_json_v1",
             result={"category": failure.category, "code": failure.code},
             visible_result=visible,
-            transport=project_transport_event(prepared.spec, resolved),
+            transport=transport,
             undo=None,
             failure_category=failure.category,
             failure_code=failure.code,
@@ -3509,6 +3693,7 @@ class WriteOperationCoordinator:
             {"arguments_digest": arguments_digest},
         )
         self._set_terminal(operation, payload, owner)
+        self._seal_confirmation_strategy(operation, payload)
         self.repository.append_transition(session, operation.id, 4, "failed")
         try:
             session.commit()
@@ -3549,18 +3734,32 @@ class WriteOperationCoordinator:
         """Durably terminalize after dispatch without invoking fallible projections again."""
 
         failure = ToolFailure("internal_error", "operation_projection_failed")
+        transport: dict[str, object] = {
+            "status": "error",
+            "tool_call_id": prepared.tool_call_id,
+            "tool_name": prepared.spec.name,
+            "category": failure.category,
+            "code": failure.code,
+        }
+        if operation.confirmation_strategy_version is not None:
+            try:
+                strategy_fields = json.loads(operation.confirmation_strategy_fields_json or "")
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise WriteOperationError("operation_integrity_error") from exc
+            strategy_version, normalized_fields = _normalize_confirmation_strategy(
+                operation.confirmation_strategy_version,
+                strategy_fields,
+            )
+            transport.update(
+                confirmation_strategy_version=strategy_version,
+                confirmation_strategy_fields=list(normalized_fields),
+            )
         payload = build_terminal_payload(
             status="failed",
             result_contract="typed_json_v1",
             result={"category": failure.category, "code": failure.code},
             visible_result="错误：操作结果处理失败，操作未提交。",
-            transport={
-                "status": "error",
-                "tool_call_id": prepared.tool_call_id,
-                "tool_name": prepared.spec.name,
-                "category": failure.category,
-                "code": failure.code,
-            },
+            transport=transport,
             undo=None,
             failure_category=failure.category,
             failure_code=failure.code,
@@ -3572,6 +3771,7 @@ class WriteOperationCoordinator:
             {"arguments_digest": arguments_digest},
         )
         self._set_terminal(operation, payload, owner)
+        self._seal_confirmation_strategy(operation, payload)
         self.repository.append_transition(session, operation.id, 4, "failed")
         try:
             session.commit()
@@ -3631,6 +3831,37 @@ class WriteOperationCoordinator:
             Any, func.unixepoch("now") + DELIVERY_OWNER_LEASE_SECONDS
         )
         operation.updated_at = now
+
+    def _seal_confirmation_strategy(
+        self,
+        operation: WriteOperation,
+        payload: TerminalPayload,
+    ) -> None:
+        version = operation.confirmation_strategy_version
+        if version is None:
+            if (
+                operation.confirmation_strategy_fields_json is not None
+                or operation.confirmation_strategy_fingerprint is not None
+            ):
+                raise WriteOperationError("operation_integrity_error")
+            return
+        try:
+            fields = json.loads(operation.confirmation_strategy_fields_json or "")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise WriteOperationError("operation_integrity_error") from exc
+        if not operation.operation_request_fingerprint:
+            raise WriteOperationError("operation_integrity_error")
+        normalized_version, normalized_fields = _normalize_confirmation_strategy(version, fields)
+        if normalized_version is None:
+            raise WriteOperationError("operation_integrity_error")
+        operation.confirmation_strategy_fingerprint = confirmation_strategy_fingerprint(
+            self.repository.key,
+            operation_id=operation.id,
+            request_fingerprint=operation.operation_request_fingerprint or "",
+            terminal_payload_sha256=payload.digest,
+            strategy_version=normalized_version,
+            fields=normalized_fields,
+        )
 
 
 def _map_exception(
