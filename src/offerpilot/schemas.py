@@ -99,6 +99,7 @@ class ChatMessageOut(BaseModel):
     content: str
     tool_calls: str = ""
     tool_call_id: str = ""
+    operation_id: str | None = None
     created_at: datetime
 
 

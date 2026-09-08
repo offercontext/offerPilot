@@ -80,6 +80,7 @@ export type WriteStatus = 'success' | 'failed' | 'cancelled' | 'none';
 
 export interface ChatMessage {
   id: number;
+  operation_id?: string | null;
   conversation_id: number;
   role: 'user' | 'assistant' | 'tool';
   content: string;

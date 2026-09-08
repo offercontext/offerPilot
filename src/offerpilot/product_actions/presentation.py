@@ -36,7 +36,8 @@ from offerpilot.product_actions.contracts import (
     require_product_action_uuid,
 )
 from offerpilot.product_actions.coordinator import ProductActionCoordinator
-from offerpilot.product_actions.repository import ProductActionBundleV1
+from offerpilot.product_actions.repository import ProductActionBundleV1, ProductActionProposalRepository
+from offerpilot.ai.tool_runtime.contracts import JSONValue
 from offerpilot.review_readiness.repository import (
     ReadinessSignalRepository,
     ReviewReadinessReadNotFound,
@@ -81,7 +82,7 @@ def _same_text(left: object, right: object) -> bool:
     return (
         type(left) is str
         and type(right) is str
-        and hmac.compare_digest(cast(str, left), cast(str, right))
+        and hmac.compare_digest(left, right)
     )
 
 
@@ -141,7 +142,7 @@ class ProductActionPresentationBuilder:
 
     def __init__(
         self,
-        proposal_repository: object,
+        proposal_repository: ProductActionProposalRepository,
         coordinator: ProductActionCoordinator,
         *,
         readiness_repository: ReadinessSignalRepository | object | None = None,
@@ -149,21 +150,7 @@ class ProductActionPresentationBuilder:
         current_undo_operation_id: str | None = None,
         compensation_coordinator: object | None = None,
         session_factory: Callable[[], Any] | None = None,
-        # These aliases make composition explicit at call sites that use the
-        # domain names from the existing API state attributes.
-        product_action_proposal_repository: object | None = None,
-        product_action_coordinator: ProductActionCoordinator | None = None,
-        readiness_signal_repository: object | None = None,
-        story_repository: object | None = None,
     ) -> None:
-        if product_action_proposal_repository is not None:
-            proposal_repository = product_action_proposal_repository
-        if product_action_coordinator is not None:
-            coordinator = product_action_coordinator
-        if readiness_signal_repository is not None:
-            readiness_repository = readiness_signal_repository
-        if story_repository is not None:
-            stories_repository = story_repository
         if not callable(getattr(proposal_repository, "load_bundle", None)):
             raise TypeError("Product Action presentation requires a proposal repository")
         if not callable(getattr(coordinator, "verify_terminal_projection", None)):
@@ -243,10 +230,14 @@ class ProductActionPresentationBuilder:
         )
 
     def _build_terminal(self, bundle: ProductActionBundleV1) -> ActionPresentationV1:
+        evidence: ProductActionEvidence
         # ``verify_terminal_projection`` checks the closed result and transport
         # codec.  It returns only bounded, provider-free data and is also the
         # source for the exact P0 visible receipt.
         try:
+            state = self._coordinator.get_state(bundle.operation.id)
+            if state.operation_id != bundle.operation.id or state.status != bundle.operation.status:
+                raise ProductActionIntegrityError('product_action_terminal_state')
             projection = self._coordinator.verify_terminal_projection(bundle)
         except ProductActionIntegrityError:
             raise
@@ -566,7 +557,7 @@ class ProductActionPresentationBuilder:
                     key,
                     operation_request_fingerprint=operation.operation_request_fingerprint,
                     parent_terminal_payload_sha256=parent_digest,
-                    validated_undo_json=dict(undo_payload),
+                    validated_undo_json=cast(dict[str, JSONValue], dict(undo_payload)),
                 )
                 if (
                     type(operation.input_fingerprint) is not str
@@ -604,7 +595,7 @@ class ProductActionPresentationBuilder:
 def build_product_action_presentation(
     operation_id: str,
     *,
-    proposal_repository: object,
+    proposal_repository: ProductActionProposalRepository,
     coordinator: ProductActionCoordinator,
     readiness_repository: object | None = None,
     stories_repository: object | None = None,

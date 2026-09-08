@@ -18,6 +18,7 @@ import {
 import styles from './ChatPanel.module.css';
 
 interface Props {
+  allowedActions?: readonly string[];
   action: PendingAction;
   loading: boolean;
   evidence: EvidenceItem[];
@@ -159,7 +160,7 @@ function summarizeLongValue(value: unknown, field?: string): string | null {
   return `新增 ${paragraphCount} 段内容 · ${normalized.length} 字`;
 }
 
-export default function ProposalCard({ action, loading, evidence, onConfirm, onCancel, onOpenEvidence }: Props) {
+export default function ProposalCard({ action, loading, evidence, onConfirm, onCancel, onOpenEvidence, allowedActions }: Props) {
   const identity = actionIdentity(action);
   const editorId = `proposal-editor-${useId().replace(/:/g, '')}`;
   const [review, setReview] = useState<ProposalReviewState>(() => createProposalReviewState(action));
@@ -574,6 +575,7 @@ export default function ProposalCard({ action, loading, evidence, onConfirm, onC
               danger
               type="primary"
               loading={loading}
+              disabled={allowedActions !== undefined && !allowedActions.includes('reject')}
               onClick={() => onCancel(currentReview.feedback.trim() || undefined)}
             >
               {isDelete ? '确认不删除' : '最终拒绝'}
@@ -586,6 +588,7 @@ export default function ProposalCard({ action, loading, evidence, onConfirm, onC
             type="primary"
             className="op-ai-btn"
             loading={loading}
+            disabled={allowedActions !== undefined && !allowedActions.includes(changedEditableArgs(action, currentReview.draft) ? 'modify' : 'approve')}
             onClick={() => onConfirm(changedEditableArgs(action, currentReview.draft))}
           >
             {confirmLabel}

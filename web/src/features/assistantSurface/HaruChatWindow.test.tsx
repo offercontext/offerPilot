@@ -8,6 +8,7 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 import HaruChatWindow from './HaruChatWindow';
+vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

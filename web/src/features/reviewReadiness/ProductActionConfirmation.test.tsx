@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProductActionOwnerDraft } from './contracts';
 
 const service = vi.hoisted(() => ({ decide: vi.fn(), state: vi.fn() }));
+const presentation = vi.hoisted(() => ({ read: vi.fn() }));
+vi.mock('@/features/actionPresentation/service', () => ({ getProductPresentation: presentation.read }));
 vi.mock('./service', () => ({ decideProductAction: service.decide, getProductActionState: service.state }));
 
 const { ProductActionConfirmation, productActionDraftFromProposal } = await import('./ProductActionConfirmation');
@@ -27,6 +29,7 @@ beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   service.decide.mockReset();
   service.state.mockReset();
+  presentation.read.mockReset().mockRejectedValue(new Error('legacy server'));
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -38,6 +41,37 @@ afterEach(() => {
 });
 
 describe('ProductActionConfirmation', () => {
+  it.each([99, 1])('preserves the confirmed owner receipt when display version/state %s conflicts', async (version) => {
+    presentation.read.mockResolvedValue({
+      schema_version: version, source_kind: 'product_action', operation_id: proposal.operation_id,
+      source_revision: 'old', presentation_revision: 'old-view', title: '保存准备重点', target: null,
+      summary: '尚未保存', source_label: '准备重点', decision: 'undecided',
+      execution: version === 99 ? 'committed' : 'not_started', evidence: 'verified', undo: 'unsupported', available_actions: [],
+    });
+    const draft: ProductActionOwnerDraft = {
+      ...productActionDraftFromProposal('review:7:11:focus-1', proposal, {}),
+      confirmationToken: null, status: 'committed', result: { signal_id: 8 },
+    };
+    await act(async () => root.render(<ProductActionConfirmation draft={draft} onDraftChange={vi.fn()} onUndo={vi.fn()} />));
+    expect(host.querySelector('strong')?.textContent).toBe('已保存为下次准备重点。');
+    expect(host.textContent).toContain('本次保存已由原操作确认');
+    expect([...host.querySelectorAll('button')].find((button) => button.textContent === '撤销本次保存')?.disabled).toBe(true);
+  });
+  it.each([1, 99])('disables decisions when current presentation denies them or uses unknown version %s', async (version) => {
+    presentation.read.mockResolvedValue({
+      schema_version: version, source_kind: 'product_action', operation_id: proposal.operation_id,
+      source_revision: 'source', presentation_revision: 'view', title: '保存准备重点', target: null,
+      summary: '来源已变化，请重新检查。', source_label: '准备重点', decision: 'undecided',
+      execution: 'not_started', evidence: 'unavailable', undo: 'unsupported', available_actions: [],
+    });
+    const draft = productActionDraftFromProposal('review:7:11:focus-1', proposal, { user_note: '' });
+    await act(async () => root.render(<ProductActionConfirmation draft={draft} onDraftChange={vi.fn()} />));
+    const approve = [...host.querySelectorAll('button')].find((button) => button.textContent === '确认保存')!;
+    expect(approve.disabled).toBe(true);
+    act(() => approve.click());
+    expect(service.decide).not.toHaveBeenCalled();
+    expect(host.textContent).toContain(version === 99 ? '操作展示暂不可用' : '来源暂不可用');
+  });
   it.each(['false', 'throw'] as const)('does not send a decision when frozen token-bound persistence returns %s', async (failure) => {
     const decide = vi.fn();
     const persist = vi.fn(() => {

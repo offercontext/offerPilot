@@ -27,6 +27,7 @@ import type {
 } from '@/components/ChatPanel/model';
 import { buildChatRequestContext, pendingAutoSelectReducer } from '@/components/ChatPanel/model';
 import { pageContextKey } from '@/lib/pilotPageContext';
+import { usePilotPresentation } from '@/features/actionPresentation/usePilotPresentation';
 import type { AssistantTaskState } from './assistantSurfaceReducer';
 
 export type SendMessageOutcome = 'sent' | 'stopped' | 'failed' | 'ignored';
@@ -49,6 +50,7 @@ export interface ActiveConversationRequest extends ActiveConversationRequestOwne
 }
 
 export interface PilotConversationActions {
+  undoOperation?: (operationId: string) => Promise<void>;
   sendMessage: (text: string) => Promise<SendMessageOutcome>;
   selectConversation: (conversationId: number) => Promise<void>;
   startNewChat: () => boolean;
@@ -159,6 +161,7 @@ export function usePilotConversationControllerState() {
   const [contextChangeNotice, setContextChangeNotice] = useState<ContextChangeNotice | null>(null);
   const [requestContextSnapshot, setRequestContextSnapshot] = useState<PilotPageContext>();
   const [attachments, setAttachments] = useState<PilotContextAttachment[]>([]);
+  const { displayTurns, presentationSnapshot, refreshPresentation } = usePilotPresentation(conversationId, turns, pending, loading, confirmPhase === 'error');
 
   const activeRequestRef = useRef<ActiveConversationRequest | null>(null);
   const streamingAssistantActiveRef = useRef(false);
@@ -431,6 +434,9 @@ export function usePilotConversationControllerState() {
     [],
   );
   const clearActiveContext = useCallback(() => actionsRef.current.clearActiveContext(), []);
+  const undoOperation = useCallback(async (operationId: string) => {
+    await actionsRef.current.undoOperation?.(operationId);
+  }, []);
 
   const approvePending = useCallback(
     (editedArgs?: Record<string, unknown>) => {
@@ -466,6 +472,10 @@ export function usePilotConversationControllerState() {
         : 'idle';
 
   return useMemo(() => ({
+    undoOperation,
+    displayTurns,
+    presentationSnapshot,
+    refreshPresentation,
     turns,
     setTurns,
     conversationId,
@@ -563,6 +573,10 @@ export function usePilotConversationControllerState() {
     approvePending,
     rejectPending,
   }), [
+    undoOperation,
+    displayTurns,
+    presentationSnapshot,
+    refreshPresentation,
     autoApprove,
     activateConversationContext,
     bindActions,

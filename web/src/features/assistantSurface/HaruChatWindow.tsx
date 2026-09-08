@@ -16,6 +16,8 @@ import {
 import { useAssistantSurface, usePilotConversationController } from './AssistantSurfaceProvider';
 import { recentConversationTurns } from './assistantPresentation';
 import CompactMessageRenderer from './CompactMessageRenderer';
+import { ActionCard } from '@/features/actionPresentation/ActionCard';
+import { agentActionCommands, pendingPresentationActions } from '@/features/actionPresentation/commands';
 import { positionHaruWindow, type HaruRect } from './haruWindowPosition';
 import styles from './AssistantSurface.module.css';
 
@@ -93,6 +95,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
   }, [controller.turns, controller.pending, surface.surface]);
 
   if (surface.surface !== 'haru_chat') return null;
+  const pendingNeedsRefresh = pendingPresentationActions(controller.presentationSnapshot, controller.pending?.operation_id)?.length === 0;
 
   const close = () => {
     if (closingRef.current) return;
@@ -253,8 +256,10 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
             </span>
           </div>
         ) : (
-          recentConversationTurns(controller.turns).map((turn, index) => (
-            <CompactMessageRenderer key={`${turn.role}-${index}`} turn={turn} />
+          recentConversationTurns(controller.displayTurns ?? controller.turns).map((turn, index) => turn.action ? (
+            <ActionCard key={turn.id} action={turn.action} busy={controller.loading} commands={agentActionCommands(turn.action, controller)} />
+          ) : (
+            <CompactMessageRenderer key={turn.id ?? `transient:${controller.conversationId}:${index}`} turn={turn} />
           ))
         )}
         {controller.loading && !controller.hasStreamingAssistantContent ? (
@@ -267,7 +272,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
 
       {controller.pending ? (
         <div className={styles.pending} role="status">
-          <span>这一步会修改「{contextLabel}」的内容，需要在完整工作区确认。</span>
+          <span>{pendingNeedsRefresh ? '操作状态需要重新核对，请在完整工作区刷新。' : `这一步会修改「${contextLabel}」的内容，需要在完整工作区确认。`}</span>
           <button
             type="button"
             data-testid="haru-open-pending"
@@ -276,7 +281,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
               onExpand?.();
             }}
           >
-            查看修改内容
+            {pendingNeedsRefresh ? '核对操作状态' : '查看修改内容'}
             <ArrowUpOutlined />
           </button>
         </div>

@@ -24,6 +24,7 @@ from pypdf import PdfReader
 from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.ai.agent_contracts import ChatModel, PendingAction
+from offerpilot.presentation import AgentActionPresentationBuilder, build_conversation_presentation
 from offerpilot.ai.deterministic_actions import (
     parse_pilot_action,
 )
@@ -3753,6 +3754,24 @@ def create_app(
             product_action_coordinator.get_state(operation_id)
         )
 
+    @app.get("/api/product-actions/{operation_id}/presentation")
+    def get_product_action_presentation(operation_id: str) -> JSONResponse:
+        from offerpilot.product_actions.presentation import build_product_action_presentation
+
+        operation = write_operations.get(operation_id)
+        if operation is None or operation.adapter_kind != 'product_action':
+            return JSONResponse({'error': 'operation not found'}, status_code=404, headers={'Cache-Control': 'no-store'})
+        presentation = build_product_action_presentation(
+            operation_id,
+            proposal_repository=product_action_proposals,
+            coordinator=product_action_coordinator,
+            readiness_repository=readiness_signals,
+            stories_repository=interview_stories,
+            compensation_coordinator=product_action_compensation_coordinator,
+            session_factory=session_factory,
+        )
+        return JSONResponse(presentation.model_dump(mode='json'), headers={'Cache-Control': 'no-store'})
+
     @app.get(
         "/api/interview-notes/{note_id}/readiness-focus-actions/{operation_id}"
     )
@@ -5375,6 +5394,39 @@ def create_app(
             ChatMessageOut.model_validate(item).model_dump(mode="json")
             for item in chat.list_messages(conversation_id)
         ]
+
+    @app.get("/api/chat/conversations/{conversation_id}/presentation")
+    def get_conversation_presentation(conversation_id: int) -> JSONResponse:
+        from offerpilot.presentation_sources import agent_undo_state, pending_agent_source_is_current
+
+        runtime = cast(PilotRuntime, app.state.pilot_runtime)
+        builder = AgentActionPresentationBuilder(
+            write_operations,
+            pending_projector=lambda conversation: _pending_action_json(
+                PendingAction(
+                    tool_call_id=conversation.pending_tool_call_id,
+                    tool_name=conversation.pending_tool_name,
+                    args=conversation.pending_args,
+                    human=conversation.pending_human or conversation.pending_tool_name,
+                    operation_id=conversation.pending_operation_id,
+                ),
+                runtime=runtime, applications=applications,
+                session_factory=session_factory, conversation_id=conversation.id,
+                strict=True,
+            ),
+            pending_is_current=lambda conversation, operation: pending_agent_source_is_current(
+                conversation, operation, repository=write_operations,
+                metadata_bundle=runtime.metadata_bundle,
+            ),
+            undo_projector=lambda conversation, operation, payload: agent_undo_state(
+                conversation, operation, payload, repository=write_operations,
+                metadata_bundle=runtime.metadata_bundle,
+            ),
+        )
+        snapshot = build_conversation_presentation(conversation_id, builder)
+        if snapshot is None:
+            return JSONResponse({'error': 'conversation not found'}, status_code=404, headers={'Cache-Control': 'no-store'})
+        return JSONResponse(snapshot.model_dump(mode='json'), headers={'Cache-Control': 'no-store'})
 
     @app.patch("/api/chat/conversations/{conversation_id}")
     def update_conversation(
@@ -9519,6 +9571,7 @@ def _pending_action_json(
     applications: ApplicationsRepository,
     session_factory: sessionmaker[Session],
     conversation_id: int,
+    strict: bool = False,
 ) -> dict[str, Any]:
     args = _safe_tool_args(pending.args)
     human = pending.human
@@ -9541,6 +9594,8 @@ def _pending_action_json(
                 descriptor.to_compat_descriptor() for descriptor in spec.metadata.editable_fields
             ]
     except (TypeError, ValueError):
+        if strict:
+            raise
         details = {}
         editable_fields = []
     finally:
@@ -9589,6 +9644,8 @@ def _pending_action_json(
                 for descriptor in projected.editable_fields
             ]
         except (TypeError, ValueError):
+            if strict:
+                raise
             details = {}
             editable_fields = []
     payload: dict[str, Any] = {

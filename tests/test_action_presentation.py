@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from offerpilot.ai.types import Assistant, ToolCall
 from offerpilot.api import create_app
@@ -17,13 +17,15 @@ from tests.review_readiness_support import seed_review_candidate
 
 
 class _Model:
-    def __init__(self) -> None:
+    def __init__(self, tool_name='update_application_status', args=None) -> None:
         self.calls = 0
+        self.tool_name = tool_name
+        self.args = args or {'id': 1, 'status': 'interview'}
 
     def complete(self, messages, tools):
         self.calls += 1
         if self.calls == 1:
-            return Assistant(tool_calls=[ToolCall('presentation-origin', 'update_application_status', '{"id":1,"status":"interview"}')])
+            return Assistant(tool_calls=[ToolCall('presentation-origin', self.tool_name, json.dumps(self.args))])
         raise AssertionError('Presentation and edited confirmation cannot call Provider')
 
 
@@ -49,8 +51,14 @@ def test_pending_to_receipt_preserves_item_identity_and_does_not_execute_on_read
             'approved': True, 'edited_args': {'status': 'offer'},
         })
         assert confirmed.status_code == 200
+        sql: list[str] = []
+        def capture_sql(_connection, _cursor, statement, _parameters, _context, _many):
+            sql.append(statement.lstrip().split()[0].upper())
+        event.listen(app.state.db_engine, 'before_cursor_execute', capture_sql)
         first = client.get(endpoint).json()
         second = client.get(endpoint).json()
+        event.remove(app.state.db_engine, 'before_cursor_execute', capture_sql)
+        assert not set(sql) & {'INSERT', 'UPDATE', 'DELETE', 'REPLACE'}
         assert first == second
         card = next(item for item in first['items'] if item['kind'] == 'action')
         assert card['item_id'] == pending_card['item_id']
@@ -81,6 +89,54 @@ def test_presentation_does_not_create_missing_conversations(tmp_path, conversati
     with TestClient(create_app(data_dir=tmp_path)) as client:
         assert client.get(f'/api/chat/conversations/{conversation_id}/presentation').status_code == 404
         assert client.get('/api/chat/conversations').json() == []
+
+
+def test_legacy_pending_uses_its_original_read_only_presentation_port(tmp_path):
+    model = _Model()
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model, title_model=model)) as client:
+        client.post('/api/applications', json={'company_name': '展示验收', 'position_name': '工程师', 'status': 'applied'})
+        proposed = client.post('/api/chat', json={
+            'message': '保存 JD：职位：后端工程师\n负责 API 设计', 'conversation_id': 0,
+            'context_type': 'application', 'context_ref': '1',
+        }).json()
+        assert proposed['pending_action']['tool_name'] == 'save_application_jd_version'
+        before = model.calls
+        action = next(item['action'] for item in client.get(
+            f"/api/chat/conversations/{proposed['conversation_id']}/presentation"
+        ).json()['items'] if item['kind'] == 'action')
+        assert action['decision'] == 'undecided'
+        assert set(action['available_actions']) >= {'approve', 'modify', 'reject'}
+        assert model.calls == before
+
+
+@pytest.mark.parametrize(('tool_name', 'args', 'edits'), [
+    ('create_application', {'company_name': '新公司', 'position_name': '工程师'}, {'position_name': '架构师'}),
+    ('create_application_event', {'application_id': 1, 'event_type': 'interview', 'scheduled_at': '2026-09-10T09:00:00Z', 'duration_minutes': 60, 'location': '会议室'}, {'location': '线上'}),
+    ('add_note', {'application_id': 1, 'company': '展示验收', 'position': '工程师', 'date': '2026-09-08', 'self_reflection': '测试复盘'}, {'self_reflection': '先说结论'}),
+    ('create_offer', {'application_id': 1, 'base_monthly': 5000, 'months_per_year': 12}, {'base_monthly': 6000}),
+])
+def test_required_undo_display_checks_exact_created_sources(tmp_path, tool_name, args, edits):
+    model = _Model(tool_name, args)
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        client.post('/api/applications', json={'company_name': '展示验收', 'position_name': '工程师', 'status': 'applied'})
+        proposed = client.post('/api/chat', json={'message': 'hello', 'conversation_id': 0}).json()
+        assert 'pending_action' in proposed, proposed
+        pending = proposed['pending_action']
+        assert client.post('/api/chat/confirm', json={
+            'conversation_id': proposed['conversation_id'], 'operation_id': pending['operation_id'],
+            'confirmation_token': pending['confirmation_token'], 'approved': True, 'edited_args': edits,
+        }).status_code == 200
+        endpoint = f"/api/chat/conversations/{proposed['conversation_id']}/presentation"
+        action = next(item['action'] for item in client.get(endpoint).json()['items'] if item['kind'] == 'action')
+        assert action['execution'] == 'committed'
+        assert action['undo'] == 'available'
+        assert client.post('/api/chat/undo-last-write', json={
+            'conversation_id': proposed['conversation_id'], 'parent_operation_id': pending['operation_id'],
+        }).status_code == 200
+        undone = next(item['action'] for item in client.get(endpoint).json()['items'] if item['kind'] == 'action')
+        assert undone['execution'] == 'committed'
+        assert undone['undo'] == 'undone'
+        assert model.calls == 1
 
 
 @pytest.mark.parametrize('damage', ['source_deleted', 'scope_changed', 'pending_changed', 'payload_changed', 'delivery_missing'])
@@ -121,7 +177,7 @@ def test_stale_sources_and_missing_evidence_never_restore_commands(tmp_path, dam
         second = client.get(f'/api/chat/conversations/{conversation_id}/presentation').json()
         assert first == second
         action = next(item['action'] for item in first['items'] if item['kind'] == 'action')
-        assert not set(action['available_actions']) & {'approve', 'modify', 'reject'}
+        assert not set(action['available_actions']) & {'approve', 'modify'}
         if damage == 'delivery_missing':
             assert action['execution'] == 'committed'
             assert action['evidence'] == 'verified'
@@ -134,7 +190,8 @@ def test_stale_sources_and_missing_evidence_never_restore_commands(tmp_path, dam
         assert model.calls == 1
 
 
-def test_product_action_presentation_reads_real_bundle_and_receipt(tmp_path):
+@pytest.mark.parametrize('decision', ['approve', 'modify', 'reject', 'corrupt_input'])
+def test_product_action_presentation_reads_real_bundle_and_receipt(tmp_path, decision):
     session_factory = session_factory_for_data_dir(tmp_path)
     seeded = seed_review_candidate(session_factory)
     with session_factory() as session:
@@ -171,14 +228,26 @@ def test_product_action_presentation_reads_real_bundle_and_receipt(tmp_path):
             f"/api/product-actions/{operation_id}/decisions",
             json={
                 "confirmation_token": proposed.json()["confirmation_token"],
-                "decision": "approve",
+                "decision": 'approve' if decision == 'corrupt_input' else decision,
+                **({'edited_payload': {'user_note': '新的准备重点'}} if decision == 'modify' else {}),
             },
         )
         assert terminal.status_code == 200, terminal.json()
+        if decision == 'corrupt_input':
+            with session_factory.begin() as session:
+                session.execute(text('DROP TRIGGER trg_write_operation_terminal_immutable'))
+                session.get(WriteOperation, operation_id).input_fingerprint = 'hmac-sha256:' + '0' * 64
+            assert client.get(f'/api/product-actions/{operation_id}').status_code == 503
+            assert client.get(f'/api/product-actions/{operation_id}/presentation').status_code == 503
+            return
         presented = client.get(f"/api/product-actions/{operation_id}/presentation")
         assert presented.status_code == 200, presented.json()
         payload = presented.json()
-        assert payload["decision"] == "approved"
+        assert payload['decision'] == {'approve': 'approved', 'modify': 'modified', 'reject': 'rejected'}[decision]
+        if decision == 'reject':
+            assert payload['execution'] == 'not_started'
+            assert payload['available_actions'] == []
+            return
         assert payload["execution"] == "committed"
         assert payload["evidence"] == "verified"
         assert payload["summary"] == "已保存为下次准备重点。"

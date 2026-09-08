@@ -695,6 +695,64 @@ _ORDERED_SPECS = (
 )
 
 
+def compensation_source_is_current(
+    session: Session,
+    undo: FrozenJSONObject,
+    compensation_kind: CompensationKind,
+) -> bool:
+    """Conservative SELECT-only counterpart for current display capabilities.
+
+    The existing payload validator remains authoritative.  This query checks
+    the complete expected snapshot and dependencies; execution still repeats
+    its own atomic predicates when the original owner submits Undo.
+    """
+    spec = next(item for item in _ORDERED_SPECS if item.compensation_operation_kind is compensation_kind)
+    spec._validated_identity()
+    spec.validate_undo_payload(undo)
+    kind = spec.undo_payload_kind
+    row: Any
+    if kind in {UndoPayloadKind.UPDATE_APPLICATION_STATUS, UndoPayloadKind.DELETE_APPLICATION}:
+        row = session.get(Application, cast(int, undo['application_id']))
+    elif kind is UndoPayloadKind.DELETE_APPLICATION_EVENT:
+        row = session.get(ApplicationEvent, cast(int, undo['application_event_id']))
+    elif kind is UndoPayloadKind.DELETE_NOTE:
+        row = session.get(InterviewNote, cast(int, undo['note_id']))
+    elif kind is UndoPayloadKind.DELETE_OFFER:
+        row = session.get(Offer, cast(int, undo['offer_id']))
+    else:
+        return False
+    if row is None or getattr(row, 'deleted_at', None) is not None:
+        return False
+    application_id = row.id if isinstance(row, Application) else row.application_id
+    if application_id is not None:
+        application = session.get(Application, application_id)
+        if application is None or application.deleted_at is not None:
+            return False
+    expected = cast(FrozenJSONObject, undo['expected_after'])
+    for name, expected_value in expected.items():
+        value: Any = expected_value
+        actual = getattr(row, name, object())
+        if isinstance(actual, datetime):
+            parsed = _require_optional_datetime(value, f'expected {name}')
+            if parsed is None:
+                return False
+            actual = actual.replace(tzinfo=timezone.utc) if actual.tzinfo is None else actual.astimezone(timezone.utc)
+            value = parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
+        elif isinstance(actual, list) and isinstance(value, tuple):
+            actual = tuple(actual)
+        if actual != value:
+            return False
+    if kind is UndoPayloadKind.DELETE_APPLICATION:
+        for dependency in APPLICATION_FOREIGN_KEY_MODELS:
+            if session.scalar(select(exists().where(dependency.application_id == row.id))):
+                return False
+    elif kind is UndoPayloadKind.DELETE_OFFER:
+        for offer_dependency in (OfferComparisonValue, OfferNegotiationProposal, OfferNegotiationBrief):
+            if session.scalar(select(exists().where(offer_dependency.offer_id == row.id))):
+                return False
+    return True
+
+
 class CompensationHandlerHandle(TransientToolRuntimeValue):
     """Opaque metadata binding; it intentionally carries no execution method."""
 

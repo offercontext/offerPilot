@@ -11,6 +11,9 @@ import type {
 } from './contracts';
 import { decideProductAction, getProductActionState } from './service';
 import styles from './reviewReadiness.module.css';
+import { ActionCard, supportedAction } from '@/features/actionPresentation/ActionCard';
+import { useProductPresentation } from '@/features/actionPresentation/useProductPresentation';
+import { withTransportUncertainty } from '@/features/actionPresentation/model';
 
 interface ProductActionConfirmationProps {
   draft: ProductActionOwnerDraft;
@@ -127,6 +130,14 @@ export function ProductActionConfirmation({
   const [undoStatus, setUndoStatus] = useState<ProductActionCompensationResponse['status'] | null>(draft.undoStatus ?? null);
   const requestInFlight = useRef(false);
   const changed = payloadChanged(draft.originalPayload, editedPayload);
+  const presentation = useProductPresentation(draft.operationId,
+    `${draft.status}:${draft.undoStatus}:${draft.resultUnknown}:${draft.undoResultUnknown}`, busy);
+  const presentationConflict = Boolean(presentation && draft.status !== 'proposed'
+    && (!supportedAction(presentation) || (draft.status === 'committed'
+      ? presentation.execution !== 'committed' : draft.status === 'rejected'
+        ? presentation.decision !== 'rejected' : presentation.execution !== 'failed')));
+  const allows = (command: string) => !presentation || (!presentationConflict && supportedAction(presentation)
+    && presentation.available_actions.some((action) => action === command));
 
   useEffect(() => {
     setUndoStatus(draft.undoStatus ?? null);
@@ -140,6 +151,7 @@ export function ProductActionConfirmation({
         ? { decision, edited_payload: { ...(editedPayload ?? draft.originalPayload) } } as const
         : { decision } as const;
     if (!draft.allowedDecisions.includes(pending.decision)) return;
+    if (!allows(pending.decision)) return;
     const request = { confirmation_token: draft.confirmationToken, ...pending } as ProductActionDecisionRequest;
     const pendingDraft = { ...draft, pendingDecision: pending, resultUnknown: true };
     // The composition root receives the exact token-bound decision before
@@ -221,6 +233,7 @@ export function ProductActionConfirmation({
 
   async function undo() {
     if (!onUndo || requestInFlight.current) return;
+    if (!allows('undo')) return;
     const persistedRequest = draft.undoRequest ?? null;
     if (persistedRequest && (!draft.undoResultUnknown || !exactUndoRequest(draft, persistedRequest))) {
       setError('撤销恢复状态与当前操作不匹配，未发送请求。');
@@ -306,6 +319,8 @@ export function ProductActionConfirmation({
 
   return (
     <section className={styles.confirmation} aria-label="产品操作确认" aria-busy={busy}>
+      {presentationConflict ? <p role="status">{draft.status === 'committed' ? '展示状态待刷新；本次保存已由原操作确认。' : '展示状态待刷新；保留原操作确认的结果。'}</p>
+        : presentation ? <ActionCard action={withTransportUncertainty(presentation, draft.resultUnknown, Boolean(draft.undoResultUnknown))} busy={busy} /> : null}
       {draft.status === 'proposed' ? (
         <>
           <h4 className={styles.heading}>确认本次保存</h4>
@@ -313,23 +328,23 @@ export function ProductActionConfirmation({
           <div className={styles.actions}>
             {draft.resultUnknown ? (
               <>
-                <button className={styles.primaryButton} type="button" disabled={busy} onClick={() => void submit(draft.pendingDecision?.decision ?? 'approve')}>使用原操作重试</button>
+                <button className={styles.primaryButton} type="button" disabled={busy || !allows(draft.pendingDecision?.decision ?? 'approve')} onClick={() => void submit(draft.pendingDecision?.decision ?? 'approve')}>使用原操作重试</button>
                 <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void reconcile()}>确认操作结果</button>
               </>
             ) : (
               <>
-                {!changed && draft.allowedDecisions.includes('approve') ? <button className={styles.primaryButton} type="button" disabled={busy} onClick={() => void submit('approve')}>{approveLabel}</button> : null}
-                {changed && draft.allowedDecisions.includes('modify') ? <button className={styles.primaryButton} type="button" disabled={busy} onClick={() => void submit('modify')}>{modifyLabel}</button> : null}
-                <button className={styles.secondaryButton} type="button" disabled={busy || !draft.allowedDecisions.includes('reject')} onClick={() => void submit('reject')}>{rejectLabel}</button>
+                {!changed && draft.allowedDecisions.includes('approve') ? <button className={styles.primaryButton} type="button" disabled={busy || !allows('approve')} onClick={() => void submit('approve')}>{approveLabel}</button> : null}
+                {changed && draft.allowedDecisions.includes('modify') ? <button className={styles.primaryButton} type="button" disabled={busy || !allows('modify')} onClick={() => void submit('modify')}>{modifyLabel}</button> : null}
+                <button className={styles.secondaryButton} type="button" disabled={busy || !draft.allowedDecisions.includes('reject') || !allows('reject')} onClick={() => void submit('reject')}>{rejectLabel}</button>
               </>
             )}
           </div>
         </>
       ) : (
         <div className={styles.terminal} data-status={draft.status}>
-          <strong>{terminalCopy}</strong>
-          {draft.status === 'committed' && onUndo && undoStatus === null && !draft.undoRequest ? <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void undo()}>撤销本次保存</button> : null}
-          {draft.status === 'committed' && onUndo && undoStatus === null && draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void undo()}>使用原撤销操作重试</button> : null}
+          {!presentation || presentationConflict ? <strong>{terminalCopy}</strong> : null}
+          {draft.status === 'committed' && onUndo && undoStatus === null && !draft.undoRequest ? <button className={styles.secondaryButton} type="button" disabled={busy || !allows('undo')} onClick={() => void undo()}>撤销本次保存</button> : null}
+          {draft.status === 'committed' && onUndo && undoStatus === null && draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <button className={styles.secondaryButton} type="button" disabled={busy || !allows('undo')} onClick={() => void undo()}>使用原撤销操作重试</button> : null}
           {draft.status === 'committed' && undoStatus === null && draft.undoRequest && !draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <span>撤销正在处理，请等待原操作返回。</span> : null}
           {draft.status === 'committed' && draft.undoRequest && !exactUndoRequest(draft, draft.undoRequest) ? <span>撤销恢复状态与当前操作不匹配。</span> : null}
           {undoStatus === 'committed' ? <span>已撤销本次保存。</span> : null}

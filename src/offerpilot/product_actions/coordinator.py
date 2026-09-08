@@ -832,10 +832,16 @@ class _ReadinessSignalHandlerV1:
         self,
         operation_id: str,
     ) -> str:
-        aggregate = self._repository.load_by_operation(operation_id)
-        if aggregate is None:
-            raise ProductActionIntegrityError("readiness_signal_terminal_missing")
-        return _sha256_json({"user_note": aggregate.user_note})
+        # Terminal input belongs to the immutable version created by this
+        # operation. Undo advances the current pointer to a retracted version;
+        # that must not erase the original input proof or its saved receipt.
+        with self._session_factory() as session:
+            version = session.scalar(select(InterviewReadinessSignalVersion).where(
+                InterviewReadinessSignalVersion.write_operation_id == operation_id,
+            ))
+            if version is None:
+                raise ProductActionIntegrityError("readiness_signal_terminal_missing")
+            return _sha256_json({"user_note": validate_user_note(version.user_note)})
 
 
 def _require_closed_handler_contract(handler: ProductActionHandlerV1) -> None:

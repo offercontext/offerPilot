@@ -71,6 +71,8 @@ import { capabilitiesForMode, type Capability } from './capabilities';
 import ThreadRail from './ThreadRail';
 import MessageBubble from './MessageBubble';
 import ProposalCard from './ProposalCard';
+import { ActionCard } from '@/features/actionPresentation/ActionCard';
+import { agentActionCommands, pendingPresentationActions } from '@/features/actionPresentation/commands';
 import ThinkingIndicator from './ThinkingIndicator';
 import Composer from './Composer';
 import ContextAttachmentRail from './ContextAttachmentRail';
@@ -441,6 +443,7 @@ function ChatPanelView({
   });
   const capabilities = capabilitiesForMode(isNego);
   const activePending = resolveActivePendingAction(pending, conversations, convID);
+  const currentPendingActions = pendingPresentationActions(controller.presentationSnapshot, activePending?.operation_id);
   activePendingRef.current = activePending;
   const settingsQuery = useQuery({
     queryKey: SETTINGS_QUERY_KEY,
@@ -855,7 +858,7 @@ function ChatPanelView({
             return [...t.slice(0, -1), { ...last, content: resp.message }];
           }
         }
-        return [...t, { role: 'assistant', content: resp.message }];
+        return [...t, { id: `transient:${resp.conversation_id}:${visibleRequestGeneration}:assistant`, role: 'assistant', content: resp.message }];
       });
     }
     streamingAssistantActiveRef.current = false;
@@ -869,11 +872,11 @@ function ChatPanelView({
     setTurns((items) => {
       if (!streamingAssistantActiveRef.current) {
         streamingAssistantActiveRef.current = true;
-        return [...items, { role: 'assistant', content: delta }];
+        return [...items, { id: `transient:${convID ?? 'new'}:${visibleRequestGenerationRef.current}:assistant`, role: 'assistant', content: delta }];
       }
       const last = items[items.length - 1];
       if (last?.role !== 'assistant') {
-        return [...items, { role: 'assistant', content: delta }];
+        return [...items, { id: `transient:${convID ?? 'new'}:${visibleRequestGenerationRef.current}:assistant`, role: 'assistant', content: delta }];
       }
       return [...items.slice(0, -1), { ...last, content: last.content + delta }];
     });
@@ -1021,7 +1024,7 @@ function ChatPanelView({
     setConfirmError(null);
     setConfirmPhase('idle');
     setLoadingLabel('正在理解你的问题');
-    setTurns((t) => [...t, { role: 'user', content: trimmed }]);
+    setTurns((t) => [...t, { id: `transient:${convID ?? 'new'}:${visibleRequestGeneration}:user`, role: 'user', content: trimmed }]);
     streamingAssistantActiveRef.current = false;
     setHasStreamingAssistantContent(false);
     const requestPageContext = convID === undefined ? activePageContext : pinnedContext;
@@ -1409,6 +1412,10 @@ function ChatPanelView({
   }
 
   bindActions(actionOwnerRef.current, {
+    undoOperation: async (operationId) => {
+      if (lastUndo?.parent_operation_id !== operationId) return;
+      await handleUndoLastWrite();
+    },
     sendMessage,
     selectConversation,
     startNewChat,
@@ -1593,9 +1600,11 @@ function ChatPanelView({
                   </div>
                 </div>
               ) : (
-                turns.map((turn, i) => (
+                (controller.displayTurns ?? turns).map((turn, i) => turn.action ? (
+                  <ActionCard key={turn.id} action={turn.action} busy={loading} commands={agentActionCommands(turn.action, controller)} />
+                ) : (
                   <MessageBubble
-                    key={i}
+                    key={turn.id ?? `transient:${convID}:${i}`}
                     turn={turn}
                     index={i}
                     onOpenEvidence={onOpenEvidence}
@@ -1655,6 +1664,12 @@ function ChatPanelView({
 
             {activePending && (
               <div className={styles.pendingDock}>
+                {currentPendingActions?.length === 0 ? (
+                  <div className={styles.confirmRecovery} role="status">
+                    <span>操作状态需要重新核对，请刷新后再确认。</span>
+                    <button type="button" disabled={loading} onClick={controller.refreshPresentation}>刷新状态</button>
+                  </div>
+                ) : null}
                 {loading && !hasStreamingAssistantContent ? <ThinkingIndicator label={loadingLabel} /> : null}
                 {confirmError ? (
                   <div className={styles.confirmRecovery} role="alert">
@@ -1691,6 +1706,7 @@ function ChatPanelView({
                 <ProposalCard
                   key={`${convID}:${activePending.confirmation_token}`}
                   action={activePending}
+                  allowedActions={currentPendingActions}
                   loading={loading || confirmPhase === 'saving'}
                   evidence={confirmationEvidence}
                   onOpenEvidence={onOpenEvidence}
@@ -1713,7 +1729,7 @@ function ChatPanelView({
               </div>
             )}
 
-            {(confirmPhase !== 'idle' || lastUndo) && (
+            {!controller.presentationSnapshot && (confirmPhase !== 'idle' || lastUndo) && (
               <div className={styles.writeStatus}>
                 <span>
                   {confirmPhase === 'saving'

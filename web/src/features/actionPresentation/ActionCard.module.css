@@ -1,0 +1,10 @@
+.card { margin: 10px 0; padding: 14px 16px; border: 1px solid var(--op-border); border-radius: 12px; background: var(--op-surface); color: var(--op-ink); overflow-wrap: anywhere; }
+.heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.heading > span, .target { font-size: 12px; opacity: .7; }
+.target { margin: 6px 0; }
+.states { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 10px; font-size: 12px; }
+.summary { margin: 10px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.65; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.actions button { font: inherit; font-size: 12px; min-height: 36px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--op-border); background: transparent; color: inherit; cursor: pointer; }
+.actions button:disabled { opacity: .5; cursor: default; }
+.actions button:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
