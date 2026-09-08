@@ -66,6 +66,15 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT OR IGNORE INTO application_creation_workspace (id, scope_id) "
+            "VALUES (1, lower(hex(randomblob(16))))"
+        ))
+    _record_migration(
+        engine, "0029_application_creation_receipts",
+        "Add atomic Application creation receipts and local workspace identity",
+    )
     _ensure_context_projector_manifest_v2_schema(engine)
     _ensure_write_operation_ledger_schema(engine)
     _ensure_column(

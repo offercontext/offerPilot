@@ -4,11 +4,12 @@ import type {
   ApplicationJdVersionSummary,
   CurrentApplicationJd,
 } from '../types/applicationJdVersion';
+import { authHeaders } from './authToken';
 
 const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const response = await fetch(path, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
   });
   const payload = await response.json();
   if (!response.ok) {

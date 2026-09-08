@@ -5,6 +5,8 @@ import {
   saveApplicationJdVersion,
 } from './applicationJdVersions';
 
+vi.mock('./authToken', () => ({ authHeaders: () => ({ 'X-OfferPilot-Token': 'synthetic-workspace-token' }) }));
+
 describe('application JD version service', () => {
   it('sends the frozen expected version and never sends source_kind', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -19,6 +21,7 @@ describe('application JD version service', () => {
     });
 
     const [, request] = fetchMock.mock.calls[0];
+    expect(request?.headers).toMatchObject({ 'X-OfferPilot-Token': 'synthetic-workspace-token' });
     expect(JSON.parse(String(request?.body))).toEqual({
       jd_text: '岗位资料',
       source_url: null,
