@@ -1,9 +1,10 @@
 import type { ChatContextInput } from './chat';
 
 const STORAGE_KEY = 'offerpilot.pending_starts.v1';
+const RECORD_PREFIX = 'offerpilot.pending_starts.v2.';
 const EVENT_NAME = 'offerpilot-pending-starts';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-let fallback = '[]';
+const fallback = new Map<string, PendingStart | null>();
 
 export interface ChatSubmission {
   requestId: string;
@@ -24,43 +25,86 @@ export function createChatSubmission(message: string, conversationId: number | u
 }
 
 export function pendingStartsSnapshot(): string {
-  try { return typeof window === 'undefined' ? fallback : window.localStorage.getItem(STORAGE_KEY) ?? '[]'; }
-  catch { return fallback; }
+  return JSON.stringify(listPendingStarts());
+}
+
+function parse(value: string | null): unknown {
+  try { return JSON.parse(value ?? 'null') as unknown; } catch { return null; }
+}
+
+function pendingStart(value: unknown): PendingStart | undefined {
+  if (!value || typeof value !== 'object') return;
+  const item = value as Partial<PendingStart>;
+  if (typeof item.requestId !== 'string' || !UUID_V4.test(item.requestId)
+    || !Number.isSafeInteger(item.conversationId) || item.conversationId! < 0) return;
+  // Only recovery identity is allowed into storage, including when reading v1.
+  return { requestId: item.requestId, conversationId: item.conversationId!,
+    ...(Number.isSafeInteger(item.acceptedConversationId) && item.acceptedConversationId! >= 0
+      ? { acceptedConversationId: item.acceptedConversationId } : {}),
+    ...(typeof item.turnId === 'string' ? { turnId: item.turnId } : {}) };
 }
 
 export function listPendingStarts(): PendingStart[] {
+  const items = new Map<string, PendingStart | null>();
   try {
-    const value = JSON.parse(pendingStartsSnapshot()) as unknown;
-    return Array.isArray(value) ? value.filter((item): item is PendingStart => item && UUID_V4.test(item.requestId)
-      && Number.isSafeInteger(item.conversationId) && item.conversationId >= 0) : [];
-  } catch { return []; }
+    if (typeof window !== 'undefined') {
+      const storage = window.localStorage;
+      const legacy = parse(storage.getItem(STORAGE_KEY));
+      if (Array.isArray(legacy)) for (const value of legacy) {
+        const item = pendingStart(value);
+        if (item) items.set(item.requestId, item);
+      }
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index);
+        if (!key?.startsWith(RECORD_PREFIX)) continue;
+        const id = key.slice(RECORD_PREFIX.length);
+        if (!UUID_V4.test(id)) continue;
+        const raw = storage.getItem(key);
+        const item = pendingStart(parse(raw));
+        if (raw === 'null') items.set(id, null);
+        else if (item?.requestId === id) items.set(id, item);
+      }
+    }
+  } catch { /* Storage may be blocked; keep recovery available in this tab. */ }
+  for (const [id, item] of fallback) items.set(id, item);
+  return [...items.values()].filter((item): item is PendingStart => item !== null)
+    .sort((left, right) => left.requestId.localeCompare(right.requestId));
 }
 
-function savePendingStarts(items: PendingStart[]): void {
-  // This record intentionally contains no message, attachments, request body,
-  // model output, token or approval credentials.
-  fallback = JSON.stringify(items);
-  try { if (typeof window !== 'undefined') window.localStorage.setItem(STORAGE_KEY, fallback); } catch { /* Memory recovery remains available. */ }
+function savePendingStart(requestId: string, item: PendingStart | null): void {
+  // A mutation touches only its request key, never another tab's submissions.
+  try {
+    if (typeof window === 'undefined') throw new Error('storage_unavailable');
+    const storage = window.localStorage;
+    const legacy = parse(storage.getItem(STORAGE_KEY));
+    const hasLegacy = Array.isArray(legacy) && legacy.some((value) => pendingStart(value)?.requestId === requestId);
+    // Keep v1 read-only. A per-request tombstone suppresses its forgotten entry.
+    if (item || hasLegacy) storage.setItem(RECORD_PREFIX + requestId, JSON.stringify(item));
+    else storage.removeItem(RECORD_PREFIX + requestId);
+    fallback.delete(requestId);
+  } catch { fallback.set(requestId, item); }
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(EVENT_NAME));
 }
 
 export function rememberPendingStart(requestId: string, conversationId: number): void {
   if (!UUID_V4.test(requestId)) throw new Error('invalid_request_id');
   const items = listPendingStarts();
-  if (!items.some((item) => item.requestId === requestId)) savePendingStarts([...items, { requestId, conversationId }]);
+  if (!items.some((item) => item.requestId === requestId)) savePendingStart(requestId, { requestId, conversationId });
 }
 
 export function markPendingStartAccepted(requestId: string, conversationId: number, turnId: string): void {
-  savePendingStarts(listPendingStarts().map((item) => item.requestId === requestId
-    ? { ...item, acceptedConversationId: conversationId, turnId } : item));
+  const item = listPendingStarts().find((pending) => pending.requestId === requestId);
+  if (item) savePendingStart(requestId, { ...item, acceptedConversationId: conversationId, turnId });
 }
 
 export function forgetPendingStart(requestId: string): void {
-  savePendingStarts(listPendingStarts().filter((item) => item.requestId !== requestId));
+  if (UUID_V4.test(requestId)) savePendingStart(requestId, null);
 }
 
 export function forgetConversationStarts(conversationId: number): void {
-  savePendingStarts(listPendingStarts().filter((item) => item.conversationId !== conversationId && item.acceptedConversationId !== conversationId));
+  for (const item of listPendingStarts()) {
+    if (item.conversationId === conversationId || item.acceptedConversationId === conversationId) forgetPendingStart(item.requestId);
+  }
 }
 
 export function subscribePendingStarts(listener: () => void): () => void {

@@ -1,11 +1,93 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createChatSubmission, listPendingStarts, forgetPendingStart } from './chatSubmission';
+import { createChatSubmission, listPendingStarts, forgetPendingStart, rememberPendingStart, markPendingStartAccepted, forgetConversationStarts, pendingStartsSnapshot, subscribePendingStarts } from './chatSubmission';
 import { streamChat } from './chat';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   for (const pending of listPendingStarts()) forgetPendingStart(pending.requestId);
+  localStorage.clear();
+});
+
+describe('pending submissions shared by tabs', () => {
+  // Interleave a second tab after the first tab has read, just before its write.
+  function beforeNextMutation(otherTab: () => void) {
+    let fired = false;
+    for (const method of ['setItem', 'removeItem'] as const) {
+      const original = Storage.prototype[method];
+      vi.spyOn(Storage.prototype, method).mockImplementation(function (this: Storage, key: string, value?: string) {
+        if (!fired) { fired = true; otherTab(); }
+        return original.call(this, key, value!);
+      });
+    }
+    return () => expect(fired).toBe(true);
+  }
+
+  it.each(['remember', 'accepted', 'forget', 'forgetConversation'] as const)('%s cannot overwrite a concurrent submission from another tab', (operation) => {
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    if (operation !== 'remember') rememberPendingStart(first, 7);
+    const assertInterleaved = beforeNextMutation(() => rememberPendingStart(second, 8));
+    if (operation === 'remember') rememberPendingStart(first, 7);
+    if (operation === 'accepted') markPendingStartAccepted(first, 7, 'turn-1');
+    if (operation === 'forget') forgetPendingStart(first);
+    if (operation === 'forgetConversation') forgetConversationStarts(7);
+    assertInterleaved();
+    expect(listPendingStarts()).toContainEqual({ requestId: second, conversationId: 8 });
+    if (operation === 'remember' || operation === 'accepted') {
+      expect(listPendingStarts()).toHaveLength(2);
+      expect(listPendingStarts().find((item) => item.requestId === first)).toEqual({ requestId: first, conversationId: 7,
+        ...(operation === 'accepted' ? { acceptedConversationId: 7, turnId: 'turn-1' } : {}) });
+    } else expect(listPendingStarts()).toHaveLength(1);
+  });
+
+  it('retains legacy entries without rewriting the shared array and suppresses forgotten ones after reload', async () => {
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    const legacy = JSON.stringify([{ requestId: first, conversationId: 7 }]);
+    localStorage.setItem('offerpilot.pending_starts.v1', legacy);
+    rememberPendingStart(second, 8);
+    markPendingStartAccepted(first, 9, 'turn-1');
+    expect(listPendingStarts()).toHaveLength(2);
+    forgetConversationStarts(9);
+    expect(listPendingStarts()).toEqual([{ requestId: second, conversationId: 8 }]);
+    expect(localStorage.getItem('offerpilot.pending_starts.v1')).toBe(legacy);
+    vi.resetModules();
+    const reloaded = await import('./chatSubmission');
+    expect(reloaded.listPendingStarts()).toEqual([{ requestId: second, conversationId: 8 }]);
+  });
+
+  it('notifies local and other-tab readers and keeps snapshots stable across storage key order', () => {
+    const first = crypto.randomUUID();
+    const second = crypto.randomUUID();
+    const listener = vi.fn();
+    const unsubscribe = subscribePendingStarts(listener);
+    rememberPendingStart(first, 7);
+    rememberPendingStart(second, 8);
+    expect(listener).toHaveBeenCalledTimes(2);
+    const snapshot = pendingStartsSnapshot();
+    const key = localStorage.key(0)!;
+    const value = localStorage.getItem(key)!;
+    localStorage.removeItem(key);
+    localStorage.setItem(key, value);
+    window.dispatchEvent(new StorageEvent('storage', { key, newValue: value }));
+    expect(listener).toHaveBeenCalledTimes(3);
+    expect(pendingStartsSnapshot()).toBe(snapshot);
+    unsubscribe();
+    window.dispatchEvent(new StorageEvent('storage', { key }));
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it('preserves recovery in this tab if storage writes fail', () => {
+    const requestId = crypto.randomUUID();
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); });
+    rememberPendingStart(requestId, 7);
+    markPendingStartAccepted(requestId, 9, 'turn-1');
+    expect(listPendingStarts()).toEqual([{ requestId, conversationId: 7, acceptedConversationId: 9, turnId: 'turn-1' }]);
+    forgetPendingStart(requestId);
+    expect(listPendingStarts()).toEqual([]);
+  });
 });
 
 describe('logical chat submission identity', () => {
