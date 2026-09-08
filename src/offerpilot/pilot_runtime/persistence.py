@@ -507,8 +507,14 @@ class ChatPersistenceCoordinator:
     themselves (including their pending and delivery CAS checks).
     """
 
-    def __init__(self, chat: ChatRepository) -> None:
+    def __init__(
+        self,
+        chat: ChatRepository,
+        *,
+        admitted_user_message_id: int | None = None,
+    ) -> None:
         self._chat = chat
+        self._admitted_user_message_id = admitted_user_message_id
 
     def list_messages(self, conversation_id: int) -> tuple[PersistedMessageView, ...]:
         """Read detached immutable messages without exposing ORM rows."""
@@ -595,6 +601,17 @@ class ChatPersistenceCoordinator:
                 "provider_blocks": provider_blocks,
             }
         )
+        if role == "user" and self._admitted_user_message_id is not None:
+            admitted = next((
+                message for message in self._chat.list_messages(conversation_id)
+                if message.id == self._admitted_user_message_id
+            ), None)
+            if admitted is None or admitted.role != "user" or admitted.content != content:
+                return PersistenceResult(PersistenceStatus.CAS_LOST)
+            return PersistenceResult(
+                PersistenceStatus.PERSISTED, message_count=1,
+                message_id=admitted.id, message_ids=(admitted.id,),
+            )
         created = self._chat.append_message(
             conversation_id,
             values["role"],
@@ -649,6 +666,12 @@ class ChatPersistenceCoordinator:
         before = self.list_messages(conversation_id)
         created_ids: list[int] = []
         for value in values:
+            if value["role"] == "user" and self._admitted_user_message_id is not None:
+                reused = self.persist_initial_user_message(conversation_id, value["content"])
+                if not reused.persisted or reused.message_id is None:
+                    return reused
+                created_ids.append(reused.message_id)
+                continue
             created = self._chat.append_message(
                 conversation_id,
                 value["role"],

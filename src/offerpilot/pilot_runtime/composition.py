@@ -788,6 +788,13 @@ class _ContextAdapter(ContextAssembler):
         self._clarification_message = clarification_message
         self._page_messages = page_messages
 
+    def with_persistence(self, persistence: ChatPersistenceCoordinator) -> "_ContextAdapter":
+        return _ContextAdapter(
+            persistence, system_message=self._system_message,
+            clarification_message=self._clarification_message,
+            page_messages=self._page_messages,
+        )
+
     @staticmethod
     def _pending_view(value: object | None) -> PendingAction | None:
         if value is None:

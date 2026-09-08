@@ -897,6 +897,8 @@ def runtime_stream_response(
     on_immediate: Callable[[], object] | None = None,
     background: Callable[[], object] | BackgroundTask | None = None,
     timeout_seconds: float = CHAT_AGENT_TIMEOUT_SECONDS,
+    on_outcome: Callable[[object], None] | None = None,
+    extra_envelope: Mapping[str, object] | None = None,
 ) -> Response:
     """Prepare and render one guarded stream, owning all transport resources."""
 
@@ -913,6 +915,8 @@ def runtime_stream_response(
         invocation_control=control,
     )
     if isinstance(prepared, ImmediateHttpOutcome):
+        if on_outcome is not None:
+            on_outcome(prepared)
         if on_immediate is not None:
             on_immediate()
         if (
@@ -937,8 +941,12 @@ def runtime_stream_response(
         context_ref=context_ref,
         mode=mode,
     )
+    if extra_envelope is not None:
+        envelope.update(extra_envelope)
 
     def set_stream_outcome(outcome: object) -> None:
+        if on_outcome is not None:
+            on_outcome(outcome)
         if on_conversation_id is not None:
             on_conversation_id(getattr(outcome, "conversation_id", None))
 

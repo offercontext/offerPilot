@@ -40,7 +40,9 @@ from offerpilot.ai.write_operations import (
     require_pending_persistence_route,
 )
 from offerpilot.ai.types import Message
-from offerpilot.models import ChatMessage, Conversation, WriteOperation
+from offerpilot.models import (
+    ChatMessage, Conversation, WriteOperation, PilotTurnRecord, PilotTurnMessage, PilotTurnOperation,
+)
 
 
 _CONFIRMATION_CLAIM_LEASE = timedelta(minutes=15)
@@ -179,13 +181,39 @@ class ChatRepository:
         session_factory: sessionmaker[Session],
         write_operations: WriteOperationRepository | None = None,
         session: Session | None = None,
+        *,
+        turn_id: str | None = None,
     ):
         self._session_factory = session_factory
         self._write_operations = write_operations
         self._session = session
+        self._turn_id = turn_id
 
     def bind(self, session: Session) -> "ChatRepository":
-        return ChatRepository(self._session_factory, self._write_operations, session)
+        return ChatRepository(self._session_factory, self._write_operations, session, turn_id=self._turn_id)
+
+    def for_turn(self, turn_id: str) -> "ChatRepository":
+        return ChatRepository(self._session_factory, self._write_operations, turn_id=turn_id)
+
+    def _message_turn_id(
+        self, session: Session, conversation_id: int, operation_id: str | None = None,
+    ) -> str | None:
+        turn_id = self._turn_id
+        if turn_id is None and operation_id:
+            binding = session.get(PilotTurnOperation, operation_id)
+            turn_id = binding.turn_id if binding is not None else None
+        if turn_id is not None:
+            turn = session.get(PilotTurnRecord, turn_id)
+            if turn is None or turn.conversation_id != conversation_id:
+                raise ValueError("Pilot turn is unavailable for this conversation")
+        return turn_id
+
+    def _add_message(self, session: Session, message: ChatMessage) -> None:
+        turn_id = self._message_turn_id(session, message.conversation_id, message.operation_id)
+        session.add(message)
+        if turn_id is not None:
+            session.flush()
+            session.add(PilotTurnMessage(message_id=message.id, turn_id=turn_id))
 
     @contextmanager
     def _operation_session(self) -> Any:
@@ -495,7 +523,7 @@ class ChatRepository:
         )
         with self._session_factory() as session:
             now = _next_conversation_timestamp(session, conversation_id)
-            session.add(message)
+            self._add_message(session, message)
             session.execute(
                 update(Conversation)
                 .where(Conversation.id == conversation_id)
@@ -746,7 +774,7 @@ class ChatRepository:
                 if owned:
                     session.rollback()
                 return None
-            session.add(
+            self._add_message(session,
                 ChatMessage(
                     conversation_id=conversation_id,
                     role=tool_message.role,
@@ -758,7 +786,7 @@ class ChatRepository:
                 )
             )
             if terminal_assistant_content:
-                session.add(
+                self._add_message(session,
                     ChatMessage(
                         conversation_id=conversation_id,
                         role="assistant",
@@ -866,8 +894,9 @@ class ChatRepository:
                     replacement,
                     route_handle,
                     route,
+                    origin_operation_id=expected.operation_id,
                 )
-                session.add(
+                self._add_message(session,
                     ChatMessage(
                         conversation_id=conversation_id,
                         role=tool_message.role,
@@ -881,7 +910,7 @@ class ChatRepository:
                     )
                 )
                 if terminal_assistant_content:
-                    session.add(
+                    self._add_message(session,
                         ChatMessage(
                             conversation_id=conversation_id,
                             role="assistant",
@@ -1049,6 +1078,7 @@ class ChatRepository:
                     pending,
                     route_handle,
                     route,
+                    origin_operation_id=(delivery_ownership.operation_id if delivery_ownership else None),
                 )
             if delivery_ownership is not None:
                 if origin_message is None or expected_pending is None:
@@ -1057,7 +1087,7 @@ class ChatRepository:
                     if owned:
                         session.rollback()
                     return None
-                session.add(
+                self._add_message(session,
                     ChatMessage(
                         conversation_id=conversation_id,
                         role=origin_message.role,
@@ -1069,7 +1099,7 @@ class ChatRepository:
                     )
                 )
             for index, message in enumerate(messages, start=1):
-                session.add(
+                self._add_message(session,
                     ChatMessage(
                         conversation_id=conversation_id,
                         role=message.get("role", ""),
@@ -1287,14 +1317,14 @@ class ChatRepository:
             arguments_digest=arguments_digest,
         )
 
-    @staticmethod
     def _add_pending_messages(
+        self,
         session: Session,
         conversation_id: int,
         messages: list[dict[str, str]],
     ) -> None:
         for message in messages:
-            session.add(
+            self._add_message(session,
                 ChatMessage(
                     conversation_id=conversation_id,
                     role=message.get("role", ""),
@@ -1312,6 +1342,8 @@ class ChatRepository:
         pending: PendingAction,
         route_handle: PendingPersistenceRouteHandle,
         route: _PendingRouteResolution,
+        *,
+        origin_operation_id: str | None = None,
     ) -> None:
         if route.adapter_kind == "clarification":
             return
@@ -1364,6 +1396,9 @@ class ChatRepository:
             confirmation_token_fingerprint=token_fingerprint,
             authorization_scope_fingerprint=scope_fingerprint,
         )
+        turn_id = self._message_turn_id(session, conversation_id, origin_operation_id)
+        if turn_id is not None:
+            session.add(PilotTurnOperation(operation_id=pending.operation_id, turn_id=turn_id))
 
     def _validate_typed_pending(
         self,

@@ -160,7 +160,17 @@ export interface ChatUndo {
   [key: string]: unknown;
 }
 
-export type ChatResponse =
+export interface PilotTurnState {
+  turn_id: string;
+  conversation_id: number;
+  user_message_id: number | null;
+  state: 'accepted' | 'started' | 'completed' | 'failed' | 'interrupted' | 'incomplete';
+  message_ids: number[];
+  operation_ids: string[];
+  source_versions: Record<string, string>;
+}
+
+export type ChatResponse = (
   | {
       type: 'message';
       conversation_id: number;
@@ -172,7 +182,11 @@ export type ChatResponse =
       operation_id?: string;
       replayed?: boolean;
     }
-  | { type: 'confirmation_required'; conversation_id: number; pending_action: PendingAction };
+  | { type: 'confirmation_required'; conversation_id: number; pending_action: PendingAction }
+  | { type: 'turn_recovered'; conversation_id: number; turn_id: string; turn: PilotTurnState }
+) & { turn_id?: string; request_id?: string };
+
+export type ChatExecutionResponse = Exclude<ChatResponse, { type: 'turn_recovered' }>;
 
 export type ChatStreamEventName =
   | 'meta'
@@ -188,6 +202,8 @@ export type ChatStreamEventName =
   | 'cancelled';
 
 export interface ChatStreamEvent<TData = Record<string, unknown>> {
+  turn_id?: string;
+  request_id?: string;
   run_id?: string;
   seq: number;
   conversation_id?: number;

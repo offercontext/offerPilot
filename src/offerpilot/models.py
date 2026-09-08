@@ -2006,6 +2006,121 @@ class Conversation(Base):
         return payload if isinstance(payload, dict) else None
 
 
+class PilotTurnRecord(Base):
+    """Durable user submission identity; independent of diagnostic Journal."""
+
+    __tablename__ = "pilot_turns"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('accepted', 'started', 'completed', 'failed', 'interrupted', 'incomplete')",
+            name="ck_pilot_turn_state",
+        ),
+        Index("idx_pilot_turn_conversation", "conversation_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False,
+    )
+    user_message_id: Mapped[int | None] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="SET NULL"), nullable=True,
+    )
+    state: Mapped[str] = mapped_column(String, nullable=False, default="accepted")
+    source_versions_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.current_timestamp(),
+    )
+
+
+class PilotTurnMessage(Base):
+    __tablename__ = "pilot_turn_messages"
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
+    )
+    turn_id: Mapped[str] = mapped_column(
+        ForeignKey("pilot_turns.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+
+
+class PilotTurnOperation(Base):
+    __tablename__ = "pilot_turn_operations"
+    operation_id: Mapped[str] = mapped_column(
+        ForeignKey("write_operations.id", ondelete="CASCADE"), primary_key=True,
+    )
+    turn_id: Mapped[str] = mapped_column(
+        ForeignKey("pilot_turns.id", ondelete="CASCADE"), nullable=False, index=True,
+    )
+
+
+class PilotTimelineState(Base):
+    __tablename__ = "pilot_timeline_state"
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True,
+    )
+    change_seq: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cursor_key: Mapped[str] = mapped_column(String, nullable=False)
+
+
+class PilotTimelineItem(Base):
+    __tablename__ = "pilot_timeline_items"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "ordinal", name="uq_pilot_timeline_ordinal"),
+        CheckConstraint("revision >= 1 AND display_revision >= 1 AND ordinal >= 1 AND change_seq >= 1",
+                        name="ck_pilot_timeline_revision"),
+    )
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True,
+    )
+    item_id: Mapped[str] = mapped_column(String, primary_key=True)
+    turn_id: Mapped[str] = mapped_column(
+        ForeignKey("pilot_turns.id", ondelete="CASCADE"), nullable=False,
+    )
+    item_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_refs_json: Mapped[str] = mapped_column(Text, nullable=False)
+    source_revision: Mapped[str] = mapped_column(String, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    display_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    change_seq: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String, nullable=False)
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class PilotTimelineChange(Base):
+    __tablename__ = "pilot_timeline_changes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["conversation_id", "item_id"],
+            ["pilot_timeline_items.conversation_id", "pilot_timeline_items.item_id"],
+            ondelete="CASCADE",
+        ),
+        Index("idx_pilot_timeline_change_item", "conversation_id", "item_id", "change_seq"),
+    )
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"), primary_key=True,
+    )
+    change_seq: Mapped[int] = mapped_column(Integer, primary_key=True)
+    item_id: Mapped[str] = mapped_column(String, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class PilotRequestReceipt(Base):
+    """Non-content idempotency receipt retained after conversation deletion."""
+
+    __tablename__ = "pilot_request_receipts"
+    request_key: Mapped[str] = mapped_column(String, primary_key=True)
+    request_digest: Mapped[str] = mapped_column(String, nullable=False)
+    submitted_conversation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    turn_id: Mapped[str | None] = mapped_column(
+        ForeignKey("pilot_turns.id", ondelete="SET NULL"), nullable=True, unique=True,
+    )
+
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (

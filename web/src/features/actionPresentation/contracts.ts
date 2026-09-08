@@ -26,10 +26,48 @@ export interface PilotTurnItemV1 {
   operation_id: string | null;
   content: string;
   action: ActionPresentationV1 | null;
+  timeline_item_id?: string;
+  turn_id?: string;
+  revision?: number;
 }
 
 export interface PilotPresentationSnapshot {
   schema_version: number;
   conversation_id: number;
   items: PilotTurnItemV1[];
+  timeline?: PilotTimelineCache;
+}
+
+export interface PilotTimelineItem {
+  schema_version: number;
+  item_id: string;
+  turn_id: string;
+  conversation_id: number;
+  item_type: PilotTurnItemV1['kind'];
+  source_refs: string[];
+  source_revision: string;
+  revision: number;
+  display_revision: number;
+  ordinal: number;
+  change_seq: number;
+  payload_digest: string;
+  deleted: boolean;
+  payload: PilotTurnItemV1 | null;
+}
+
+export interface PilotTimelinePage {
+  schema_version: number;
+  conversation_id: number;
+  mode: 'snapshot' | 'changes';
+  high_watermark: number;
+  items: PilotTimelineItem[];
+  next_cursor: string | null;
+  cursor: string;
+}
+
+export interface PilotTimelineCache {
+  conversation_id: number;
+  high_watermark: number;
+  cursor: string;
+  items: Record<string, PilotTimelineItem>;
 }

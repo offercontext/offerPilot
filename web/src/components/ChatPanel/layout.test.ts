@@ -359,7 +359,7 @@ describe('ChatPanel docked layout contract', () => {
     expect(component).toContain('}, [incomingPageContextKey]);');
     expect(component).toContain('buildRequestContext({');
     expect(controller).toContain('buildChatRequestContext({');
-    expect(component).toContain('const requestPageContext = convID === undefined ? activePageContext : pinnedContext');
+    expect(component).toContain('const requestPageContext = retry ? retry.context.page_context : convID === undefined ? activePageContext : pinnedContext');
     expect(component).toContain('pageContext: requestPageContext');
     expect(component).toContain('pageContextChips(activePageContext)');
     expect(component).toContain("type: 'remove', contextKey: incomingPageContextKey, chipKey");
@@ -534,7 +534,7 @@ describe('ChatPanel docked layout contract', () => {
   });
 
   it('clears draft context before activating an existing conversation', () => {
-    const selectionStart = component.indexOf('async function selectConversation(id: number)');
+    const selectionStart = component.indexOf('async function selectConversation(id: number,');
     const draftReset = component.indexOf('setDraftContext(null);', selectionStart);
     const composerReset = component.indexOf("setComposerDraft('');", selectionStart);
     const contextActivation = component.indexOf('activateConversationContext(id);', selectionStart);
@@ -544,7 +544,7 @@ describe('ChatPanel docked layout contract', () => {
   });
 
   it('keeps the shared busy state while a background confirmation owns the request lease', () => {
-    const selectionStart = component.indexOf('async function selectConversation(id: number)');
+    const selectionStart = component.indexOf('async function selectConversation(id: number,');
     const selectionEnd = component.indexOf('async function removeConversation', selectionStart);
     const selection = component.slice(selectionStart, selectionEnd);
     expect(selection).toContain('const requestId = beginConversationSelection();');

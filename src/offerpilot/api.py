@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -25,6 +26,11 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.ai.agent_contracts import ChatModel, PendingAction
 from offerpilot.presentation import AgentActionPresentationBuilder, build_conversation_presentation
+from offerpilot.pilot_timeline import (
+    AdmissionConflict, AdmissionGone, AdmissionNotFound, PilotTimelineRepository, TurnAdmission, TimelineResyncRequired,
+)
+from offerpilot.pilot_timeline_projection import build_timeline_sources
+from offerpilot.pilot_runtime.persistence import ChatPersistenceCoordinator
 from offerpilot.ai.deterministic_actions import (
     parse_pilot_action,
 )
@@ -1336,6 +1342,7 @@ def create_app(
     application_jd_versions = ApplicationJDService(session_factory)
     application_outcomes = ApplicationOutcomesRepository(session_factory)
     chat = ChatRepository(session_factory, write_operations)
+    pilot_timeline = PilotTimelineRepository(session_factory)
     events = ApplicationEventsRepository(session_factory)
     notes = NotesRepository(session_factory)
     offers = OffersRepository(session_factory)
@@ -5104,6 +5111,115 @@ def create_app(
                 )
         return entries
 
+    def _finish_pilot_turn(admission: TurnAdmission, state: str) -> None:
+        # Display bookkeeping cannot change an already committed business result.
+        # A missing final fact remains incomplete and never grants another start.
+        try:
+            pilot_timeline.finish(admission.turn_id, state)
+        except Exception:
+            logging.getLogger(__name__).warning("Pilot terminal state persistence failed; task remains incomplete")
+
+    def _admit_pilot_start(
+        request: StartTurnRequest, payload: dict[str, Any],
+    ) -> tuple[StartTurnRequest, PilotRuntime, TurnAdmission, str] | JSONResponse:
+        request_id = payload.get("request_id", str(uuid4()))
+        frozen_source: list[_FrozenChatSourceMessages] = []
+        admission: TurnAdmission | None = None
+        canonical = {
+            "message": request.message, "conversation_id": request.conversation_id,
+            "context_type": request.context_type, "context_ref": request.context_ref,
+            "mode": request.mode,
+            "page_context": json.loads(json.dumps(request.page_context, default=dict)),
+            "attachments": [{"kind": ref.kind, "id": ref.ref} for ref in request.attachments],
+            "pilot_action": json.loads(request.pilot_action.value) if request.pilot_action is not None else None,
+        }
+
+        def failure(response: JSONResponse) -> JSONResponse:
+            if admission is not None and admission.created:
+                _finish_pilot_turn(admission, "failed")
+                return _with_turn_identity(response, admission, request_id)
+            return response
+
+        def freeze(session: Session, conversation: Any) -> Mapping[str, str]:
+            cast(PilotRuntime, app.state.pilot_runtime).validate_start_admission(request)
+            loader = _TransactionChatSourceLoader(session)
+            source = _load_chat_source_messages(
+                cast(Any, loader), conversation,
+                [{"kind": ref.kind, "id": ref.ref} for ref in request.attachments],
+                pending_tool_call_id=conversation.pending_tool_call_id,
+            )
+            frozen_source.append(source)
+            return {
+                "conversation_scope": str(source.scope_revision),
+                "current_scope": (
+                    source.context_message.surface_revision or "absent"
+                    if source.context_message is not None else "absent"
+                ),
+                "request_attachments": hashlib.sha256(json.dumps([
+                    [message.content, message.surface_revision]
+                    for message in source.attachment_messages
+                ], ensure_ascii=False).encode("utf-8")).hexdigest(),
+            }
+
+        try:
+            admission = pilot_timeline.admit(request_id, canonical, freeze_sources=freeze)
+            if not admission.created:
+                return JSONResponse({
+                    "type": "turn_recovered", "turn_id": admission.turn_id,
+                    "conversation_id": admission.conversation_id, "request_id": request_id,
+                    "turn": pilot_timeline.get_turn(admission.turn_id),
+                }, headers={"Cache-Control": "no-store"})
+            if not pilot_timeline.claim(admission.turn_id):
+                return error_response(409, "任务已接纳，请读取原任务。", code="turn_already_claimed")
+            runtime = cast(PilotRuntime, app.state.pilot_runtime).with_start_ports(
+                persistence=cast(Any, ChatPersistenceCoordinator(
+                    chat.for_turn(admission.turn_id), admitted_user_message_id=admission.user_message_id,
+                )),
+                source_loader=cast(Any, _AdmittedChatSourceLoader(frozen_source[0])),
+            )
+            return replace(request, conversation_id=admission.conversation_id), runtime, admission, request_id
+        except AdmissionGone:
+            return error_response(410, "原对话已删除，无法再次执行此请求。", code="turn_gone")
+        except AdmissionNotFound:
+            return error_response(404, "对话不存在。", code="conversation_not_found")
+        except AdmissionConflict:
+            return error_response(409, "请求标识已被使用或对话已归档。", code="turn_conflict")
+        except (ConversationScopeUnavailable, ConversationScopeVisibilityFailure):
+            return failure(_source_load_failed_response())
+        except LookupError:
+            return failure(error_response(404, "投递不存在。", code="application_not_found"))
+        except (TypeError, ValueError) as exc:
+            return failure(error_response(422, str(exc)))
+        except Exception:
+            return failure(error_response(503, "任务暂时无法接纳，请稍后重试。", code="turn_admission_failed"))
+
+    def _with_turn_identity(response: JSONResponse, admission: TurnAdmission, request_id: str) -> JSONResponse:
+        body = json.loads(bytes(response.body))
+        body.update(turn_id=admission.turn_id, conversation_id=admission.conversation_id, request_id=request_id)
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        headers["cache-control"] = "no-store"
+        return JSONResponse(body, status_code=response.status_code, headers=headers)
+
+    @app.get("/api/chat/turns/{turn_id}")
+    def get_pilot_turn(turn_id: str) -> JSONResponse:
+        turn = pilot_timeline.get_turn(turn_id)
+        if turn is None:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        return JSONResponse(turn, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/chat/requests/{request_id}")
+    def get_pilot_request(request_id: str) -> JSONResponse:
+        try:
+            turn = pilot_timeline.find_by_request(request_id)
+        except AdmissionGone:
+            return error_response(410, "原对话已删除。", code="turn_gone")
+        except ValueError:
+            return error_response(422, "请求标识无效。", code="invalid_request_id")
+        if turn is None:
+            return error_response(404, "尚未找到此请求。", code="turn_not_found")
+        return JSONResponse(turn, headers={"Cache-Control": "no-store"})
+
     @app.post("/api/chat")
     def send_chat(
         http_request: Request,
@@ -5113,11 +5229,12 @@ def create_app(
         typed_request = _normalize_runtime_start_request(payload)
         if isinstance(typed_request, JSONResponse):
             return typed_request
-        scope_error = _preflight_new_conversation_scope(typed_request, session_factory)
-        if scope_error is not None:
-            return scope_error
-        runtime = http_request.app.state.pilot_runtime
         created_new = typed_request.conversation_id in (None, 0)
+        admitted = _admit_pilot_start(typed_request, payload)
+        if isinstance(admitted, JSONResponse):
+            return admitted
+        typed_request, runtime, admission, request_id = admitted
+        terminal_state = "interrupted"
         title_latch: RuntimeSignalLatch | None = None
         title_sink: ClosedAgentSignalSink | None = None
         set_title_conversation_id: Callable[[int | None], None] | None = None
@@ -5139,16 +5256,24 @@ def create_app(
             )
             if set_title_conversation_id is not None:
                 set_title_conversation_id(getattr(outcome, "conversation_id", None))
-            return _runtime_http_response(outcome)
+            response = _runtime_http_response(outcome)
+            terminal_state = "completed" if response.status_code < 400 else "failed"
+            _finish_pilot_turn(admission, terminal_state)
+            return _with_turn_identity(response, admission, request_id)
         except (ConversationScopeUnavailable, ConversationScopeVisibilityFailure):
-            return _source_load_failed_response()
+            terminal_state = "failed"
+            return _with_turn_identity(_source_load_failed_response(), admission, request_id)
         except (ConversationScopeError, TypeError, ValueError) as exc:
-            return error_response(422, str(exc))
+            terminal_state = "failed"
+            return _with_turn_identity(error_response(422, str(exc)), admission, request_id)
         except RuntimeAgentTimedOut:
-            return error_response(504, CHAT_TIMEOUT_MESSAGE, code="chat_agent_timeout")
+            return _with_turn_identity(error_response(504, CHAT_TIMEOUT_MESSAGE, code="chat_agent_timeout"), admission, request_id)
         except (RuntimeCancelled, RuntimeTransportAborted) as exc:
-            return _runtime_error_response(exc)
+            return _with_turn_identity(_runtime_error_response(exc), admission, request_id)
+        except Exception:
+            return _with_turn_identity(error_response(500, "任务未返回完整结果，请读取原任务。", code="turn_execution_failed"), admission, request_id)
         finally:
+            _finish_pilot_turn(admission, terminal_state)
             if title_latch is not None:
                 title_latch.finalize()
 
@@ -5161,11 +5286,17 @@ def create_app(
         typed_request = _normalize_runtime_start_request(payload)
         if isinstance(typed_request, JSONResponse):
             return typed_request
-        scope_error = _preflight_new_conversation_scope(typed_request, session_factory)
-        if scope_error is not None:
-            return scope_error
-        runtime = http_request.app.state.pilot_runtime
         created_new = typed_request.conversation_id in (None, 0)
+        admitted = _admit_pilot_start(typed_request, payload)
+        if isinstance(admitted, JSONResponse):
+            return admitted
+        typed_request, runtime, admission, request_id = admitted
+        terminal_state = "interrupted"
+
+        def record_outcome(outcome: object) -> None:
+            nonlocal terminal_state
+            terminal_state = "failed" if outcome_http_response(cast(Any, outcome)).status_code >= 400 else "completed"
+            _finish_pilot_turn(admission, terminal_state)
         title_latch: RuntimeSignalLatch | None = None
         title_sink: ClosedAgentSignalSink | None = None
         set_title_conversation_id: Callable[[int | None], None] | None = None
@@ -5179,28 +5310,47 @@ def create_app(
                 None,
             )
         try:
-            return runtime_stream_response(
+            response = runtime_stream_response(
                 runtime,
                 typed_request,
                 signal_sink=title_sink,
                 on_conversation_id=set_title_conversation_id,
                 on_immediate=title_latch.finalize if title_latch is not None else None,
-                background=_runtime_stream_background(background_tasks, title_latch),
+                background=_runtime_stream_background(
+                    background_tasks, title_latch,
+                    on_finished=lambda: _finish_pilot_turn(admission, terminal_state),
+                ),
+                on_outcome=record_outcome,
+                extra_envelope={"turn_id": admission.turn_id, "request_id": request_id},
                 timeout_seconds=CHAT_AGENT_TIMEOUT_SECONDS,
             )
+            if isinstance(response, JSONResponse):
+                return _with_turn_identity(response, admission, request_id)
+            response.headers["X-Pilot-Turn-Id"] = admission.turn_id
+            response.headers["X-Pilot-Conversation-Id"] = str(admission.conversation_id)
+            return response
         except (ConversationScopeUnavailable, ConversationScopeVisibilityFailure):
+            _finish_pilot_turn(admission, "failed")
             if title_latch is not None:
                 title_latch.finalize()
-            return _source_load_failed_response()
+            return _with_turn_identity(_source_load_failed_response(), admission, request_id)
         except (ConversationScopeError, TypeError, ValueError) as exc:
+            _finish_pilot_turn(admission, "failed")
             if title_latch is not None:
                 title_latch.finalize()
-            return error_response(422, str(exc))
+            return _with_turn_identity(error_response(422, str(exc)), admission, request_id)
         except (RuntimeAgentTimedOut, RuntimeCancelled, RuntimeTransportAborted) as exc:
+            _finish_pilot_turn(admission, "interrupted")
             if title_latch is not None:
                 title_latch.finalize()
-            return _runtime_error_response(exc)
+            return _with_turn_identity(_runtime_error_response(exc), admission, request_id)
+        except Exception:
+            _finish_pilot_turn(admission, "interrupted")
+            if title_latch is not None:
+                title_latch.finalize()
+            return _with_turn_identity(error_response(500, "任务未返回完整结果，请读取原任务。", code="turn_execution_failed"), admission, request_id)
         except BaseException:
+            _finish_pilot_turn(admission, "interrupted")
             if title_latch is not None:
                 title_latch.finalize()
             raise
@@ -5395,12 +5545,11 @@ def create_app(
             for item in chat.list_messages(conversation_id)
         ]
 
-    @app.get("/api/chat/conversations/{conversation_id}/presentation")
-    def get_conversation_presentation(conversation_id: int) -> JSONResponse:
+    def _agent_presentation_builder() -> AgentActionPresentationBuilder:
         from offerpilot.presentation_sources import agent_undo_state, pending_agent_source_is_current
 
         runtime = cast(PilotRuntime, app.state.pilot_runtime)
-        builder = AgentActionPresentationBuilder(
+        return AgentActionPresentationBuilder(
             write_operations,
             pending_projector=lambda conversation: _pending_action_json(
                 PendingAction(
@@ -5423,10 +5572,32 @@ def create_app(
                 metadata_bundle=runtime.metadata_bundle,
             ),
         )
-        snapshot = build_conversation_presentation(conversation_id, builder)
+    @app.get("/api/chat/conversations/{conversation_id}/presentation")
+    def get_conversation_presentation(conversation_id: int) -> JSONResponse:
+        snapshot = build_conversation_presentation(conversation_id, _agent_presentation_builder())
         if snapshot is None:
             return JSONResponse({'error': 'conversation not found'}, status_code=404, headers={'Cache-Control': 'no-store'})
         return JSONResponse(snapshot.model_dump(mode='json'), headers={'Cache-Control': 'no-store'})
+
+    @app.get("/api/chat/conversations/{conversation_id}/timeline")
+    def get_conversation_timeline(
+        conversation_id: int,
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=100, ge=1, le=200),
+    ) -> JSONResponse:
+        try:
+            page = pilot_timeline.read_timeline(
+                conversation_id,
+                lambda session: build_timeline_sources(session, conversation_id, _agent_presentation_builder()),
+                cursor=cursor, limit=limit,
+            )
+            return JSONResponse(page, headers={"Cache-Control": "no-store"})
+        except TimelineResyncRequired:
+            return error_response(409, "时间线已变化，请重新同步。", code="timeline_resync_required")
+        except AdmissionGone:
+            return error_response(404, "对话不存在。", code="conversation_not_found")
+        except Exception:
+            return error_response(503, "时间线暂时无法读取，请重试。", code="timeline_unavailable")
 
     @app.patch("/api/chat/conversations/{conversation_id}")
     def update_conversation(
@@ -8726,6 +8897,8 @@ def _runtime_title_latch(
 def _runtime_stream_background(
     background_tasks: BackgroundTasks,
     title_latch: RuntimeSignalLatch | None,
+    *,
+    on_finished: Callable[[], None] | None = None,
 ) -> Callable[[], object]:
     """Run stream finalization before the request's live task collection.
 
@@ -8736,9 +8909,13 @@ def _runtime_stream_background(
     """
 
     async def finalize() -> None:
-        if title_latch is not None:
-            title_latch.finalize()
-        await background_tasks()
+        try:
+            if title_latch is not None:
+                title_latch.finalize()
+            await background_tasks()
+        finally:
+            if on_finished is not None:
+                on_finished()
 
     return finalize
 
@@ -9159,6 +9336,34 @@ class _FrozenChatSourceMessages:
     context_ref: str | None = None
     mode: str = ""
     scope_revision: int = -1
+
+
+class _TransactionChatSourceLoader:
+    """Run the existing bounded source reader inside the admission transaction."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def load(self, read: Any, freeze: Any) -> Any:
+        connection = self.session.connection().connection.driver_connection
+        return freeze(read(connection))
+
+
+class _AdmittedChatSourceLoader:
+    def __init__(self, source: _FrozenChatSourceMessages) -> None:
+        self.source = source
+
+    def load(self, conversation: object, request: object, **_kwargs: object) -> object:
+        scope = _canonical_source_scope(conversation)
+        if (
+            scope.conversation_id != self.source.conversation_id
+            or scope.scope_revision != self.source.scope_revision
+            or scope.context_type != self.source.context_type
+            or scope.persisted_context_ref != self.source.context_ref
+            or scope.mode != self.source.mode
+        ):
+            raise RuntimeError("Conversation scope changed after admission")
+        return self.source
 
 
 @dataclass(frozen=True, slots=True)

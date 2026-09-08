@@ -22,6 +22,7 @@ import {
   type ConfirmationInput,
 } from '@/services/chat';
 import { getOffer } from '@/services/offers';
+import { createChatSubmission, type ChatSubmission } from '@/services/chatSubmission';
 import { ONBOARDING_QUERY_KEY } from '@/services/onboarding';
 import type {
   ChatResponse,
@@ -73,6 +74,7 @@ import MessageBubble from './MessageBubble';
 import ProposalCard from './ProposalCard';
 import { ActionCard } from '@/features/actionPresentation/ActionCard';
 import { PresentationRecovery } from '@/features/actionPresentation/PresentationRecovery';
+import { PendingStartRecovery } from '@/features/actionPresentation/PendingStartRecovery';
 import { agentActionCommands, pendingPresentationActions } from '@/features/actionPresentation/commands';
 import ThinkingIndicator from './ThinkingIndicator';
 import Composer from './Composer';
@@ -685,6 +687,7 @@ function ChatPanelView({
     setPanelOpen(false);
     setLastError(null);
     setLastFailedText('');
+    controller.lastSubmissionRef.current = null;
     setConfirmError(null);
     setConfirmPhase('idle');
     setLastUndo(null);
@@ -723,9 +726,12 @@ function ChatPanelView({
     void sendMessage(draftContext.initialMessage);
   }, [draftContext?.requestKey]);
 
-  async function selectConversation(id: number) {
+  async function selectConversation(id: number, { refresh = false }: { refresh?: boolean } = {}) {
     markPendingAutoSelect('allow');
-    if (id === convID) return;
+    if (id === convID && !refresh) return;
+    setLastError(null);
+    setLastFailedText('');
+    controller.lastSubmissionRef.current = null;
     setDraftContext(null);
     setComposerDraft('');
     setRequestContextSnapshot(undefined);
@@ -733,24 +739,32 @@ function ChatPanelView({
     visibleRequestGenerationRef.current += 1;
     const visibleRequestGeneration = visibleRequestGenerationRef.current;
     const requestId = beginConversationSelection();
+    const listRequestId = refresh ? ++conversationListRequestRef.current : null;
     try {
-      const stored = await getConversation(id);
+      const [stored, currentConversations] = await Promise.all([
+        getConversation(id),
+        refresh ? listConversations(true) : Promise.resolve(conversations),
+      ]);
       if (
         !shouldApplyConversationRequest(
           requestId,
           conversationSelectionRequestRef.current,
           pendingAutoSelectSuppressedRef.current,
         )
-      ) return;
+      ) {
+        if (refresh) throw new Error('conversation_selection_replaced');
+        return;
+      }
+      if (listRequestId !== null && listRequestId === conversationListRequestRef.current) setConversations(currentConversations);
       setConvID(id);
       setTurns(buildTurns(stored));
-      const selectedPending = pendingActionForConversation(conversations, id);
+      const selectedPending = pendingActionForConversation(currentConversations, id);
       setPending(selectedPending);
       lastConfirmationInputRef.current = null;
       setDegraded(false);
       setConfirmError(null);
       setHasStreamingAssistantContent(false);
-      const conversation = conversations.find((item) => item.id === id);
+      const conversation = currentConversations.find((item) => item.id === id);
       const selectedConfirmationLock = confirmationLocksRef.current.get(id);
       if (selectedConfirmationLock) {
         lockedConfirmationRef.current = selectedConfirmationLock;
@@ -769,7 +783,9 @@ function ChatPanelView({
         setConfirmPhase('idle');
       }
       setLastUndo(conversation?.last_write_undo ?? null);
+      if (refresh) controller.refreshPresentation();
     } catch (e: any) {
+      if (refresh) throw e;
       if (requestId === conversationSelectionRequestRef.current) {
         toast.error(e?.response?.data?.error ?? '加载对话失败');
       }
@@ -999,7 +1015,7 @@ function ChatPanelView({
     }
   }
 
-  async function sendMessage(text: string): Promise<SendMessageOutcome> {
+  async function sendMessage(text: string, retry?: ChatSubmission): Promise<SendMessageOutcome> {
     const trimmed = text.trim();
     if (!trimmed || loading || activePending) return 'ignored';
     if (onOpenInterviewStoryLibrary && isInterviewStoryPilotIntent(trimmed)) {
@@ -1028,12 +1044,12 @@ function ChatPanelView({
     setTurns((t) => [...t, { id: `transient:${convID ?? 'new'}:${visibleRequestGeneration}:user`, role: 'user', content: trimmed }]);
     streamingAssistantActiveRef.current = false;
     setHasStreamingAssistantContent(false);
-    const requestPageContext = convID === undefined ? activePageContext : pinnedContext;
+    const requestPageContext = retry ? retry.context.page_context : convID === undefined ? activePageContext : pinnedContext;
     setRequestContextSnapshot(requestPageContext);
     let streamConversationId = convID;
     try {
       const isNew = convID === undefined;
-      const requestContext = buildRequestContext({
+      const requestContext = retry?.context ?? buildRequestContext({
         conversationId: convID,
         draftContext,
         offerApplicationId: offer?.application_id,
@@ -1041,7 +1057,17 @@ function ChatPanelView({
         pageContext: requestPageContext,
         attachments,
       });
+      const submission = retry ?? createChatSubmission(trimmed, convID, requestContext);
+      controller.lastSubmissionRef.current = submission;
       const resp = await streamChatRequest(requestLease, trimmed, convID, requestContext, {
+        requestId: submission.requestId,
+        onAccepted: (identity) => {
+          streamConversationId = identity.conversationId;
+          if (isCurrentVisibleRequest(visibleRequestGeneration) && isNew) {
+            setConvID(identity.conversationId);
+            pinConversationContext(identity.conversationId, requestPageContext);
+          }
+        },
         onEvent: (event) => {
           if (event.event === 'user_message_saved') {
             void queryClient.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
@@ -1075,7 +1101,11 @@ function ChatPanelView({
         setConvID(resp.conversation_id);
         pinConversationContext(resp.conversation_id, requestPageContext);
       }
-      if (resp.type === 'confirmation_required') {
+      if (resp.type === 'turn_recovered') {
+        await syncConversationAfterAbort(resp.conversation_id, visibleRequestGeneration);
+        refreshConversations();
+        controller.refreshPresentation();
+      } else if (resp.type === 'confirmation_required') {
         setLoadingLabel('正在准备确认卡片');
         setConvID(resp.conversation_id);
         setPending(resp.pending_action);
@@ -1159,7 +1189,9 @@ function ChatPanelView({
   function retryLastMessage() {
     if (!lastFailedText || loading || activePending) return;
     const retryText = lastFailedText;
-    void sendMessage(retryText).then((outcome) => {
+    const submission = controller.lastSubmissionRef.current;
+    if (!submission || submission.message !== retryText) return;
+    void sendMessage(retryText, submission).then((outcome) => {
       if (outcome === 'sent') {
         setComposerDraft((current) => (current === retryText ? '' : current));
       }
@@ -1616,6 +1648,7 @@ function ChatPanelView({
               )}
 
               <PresentationRecovery failed={controller.presentationFailed} busy={loading || controller.presentationRefreshing} onRefresh={controller.refreshPresentation} />
+              <PendingStartRecovery busy={loading} conversationId={convID} onOpen={controller.selectConversation} />
 
               {activeRequestChips.length > 0 ? (
                 <div className={styles.requestContextRow} aria-label="本次请求上下文">

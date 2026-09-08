@@ -135,7 +135,7 @@ describe('settings service v0.1 contract', () => {
   });
 
   it('streams chat through the pilot SSE endpoint', async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       sseResponse(
         'event: completed\nid: run:1\ndata: {"event":"completed","seq":1,"data":{"response":{"type":"message","conversation_id":3,"message":"ok"}}}\n\n',
       ),
@@ -149,11 +149,12 @@ describe('settings service v0.1 contract', () => {
       '/api/chat/stream',
       expect.objectContaining({
         method: 'POST',
-        body: JSON.stringify({ message: 'hi', conversation_id: 0, context_type: 'workspace', mode: 'general' }),
+        body: expect.any(String),
       }),
     );
+    expect(JSON.parse(fetchMock.mock.calls[0][1]?.body as string)).toEqual({ message: 'hi', request_id: expect.any(String), conversation_id: 0, context_type: 'workspace', mode: 'general' });
     expect(events.map((event) => event.event)).toEqual(['completed']);
-    expect(response).toEqual({ type: 'message', conversation_id: 3, message: 'ok' });
+    expect(response).toEqual({ type: 'message', conversation_id: 3, message: 'ok', request_id: expect.any(String) });
   });
 
   it('serializes the same context attachments for JSON and SSE chat requests', async () => {
@@ -192,6 +193,7 @@ describe('settings service v0.1 contract', () => {
 
     expect(postMock.mock.calls[0][1]).toEqual({
       message: 'hi',
+      request_id: expect.any(String),
       conversation_id: 3,
       context_type: 'workspace',
       page_context: pageContext,

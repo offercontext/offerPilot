@@ -7,6 +7,7 @@ import {
   type MutableRefObject,
 } from 'react';
 import type { ConfirmationInput } from '@/services/chat';
+import type { ChatSubmission } from '@/services/chatSubmission';
 import {
   streamChat as streamChatService,
   streamConfirmAction as streamConfirmActionService,
@@ -52,7 +53,7 @@ export interface ActiveConversationRequest extends ActiveConversationRequestOwne
 export interface PilotConversationActions {
   undoOperation?: (operationId: string) => Promise<void>;
   sendMessage: (text: string) => Promise<SendMessageOutcome>;
-  selectConversation: (conversationId: number) => Promise<void>;
+  selectConversation: (conversationId: number, options?: { refresh?: boolean }) => Promise<void>;
   startNewChat: () => boolean;
   retryLastMessage: () => void;
   clearLastFailure: () => void;
@@ -149,6 +150,7 @@ export function usePilotConversationControllerState() {
   const [draftContext, setDraftContext] = useState<ChatStartRequest | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [lastFailedText, setLastFailedText] = useState('');
+  const lastSubmissionRef = useRef<ChatSubmission | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [confirmPhase, setConfirmPhaseState] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
   const [lastUndo, setLastUndo] = useState<ChatUndo | null>(null);
@@ -422,7 +424,7 @@ export function usePilotConversationControllerState() {
 
   const sendMessage = useCallback((text: string) => actionsRef.current.sendMessage(text), []);
   const selectConversation = useCallback(
-    (id: number) => actionsRef.current.selectConversation(id),
+    (id: number, options?: { refresh?: boolean }) => actionsRef.current.selectConversation(id, options),
     [],
   );
   const startNewChat = useCallback(() => actionsRef.current.startNewChat(), []);
@@ -503,6 +505,7 @@ export function usePilotConversationControllerState() {
     setLastError,
     lastFailedText,
     setLastFailedText,
+    lastSubmissionRef,
     confirmError,
     setConfirmError,
     confirmPhase,

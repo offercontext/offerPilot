@@ -1723,6 +1723,40 @@ class PilotRuntime:
         _ = bundle.bundle_instance_token
         return bundle
 
+    def with_start_ports(
+        self,
+        *,
+        persistence: RuntimePersistence,
+        source_loader: SourceLoader,
+    ) -> "PilotRuntime":
+        """Bind one admitted start without mutating the application Runtime.
+
+        Catalog, authority and pending route provenance remain the exact shared
+        production graph. Only request-local source and message persistence
+        ports change; confirmation still belongs to its existing coordinator.
+        """
+        deterministic = self._dependencies.deterministic
+        if deterministic is not None:
+            deterministic = DeterministicPilotAdapter(replace(
+                deterministic.dependencies, persistence=cast(Any, persistence),
+            ))
+        assembler = self._dependencies.context_assembler
+        bind_assembler = getattr(assembler, "with_persistence", None)
+        if callable(bind_assembler):
+            assembler = bind_assembler(persistence)
+        return PilotRuntime(replace(
+            self._dependencies, persistence=persistence, source_loader=source_loader,
+            deterministic=deterministic, context_assembler=assembler,
+        ))
+
+    def validate_start_admission(self, request: StartTurnRequest) -> None:
+        """Run the existing read-only new-request validation before admission commits."""
+        self._validate(request)
+        if request.conversation_id in (None, 0):
+            preflight = _callable(self._dependencies.deterministic, ("validate_new_request",))
+            if preflight is not None:
+                _invoke(preflight, {"request": request}, (request,))
+
     @property
     def metadata_components(self) -> TransientToolRuntimeValue:
         components = self._dependencies.metadata_components

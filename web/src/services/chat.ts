@@ -1,6 +1,8 @@
 import type {
   ChatMessage,
   ChatResponse,
+  ChatExecutionResponse,
+  PilotTurnState,
   ChatStreamEvent,
   Conversation,
   PilotActionRequest,
@@ -9,6 +11,7 @@ import type {
 } from '@/types/chat';
 import { authHeaders } from './authToken';
 import { createApiClient } from './http';
+import { forgetConversationStarts, forgetPendingStart, listPendingStarts, markPendingStartAccepted, rememberPendingStart } from './chatSubmission';
 
 const http = createApiClient({ baseURL: '/api', timeout: 130000 });
 export const SETTINGS_QUERY_KEY = ['settings'] as const;
@@ -24,6 +27,8 @@ export interface ChatContextInput {
 
 export interface ChatRequestOptions {
   signal?: AbortSignal;
+  requestId?: string;
+  onAccepted?: (identity: { conversationId: number; turnId: string }) => void;
 }
 
 export interface ChatStreamRequestOptions extends ChatRequestOptions {
@@ -33,12 +38,16 @@ export interface ChatStreamRequestOptions extends ChatRequestOptions {
 export class ChatStreamError extends Error {
   code?: string;
   retryable?: boolean;
+  status?: number;
+  acceptedTurn: boolean;
 
-  constructor(message: string, code?: string, retryable?: boolean) {
+  constructor(message: string, code?: string, retryable?: boolean, status?: number, acceptedTurn = false) {
     super(message);
     this.name = 'ChatStreamError';
     this.code = code;
     this.retryable = retryable;
+    this.status = status;
+    this.acceptedTurn = acceptedTurn;
   }
 }
 
@@ -70,10 +79,14 @@ export async function sendChat(
   context?: ChatContextInput,
   options?: ChatRequestOptions,
 ): Promise<ChatResponse> {
+  const requestId = options?.requestId ?? crypto.randomUUID();
+  const wasPending = listPendingStarts().some((item) => item.requestId === requestId);
+  rememberPendingStart(requestId, conversationId ?? 0);
   const { data } = await http.post<ChatResponse>(
     '/chat',
     {
       message,
+      request_id: requestId,
       conversation_id: conversationId ?? 0,
       ...(context?.context_type ? { context_type: context.context_type } : {}),
       ...(context?.context_ref !== undefined ? { context_ref: String(context.context_ref) } : {}),
@@ -83,7 +96,11 @@ export async function sendChat(
       ...(context?.pilot_action !== undefined ? { pilot_action: context.pilot_action } : {}),
     },
     { signal: options?.signal },
-  );
+  ).catch((error: unknown) => {
+    forgetRejectedStart(requestId, wasPending, error);
+    throw error;
+  });
+  settlePendingStart(requestId, data);
   return data;
 }
 
@@ -91,8 +108,8 @@ export async function confirmAction(
   conversationId: number,
   input: ConfirmationRequest,
   options?: ChatRequestOptions,
-): Promise<ChatResponse> {
-  const { data } = await http.post<ChatResponse>(
+): Promise<ChatExecutionResponse> {
+  const { data } = await http.post<ChatExecutionResponse>(
     '/chat/confirm',
     {
       conversation_id: conversationId,
@@ -164,10 +181,14 @@ export async function streamChat(
   context?: ChatContextInput,
   options?: ChatStreamRequestOptions,
 ): Promise<ChatResponse> {
-  return postChatStream(
+  const requestId = options?.requestId ?? crypto.randomUUID();
+  const wasPending = listPendingStarts().some((item) => item.requestId === requestId);
+  rememberPendingStart(requestId, conversationId ?? 0);
+  const response = await postChatStream(
     '/api/chat/stream',
     {
       message,
+      request_id: requestId,
       conversation_id: conversationId ?? 0,
       ...(context?.context_type ? { context_type: context.context_type } : {}),
       ...(context?.context_ref !== undefined ? { context_ref: String(context.context_ref) } : {}),
@@ -177,15 +198,39 @@ export async function streamChat(
       ...(context?.pilot_action !== undefined ? { pilot_action: context.pilot_action } : {}),
     },
     options,
-  );
+  ).catch((error: unknown) => {
+    forgetRejectedStart(requestId, wasPending, error);
+    throw error;
+  });
+  settlePendingStart(requestId, response);
+  return response;
+}
+
+function settlePendingStart(requestId: string, response: ChatResponse): void {
+  if (response.type === 'turn_recovered' && ['accepted', 'started'].includes(response.turn?.state)) {
+    markPendingStartAccepted(requestId, response.conversation_id, response.turn_id);
+  } else {
+    forgetPendingStart(requestId);
+  }
+}
+
+function forgetRejectedStart(requestId: string, wasPending: boolean, error: unknown): void {
+  const response = (error as { response?: { status?: number; data?: { turn_id?: unknown } } })?.response;
+  const status = error instanceof ChatStreamError ? error.status : response?.status;
+  const accepted = error instanceof ChatStreamError ? error.acceptedTurn : typeof response?.data?.turn_id === 'string';
+  // A 5xx may follow a committed start (including a lost upstream response).
+  // A rejected retry also cannot disprove an earlier unknown admission.
+  if (!accepted && (status === 410 || (!wasPending && status !== undefined && [400, 401, 403, 404, 422].includes(status)))) {
+    forgetPendingStart(requestId);
+  }
 }
 
 export async function streamConfirmAction(
   conversationId: number,
   input: ConfirmationRequest,
   options?: ChatStreamRequestOptions,
-): Promise<ChatResponse> {
-  return postChatStream(
+): Promise<ChatExecutionResponse> {
+  const response = await postChatStream(
     '/api/chat/confirm/stream',
     {
       conversation_id: conversationId,
@@ -193,6 +238,8 @@ export async function streamConfirmAction(
     },
     options,
   );
+  if (response.type === 'turn_recovered') throw new Error('confirmation_response_mismatch');
+  return response;
 }
 
 async function postChatStream(
@@ -209,8 +256,19 @@ async function postChatStream(
     body: JSON.stringify(body),
     signal: options?.signal,
   });
+  const turnId = response.headers.get('X-Pilot-Turn-Id');
+  const acceptedConversationId = Number(response.headers.get('X-Pilot-Conversation-Id'));
+  if (turnId && Number.isSafeInteger(acceptedConversationId) && acceptedConversationId > 0) {
+    if (typeof body.request_id === 'string') markPendingStartAccepted(body.request_id, acceptedConversationId, turnId);
+    options?.onAccepted?.({ conversationId: acceptedConversationId, turnId });
+  }
   if (!response.ok) {
     throw await streamHttpError(response);
+  }
+  if (response.headers.get('content-type')?.includes('application/json')) {
+    const data = await response.json() as ChatResponse;
+    if (!['message', 'confirmation_required', 'turn_recovered'].includes(data.type)) throw new Error('chat_response_mismatch');
+    return data;
   }
   if (!response.body) {
     throw new Error('对话连接中断，请稍后重试。');
@@ -244,15 +302,15 @@ async function postChatStream(
   if (!completed) {
     throw new Error('对话没有返回完整结果，请重试。');
   }
-  return completed;
+  return { ...completed, ...(turnId ? { turn_id: turnId } : {}), ...(typeof body.request_id === 'string' ? { request_id: body.request_id } : {}) };
 }
 
 async function streamHttpError(response: Response) {
   try {
-    const payload = (await response.json()) as { error?: string };
-    return new ChatStreamError(payload.error || `HTTP ${response.status}`, `http_${response.status}`);
+    const payload = (await response.json()) as { error?: string; error_code?: string; retryable?: boolean; turn_id?: unknown };
+    return new ChatStreamError(payload.error || `HTTP ${response.status}`, payload.error_code || `http_${response.status}`, payload.retryable, response.status, typeof payload.turn_id === 'string');
   } catch {
-    return new ChatStreamError(`HTTP ${response.status}`, `http_${response.status}`);
+    return new ChatStreamError(`HTTP ${response.status}`, `http_${response.status}`, undefined, response.status);
   }
 }
 
@@ -270,6 +328,17 @@ export async function getConversation(id: number): Promise<ChatMessage[]> {
 
 export async function deleteConversation(id: number): Promise<void> {
   await http.delete(`/chat/conversations/${id}`);
+  forgetConversationStarts(id);
+}
+
+export async function getPilotRequest(requestId: string): Promise<PilotTurnState> {
+  const { data } = await http.get<PilotTurnState>(`/chat/requests/${encodeURIComponent(requestId)}`);
+  return data;
+}
+
+export async function findPilotTurn(requestId: string): Promise<PilotTurnState> {
+  const { data } = await http.get<PilotTurnState>(`/chat/requests/${encodeURIComponent(requestId)}`);
+  return data;
 }
 
 export interface UpdateConversationPayload {

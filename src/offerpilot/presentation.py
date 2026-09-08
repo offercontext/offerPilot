@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import hmac
 import json
+from contextlib import nullcontext
 from collections.abc import Callable, Mapping
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from offerpilot.ai.confirmation_receipt import (
     EDITED_CONFIRMATION_RECEIPT_STRATEGY,
@@ -162,8 +164,10 @@ def _display_text(value: object) -> str | None:
 def build_conversation_presentation(
     conversation_id: int,
     builder: AgentActionPresentationBuilder,
+    *,
+    source_session: Session | None = None,
 ) -> PilotPresentationSnapshotV1 | None:
-    with builder.repository.session_factory() as session:
+    with (nullcontext(source_session) if source_session is not None else builder.repository.session_factory()) as session:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             return None

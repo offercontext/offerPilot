@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App as AntApp } from 'antd';
 import ProposalCard from './ProposalCard';
 import type { PendingAction } from '@/types/chat';
+import { AssistantSurfaceProvider, usePilotConversationController } from '@/features/assistantSurface/AssistantSurfaceProvider';
+import type { PilotConversationController } from '@/features/assistantSurface/usePilotConversationController';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 if (!HTMLElement.prototype.scrollIntoView) HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -13,6 +15,7 @@ const chatState = vi.hoisted(() => ({
   streamChat: vi.fn(),
   undoLastWrite: vi.fn(),
   getConversation: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn().mockResolvedValue([]),
   getOffer: vi.fn().mockResolvedValue({ id: 17, application_id: 42 }),
   attachments: [] as Array<{ kind: 'application' | 'offer' | 'resume'; id: string; label: string }>,
 }));
@@ -23,7 +26,7 @@ vi.mock('@/services/chat', () => ({
   getSettings: vi.fn().mockResolvedValue({ chat_auto_approve_writes: false }),
   SETTINGS_QUERY_KEY: ['settings'],
   updateAutoApprove: vi.fn(),
-  listConversations: vi.fn().mockResolvedValue([]),
+  listConversations: chatState.listConversations,
   getConversation: chatState.getConversation,
   deleteConversation: vi.fn(),
   updateConversation: vi.fn(),
@@ -78,7 +81,8 @@ let container: HTMLDivElement | undefined;
 afterEach(() => {
   chatState.streamChat.mockReset();
   chatState.undoLastWrite.mockReset();
-  chatState.getConversation.mockClear();
+  chatState.getConversation.mockReset().mockResolvedValue([]);
+  chatState.listConversations.mockReset().mockResolvedValue([]);
   chatState.getOffer.mockClear();
   chatState.attachments = [];
   act(() => root?.unmount());
@@ -126,6 +130,54 @@ const jdAction: PendingAction = {
 };
 
 describe('deterministic Pilot JD confirmation card', () => {
+  it('retries an unknown submission with its original page context after navigation', async () => {
+    let owner!: PilotConversationController;
+    function Observe() { owner = usePilotConversationController(); return null; }
+    const pageA = { view: 'board' as const, label: '原始投递页' };
+    const pageB = { view: 'calendar' as const, label: '后来的日历页' };
+    chatState.streamChat.mockRejectedValueOnce(new Error('连接中断'))
+      .mockResolvedValueOnce({ type: 'message', conversation_id: 501, message: '恢复成功' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const view = (pageContext: typeof pageA | typeof pageB) => <AntApp><AssistantSurfaceProvider><Observe /><ChatPanel open variant="page" onClose={vi.fn()} pageContext={pageContext} /></AssistantSurfaceProvider></AntApp>;
+    await act(async () => root?.render(view(pageA)));
+    await act(async () => { await owner.sendMessage('继续原请求'); });
+    await act(async () => root?.render(view(pageB)));
+    await act(async () => owner.retryLastMessage());
+    expect(chatState.streamChat).toHaveBeenCalledTimes(2);
+    const [first, retry] = chatState.streamChat.mock.calls;
+    expect(retry[3].requestId).toBe(first[3].requestId);
+    expect(retry[2].page_context).toEqual(pageA);
+    expect(owner.pinnedContext).toEqual(pageA);
+  });
+
+  it('force-refreshes the current recovered conversation and loads its original pending state', async () => {
+    let owner!: PilotConversationController;
+    function Observe() { owner = usePilotConversationController(); return null; }
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => root?.render(<AntApp><AssistantSurfaceProvider><Observe /><ChatPanel open variant="page" onClose={vi.fn()} /></AssistantSurfaceProvider></AntApp>));
+    act(() => owner.setConversationId(501));
+    chatState.getConversation.mockResolvedValue([{ id: 9, conversation_id: 501, role: 'user', content: '恢复的消息' }]);
+    chatState.listConversations.mockResolvedValue([{ id: 501, pending_action: jdAction }]);
+    const before = chatState.getConversation.mock.calls.length;
+    await act(async () => owner.selectConversation(501, { refresh: true }));
+    expect(chatState.getConversation.mock.calls.length).toBe(before + 1);
+    expect(owner.turns.map((turn) => turn.content)).toContain('恢复的消息');
+    expect(owner.pending?.confirmation_token).toBe(jdAction.confirmation_token);
+    act(() => {
+      owner.setLastError('旧对话错误');
+      owner.setLastFailedText('旧对话请求');
+      owner.lastSubmissionRef.current = { requestId: crypto.randomUUID(), conversationId: 501, message: '旧对话请求', context: {} };
+    });
+    await act(async () => owner.selectConversation(502));
+    expect(owner.lastError).toBeNull();
+    expect(owner.lastFailedText).toBe('');
+    expect(owner.lastSubmissionRef.current).toBeNull();
+  });
+
   it('binds an unsent negotiation draft to exactly one Offer scope', () => {
     const request = {
       requestKey: 90,
