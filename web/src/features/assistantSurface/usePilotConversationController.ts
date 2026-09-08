@@ -161,7 +161,7 @@ export function usePilotConversationControllerState() {
   const [contextChangeNotice, setContextChangeNotice] = useState<ContextChangeNotice | null>(null);
   const [requestContextSnapshot, setRequestContextSnapshot] = useState<PilotPageContext>();
   const [attachments, setAttachments] = useState<PilotContextAttachment[]>([]);
-  const { displayTurns, presentationSnapshot, refreshPresentation } = usePilotPresentation(conversationId, turns, pending, loading, confirmPhase === 'error');
+  const { displayTurns, presentationSnapshot, refreshPresentation, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, loading, confirmPhase === 'error');
 
   const activeRequestRef = useRef<ActiveConversationRequest | null>(null);
   const streamingAssistantActiveRef = useRef(false);
@@ -476,6 +476,8 @@ export function usePilotConversationControllerState() {
     displayTurns,
     presentationSnapshot,
     refreshPresentation,
+    presentationFailed,
+    presentationRefreshing,
     turns,
     setTurns,
     conversationId,
@@ -577,6 +579,8 @@ export function usePilotConversationControllerState() {
     displayTurns,
     presentationSnapshot,
     refreshPresentation,
+    presentationFailed,
+    presentationRefreshing,
     autoApprove,
     activateConversationContext,
     bindActions,

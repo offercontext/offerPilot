@@ -17,6 +17,7 @@ import { useAssistantSurface, usePilotConversationController } from './Assistant
 import { recentConversationTurns } from './assistantPresentation';
 import CompactMessageRenderer from './CompactMessageRenderer';
 import { ActionCard } from '@/features/actionPresentation/ActionCard';
+import { PresentationRecovery } from '@/features/actionPresentation/PresentationRecovery';
 import { agentActionCommands, pendingPresentationActions } from '@/features/actionPresentation/commands';
 import { positionHaruWindow, type HaruRect } from './haruWindowPosition';
 import styles from './AssistantSurface.module.css';
@@ -257,11 +258,12 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
           </div>
         ) : (
           recentConversationTurns(controller.displayTurns ?? controller.turns).map((turn, index) => turn.action ? (
-            <ActionCard key={turn.id} action={turn.action} busy={controller.loading} commands={agentActionCommands(turn.action, controller)} />
+            <ActionCard key={turn.id} action={turn.action} busy={controller.loading || controller.presentationRefreshing} commands={agentActionCommands(turn.action, controller)} />
           ) : (
             <CompactMessageRenderer key={turn.id ?? `transient:${controller.conversationId}:${index}`} turn={turn} />
           ))
         )}
+        <PresentationRecovery failed={controller.presentationFailed} busy={controller.loading || controller.presentationRefreshing} onRefresh={controller.refreshPresentation} />
         {controller.loading && !controller.hasStreamingAssistantContent ? (
           <div className={styles.thinking} role="status">
             {controller.loadingLabel || '正在理解你的问题'}

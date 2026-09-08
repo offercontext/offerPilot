@@ -8,6 +8,7 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 import HaruChatWindow from './HaruChatWindow';
+import { getPilotPresentation } from '@/features/actionPresentation/service';
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -108,6 +109,52 @@ describe('HaruChatWindow', () => {
   afterEach(() => {
     act(() => root?.unmount());
     host?.remove();
+  });
+
+  it('keeps a visible read-only recovery entry without Pending or Undo and recovers the display', async () => {
+    await act(async () => root?.render(
+      <AssistantSurfaceProvider><ContextHarness /></AssistantSurfaceProvider>,
+    ));
+    expect(host!.textContent).toContain('保留这条消息');
+    const retry = [...host!.querySelectorAll('button')].find((button) => button.textContent === '重新加载操作状态');
+    expect(retry).toBeDefined();
+    const reads = vi.mocked(getPilotPresentation).mock.calls.length;
+    let fail!: (error: Error) => void;
+    vi.mocked(getPilotPresentation).mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+    act(() => retry!.click());
+    expect(retry!.disabled).toBe(true);
+    act(() => retry!.click());
+    expect(getPilotPresentation).toHaveBeenCalledTimes(reads + 1);
+    await act(async () => fail(new Error('still offline')));
+    expect(retry!.disabled).toBe(false);
+    expect(host!.textContent).toContain('保留这条消息');
+    vi.mocked(getPilotPresentation).mockResolvedValueOnce({ schema_version: 1, conversation_id: 7,
+      items: [{ schema_version: 1, item_id: 'message:9', kind: 'assistant_message', message_id: 9,
+        operation_id: null, content: '恢复后的展示', action: null }] });
+    await act(async () => retry!.click());
+    expect(getPilotPresentation).toHaveBeenCalledTimes(reads + 2);
+    expect(host!.textContent).toContain('恢复后的展示');
+    expect(host!.textContent).not.toContain('重新加载操作状态');
+  });
+
+  it('disables an existing action refresh while its shared display request is in flight', async () => {
+    vi.mocked(getPilotPresentation).mockResolvedValueOnce({ schema_version: 1, conversation_id: 7,
+      items: [{ schema_version: 1, item_id: 'agent_operation:op', kind: 'action', message_id: null,
+        operation_id: 'op', content: '', action: { schema_version: 1, source_kind: 'agent', operation_id: 'op',
+          source_revision: 's', presentation_revision: 'p', title: '已拒绝', target: null, summary: '未执行',
+          source_label: 'Pilot', decision: 'rejected', execution: 'not_started', evidence: 'verified',
+          undo: 'unsupported', available_actions: ['refresh'] } }] });
+    await act(async () => root?.render(
+      <AssistantSurfaceProvider><ContextHarness /></AssistantSurfaceProvider>,
+    ));
+    const retry = [...host!.querySelectorAll('button')].find((button) => button.textContent === '刷新状态')!;
+    expect(retry.disabled).toBe(false);
+    const reads = vi.mocked(getPilotPresentation).mock.calls.length;
+    vi.mocked(getPilotPresentation).mockImplementationOnce(() => new Promise(() => {}));
+    act(() => retry.click());
+    expect(retry.disabled).toBe(true);
+    act(() => retry.click());
+    expect(getPilotPresentation).toHaveBeenCalledTimes(reads + 1);
   });
 
   it('shows shared messages and routes Pending to the full Pilot workspace', async () => {

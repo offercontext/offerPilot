@@ -9,16 +9,24 @@ import { mergePresentationTurns, withTransportUncertainty } from './model';
 export function usePilotPresentation(conversationId: number | undefined, turns: UITurn[], pending: PendingAction | null, loading: boolean, confirmationUnknown = false) {
   const [loaded, setLoaded] = useState<{ snapshot: PilotPresentationSnapshot; turns: UITurn[]; pending: PendingAction | null; revision: number } | null>(null);
   const [revision, setRevision] = useState(0);
+  const [requestState, setRequestState] = useState<{ conversationId: number; failed: boolean; refreshing: boolean } | null>(null);
   const refreshPresentation = useCallback(() => setRevision((value) => value + 1), []);
   useEffect(() => {
     let current = true;
     if (conversationId !== undefined && !loading) {
+      setRequestState((previous) => ({ conversationId, failed: previous?.conversationId === conversationId && previous.failed, refreshing: true }));
       void getPilotPresentation(conversationId).then((snapshot) => {
-        if (current) setLoaded({ snapshot, turns, pending, revision });
+        if (current) {
+          setLoaded({ snapshot, turns, pending, revision });
+          setRequestState({ conversationId, failed: false, refreshing: false });
+        }
       }).catch(() => {
         // A failed refresh must release the stale projection so the latest
         // persisted messages remain visible through the original owner.
-        if (current) setLoaded(null);
+        if (current) {
+          setLoaded(null);
+          setRequestState({ conversationId, failed: true, refreshing: false });
+        }
       });
     }
     return () => { current = false; };
@@ -44,5 +52,7 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
     displayTurns,
     presentationSnapshot: snapshot,
     refreshPresentation,
+    presentationFailed: requestState?.conversationId === conversationId && requestState?.failed === true,
+    presentationRefreshing: requestState?.conversationId === conversationId && requestState?.refreshing === true,
   };
 }

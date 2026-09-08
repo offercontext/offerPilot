@@ -72,6 +72,7 @@ import ThreadRail from './ThreadRail';
 import MessageBubble from './MessageBubble';
 import ProposalCard from './ProposalCard';
 import { ActionCard } from '@/features/actionPresentation/ActionCard';
+import { PresentationRecovery } from '@/features/actionPresentation/PresentationRecovery';
 import { agentActionCommands, pendingPresentationActions } from '@/features/actionPresentation/commands';
 import ThinkingIndicator from './ThinkingIndicator';
 import Composer from './Composer';
@@ -1601,7 +1602,7 @@ function ChatPanelView({
                 </div>
               ) : (
                 (controller.displayTurns ?? turns).map((turn, i) => turn.action ? (
-                  <ActionCard key={turn.id} action={turn.action} busy={loading} commands={agentActionCommands(turn.action, controller)} />
+                  <ActionCard key={turn.id} action={turn.action} busy={loading || controller.presentationRefreshing} commands={agentActionCommands(turn.action, controller)} />
                 ) : (
                   <MessageBubble
                     key={turn.id ?? `transient:${convID}:${i}`}
@@ -1613,6 +1614,8 @@ function ChatPanelView({
                   />
                 ))
               )}
+
+              <PresentationRecovery failed={controller.presentationFailed} busy={loading || controller.presentationRefreshing} onRefresh={controller.refreshPresentation} />
 
               {activeRequestChips.length > 0 ? (
                 <div className={styles.requestContextRow} aria-label="本次请求上下文">
@@ -1667,7 +1670,7 @@ function ChatPanelView({
                 {currentPendingActions?.length === 0 ? (
                   <div className={styles.confirmRecovery} role="status">
                     <span>操作状态需要重新核对，请刷新后再确认。</span>
-                    <button type="button" disabled={loading} onClick={controller.refreshPresentation}>刷新状态</button>
+                    <button type="button" disabled={loading || controller.presentationRefreshing} onClick={controller.refreshPresentation}>刷新状态</button>
                   </div>
                 ) : null}
                 {loading && !hasStreamingAssistantContent ? <ThinkingIndicator label={loadingLabel} /> : null}
