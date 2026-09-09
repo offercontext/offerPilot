@@ -39,19 +39,30 @@ def test_readme_states_the_product_boundary_and_core_capabilities():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for text in [
-        "# OfferPilot — 本地优先的 AI 求职工作台",
-        "管理简历与投递",
-        "评估岗位匹配、准备投递材料",
-        "准备面试、进行文本模拟与复盘",
-        "汇总已确认的经验与知识",
-        "比较 Offer 已知事实，准备谈薪沟通",
-        "不自动投递",
-        "不替用户决定",
-        "SQLite",
+        "# OfferPilot — 开源、本地优先的 AI 求职与投递管理工具",
+        "| 投递管理 |",
+        "| 简历与材料准备 |",
+        "| 面试准备与模拟 |",
+        "| 面试复盘 |",
+        "| Offer 对比与谈薪 |",
+        "| Pilot AI 助手 |",
+        "本地工作区",
+        "相关资料会发送给你配置的模型服务",
+        "不自动向招聘方投递或发送消息",
+        "默认需要用户确认",
+        "仍由你决定",
         "AGPLv3",
-        "## English",
+        "[English](README.en.md)",
     ]:
         assert text in readme
+    english = (ROOT / "README.en.md").read_text(encoding="utf-8")
+    for text in (
+        "local-first",
+        "configured model service",
+        "does not automatically submit applications or message recruiters",
+        "[LICENSE](LICENSE)",
+    ):
+        assert text in english
 
 
 def test_docker_smoke_scripts_document_container_smoke_path():
