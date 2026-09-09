@@ -273,7 +273,11 @@ class ProactiveRepository:
                 # Charge before any dispatch. Uncertain admission cannot re-spend.
                 row.model_started_at = now
                 row.lease_until = min(row.lease_until, now + 60)
-                conversation = Conversation(title="Haru 主动准备草稿", context_type="application", context_ref=row.application_id)
+                conversation = Conversation(
+                    title="Haru 主动准备草稿",
+                    context_type="application",
+                    context_ref=str(row.application_id),
+                )
                 session.add(conversation)
                 session.flush()
                 row.conversation_id = conversation.id

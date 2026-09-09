@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import select
 
 from offerpilot.db import init_database
-from offerpilot.models import Application, ApplicationEvent
+from offerpilot.models import Application, ApplicationEvent, Conversation
 from offerpilot.proactive.contracts import ProactivePolicy, ProactivePolicyUpdate
 from offerpilot.proactive.models import ProactiveJob
 from offerpilot.proactive.repository import ProactiveConflict, ProactiveRepository, quiet
@@ -75,6 +75,22 @@ def test_unknown_model_result_is_not_retried_and_old_generation_cannot_publish(q
     assert repo.list_jobs()[0]["state"] == "result_unknown"
     assert not repo.publish(job_id, "worker", job["turn_id"], 1, "旧草稿", NOW + 122)
     assert repo.discover(NOW + 122) == 0
+
+
+def test_draft_conversation_context_ref_uses_domain_string_type(queue):
+    sessions, repo, (app_id, _) = queue
+    enable(repo, app_id, draft=True)
+    repo.discover(NOW)
+    job_id = repo.claim("worker", NOW)
+    job = repo.begin(job_id, "worker", NOW)
+    assert job is not None
+
+    with sessions() as session:
+        conversation = session.get(Conversation, job["conversation_id"])
+        assert conversation is not None
+        assert conversation.context_type == "application"
+        assert type(conversation.context_ref) is str
+        assert conversation.context_ref == str(app_id)
 
 
 def test_publish_dedup_and_revision_change_does_not_bypass_subject_rate_limit(queue):
