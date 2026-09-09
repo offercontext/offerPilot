@@ -103,7 +103,7 @@ function JobCard({
 
       <div className={styles.jobMeta}>
         <span className={styles.jobMetaItem}>
-          <ClockCircleOutlined aria-hidden="true" /> 到期：{formatProactiveTimestamp(job.due_at, timezone)}
+          <ClockCircleOutlined aria-hidden="true" /> 计划处理时间：{formatProactiveTimestamp(job.due_at, timezone)}
         </span>
         <span className={styles.jobMetaItem}>创建：{formatProactiveTimestamp(job.created_at, timezone)}</span>
       </div>
