@@ -33,6 +33,15 @@ it('discovers an execution owned by another page without a local request', async
   expect(controller.canStop).toBe(true);
 });
 
+it.each(['completed', 'stopped', 'interrupted'] as const)('notifies the owner when a manually opened conversation already has a %s execution', async (state) => {
+  vi.useFakeTimers();
+  read.mockResolvedValue({ ...first, state });
+  await render();
+  expect(stopped).toHaveBeenCalledWith({ ...first, state });
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(stopped).toHaveBeenCalledTimes(1);
+});
+
 it('retries an uncertain stop with the identical command after remount', async () => {
   read.mockResolvedValue(first);
   interrupt.mockRejectedValueOnce(new Error('lost response')).mockImplementation(async (target, key) => ({
@@ -46,7 +55,21 @@ it('retries an uncertain stop with the identical command after remount', async (
   await render();
   await act(async () => { await controller.stop(); });
   expect(interrupt.mock.calls[1]).toEqual(original);
-  expect(stopped).toHaveBeenCalledWith(first);
+  expect(stopped).toHaveBeenCalledWith({ ...first, state: 'stopped' });
+});
+
+it('passes a terminal target to the owner when the stop command finds an ended task', async () => {
+  read.mockResolvedValue(first);
+  interrupt.mockImplementation(async (target, commandId) => ({
+    command_id: commandId,
+    turn_id: target.turn_id,
+    execution_generation: target.execution_generation,
+    status: 'already_ended',
+  }));
+  await render();
+  await act(async () => { await controller.stop(); });
+  expect(stopped).toHaveBeenCalledWith({ ...first, state: 'completed' });
+  expect(controller.execution?.state).toBe('completed');
 });
 
 it('never applies a late stop result to a different conversation', async () => {
@@ -128,5 +151,17 @@ it('ends the exact local subscription when another page durably stops it', async
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(stopped).toHaveBeenCalledWith({ ...first, state: 'stopped' });
   expect(controller.execution?.state).toBe('stopped');
+  expect(interrupt).not.toHaveBeenCalled();
+});
+
+it.each(['completed', 'waiting_confirmation', 'failed'] as const)('refreshes persisted content when a detached execution becomes %s', async (state) => {
+  vi.useFakeTimers();
+  read.mockResolvedValueOnce(first).mockResolvedValue({ ...first, state });
+  await render();
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(stopped).toHaveBeenCalledWith({ ...first, state });
+  expect(controller.stopMessage).not.toContain('中断');
+  await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+  expect(stopped).toHaveBeenCalledTimes(1);
   expect(interrupt).not.toHaveBeenCalled();
 });

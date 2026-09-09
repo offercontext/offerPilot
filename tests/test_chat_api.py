@@ -57,6 +57,7 @@ from offerpilot.models import (
     ChatMessage,
     Conversation,
     JDAnalysis,
+    PilotExecution,
     Question,
     Resume,
     ResumeMatch,
@@ -91,7 +92,7 @@ _LEGACY_JD_EXECUTION_ORIGINAL: Any = None
 _TEST_TOOL_CATALOG = build_model_tool_catalog()
 
 
-def _timeout_after_agent_signal_host(signal: Event):
+def _timeout_after_agent_signal_host(signal: Event, worker_done: Event | None = None):
     """Return a deterministic non-joining host that times out after Agent work starts."""
 
     class TimeoutAfterAgentSignalHost:
@@ -100,7 +101,15 @@ def _timeout_after_agent_signal_host(signal: Event):
 
         def run(self, thunk, invocation_control):
             executor = transport_module.ThreadPoolExecutor(max_workers=1)
-            executor.submit(thunk)
+
+            def run_worker():
+                try:
+                    return thunk()
+                finally:
+                    if worker_done is not None:
+                        worker_done.set()
+
+            executor.submit(transport_module.copy_context().run, run_worker)
             try:
                 assert signal.wait(timeout=5), "Agent work did not reach the timeout probe"
                 assert invocation_control.request_timeout()
@@ -724,8 +733,18 @@ def test_chat_ingress_rejection_does_not_create_journal_run(tmp_path, payload, e
 
 
 class _RouteSpyRuntime:
-    def __init__(self) -> None:
+    def __init__(self, delegate: PilotRuntime) -> None:
         self.calls: Counter[str] = Counter()
+        self.delegate = delegate
+
+    def validate_start_admission(self, request) -> None:
+        self.calls["validate_start_admission"] += 1
+        self.delegate.validate_start_admission(request)
+
+    def with_start_ports(self, **ports):
+        self.calls["with_start_ports"] += 1
+        self.delegate = self.delegate.with_start_ports(**ports)
+        return self
 
     @staticmethod
     def _outcome(conversation_id: int = 1) -> MessageOutcome:
@@ -763,12 +782,13 @@ class _RouteSpyRuntime:
         (
             "/api/chat",
             {"message": "hello", "conversation_id": 1},
-            {"start_turn": 1},
+            {"validate_start_admission": 1, "with_start_ports": 1, "start_turn": 1},
         ),
         (
             "/api/chat/stream",
             {"message": "hello", "conversation_id": 1},
-            {"prepare_stream": 1, "execute_prepared_stream": 1},
+            {"validate_start_admission": 1, "with_start_ports": 1,
+             "prepare_stream": 1, "execute_prepared_stream": 1},
         ),
         (
             "/api/chat/confirm",
@@ -792,7 +812,11 @@ class _RouteSpyRuntime:
 )
 def test_chat_routes_delegate_to_pilot_runtime_once(tmp_path, endpoint, payload, expected_calls):
     app = create_app(data_dir=tmp_path)
-    spy = _RouteSpyRuntime()
+    factory = session_factory_for_data_dir(tmp_path)
+    with factory() as session:
+        session.add(Conversation(id=payload["conversation_id"], title="路由委托测试"))
+        session.commit()
+    spy = _RouteSpyRuntime(app.state.pilot_runtime)
     app.state.pilot_runtime = spy
 
     response = TestClient(app).post(endpoint, json=payload)
@@ -1144,6 +1168,7 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
     else:
         body = response.json()
     assert body == {
+        **_checked_turn_identity(body, required=not endpoint.endswith("/stream")),
         "type": "message",
         "conversation_id": body["conversation_id"],
         "message": "stable slow final",
@@ -1250,6 +1275,7 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
     else:
         body = response.json()
     assert body == {
+        **_checked_turn_identity(body, required=not endpoint.endswith("/stream")),
         "type": "message",
         "conversation_id": body["conversation_id"],
         "message": "stable read final",
@@ -1361,7 +1387,7 @@ def test_deterministic_action_records_waiting_run_without_model_events(tmp_path)
     assert model.calls == 0
 
 
-def test_deterministic_pending_replay_uses_original_journal_run(tmp_path, monkeypatch):
+def test_deterministic_pending_readback_uses_original_journal_run(tmp_path, monkeypatch):
     import offerpilot.ai.tool_specs.legacy as legacy_specs
 
     from offerpilot.ai.tool_runtime.legacy import (
@@ -1398,6 +1424,16 @@ def test_deterministic_pending_replay_uses_original_journal_run(tmp_path, monkey
             "context_ref": str(application["id"]),
         },
     )
+
+    assert first.status_code == 200, first.text
+    before_runs, before_events, _ = _wait_for_journal_status(
+        tmp_path,
+        "waiting_confirmation",
+        predicate=_journal_terminal_predicate(required_event_types=("run.waiting_confirmation",)),
+    )
+    before_journal = [(event.seq, event.event_type, event.payload_json) for event in before_events]
+    conversation_id = first.json()["conversation_id"]
+    messages_before = client.get(f"/api/chat/conversations/{conversation_id}").json()
 
     observed_read_contexts = []
     original_project_pending = LegacyPersistedPresentationPort.project_pending
@@ -1447,8 +1483,15 @@ def test_deterministic_pending_replay_uses_original_journal_run(tmp_path, monkey
         },
     )
 
-    assert replay.status_code == 200, replay.text
-    replay_pending = replay.json()["pending_action"]
+    assert replay.status_code == 409, replay.text
+    assert replay.json()["error_code"] == "turn_execution_active"
+    readback = client.get("/api/chat/conversations")
+    assert readback.status_code == 200, readback.text
+    replay_pending = next(
+        item for item in readback.json() if item["id"] == conversation_id
+    )["pending_action"]
+    for key in ("args", "operation_id", "confirmation_token", "tool_name"):
+        assert replay_pending[key] == first.json()["pending_action"][key]
     assert replay_pending["human"] == (
         f"Confirm saving the job description to application {application['id']}. "
         "The source URL will not be opened."
@@ -1477,30 +1520,13 @@ def test_deterministic_pending_replay_uses_original_journal_run(tmp_path, monkey
     }
     assert len(observed_read_contexts) == 1
     assert model.calls == 0
-    replay_predicate = _journal_terminal_predicate(
-        required_event_types=("run.waiting_confirmation",)
-    )
-    runs, events, _ = _wait_for_journal_status(
-        tmp_path,
-        "waiting_confirmation",
-        predicate=lambda runs, events, snapshots: (
-            replay_predicate(runs, events, snapshots)
-            and len([event for event in events if event.event_type == "segment.started"]) == 2
-            and json.loads(
-                next(
-                    event for event in reversed(events) if event.event_type == "segment.started"
-                ).payload_json
-            )["facts"]["request_kind"]
-            == "pending_replay"
-            and json.loads(events[-1].payload_json)["facts"]["outcome"] == "noop"
-        ),
-    )
-    assert len(runs) == 1
+    runs, events, _ = _journal_rows(tmp_path)
+    assert len(runs) == len(before_runs) == 1
+    assert runs[0].id == before_runs[0].id
     assert runs[0].status == "waiting_confirmation"
-    segment_starts = [event for event in events if event.event_type == "segment.started"]
-    assert len(segment_starts) == 2
-    assert json.loads(segment_starts[-1].payload_json)["facts"]["request_kind"] == "pending_replay"
-    assert json.loads(events[-1].payload_json)["facts"]["outcome"] == "noop"
+    assert [(event.seq, event.event_type, event.payload_json) for event in events] == before_journal
+    assert len([event for event in events if event.event_type == "segment.started"]) == 1
+    assert client.get(f"/api/chat/conversations/{conversation_id}").json() == messages_before
 
 
 def test_arbitrary_context_strings_never_enter_journal_storage(tmp_path):
@@ -1582,7 +1608,9 @@ def test_journal_disabled_or_create_failure_preserves_chat_behavior(tmp_path, fa
     )
 
     assert candidate_response.status_code == control_response.status_code
-    assert candidate_response.json() == control_response.json()
+    assert _normalized_chat_response(candidate_response, "/api/chat") == _normalized_chat_response(
+        control_response, "/api/chat"
+    )
     control_messages = ChatRepository(session_factory_for_data_dir(control_dir)).list_messages(1)
     candidate_messages = ChatRepository(session_factory_for_data_dir(candidate_dir)).list_messages(
         1
@@ -1840,6 +1868,16 @@ def test_existing_deterministic_conversation_uses_durable_context(tmp_path, endp
     )
     assert first.status_code == 200
     conversation_id = first.json()["conversation_id"]
+    rejected = client.post(
+        "/api/chat/confirm",
+        json={
+            "conversation_id": conversation_id,
+            "operation_id": first.json()["pending_action"]["operation_id"],
+            "confirmation_token": first.json()["pending_action"]["confirmation_token"],
+            "approved": False,
+        },
+    )
+    assert rejected.status_code == 200, rejected.text
 
     replay = client.post(
         endpoint,
@@ -1857,7 +1895,8 @@ def test_existing_deterministic_conversation_uses_durable_context(tmp_path, endp
     else:
         response = replay.json()
     assert response["type"] == "confirmation_required"
-    assert response["pending_action"]["args"]["jd_text"] == "saved JD"
+    assert response["pending_action"]["args"]["jd_text"] == "different JD"
+    assert response["pending_action"]["args"]["application_id"] == application["id"]
     assert model.calls == 0
 
 
@@ -3541,12 +3580,40 @@ def test_stable_journal_clock_contract_keeps_real_time_probes_explicit():
         assert "clock=time.monotonic" in inspect.getsource(probe)
 
 
+def _checked_turn_identity(payload, *, required=False):
+    keys = {"turn_id", "request_id", "execution_generation"}
+    present = keys.intersection(payload)
+    if not present and not required:
+        return {}
+    assert present == keys
+    for key in ("turn_id", "request_id"):
+        assert re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            payload[key],
+        )
+    assert type(payload["execution_generation"]) is int
+    assert payload["execution_generation"] >= 1
+    if "conversation_id" in payload:
+        assert type(payload["conversation_id"]) is int
+        assert payload["conversation_id"] > 0
+    return {key: payload[key] for key in keys}
+
+
+def _normalize_turn_identity(payload):
+    normalized = dict(payload)
+    identity = _checked_turn_identity(payload)
+    for key in ("turn_id", "request_id"):
+        if key in identity:
+            normalized[key] = f"<{key}>"
+    return normalized
+
+
 def _normalized_chat_response(response, endpoint):
     if not endpoint.endswith("/stream"):
-        return response.json()
+        return _normalize_turn_identity(response.json())
     normalized = []
     for item in _parse_sse_events(response.text):
-        envelope = dict(item["data"])
+        envelope = _normalize_turn_identity(item["data"])
         envelope["run_id"] = "<transport-run>"
         envelope["ts"] = "<timestamp>"
         normalized.append(
@@ -5197,8 +5264,11 @@ def test_chat_returns_bad_gateway_when_model_fails(tmp_path):
     response = client.post("/api/chat", json={"message": "你好", "conversation_id": 0})
 
     assert response.status_code == 502
-    assert response.json() == {
-        "error": "AI 连接失败：provider unavailable。请检查 AI 设置或稍后重试。"
+    body = response.json()
+    assert body == {
+        **_checked_turn_identity(body, required=True),
+        "conversation_id": body["conversation_id"],
+        "error": "AI 连接失败：provider unavailable。请检查 AI 设置或稍后重试。",
     }
 
 
@@ -5992,8 +6062,11 @@ def test_chat_provider_error_masks_configured_api_key(tmp_path):
 
     assert response.status_code == 502
     assert "sk-secret-value" not in response.text
-    assert response.json() == {
-        "error": "AI 连接失败：provider rejected API key ***。请检查 AI 设置或稍后重试。"
+    body = response.json()
+    assert body == {
+        **_checked_turn_identity(body, required=True),
+        "conversation_id": body["conversation_id"],
+        "error": "AI 连接失败：provider rejected API key ***。请检查 AI 设置或稍后重试。",
     }
 
 
@@ -7700,7 +7773,7 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
-def test_chat_confirm_timeout_during_handler_finalizes_durably_later(
+def test_chat_confirm_timeout_during_handler_rejects_late_write_and_allows_retry(
     tmp_path,
     monkeypatch,
     endpoint,
@@ -7726,6 +7799,7 @@ def test_chat_confirm_timeout_during_handler_finalizes_durably_later(
     )
     handler_started = Event()
     release_handler = Event()
+    worker_done = Event()
     original_update = ApplicationsRepository.update_application_status_scoped
 
     def blocked_update(self, constraint, app_id, status, closed_reason=""):
@@ -7734,12 +7808,14 @@ def test_chat_confirm_timeout_during_handler_finalizes_durably_later(
         return original_update(self, constraint, app_id, status, closed_reason)
 
     monkeypatch.setattr(ApplicationsRepository, "update_application_status_scoped", blocked_update)
+    original_host = transport_module.SyncAgentExecutionHost
     monkeypatch.setattr(
         transport_module,
         "SyncAgentExecutionHost",
-        _timeout_after_agent_signal_host(handler_started),
+        _timeout_after_agent_signal_host(handler_started, worker_done),
     )
 
+    started_at = time.monotonic()
     try:
         response = client.post(
             endpoint,
@@ -7750,8 +7826,12 @@ def test_chat_confirm_timeout_during_handler_finalizes_durably_later(
             },
         )
         assert handler_started.is_set()
+        # The handler is held for five seconds; the timeout response must
+        # return before that wait is released by the test.
+        assert time.monotonic() - started_at < 4
     finally:
         release_handler.set()
+    assert worker_done.wait(timeout=5)
 
     if endpoint.endswith("/stream"):
         error = _parse_sse_events(response.text)[-1]
@@ -7761,51 +7841,74 @@ def test_chat_confirm_timeout_during_handler_finalizes_durably_later(
     else:
         assert response.status_code == 409
         assert "仍在后台执行" in response.json()["error"]
-    deadline = time.monotonic() + 5
-    while True:
-        conversation = client.get("/api/chat/conversations").json()[0]
-        if conversation["pending_action"] is None:
-            break
-        if time.monotonic() >= deadline:
-            pytest.fail("background confirmation did not clear the durable Pending action")
-        time.sleep(0.01)
-    assert conversation["last_write_undo"] is not None
-    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+    conversation = client.get("/api/chat/conversations").json()[0]
+    assert conversation["pending_action"] == pending["pending_action"]
+    assert conversation["last_write_undo"] == pending.get("last_write_undo")
+    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "interview"
     stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
-    assert sum(message["role"] == "tool" for message in stored) == 1
-    runs, journal_events, journal_snapshots = _wait_for_journal_status(
-        tmp_path,
-        "completed",
-        predicate=_journal_terminal_predicate(
-            required_event_types=("run.completed",),
-            required_snapshot_kinds=("initial", "model_input"),
-        ),
-    )
-    assert len(runs) == 1
-    assert runs[0].recording_status == "healthy"
-    trace = _journal_trace(tmp_path, runs[0])
-    assert trace.lifecycle_status == "completed"
-    assert trace.completion_status == "terminal"
-    assert trace.recording_status == "healthy"
-    assert trace.integrity_status == "healthy", trace.anomalies
-    assert "recording_degraded" not in trace.anomalies
-    assert not any(anomaly.startswith("model_call_incomplete:") for anomaly in trace.anomalies)
-    assert journal_events[-1].event_type == "segment.finished"
-    assert {snapshot.snapshot_kind for snapshot in journal_snapshots} == {
-        "initial",
-        "model_input",
-    }
+    assert sum(message["role"] == "tool" for message in stored) == 0
     assert len(model.turns) == 1
+    with session_factory_for_data_dir(tmp_path)() as session:
+        operation = session.get(WriteOperation, pending["pending_action"]["operation_id"])
+        executions = list(session.scalars(select(PilotExecution)))
+    assert operation is not None
+    assert operation.status == "proposed"
+    assert operation.delivery_status == "pending"
+    assert operation.result_json is None
+    assert operation.undo_json is None
+    assert executions
+    timed_out_generation = max(execution.generation for execution in executions)
+
+    # The timeout probe is deliberately non-blocking.  If it loses the
+    # handler's database lock, the old lease may still be running until its
+    # durable deadline; simulate that deadline instead of sleeping 30 seconds.
+    with session_factory_for_data_dir(tmp_path)() as session:
+        session.execute(
+            update(PilotExecution)
+            .where(PilotExecution.generation == timed_out_generation)
+            .values(renewed_at_ms=0, lease_until_ms=0)
+        )
+        session.commit()
+
+    # The timed-out lease owns no further writes.  A user retry gets a new
+    # generation and can commit the still-proposed operation exactly once.
+    monkeypatch.setattr(transport_module, "SyncAgentExecutionHost", original_host)
+    retry = client.post(
+        endpoint,
+        json={
+            "conversation_id": pending["conversation_id"],
+            "operation_id": pending["pending_action"]["operation_id"],
+            "approved": True,
+            "confirmation_token": pending["pending_action"]["confirmation_token"],
+        },
+    )
+    assert retry.status_code == 200
+    if endpoint.endswith("/stream"):
+        retry_events = _parse_sse_events(retry.text)
+        assert retry_events[-1]["event"] == "completed"
+    retry_conversation = client.get("/api/chat/conversations").json()[0]
+    assert retry_conversation["pending_action"] is None
+    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+    retry_stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+    assert sum(message["role"] == "tool" for message in retry_stored) == 1
+    with session_factory_for_data_dir(tmp_path)() as session:
+        retry_operation = session.get(WriteOperation, pending["pending_action"]["operation_id"])
+        retry_executions = list(session.scalars(select(PilotExecution)))
+    assert retry_operation is not None and retry_operation.status == "committed"
+    assert retry_operation.delivery_status == "completed"
+    assert max(execution.generation for execution in retry_executions) == timed_out_generation + 1
+    assert sum(execution.generation == timed_out_generation + 1 for execution in retry_executions) == 1
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
-def test_chat_confirm_slow_handler_atomically_finishes_without_chained_continuation(
+def test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuation(
     tmp_path,
     monkeypatch,
     endpoint,
 ):
     handler_started = Event()
     release_handler = Event()
+    worker_done = Event()
     continuation_started = Event()
     release_continuation = Event()
 
@@ -7849,9 +7952,10 @@ def test_chat_confirm_slow_handler_atomically_finishes_without_chained_continuat
     monkeypatch.setattr(
         transport_module,
         "SyncAgentExecutionHost",
-        _timeout_after_agent_signal_host(handler_started),
+        _timeout_after_agent_signal_host(handler_started, worker_done),
     )
 
+    started_at = time.monotonic()
     try:
         response = client.post(
             endpoint,
@@ -7862,6 +7966,9 @@ def test_chat_confirm_slow_handler_atomically_finishes_without_chained_continuat
             },
         )
         assert handler_started.is_set()
+        # The handler is held for five seconds; timeout must win before the
+        # test releases that wait.
+        assert time.monotonic() - started_at < 4
         if endpoint.endswith("/stream"):
             error = _parse_sse_events(response.text)[-1]
             assert error["data"]["data"]["code"] == "confirmation_in_progress"
@@ -7877,27 +7984,17 @@ def test_chat_confirm_slow_handler_atomically_finishes_without_chained_continuat
         )
     finally:
         release_handler.set()
-
-    try:
-        deadline = time.monotonic() + 2
-        while time.monotonic() < deadline:
-            if app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer":
-                break
-            time.sleep(0.01)
-        else:
-            pytest.fail("background confirmation did not commit the terminal write")
-    finally:
-        release_continuation.set()
+    assert worker_done.wait(timeout=5)
 
     assert continuation_started.is_set() is False
     assert model.calls == 1
     conversation = client.get("/api/chat/conversations").json()[0]
-    assert conversation["pending_action"] is None
-    assert conversation["last_write_undo"] is not None
+    assert conversation["pending_action"] == pending["pending_action"]
+    assert conversation["last_write_undo"] is None
     stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
-    assert sum(message["role"] == "tool" for message in stored) == 1
-    assert sum("写入已完成" in message["content"] for message in stored) == 1
-    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+    assert sum(message["role"] == "tool" for message in stored) == 0
+    assert all("写入已完成" not in message["content"] for message in stored)
+    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "interview"
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
@@ -9053,7 +9150,7 @@ def test_chat_new_stream_runs_late_registered_generated_title_task(tmp_path):
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
-def test_first_model_signal_keeps_title_id_when_later_provider_fails(tmp_path, endpoint):
+def test_later_provider_failure_keeps_fallback_title_and_execution_identity(tmp_path, endpoint):
     class LaterFailureModel:
         def __init__(self):
             self.calls = 0
@@ -9101,11 +9198,12 @@ def test_first_model_signal_keeps_title_id_when_later_provider_fails(tmp_path, e
         )
         assert "conversation_id" not in error_event["data"]["data"]
     else:
-        assert "conversation_id" not in response.json()
+        assert response.status_code == 502
+        _checked_turn_identity(response.json(), required=True)
     conversation = client.get("/api/chat/conversations").json()[0]
-    assert title_model.calls == 1
-    assert conversation["title"] == "后续失败仍生成标题"
-    assert conversation["title_source"] == "generated"
+    assert title_model.calls == 0
+    assert conversation["title"] == "首个模型成功后再失败"
+    assert conversation["title_source"] == "fallback"
 
 
 def test_chat_conversations_detail_and_delete(tmp_path):
@@ -9448,7 +9546,8 @@ def test_chat_without_configured_ai_returns_503(tmp_path):
     response = client.post("/api/chat", json={"message": "你好", "conversation_id": 0})
 
     assert response.status_code == 503
-    assert response.json() == {"error": "AI is not configured: run `oc config` to set your API key"}
+    assert response.json()["error"] == "AI is not configured: run `oc config` to set your API key"
+    _checked_turn_identity(response.json(), required=True)
 
 
 def test_chat_confirm_stream_consumes_pending_before_running_write(tmp_path):
@@ -9825,7 +9924,7 @@ def test_chat_fails_closed_before_model_for_invalid_application_scope(tmp_path, 
     )
 
     assert response.status_code == 503
-    assert response.json()["error_code"] == "source_load_failed"
+    assert response.json()["error_code"] == "turn_admission_failed"
     assert model.calls == []
 
 
@@ -9857,7 +9956,7 @@ def test_chat_fails_closed_when_persisted_application_scope_is_soft_deleted(tmp_
     )
 
     assert response.status_code == 503
-    assert response.json()["error_code"] == "source_load_failed"
+    assert response.json()["error_code"] == "turn_admission_failed"
     assert len(model.calls) == 1
 
 
@@ -9930,7 +10029,7 @@ def test_chat_fails_closed_for_invalid_persisted_scope_or_mode(tmp_path, column,
     )
 
     assert response.status_code == 503
-    assert response.json()["error_code"] == "source_load_failed"
+    assert response.json()["error_code"] == "turn_admission_failed"
     assert model.calls == []
 
 

@@ -33,3 +33,19 @@ export async function getProductPresentation(operationId: string): Promise<Actio
   if (data.operation_id !== operationId || data.source_kind !== 'product_action') throw new Error('presentation_owner_mismatch');
   return data;
 }
+
+/** Complete the Runtime's exact P2 snapshot before following its high watermark. */
+export async function getPilotPresentationFromPage(first: PilotTimelinePage): Promise<PilotPresentationSnapshot> {
+  let working = applyTimelinePage(null, first);
+  let next = first.next_cursor;
+  for (let pageNumber = 0; next; pageNumber += 1) {
+    if (pageNumber >= 99) throw new Error('timeline_pagination_limit');
+    const { data } = await http.get<PilotTimelinePage>(`/chat/conversations/${first.conversation_id}/timeline`, {
+      params: { cursor: next, limit: 200 },
+    });
+    if (data.conversation_id !== first.conversation_id || data.high_watermark !== first.high_watermark) throw new Error('timeline_snapshot_boundary_mismatch');
+    working = applyTimelinePage(working, data);
+    next = data.next_cursor;
+  }
+  return getPilotPresentation(first.conversation_id, timelinePresentation(working));
+}

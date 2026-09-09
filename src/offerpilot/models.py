@@ -2059,6 +2059,11 @@ class PilotExecution(Base):
     state: Mapped[str] = mapped_column(String, nullable=False)
     renewed_at_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     lease_until_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    protocol: Mapped[str] = mapped_column(String, nullable=False, default="legacy", server_default="legacy")
+    runtime_epoch: Mapped[str | None] = mapped_column(String, nullable=True)
+    submission_key: Mapped[str | None] = mapped_column(String, nullable=True)
+    submission_request_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    source_refs_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
 
 
 class PilotInterruptCommand(Base):
@@ -2697,12 +2702,12 @@ class AgentContextSnapshot(Base):
             name="ck_agent_context_key_uuid",
         ),
         CheckConstraint(
-            "manifest_schema_version IN (1, 2)",
+            "manifest_schema_version IN (1, 2, 3)",
             name="ck_agent_context_manifest_schema",
         ),
         CheckConstraint(
             "(manifest_schema_version = 1 AND length(CAST(manifest_json AS BLOB)) <= 16384) "
-            "OR (manifest_schema_version = 2 AND length(CAST(manifest_json AS BLOB)) <= 65536)",
+            "OR (manifest_schema_version IN (2, 3) AND length(CAST(manifest_json AS BLOB)) <= 65536)",
             name="ck_agent_context_manifest_size",
         ),
         CheckConstraint(

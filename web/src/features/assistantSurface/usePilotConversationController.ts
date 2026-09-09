@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useEffect,
   useMemo,
   useReducer,
   useRef,
@@ -8,7 +9,7 @@ import {
 } from 'react';
 import type { ConfirmationInput } from '@/services/chat';
 import type { ChatSubmission } from '@/services/chatSubmission';
-import { forgetPendingStart } from '@/services/chatSubmission';
+import { settlePendingStartForExecution } from '@/services/chatSubmission';
 import {
   streamChat as streamChatService,
   streamConfirmAction as streamConfirmActionService,
@@ -35,6 +36,7 @@ import { pageContextKey } from '@/lib/pilotPageContext';
 import { usePilotPresentation } from '@/features/actionPresentation/usePilotPresentation';
 import type { AssistantTaskState } from './assistantSurfaceReducer';
 import { sameExecution, usePilotExecution } from './usePilotExecution';
+import { getRuntimeRequestExecution, observeRuntimeTurn } from '@/services/pilotRuntime';
 
 export type SendMessageOutcome = 'sent' | 'stopped' | 'failed' | 'ignored';
 
@@ -51,6 +53,7 @@ export interface ContextChangeNotice {
 }
 
 export interface ActiveConversationRequest extends ActiveConversationRequestOwner {
+  protocol?: 'pilot-runtime-v1';
   controller: AbortController;
   runId?: string;
   execution?: PilotExecution;
@@ -144,7 +147,7 @@ const unavailableActions: PilotConversationActions = {
   clearActiveContext: async () => undefined,
 };
 
-export function usePilotConversationControllerState() {
+export function usePilotConversationControllerState(observationEnabled = true) {
   const [turns, setTurns] = useState<UITurn[]>([]);
   const [conversationId, setConversationId] = useState<number>();
   const [pending, setPending] = useState<PendingAction | null>(null);
@@ -171,7 +174,7 @@ export function usePilotConversationControllerState() {
   const [contextChangeNotice, setContextChangeNotice] = useState<ContextChangeNotice | null>(null);
   const [requestContextSnapshot, setRequestContextSnapshot] = useState<PilotPageContext>();
   const [attachments, setAttachments] = useState<PilotContextAttachment[]>([]);
-  const { displayTurns, presentationSnapshot, refreshPresentation, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, loading, confirmPhase === 'error');
+  const { displayTurns, presentationSnapshot, refreshPresentation, acceptRuntimeSnapshot, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, loading, confirmPhase === 'error');
 
   const activeRequestRef = useRef<ActiveConversationRequest | null>(null);
   const streamingAssistantActiveRef = useRef(false);
@@ -207,16 +210,37 @@ export function usePilotConversationControllerState() {
 
   const stoppedExecution = useCallback((target: PilotExecution) => {
     const request = activeRequestRef.current;
-    if (request?.execution && sameExecution(request.execution, target)) {
-      if (request.requestId && target.state !== 'result_unknown') forgetPendingStart(request.requestId);
+    const endedNormally = ['completed', 'waiting_confirmation', 'failed', 'stopped', 'interrupted'].includes(target.state);
+    // Persisted terminal state also releases a subscriber whose network stream
+    // stalled. Recovery never relies on that stream delivering its final frame.
+    const ownsRequest = Boolean(request?.execution && sameExecution(request.execution, target));
+    settlePendingStartForExecution(target, ownsRequest ? request?.requestId : undefined);
+    if (request && ownsRequest) {
       request.controller.abort();
       activeRequestRef.current = null;
       setLoading(activeConversationSelectionRef.current !== null);
       taskStateReporterRef.current?.('idle', target.conversation_id);
     }
+    if (endedNormally && activeConversationIdRef.current === target.conversation_id && (!request || ownsRequest)) {
+      const generation = visibleRequestGenerationRef.current;
+      void Promise.all([getConversation(target.conversation_id), listConversations(true)]).then(([messages, summaries]) => {
+        if (activeConversationIdRef.current !== target.conversation_id || activeRequestRef.current
+          || visibleRequestGenerationRef.current !== generation || activeConversationSelectionRef.current !== null) return;
+        setTurns(buildTurns(messages));
+        const nextPending = pendingActionForConversation(summaries, target.conversation_id);
+        setPending(nextPending);
+        setLastUndo(summaries.find((item) => item.id === target.conversation_id)?.last_write_undo ?? null);
+        taskStateReporterRef.current?.(nextPending ? 'waiting_confirmation' : target.state === 'failed' ? 'failed' : 'completed', target.conversation_id);
+      }).catch(() => {
+        if (activeConversationIdRef.current === target.conversation_id && visibleRequestGenerationRef.current === generation
+          && !activeRequestRef.current) setLastError('任务已结束，暂时无法读取记录，请重新打开对话。');
+      });
+    }
     void refreshPresentation();
   }, [refreshPresentation]);
   const executionControl = usePilotExecution(conversationId, stoppedExecution);
+  const observedExecutionRef = useRef(executionControl.execution);
+  observedExecutionRef.current = executionControl.execution;
 
   showArchivedRef.current = showArchived;
   activeConversationIdRef.current = conversationId;
@@ -431,20 +455,23 @@ export function usePilotConversationControllerState() {
   ) => {
     ensureOwnedRequest(request);
     request.visibleGeneration = visibleRequestGenerationRef.current;
-    request.requestId = options.requestId;
+    request.protocol = 'pilot-runtime-v1';
+    request.requestId = options.requestId ?? crypto.randomUUID();
     return streamChatService(message, activeConversationId, context, {
-      ...options,
+      ...options, requestId: request.requestId,
+      onSnapshot: (page) => acceptRuntimeSnapshot(page, () => activeRequestRef.current === request
+        && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current),
       onAccepted: (identity) => {
         if (activeRequestRef.current === request && identity.executionGeneration) {
           request.execution = { turn_id: identity.turnId, conversation_id: identity.conversationId,
-            execution_generation: identity.executionGeneration, state: 'running' };
+            execution_generation: identity.executionGeneration, state: 'running', protocol: identity.protocol };
           executionControl.acceptExecution(request.execution);
         }
         options.onAccepted?.(identity);
       },
       signal: request.controller.signal,
     });
-  }, [ensureOwnedRequest, executionControl.acceptExecution]);
+  }, [ensureOwnedRequest, executionControl.acceptExecution, acceptRuntimeSnapshot]);
 
   const streamConfirmationRequest = useCallback((
     request: ActiveConversationRequest,
@@ -454,20 +481,32 @@ export function usePilotConversationControllerState() {
   ) => {
     ensureOwnedRequest(request);
     request.visibleGeneration = visibleRequestGenerationRef.current;
+    request.protocol = 'pilot-runtime-v1';
+    request.requestId = options.requestId ?? crypto.randomUUID();
     return streamConfirmActionService(activeConversationId, input, {
-      ...options,
+      ...options, requestId: request.requestId,
+      onSnapshot: (page) => acceptRuntimeSnapshot(page, () => activeRequestRef.current === request
+        && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current),
+      onAccepted: (identity) => {
+        if (activeRequestRef.current === request && identity.executionGeneration) {
+          request.execution = { turn_id: identity.turnId, conversation_id: identity.conversationId,
+            execution_generation: identity.executionGeneration, state: 'running', protocol: identity.protocol };
+          executionControl.acceptExecution(request.execution);
+        }
+        options.onAccepted?.(identity);
+      },
       onEvent: (event) => {
         if (activeRequestRef.current === request && event.turn_id && event.execution_generation
           && event.conversation_id === activeConversationId) {
           request.execution = { turn_id: event.turn_id, conversation_id: activeConversationId,
-            execution_generation: event.execution_generation, state: 'running' };
+            execution_generation: event.execution_generation, state: 'running', protocol: request.execution?.protocol };
           executionControl.acceptExecution(request.execution);
         }
         options.onEvent?.(event);
       },
       signal: request.controller.signal,
     });
-  }, [ensureOwnedRequest, executionControl.acceptExecution]);
+  }, [ensureOwnedRequest, executionControl.acceptExecution, acceptRuntimeSnapshot]);
 
   const stopActiveRequest = useCallback((options: { silent?: boolean } = {}) => {
     if (!options.silent) {
@@ -482,6 +521,62 @@ export function usePilotConversationControllerState() {
     taskStateReporterRef.current?.('idle');
     return true;
   }, [executionControl.stop, executionControl.canStop]);
+
+  useEffect(() => {
+    if (!observationEnabled && (activeRequestRef.current?.protocol === 'pilot-runtime-v1'
+      || activeRequestRef.current?.execution?.protocol === 'pilot-runtime-v1')) {
+      stopActiveRequest({ silent: true });
+    }
+  }, [observationEnabled, stopActiveRequest]);
+
+  useEffect(() => {
+    const target = executionControl.execution;
+    if (!observationEnabled || !target || target.protocol !== 'pilot-runtime-v1' || target.state !== 'running'
+      || activeRequestRef.current || target.conversation_id !== conversationId) return;
+    const subscription = new AbortController();
+    void observeRuntimeTurn(target, {
+      signal: subscription.signal,
+      onSnapshot: (page) => acceptRuntimeSnapshot(page, () => !subscription.signal.aborted
+        && sameExecution(observedExecutionRef.current, target) && !activeRequestRef.current),
+      onEvent: (event) => {
+        if (event.event !== 'assistant_delta') void refreshPresentation();
+      },
+    }).then(() => {
+      if (!subscription.signal.aborted) stoppedExecution({ ...target, state: 'completed' });
+    }).catch(() => {
+      // Durable polling remains available when transient observation fails.
+    });
+    return () => subscription.abort();
+  }, [observationEnabled, conversationId, executionControl.execution, loading, refreshPresentation, acceptRuntimeSnapshot, stoppedExecution]);
+
+  useEffect(() => {
+    if (!observationEnabled || !loading) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const lookup = new AbortController();
+    const read = async () => {
+      const request = activeRequestRef.current;
+      if (!request || request.execution || request.protocol !== 'pilot-runtime-v1' || !request.requestId) return;
+      try {
+        const target = await getRuntimeRequestExecution(request.requestId, lookup.signal);
+        if (cancelled || !target || activeRequestRef.current !== request || request.execution) return;
+        if (request.conversationId !== undefined && request.conversationId !== target.conversation_id) return;
+        request.execution = target;
+        executionControl.acceptExecution(target);
+        request.controller.abort();
+        activeRequestRef.current = null;
+        setLoading(activeConversationSelectionRef.current !== null);
+        if (request.visibleGeneration === visibleRequestGenerationRef.current && activeConversationIdRef.current === undefined) {
+          activeConversationIdRef.current = target.conversation_id;
+          setConversationId(target.conversation_id);
+        }
+        if (target.state !== 'running') stoppedExecution(target);
+      } catch { /* Missing proof never permits another POST or guessing a turn. */ }
+      finally { if (!cancelled && activeRequestRef.current === request) timer = setTimeout(() => void read(), 2000); }
+    };
+    timer = setTimeout(() => void read(), 2000);
+    return () => { cancelled = true; clearTimeout(timer); lookup.abort(); };
+  }, [observationEnabled, loading, executionControl.acceptExecution, stoppedExecution]);
 
   const sendMessage = useCallback((text: string) => executionControl.execution?.state === 'running'
     ? Promise.resolve('ignored' as const) : actionsRef.current.sendMessage(text), [executionControl.execution]);

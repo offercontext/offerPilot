@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from offerpilot.context_projector.contracts import FrozenMessage, ProjectionError, canonical_json
 
-BUDGET_POLICY_VERSION = "model-surface-budget-v1"
+BUDGET_POLICY_VERSION = "model-surface-budget-v2"
 COMPAT_CONTEXT_WINDOW = 32_768
 DEFAULT_OUTPUT_RESERVE = 4_096
 PROVIDER_FRAMING_RESERVE = 1_024

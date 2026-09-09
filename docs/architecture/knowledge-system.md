@@ -454,6 +454,9 @@ V1 发布并获得人工使用反馈后，再决定是否提供 Brief。优先�
 
 ### 16.3 Knowledge V2：内部消费链路
 
+Pilot 的有界 Note/Evidence 消费与版本失效边界见 [ADR-0011](decisions/0011-bound-optional-context-sources.md)。
+实现与验收状态以关联交付计划为准，不改变本节的长期领域约束。
+
 - Captured Source 原子捕获。
 - Note Preview 的 HITL 确认。
 - Knowledge Note 版本、归档和 Evidence 引用。

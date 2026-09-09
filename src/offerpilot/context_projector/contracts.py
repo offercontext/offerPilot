@@ -19,10 +19,11 @@ CONTRIBUTOR_ORDER = (
     "request_page_context",
     "request_attachments",
     "conversation_history",
-    "current_request",
+    "confirmed_readiness",
     "confirmed_memory",
     "knowledge_context",
     "older_conversation_summary",
+    "current_request",
 )
 
 _DIAGNOSTIC_KEYS = frozenset(

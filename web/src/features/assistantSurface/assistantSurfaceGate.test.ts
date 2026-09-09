@@ -22,6 +22,7 @@ const ALLOWLIST = [
 const CANONICAL_ALLOWLIST_JSON = JSON.stringify(ALLOWLIST);
 const ALLOWLIST_SHA256 = 'b1698f9b89b23effcb6adc604c5d4457a26a36c6d2207b4bbe49c70cae290eb8';
 const CONTROLLER_PATH = 'web/src/features/assistantSurface/usePilotConversationController.ts';
+const EXECUTION_CONTROL_PATH = 'web/src/features/assistantSurface/usePilotExecution.ts';
 const DOC_PATHS = ALLOWLIST.filter((path) => path.startsWith('docs/'));
 
 type SourceEntry = {
@@ -149,7 +150,10 @@ describe('Haru Desktop Surface Completion gate', () => {
     const serviceImportFiles = sources
       .filter(({ text }) => /from\s+['"]@\/services\/chat['"]/.test(text))
       .map(({ relativePath }) => relativePath);
-    expect(serviceImportFiles).toEqual([CONTROLLER_PATH]);
+    expect(serviceImportFiles.sort()).toEqual([CONTROLLER_PATH, EXECUTION_CONTROL_PATH].sort());
+    const executionControl = sources.find(({ relativePath }) => relativePath === EXECUTION_CONTROL_PATH);
+    expect(executionControl?.text).toMatch(/import\s*\{\s*getPilotExecution,\s*interruptPilotExecution\s*\}\s*from/);
+    expect(executionControl?.text).not.toMatch(/\b(?:streamChat|streamConfirmAction|sendChat|confirmAction)\b/);
 
     const controller = sources.find(({ relativePath }) => relativePath === CONTROLLER_PATH);
     expect(controller).toBeDefined();
@@ -158,7 +162,6 @@ describe('Haru Desktop Surface Completion gate', () => {
 
     const nonController = sources.filter(({ relativePath }) => relativePath !== CONTROLLER_PATH);
     const transportPatterns = [
-      /from\s+['"]@\/services\/chat['"]/,
       /\bstream(?:Chat|ConfirmAction)\b/,
       /\bnew\s+EventSource\b/,
       /\bfetch\s*\(/,
@@ -166,6 +169,7 @@ describe('Haru Desktop Surface Completion gate', () => {
       /\.getReader\s*\(/,
     ];
     for (const source of nonController) {
+      if (source.relativePath !== EXECUTION_CONTROL_PATH) expect(source.text).not.toMatch(/from\s+['"]@\/services\/chat['"]/);
       for (const pattern of transportPatterns) {
         expect(source.text, `${source.relativePath} must not own Chat transport`).not.toMatch(pattern);
       }
@@ -215,7 +219,7 @@ describe('Haru Desktop Surface Completion gate', () => {
       ...readProductionSources(root, 'web/src/features/pilotMascot'),
     ];
     const constructionSites = surfaceSources
-      .filter(({ text }) => /=\s*usePilotConversationControllerState\s*\(\)/.test(text))
+      .filter(({ text }) => /=\s*usePilotConversationControllerState\s*\(/.test(text))
       .map(({ relativePath }) => relativePath);
     expect(constructionSites).toEqual(['web/src/features/assistantSurface/AssistantSurfaceProvider.tsx']);
 

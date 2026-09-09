@@ -1,3 +1,4 @@
+import KnowledgeNoteManager from './KnowledgeNoteManager';
 import type { ReactNode } from 'react';
 import InterviewStoryLibraryView, { type InterviewStoryOpenDraft } from './InterviewStoryLibraryView';
 import {
@@ -74,6 +75,8 @@ export default function ExperienceMaterialsView({
         <h2>经历素材</h2>
         <p>已确认的经历故事和面试片段会保留在这里，来源变化时仍保留当时确认的内容。</p>
       </header>
+
+      <KnowledgeNoteManager />
 
       <section aria-label="已确认面试片段" data-testid="confirmed-capture-list">
         <h3>已确认面试片段</h3>

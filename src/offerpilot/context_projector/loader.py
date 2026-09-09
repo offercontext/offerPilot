@@ -22,6 +22,13 @@ POOL_SIZE = 4
 FETCH_BATCH_SIZE = 32
 
 
+class SourceTemporarilyUnavailable(ProjectionError):
+    """Only a bounded wait, deadline or transient SQLite lock interrupted a read."""
+
+    def __init__(self) -> None:
+        super().__init__("source_load_failed")
+
+
 class _WriterFairGate:
     def __init__(self) -> None:
         self._condition = threading.Condition()
@@ -35,7 +42,7 @@ class _WriterFairGate:
             while self._writer_active or self._waiting_writers:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0 or not self._condition.wait(remaining):
-                    raise ProjectionError("source_load_failed")
+                    raise SourceTemporarilyUnavailable()
             self._active_readers += 1
         try:
             yield
@@ -52,7 +59,7 @@ class _WriterFairGate:
                 while self._writer_active or self._active_readers:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0 or not self._condition.wait(remaining):
-                        raise ProjectionError("source_load_failed")
+                        raise SourceTemporarilyUnavailable()
                 self._writer_active = True
             finally:
                 self._waiting_writers -= 1
@@ -117,7 +124,7 @@ class WarmConnectionPool:
                 while self._reservation_tickets[0] != ticket or self._queue.empty():
                     remaining = work_deadline - time.monotonic()
                     if remaining <= 0 or not self._reservation_condition.wait(remaining):
-                        raise ProjectionError("source_load_failed")
+                        raise SourceTemporarilyUnavailable()
                 self._reservation_tickets.popleft()
                 connection = self._queue.get_nowait()
                 self._reservation_condition.notify_all()
@@ -143,7 +150,10 @@ class WarmConnectionPool:
                 replacement = sqlite3.connect(
                     self.database, check_same_thread=False, isolation_level=None
                 )
-                replacement.execute("PRAGMA journal_mode=DELETE")
+                # Journal mode belongs to the database and was established at
+                # pool startup. Reissuing this write-capable PRAGMA while a
+                # caller holds an exclusive lock can lose the replacement slot
+                # and exceed the read deadline during cleanup.
                 self._queue.put_nowait(replacement)
         with self._reservation_condition:
             self._reservation_condition.notify_all()
@@ -165,7 +175,7 @@ def fetch_rows(
     rows: list[tuple[object, ...]] = []
     while True:
         if deadline is not None and time.monotonic() >= deadline:
-            raise ProjectionError("source_load_failed")
+            raise SourceTemporarilyUnavailable()
         batch = cursor.fetchmany(FETCH_BATCH_SIZE)
         if not batch:
             break
@@ -210,10 +220,10 @@ class ContextSourceLoader(Generic[T, R]):
                 raw = read(lease.connection)
                 lease.connection.rollback()
                 if time.monotonic() >= work_deadline:
-                    raise ProjectionError("source_load_failed")
+                    raise SourceTemporarilyUnavailable()
                 frozen = freeze(raw)
                 if time.monotonic() >= work_deadline:
-                    raise ProjectionError("source_load_failed")
+                    raise SourceTemporarilyUnavailable()
                 valid = True
             except BaseException as exc:
                 try:
@@ -224,6 +234,12 @@ class ContextSourceLoader(Generic[T, R]):
                     raise
                 if isinstance(exc, ProjectionError):
                     raise
+                sqlite_code = getattr(exc, "sqlite_errorcode", None)
+                if isinstance(exc, sqlite3.OperationalError) and type(sqlite_code) is int and (sqlite_code & 0xFF) in {
+                    getattr(sqlite3, "SQLITE_BUSY", 5), getattr(sqlite3, "SQLITE_LOCKED", 6),
+                    getattr(sqlite3, "SQLITE_INTERRUPT", 9),
+                }:
+                    raise SourceTemporarilyUnavailable() from exc
                 raise ProjectionError("source_load_failed") from exc
             finally:
                 lease.finished_event.set()
@@ -239,7 +255,7 @@ class ContextSourceLoader(Generic[T, R]):
                     valid = False
                 self._pool.release(lease, valid=valid)
         if time.monotonic() > total_deadline:
-            raise ProjectionError("source_load_failed")
+            raise SourceTemporarilyUnavailable()
         return frozen
 
     @staticmethod

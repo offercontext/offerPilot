@@ -71,8 +71,14 @@ def _digest(value: object) -> str:
 
 
 class PilotTimelineRepository:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        *,
+        title_from_message: Callable[[str], str] | None = None,
+    ) -> None:
         self.session_factory = session_factory
+        self._title_from_message = title_from_message
 
     def admit(
         self,
@@ -139,7 +145,11 @@ class PilotTimelineRepository:
                 )
                 _require_active_application(session, scope)
                 conversation = Conversation(
-                    title=message[:40], title_source="fallback",
+                    title=(
+                        self._title_from_message(message)
+                        if self._title_from_message is not None else message[:40]
+                    ),
+                    title_source="fallback",
                     context_type=scope.context_type, context_ref=scope.context_ref,
                     mode=scope.mode, scope_revision=0,
                 )

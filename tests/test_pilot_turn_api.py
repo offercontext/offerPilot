@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from offerpilot.ai.types import Assistant
 from offerpilot.api import create_app
-from offerpilot.pilot_timeline import PilotTimelineRepository
+from offerpilot.pilot_control import PilotControlRepository
 from tests.test_action_presentation import _Model as ActionModel
 
 
@@ -114,16 +114,16 @@ def test_post_admission_initialization_failure_has_identity_and_never_reexecutes
 
 
 def test_failed_terminal_write_retries_the_known_result_not_interrupted(tmp_path, monkeypatch):
-    original = PilotTimelineRepository.finish
+    original = PilotControlRepository.finish
     attempted = []
 
-    def finish(self, turn_id, state):
+    def finish(self, lease, state):
         attempted.append(state)
         if len(attempted) == 1:
             raise RuntimeError('temporary display write failure')
-        original(self, turn_id, state)
+        original(self, lease, state)
 
-    monkeypatch.setattr(PilotTimelineRepository, 'finish', finish)
+    monkeypatch.setattr(PilotControlRepository, 'finish', finish)
     with TestClient(create_app(data_dir=tmp_path, chat_model=CountingModel())) as client:
         result = client.post('/api/chat', json={'request_id': str(uuid4()), 'message': '完整回答'}).json()
         assert attempted == ['completed', 'completed']

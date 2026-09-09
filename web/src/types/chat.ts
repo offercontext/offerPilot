@@ -172,10 +172,13 @@ export interface PilotTurnState {
 }
 
 export interface PilotExecution {
+  protocol?: 'pilot-runtime-v1';
   turn_id: string;
   conversation_id: number;
   execution_generation: number;
   state: 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'interrupted' | 'stopped' | 'result_unknown';
+  /** Exact admission proof used to settle a marker when the accepted frame was lost. */
+  submission_request_id?: string | null;
 }
 
 export interface PilotInterruptResult {

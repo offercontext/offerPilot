@@ -50,8 +50,8 @@ const AssistantSurfaceContext = createContext<AssistantSurfaceContextValue | nul
 const PilotConversationContext = createContext<PilotConversationController | null>(null);
 
 export function AssistantSurfaceProvider({ children }: { children: ReactNode }) {
-  const controller = usePilotConversationControllerState();
   const [state, dispatch] = useReducer(assistantSurfaceReducer, initialAssistantSurfaceState);
+  const controller = usePilotConversationControllerState(state.surface !== 'mascot');
   const surfaceRef = useRef(state.surface);
   const [conversationRequest, setConversationRequest] = useState<AssistantConversationRequest>();
   const nextConversationRequestKeyRef = useRef(0);

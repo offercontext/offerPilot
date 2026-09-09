@@ -316,7 +316,7 @@ def test_contributor_diagnostics_are_closed_and_bounded() -> None:
     "deferred_name",
     ("confirmed_memory", "knowledge_context", "older_conversation_summary"),
 )
-def test_plain_ready_contributor_cannot_enable_deferred_agent_context(
+def test_plain_ready_contributor_requires_controlled_source(
     deferred_name: str,
 ) -> None:
     values = list(contributors())
@@ -327,7 +327,7 @@ def test_plain_ready_contributor_cannot_enable_deferred_agent_context(
         (frozen("system", "synthetic future context"),),
     )
 
-    with pytest.raises(ProjectionError, match="deferred_contributor_not_disabled"):
+    with pytest.raises(ProjectionError, match="optional_contributor_source_required"):
         ModelSurfaceProjector().project(
             ProjectionRequest(
                 model_call_id="deferred-context-must-remain-disabled",
@@ -1080,7 +1080,7 @@ def test_manifest_v2_is_canonical_private_and_validated_by_shared_entrypoint() -
         signals=("trusted_page",),
     )
     validated = validate_context_manifest_json(prepared.manifest_json)
-    assert validated["manifest_schema_version"] == 2
+    assert validated["manifest_schema_version"] == 3
     assert "private-provider" not in prepared.manifest_json
     assert "logical_input_fingerprint" not in prepared.manifest_json
 
@@ -1438,7 +1438,7 @@ def test_maximal_semantic_manifest_reaches_every_array_limit_under_cap() -> None
     manifest = validate_surface_manifest_v2(prepared.manifest_json)
     assert len(prepared.manifest_json.encode("utf-8")) < 65_536
     assert len(manifest["providers"]) == 8
-    assert len(manifest["contributors"]) == 10
+    assert len(manifest["contributors"]) == len(CONTRIBUTOR_ORDER)
     assert len(manifest["history_groups"]) == 32
     assert len(manifest["tools"]) == 26
     assert len(manifest["sources"]) == 8
@@ -1694,7 +1694,7 @@ def test_migration_0027_records_and_database_accepts_v2_limit(tmp_path: Path) ->
     assert "65536" in str(sql)
 
 
-def test_real_chat_adapter_uses_projected_surface_and_persists_v2_manifest(
+def test_real_chat_adapter_uses_projected_surface_and_persists_v3_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import offerpilot.ai.client as ai_client
@@ -1724,12 +1724,53 @@ def test_real_chat_adapter_uses_projected_surface_and_persists_v2_manifest(
     assert events[-1].event_type == "segment.finished"
     snapshots = [snapshot for snapshot in snapshots if snapshot.snapshot_kind == "model_input"]
     assert snapshots
-    assert snapshots[0].manifest_schema_version == 2
+    assert snapshots[0].manifest_schema_version == 3
     manifest = validate_surface_manifest_v2(snapshots[0].manifest_json)
     assert manifest["tools"]
     contributor_statuses = {
         item["name"]: item["status"] for item in manifest["contributors"]
     }
-    assert contributor_statuses["confirmed_memory"] == "disabled"
+    assert contributor_statuses["confirmed_memory"] == "not_applicable"
     assert contributor_statuses["knowledge_context"] == "disabled"
     assert contributor_statuses["older_conversation_summary"] == "disabled"
+
+@pytest.mark.parametrize("source_name", ["confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"])
+def test_optional_sources_share_provider_budget_and_preserve_current_request(source_name: str) -> None:
+    from offerpilot.context_sources.contracts import ContributorPolicy
+    from offerpilot.context_sources.loader import OptionalSources, _contributor
+    optional, source = _contributor(source_name, ContributorPolicy(enabled=True), [{"text": "可选参考" * 30}])
+    assert source is not None
+    values = list(contributors("当前请求必须保留"))
+    values[CONTRIBUTOR_ORDER.index(source_name)] = optional
+    signals = ToolSelectionSignals(current_request="当前请求必须保留")
+    request = ProjectionRequest(model_call_id="optional-budget", contributors=tuple(values), history=(),
+        tool_signals=signals, provider_budgets=(ProviderBudget(),), selection=_selection_for(signals),
+        sources=(source,), optional_sources=OptionalSources((optional,), (source,), (("user", "older"),) if source_name == "older_conversation_summary" else ()))
+    surface = ModelSurfaceProjector().project(replace(request, history=(frozen("user", "older"),) if source_name == "older_conversation_summary" else ()))
+    assert any("可选参考" in message.content for message in surface.messages)
+    assert surface.messages[-1].content == "当前请求必须保留"
+    assert surface.audit.estimated_input_units <= ProviderBudget().input_limit
+    values[CONTRIBUTOR_ORDER.index(source_name)] = ContributorResult(source_name, "disabled")
+    without = ModelSurfaceProjector().project(replace(request, contributors=tuple(values), optional_sources=None, sources=()))
+    assert all("可选参考" not in message.content for message in without.messages)
+    assert without.tools == surface.tools
+
+
+def test_summary_replaces_only_matching_plain_prefix_and_falls_back_on_mismatch() -> None:
+    from offerpilot.context_sources.contracts import ContributorPolicy
+    from offerpilot.context_sources.loader import OptionalSources, _contributor
+    optional, source = _contributor("older_conversation_summary", ContributorPolicy(enabled=True), [{"excerpt": "历史摘要"}])
+    values = list(contributors("当前问题"))
+    values[CONTRIBUTOR_ORDER.index("older_conversation_summary")] = optional
+    signals = ToolSelectionSignals(current_request="当前问题")
+    request = ProjectionRequest(model_call_id="summary-dedup", contributors=tuple(values),
+        history=(frozen("user", "待替换的完整原文"), frozen("user", "近期原文")),
+        tool_signals=signals, provider_budgets=(ProviderBudget(),), selection=_selection_for(signals),
+        sources=(source,), optional_sources=OptionalSources((optional,), (source,), (("user", "待替换的完整原文"),)))
+    result = ModelSurfaceProjector().project(request)
+    assert any("历史摘要" in message.content for message in result.messages)
+    assert all(message.content != "待替换的完整原文" for message in result.messages)
+    assert any(message.content == "近期原文" for message in result.messages)
+    fallback = ModelSurfaceProjector().project(replace(request, history=(frozen("user", "来源已编辑"),)))
+    assert all("历史摘要" not in message.content for message in fallback.messages)
+    assert any(message.content == "来源已编辑" for message in fallback.messages)

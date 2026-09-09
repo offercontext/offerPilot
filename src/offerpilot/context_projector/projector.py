@@ -36,6 +36,7 @@ from offerpilot.context_projector.history import (
     validate_message_integrity,
 )
 from offerpilot.context_projector.selector import ToolSelectionResult, ToolSelectionSignals
+from offerpilot.context_sources.loader import OptionalSources
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ class ProjectionRequest:
     selection: ToolSelectionResult
     sources: tuple[FrozenSource, ...] = ()
     provider_surface_build_identity: object | None = None
+    optional_sources: OptionalSources | None = None
 
 
 class ModelSurfaceProjector:
@@ -61,6 +63,10 @@ class ModelSurfaceProjector:
         if any(len(source.chunks) > 32 for source in request.sources):
             raise ProjectionError("source_chunk_limit_exceeded")
         contributors = self._validate_contributors(request.contributors)
+        trusted_optional = {item.name: item for item in request.optional_sources.contributors} if request.optional_sources else {}
+        for name in ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"):
+            if contributors[name].status == "ready" and trusted_optional.get(name) is not contributors[name]:
+                raise ProjectionError("optional_contributor_source_required")
         selection = request.selection
         if type(selection) is not ToolSelectionResult:
             raise ProjectionError("tool_selection_result_required")
@@ -94,13 +100,27 @@ class ModelSurfaceProjector:
             )
             if baseline_remainder >= 0:
                 raise ProjectionError("mandatory_tool_result_over_budget")
-        shares, shared_pool = optional_shares(remainder)
+        optional_names = ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary")
+        history = request.history
+        covered = request.optional_sources.covered_history if request.optional_sources else ()
+        summary_messages = self._messages_for(contributors, "older_conversation_summary")
+        if summary_messages:
+            prefix = history[:len(covered)]
+            if not covered or tuple((message.role, message.content) for message in prefix) != covered or any(message.tool_calls or message.tool_call_id or message.provider_blocks_json != b"{}" for message in prefix) or (len(history) > len(covered) and history[len(covered)].role != "user"):
+                contributors["older_conversation_summary"] = ContributorResult("older_conversation_summary", "unavailable")
+                summary_messages = ()
+        optional_items = tuple(message for name in optional_names for message in self._messages_for(contributors, name))
+        selected_optional, _, unused_optional = self._fit_items(optional_items, max(0, remainder // 4), self._message_cost)
+        optional_used = max(0, remainder // 4) - unused_optional
+        if summary_messages and all(message in selected_optional for message in summary_messages):
+            history = history[len(covered):]
+        shares, shared_pool = optional_shares(remainder - optional_used)
 
         scope_messages = self._messages_for(contributors, "current_scope") + self._messages_for(
             contributors, "request_page_context"
         )
         attachment_messages = self._messages_for(contributors, "request_attachments")
-        groups = group_history(request.history, legacy_orphan_compat=True)
+        groups = group_history(history, legacy_orphan_compat=True)
         ranked_groups = rank_history(groups, current_request=request.tool_signals.current_request)
         selected_scope, remaining_scope, unused_scope = self._fit_items(
             scope_messages, shares["scope"], self._message_cost
@@ -140,7 +160,9 @@ class ModelSurfaceProjector:
         # Contributor order controls assembly. History is inserted at its declared slot.
         assembled: list[FrozenMessage] = []
         for name in CONTRIBUTOR_ORDER:
-            if name == "current_scope":
+            if name in optional_names:
+                assembled.extend(message for message in self._messages_for(contributors, name) if message in selected_optional)
+            elif name == "current_scope":
                 assembled.extend(selected_scope)
             elif name == "request_page_context":
                 continue
@@ -185,7 +207,7 @@ class ModelSurfaceProjector:
             canonical_message_bytes=len(message_bytes),
             canonical_tool_bytes=len(tool_bytes),
             truncated=(
-                len(selected_scope) != len(scope_messages)
+                len(selected_optional) != len(optional_items) or len(selected_scope) != len(scope_messages)
                 or len(selected_attachments) != len(attachment_messages)
                 or len(selected_groups) != len(groups)
             ),
@@ -221,9 +243,6 @@ class ModelSurfaceProjector:
         if tuple(item.name for item in raw) != CONTRIBUTOR_ORDER:
             raise ProjectionError("contributor_order_mismatch")
         contributors = {item.name: item for item in raw}
-        for disabled in ("confirmed_memory", "knowledge_context", "older_conversation_summary"):
-            if contributors[disabled].status != "disabled":
-                raise ProjectionError("deferred_contributor_not_disabled")
         for mandatory in ("static_policy", "current_request"):
             if contributors[mandatory].status != "ready" or not contributors[mandatory].messages:
                 raise ProjectionError("mandatory_contributor_unavailable")

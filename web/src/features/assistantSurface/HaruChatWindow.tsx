@@ -8,11 +8,14 @@ import {
 } from 'react';
 import {
   ArrowUpOutlined,
+  BellOutlined,
   CloseOutlined,
   ExpandAltOutlined,
   SendOutlined,
   StopOutlined,
 } from '@ant-design/icons';
+import { Modal } from 'antd';
+import ProactiveInbox from '@/components/ProactiveInbox';
 import { useAssistantSurface, usePilotConversationController } from './AssistantSurfaceProvider';
 import { recentConversationTurns } from './assistantPresentation';
 import CompactMessageRenderer from './CompactMessageRenderer';
@@ -70,9 +73,10 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
   const endRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const closingRef = useRef(false);
+  const [inboxOpen, setInboxOpen] = useState(false);
 
   useEffect(() => {
-    if (surface.surface !== 'haru_chat') return;
+    if (surface.surface !== 'haru_chat') { setInboxOpen(false); return; }
     closingRef.current = false;
     if (controller.hasKey && !controller.pending) inputRef.current?.focus();
     else dialogRef.current?.focus();
@@ -172,7 +176,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
         direction: 'left-up' as const,
       };
 
-  return (
+  return (<>
     <section
       id="haru-chat-window"
       ref={dialogRef}
@@ -203,6 +207,9 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
           </span>
         </div>
         <div className={styles.headerActions}>
+          <button type="button" aria-label="查看主动提醒与草稿" onClick={() => setInboxOpen(true)}>
+            <BellOutlined />
+          </button>
           <button
             type="button"
             aria-label="展开到 Pilot 工作区"
@@ -342,7 +349,13 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
           </button>
         )}
         {controller.executionControl.stopMessage && <p role="status">{controller.executionControl.stopMessage}</p>}
+        {controller.executionControl.execution?.protocol === 'pilot-runtime-v1'
+          && controller.executionControl.execution.state === 'running'
+          && <p role="status">关闭窗口后任务会继续；需要终止时，请点击停止。</p>}
       </footer>
     </section>
-  );
+    <Modal open={inboxOpen} title="主动提醒与草稿" onCancel={() => setInboxOpen(false)} footer={null} width={720} destroyOnClose>
+      <ProactiveInbox />
+    </Modal>
+  </>);
 }

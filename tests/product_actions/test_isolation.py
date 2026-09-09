@@ -59,7 +59,7 @@ def test_product_action_modules_are_isolated_from_agent_provider_legacy_chat_and
         "repository.py",
     }
     assert task3_modules <= present_modules
-    assert present_modules <= task3_modules | {"coordinator.py", "compensation.py"}
+    assert present_modules <= task3_modules | {"coordinator.py", "compensation.py", "presentation.py"}
     for path in PRODUCT_ROOT.glob("*.py"):
         imports = _imports(path)
         assert not any(

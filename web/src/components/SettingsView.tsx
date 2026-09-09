@@ -1,3 +1,7 @@
+import ContextPolicySettings from './ContextPolicySettings';
+import ConfirmedMemorySettings from './ConfirmedMemorySettings';
+import ProactiveSettings from './ProactiveSettings';
+import ProactiveInbox from './ProactiveInbox';
 import { ApiOutlined, CopyOutlined, DownloadOutlined, FileSearchOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Divider, Empty, Input, Modal, Pagination, Select, Skeleton, Space, Spin, Switch, Tag, Typography, message } from 'antd';
@@ -172,6 +176,11 @@ export default function SettingsView({
           </Space>
         </div>
       </section>
+
+      <ContextPolicySettings />
+      <ConfirmedMemorySettings />
+      <ProactiveSettings />
+      <ProactiveInbox />
 
       <section style={panelStyle} aria-labelledby="data-backup-settings-title">
         <Space align="start" size={12}>

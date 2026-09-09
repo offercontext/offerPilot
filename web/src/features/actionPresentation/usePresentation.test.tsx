@@ -3,11 +3,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { UITurn } from '@/components/ChatPanel/model';
-import type { PilotPresentationSnapshot } from './contracts';
+import type { PilotPresentationSnapshot, PilotTimelinePage } from './contracts';
 import { usePilotPresentation } from './usePilotPresentation';
 
-const api = vi.hoisted(() => ({ read: vi.fn() }));
-vi.mock('./service', () => ({ getPilotPresentation: api.read }));
+const api = vi.hoisted(() => ({ read: vi.fn(), fromPage: vi.fn() }));
+vi.mock('./service', () => ({ getPilotPresentation: api.read, getPilotPresentationFromPage: api.fromPage }));
 let root: Root;
 let host: HTMLDivElement;
 const turns: UITurn[] = [{ id: 'message:1', role: 'user', content: '原始消息' }];
@@ -26,6 +26,46 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 describe('presentation request ownership', () => {
+  it('does not apply a snapshot after its exact runtime observation is invalidated', async () => {
+    let projection!: ReturnType<typeof usePilotPresentation>;
+    function RuntimeOwner() { projection = usePilotPresentation(1, turns, null, false); return <p>{projection.displayTurns.map((turn) => turn.content).join('')}</p>; }
+    api.read.mockResolvedValueOnce(snapshot(1, '当前执行保存记录'));
+    let resolve!: (value: PilotPresentationSnapshot) => void;
+    api.fromPage.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    await act(async () => root.render(<RuntimeOwner />));
+    let valid = true;
+    let pending!: Promise<void>;
+    act(() => { pending = projection.acceptRuntimeSnapshot({ conversation_id: 1 } as PilotTimelinePage, () => valid); });
+    valid = false;
+    await act(async () => { resolve(snapshot(1, '旧代次快照')); await pending; });
+    expect(host.textContent).toBe('当前执行保存记录');
+  });
+  it('prevents an older regular read from replacing the accepted runtime snapshot', async () => {
+    let projection!: ReturnType<typeof usePilotPresentation>;
+    function RuntimeOwner() { projection = usePilotPresentation(1, turns, null, false); return <p>{projection.displayTurns.map((turn) => turn.content).join('')}</p>; }
+    let old!: (value: PilotPresentationSnapshot) => void;
+    api.read.mockImplementationOnce(() => new Promise((resolve) => { old = resolve; }));
+    api.fromPage.mockResolvedValueOnce(snapshot(1, 'Runtime 最新快照'));
+    await act(async () => root.render(<RuntimeOwner />));
+    await act(async () => projection.acceptRuntimeSnapshot({ conversation_id: 1 } as PilotTimelinePage));
+    await act(async () => old(snapshot(1, '迟到旧快照')));
+    expect(host.textContent).toBe('Runtime 最新快照');
+  });
+
+  it('rejects a late runtime snapshot after switching away and back', async () => {
+    let projection!: ReturnType<typeof usePilotPresentation>;
+    function RuntimeOwner({ id }: { id: number }) { projection = usePilotPresentation(id, turns, null, false); return <p>{projection.displayTurns.map((turn) => turn.content).join('')}</p>; }
+    api.read.mockResolvedValue(snapshot(1, '当前会话保存记录'));
+    let old!: (value: PilotPresentationSnapshot) => void;
+    api.fromPage.mockImplementationOnce(() => new Promise((resolve) => { old = resolve; }));
+    await act(async () => root.render(<RuntimeOwner id={1} />));
+    let pending!: Promise<void>;
+    act(() => { pending = projection.acceptRuntimeSnapshot({ conversation_id: 1 } as PilotTimelinePage); });
+    await act(async () => root.render(<RuntimeOwner id={2} />));
+    await act(async () => root.render(<RuntimeOwner id={1} />));
+    await act(async () => { old(snapshot(1, '失效的旧执行快照')); await pending; });
+    expect(host.textContent).toBe('当前会话保存记录');
+  });
   it('discards an old conversation response that arrives after the new one', async () => {
     let first!: (value: PilotPresentationSnapshot) => void;
     let second!: (value: PilotPresentationSnapshot) => void;

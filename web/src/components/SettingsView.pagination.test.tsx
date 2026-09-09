@@ -104,7 +104,7 @@ beforeEach(() => {
     refetch: mocks.refetchLogs,
   };
   mocks.useQuery.mockImplementation((config: { queryKey: readonly unknown[] }) =>
-    config.queryKey[0] === 'settings-summary' ? { data: undefined } : logsResult
+    config.queryKey[0] === 'runtime-logs' ? logsResult : { data: undefined, isLoading: true }
   );
   mocks.useQueryClient.mockReturnValue({ invalidateQueries: mocks.invalidateQueries });
   mocks.useMutation.mockReturnValue({ isPending: false, mutate: vi.fn() });

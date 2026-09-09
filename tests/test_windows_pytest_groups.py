@@ -59,7 +59,7 @@ def _write_group_results(result_dir: Path, *, marker_overrides: dict[str, object
 
 
 def _aggregate(result_dir: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         [
             _powershell(),
             "-NoProfile",
@@ -73,9 +73,33 @@ def _aggregate(result_dir: Path) -> subprocess.CompletedProcess[str]:
         ],
         cwd=ROOT,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
     )
+    # Windows PowerShell can format terminating errors in the local code page.
+    # Decode after capture so a reader-thread UnicodeError cannot discard stderr;
+    # escape undecodable bytes rather than hiding the diagnostic or guessing it.
+    return subprocess.CompletedProcess(
+        result.args,
+        result.returncode,
+        result.stdout.decode("utf-8", errors="backslashreplace"),
+        result.stderr.decode("utf-8", errors="backslashreplace"),
+    )
+
+
+def test_aggregate_preserves_non_utf8_powershell_error_output(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("test_windows_pytest_groups._powershell", lambda: "powershell")
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            ["powershell"], 1, b"", b"\xcb\xf9: completion marker missing\n"
+        ),
+    )
+
+    result = _aggregate(tmp_path)
+
+    assert result.returncode == 1
+    assert result.stdout == ""
+    assert result.stderr == "\\xcb\\xf9: completion marker missing\n"
 
 
 def test_pytest_group_aggregate_requires_every_completion_marker(tmp_path: Path) -> None:

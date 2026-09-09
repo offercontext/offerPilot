@@ -1,6 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { applyTimelinePage, timelinePresentation } from './timeline';
-import { getPilotPresentation } from './service';
+import { getPilotPresentation, getPilotPresentationFromPage } from './service';
 import type { PilotTimelineItem, PilotTimelinePage } from './contracts';
 
 const api = vi.hoisted(() => ({ get: vi.fn() }));
@@ -25,6 +25,19 @@ function page(items: PilotTimelineItem[], high = 1, mode: 'snapshot' | 'changes'
 beforeEach(() => api.get.mockReset());
 
 describe('durable timeline merge', () => {
+  it('completes a runtime snapshot at its original watermark before reading later changes', async () => {
+    api.get.mockResolvedValueOnce({ data: page([], 1) })
+      .mockResolvedValueOnce({ data: page([item(2)], 2, 'changes') });
+    const recovered = await getPilotPresentationFromPage({ ...page([item()]), next_cursor: 'snapshot-page-2' });
+    expect(api.get.mock.calls.map((call) => call[1].params.cursor)).toEqual(['snapshot-page-2', 'checkpoint-1']);
+    expect(recovered.items[0].content).toBe('版本 2');
+  });
+
+  it('refuses snapshot pages from a different consistency boundary', async () => {
+    api.get.mockResolvedValueOnce({ data: page([], 2) });
+    await expect(getPilotPresentationFromPage({ ...page([item()]), next_cursor: 'snapshot-page-2' }))
+      .rejects.toThrow('timeline_snapshot_boundary_mismatch');
+  });
   it('uses monotonic revision and retains tombstones against delayed older updates', () => {
     const first = applyTimelinePage(null, page([item()]));
     const newer = applyTimelinePage(first, page([item(3)], 3, 'changes'));

@@ -27,6 +27,68 @@ def admit(turns, conversation_id=0):
     return turns.admit(str(uuid4()), {'message': '测试执行', 'conversation_id': conversation_id})
 
 
+def _observe_checkin_busy_timeouts(engine):
+    with engine.connect() as connection:
+        baseline = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+    observed = []
+
+    def checkin(dbapi_connection, _record):  # type: ignore[no-untyped-def]
+        observed.append(dbapi_connection.execute("PRAGMA busy_timeout").fetchone()[0])
+
+    event.listen(engine, "checkin", checkin)
+    return baseline, observed, checkin
+
+
+def test_try_finish_restores_busy_timeout_before_successful_checkin(control_store):
+    factory, controls, turns, _ = control_store
+    engine = factory.kw["bind"]
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    baseline, observed, checkin = _observe_checkin_busy_timeouts(engine)
+    try:
+        assert controls.try_finish(lease, "completed")
+    finally:
+        event.remove(engine, "checkin", checkin)
+    assert observed and observed[-1] == baseline
+
+
+def test_try_finish_restores_busy_timeout_after_busy_probe(control_store):
+    factory, controls, turns, _ = control_store
+    engine = factory.kw["bind"]
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    holder = engine.connect()
+    holder.exec_driver_sql("BEGIN IMMEDIATE")
+    baseline, observed, checkin = _observe_checkin_busy_timeouts(engine)
+    try:
+        assert controls.try_finish(lease, "interrupted") is False
+    finally:
+        holder.rollback()
+        holder.close()
+        event.remove(engine, "checkin", checkin)
+    assert observed and all(timeout == baseline for timeout in observed)
+    controls.finish(lease, "interrupted")
+
+
+def test_try_finish_restores_busy_timeout_after_handler_exception(control_store, monkeypatch):
+    factory, controls, turns, _ = control_store
+    engine = factory.kw["bind"]
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    baseline, observed, checkin = _observe_checkin_busy_timeouts(engine)
+
+    def fail_finish(*_args):
+        raise RuntimeError("synthetic finish failure")
+
+    monkeypatch.setattr(controls, "_finish_in_session", fail_finish)
+    try:
+        with pytest.raises(RuntimeError, match="synthetic finish failure"):
+            controls.try_finish(lease, "interrupted")
+    finally:
+        event.remove(engine, "checkin", checkin)
+    assert observed and observed[-1] == baseline
+
+
 def test_only_one_generation_can_claim_a_conversation(control_store):
     _, controls, turns, _ = control_store
     first = admit(turns)

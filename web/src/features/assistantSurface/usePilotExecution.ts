@@ -72,11 +72,15 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
       try {
         const value = await getPilotExecution(conversationId);
         if (!cancelled && startedAt === revision.current) {
-          if (value && sameExecution(executionRef.current, value) && executionRef.current?.state === 'running'
-            && ['stopped', 'interrupted', 'result_unknown'].includes(value.state)) {
+          const terminalTransition = value !== null && value.state !== 'running' && (
+            !executionRef.current
+            || !sameExecution(executionRef.current, value)
+            || executionRef.current.state === 'running'
+          );
+          if (terminalTransition) {
             callback.current(value);
             setStopMessage(value.state === 'stopped' ? messages.stopped : value.state === 'result_unknown'
-              ? messages.result_unknown : '执行已中断，已保存的记录仍保留。');
+              ? messages.result_unknown : value.state === 'interrupted' ? '执行已中断，已保存的记录仍保留。' : '');
           }
           setExecution(value);
           setRetry(readCommand(conversationId));
@@ -123,8 +127,12 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
       revision.current += 1;
       if (sameExecution(executionRef.current, command.target)) {
         if (result.status === 'stopped' || result.status === 'already_ended') {
-          setExecution({ ...command.target, state: result.status === 'stopped' ? 'stopped' : 'completed' });
-          callback.current(command.target);
+          const terminalTarget = {
+            ...command.target,
+            state: result.status === 'stopped' ? 'stopped' as const : 'completed' as const,
+          };
+          setExecution(terminalTarget);
+          callback.current(terminalTarget);
         }
       }
     } catch {

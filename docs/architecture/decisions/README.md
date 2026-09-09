@@ -21,6 +21,9 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 - [ADR-0007: 从业务事实投影共享动作展示](./0007-project-action-presentation.md) — Accepted
 - [ADR-0008: 持久化 Pilot 请求身份与增量时间线](./0008-persist-pilot-turns-and-timeline.md) — Accepted
 - [ADR-0009: 持久化执行权限并围栏化 Pilot 停止操作](./0009-fence-pilot-execution-control.md) — Accepted
+- [ADR-0010: 由 Runtime 持有 Pilot 执行，客户端只订阅进度](./0010-own-pilot-execution-in-runtime.md) — Accepted
+- [ADR-0011: 按确认、范围和预算装配可选上下文](./0011-bound-optional-context-sources.md) — Accepted
+- [ADR-0012: 持久化有界的本地主动任务](./0012-bound-local-proactive-jobs.md) — Accepted
 
 ### 决策链
 

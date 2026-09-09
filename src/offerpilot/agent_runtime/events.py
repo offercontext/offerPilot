@@ -662,7 +662,7 @@ def validate_context_manifest_json(manifest_json: str) -> dict[str, object]:
         manifest = json.loads(manifest_json)
     except (json.JSONDecodeError, TypeError):
         raise JournalEventValidationError("invalid context manifest") from None
-    if type(manifest) is dict and manifest.get("manifest_schema_version") == 2:
+    if type(manifest) is dict and manifest.get("manifest_schema_version") in {2, 3}:
         from offerpilot.context_projector.manifest import (
             ManifestV2ValidationError,
             validate_surface_manifest_v2,

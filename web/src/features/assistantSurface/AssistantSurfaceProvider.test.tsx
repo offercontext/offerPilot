@@ -2,7 +2,8 @@
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getConversation, listConversations } from '@/services/chat';
+import { getConversation, getPilotExecution, listConversations } from '@/services/chat';
+import { getRuntimeRequestExecution, observeRuntimeTurn } from '@/services/pilotRuntime';
 import {
   AssistantSurfaceProvider,
   useAssistantSurface,
@@ -16,6 +17,16 @@ vi.mock('@/services/chat', async (importOriginal) => ({
   listConversations: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock('@/features/actionPresentation/service', () => ({
+  getPilotPresentation: vi.fn().mockRejectedValue(new Error('timeline unavailable in controller fixture')),
+}));
+
+vi.mock('@/services/pilotRuntime', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/pilotRuntime')>(),
+  getRuntimeRequestExecution: vi.fn().mockResolvedValue(null),
+  observeRuntimeTurn: vi.fn().mockImplementation(() => new Promise(() => undefined)),
+}));
+
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let root: Root | undefined;
@@ -24,9 +35,119 @@ let host: HTMLDivElement | undefined;
 afterEach(() => {
   act(() => root?.unmount());
   host?.remove();
+  vi.useRealTimers();
+  vi.mocked(getPilotExecution).mockReset().mockResolvedValue(null);
+  vi.mocked(observeRuntimeTurn).mockClear();
+  vi.mocked(getRuntimeRequestExecution).mockReset().mockResolvedValue(null);
 });
 
 describe('AssistantSurfaceProvider', () => {
+  it.each([true, false])('releases a hanging POST only with exact admission proof (proof=%s)', async (proof) => {
+    vi.useFakeTimers();
+    let controller!: ReturnType<typeof usePilotConversationController>;
+    let surface!: ReturnType<typeof useAssistantSurface>;
+    function Consumer() { controller = usePilotConversationController(); surface = useAssistantSurface(); return null; }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    await act(async () => root?.render(<AssistantSurfaceProvider><Consumer /></AssistantSurfaceProvider>));
+    await act(async () => { surface.openHaru(); controller.setConversationId(7); });
+    const target = { turn_id: 'hanging-post', conversation_id: 7, execution_generation: 2,
+      state: 'running' as const, protocol: 'pilot-runtime-v1' as const };
+    vi.mocked(getPilotExecution).mockResolvedValue(target);
+    vi.mocked(getRuntimeRequestExecution).mockResolvedValue(proof ? target : null);
+    let request!: NonNullable<ReturnType<typeof controller.beginActiveRequest>>;
+    act(() => {
+      request = controller.beginActiveRequest('chat', 7)!;
+      request.protocol = 'pilot-runtime-v1'; request.requestId = 'original-request';
+    });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(getRuntimeRequestExecution).toHaveBeenCalledWith('original-request', expect.any(AbortSignal));
+    expect(request.controller.signal.aborted).toBe(proof);
+    expect(controller.activeRequestRef.current).toBe(proof ? null : request);
+    if (proof) expect(observeRuntimeTurn).toHaveBeenCalledWith(target, expect.anything());
+    else expect(observeRuntimeTurn).not.toHaveBeenCalled();
+  });
+  it.each(['completed', 'stopped', 'interrupted'] as const)('recovers a %s task even when its original event stream never finishes', async (terminalState) => {
+    vi.useFakeTimers();
+    let controller!: ReturnType<typeof usePilotConversationController>;
+    let surface!: ReturnType<typeof useAssistantSurface>;
+    function Consumer() { controller = usePilotConversationController(); surface = useAssistantSurface(); return null; }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    await act(async () => root?.render(<AssistantSurfaceProvider><Consumer /></AssistantSurfaceProvider>));
+    await act(async () => { surface.openHaru(); controller.setConversationId(7); });
+    const target = { turn_id: 'stalled-stream', conversation_id: 7, execution_generation: 1,
+      state: 'running' as const, protocol: 'pilot-runtime-v1' as const };
+    let request!: NonNullable<ReturnType<typeof controller.beginActiveRequest>>;
+    act(() => {
+      request = controller.beginActiveRequest('chat', 7)!; request.execution = target;
+      controller.executionControl.acceptExecution(target);
+    });
+    vi.mocked(getPilotExecution).mockResolvedValue({ ...target, state: terminalState });
+    vi.mocked(getConversation).mockResolvedValue([{ id: 20, conversation_id: 7, role: 'assistant', content: '已保存的完整结果', created_at: '2026-09-09T00:00:00Z' }]);
+    vi.mocked(listConversations).mockResolvedValue([]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(request.controller.signal.aborted).toBe(true);
+    expect(controller.activeRequestRef.current).toBeNull();
+    expect(controller.turns.some((turn) => turn.content === '已保存的完整结果')).toBe(true);
+  });
+  it('detaches a v1 admission when closed before the server has returned its identity', async () => {
+    let controller!: ReturnType<typeof usePilotConversationController>;
+    let surface!: ReturnType<typeof useAssistantSurface>;
+    function Consumer() { controller = usePilotConversationController(); surface = useAssistantSurface(); return null; }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    await act(async () => root?.render(<AssistantSurfaceProvider><Consumer /></AssistantSurfaceProvider>));
+    act(() => surface.openHaru());
+    let request!: NonNullable<ReturnType<typeof controller.beginActiveRequest>>;
+    act(() => { request = controller.beginActiveRequest('chat')!; request.protocol = 'pilot-runtime-v1'; });
+    act(() => surface.closeSurface());
+    expect(request.controller.signal.aborted).toBe(true);
+    expect(controller.activeRequestRef.current).toBeNull();
+    expect(observeRuntimeTurn).not.toHaveBeenCalled();
+  });
+  it('closes only the v1 subscription and reattaches the same task when opened', async () => {
+    let controller!: ReturnType<typeof usePilotConversationController>;
+    let surface!: ReturnType<typeof useAssistantSurface>;
+    function Consumer() { controller = usePilotConversationController(); surface = useAssistantSurface(); return null; }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    await act(async () => root?.render(<AssistantSurfaceProvider><Consumer /></AssistantSurfaceProvider>));
+    await act(async () => { surface.openHaru(); controller.setConversationId(7); });
+    let request!: NonNullable<ReturnType<typeof controller.beginActiveRequest>>;
+    act(() => { request = controller.beginActiveRequest('chat', 7)!; });
+    const target = { turn_id: 'runtime-turn', conversation_id: 7, execution_generation: 1, state: 'running' as const, protocol: 'pilot-runtime-v1' as const };
+    request.execution = target;
+    act(() => controller.executionControl.acceptExecution(target));
+    act(() => surface.closeSurface());
+    expect(request.controller.signal.aborted).toBe(true);
+    expect(controller.executionControl.execution).toEqual(target);
+    expect(observeRuntimeTurn).not.toHaveBeenCalled();
+    act(() => surface.openHaru());
+    expect(observeRuntimeTurn).toHaveBeenCalledWith(target, expect.objectContaining({ signal: expect.any(AbortSignal) }));
+    const signal = vi.mocked(observeRuntimeTurn).mock.calls[0][1]!.signal!;
+    act(() => surface.closeSurface());
+    expect(signal.aborted).toBe(true);
+    expect(controller.executionControl.execution?.state).toBe('running');
+  });
+
+  it.each([false, true])('loads saved results after detached completion without changing a newer conversation (changed=%s)', async (changed) => {
+    vi.useFakeTimers();
+    vi.mocked(getConversation).mockReset();
+    let controller!: ReturnType<typeof usePilotConversationController>;
+    function Consumer() { controller = usePilotConversationController(); return null; }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    await act(async () => root?.render(<AssistantSurfaceProvider><Consumer /></AssistantSurfaceProvider>));
+    const execution = { turn_id: 'detached-turn', conversation_id: 7, execution_generation: 1, state: 'running' as const };
+    vi.mocked(getPilotExecution).mockResolvedValueOnce(execution).mockResolvedValue({ ...execution, state: 'completed' });
+    await act(async () => controller.setConversationId(7));
+    let resolve!: (messages: Awaited<ReturnType<typeof getConversation>>) => void;
+    vi.mocked(getConversation).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    vi.mocked(listConversations).mockResolvedValueOnce([]);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(getConversation).toHaveBeenCalledWith(7);
+    if (changed) act(() => { controller.setConversationId(8); controller.visibleRequestGenerationRef.current += 1; });
+    await act(async () => resolve([{ id: 9, role: 'assistant', content: '脱离页面后保存的结果' }] as Awaited<ReturnType<typeof getConversation>>));
+    expect(controller.turns.some((turn) => turn.content === '脱离页面后保存的结果')).toBe(!changed);
+    expect(controller.activeRequestRef.current).toBeNull();
+  });
+
   it.each([false, true])('recovers a returned conversation after background completion (changed=%s)', async (changed) => {
     vi.mocked(getConversation).mockReset();
     let controller!: ReturnType<typeof usePilotConversationController>;

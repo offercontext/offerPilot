@@ -1,4 +1,6 @@
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToStaticMarkup as renderMarkup } from 'react-dom/server';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { MaterialRecord } from '@/features/materialSurfaces/materialClassification';
 
@@ -7,6 +9,11 @@ vi.mock('./InterviewStoryLibraryView', () => ({
 }));
 
 import ExperienceMaterialsView from './ExperienceMaterialsView';
+
+function renderToStaticMarkup(children: ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderMarkup(<QueryClientProvider client={client}>{children}</QueryClientProvider>);
+}
 
 const metadata = {
   origin_note_id: 21,

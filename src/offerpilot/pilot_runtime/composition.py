@@ -9,6 +9,8 @@ are request-local state.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import json
 import inspect
 from collections.abc import Callable, Mapping, Sequence
@@ -80,7 +82,10 @@ from offerpilot.ai.write_operations import (
 from offerpilot.agent_runtime.journal import NullRunRecorder, RunRecorderFactory
 from offerpilot.ai.types import Message
 from offerpilot.config import Config, load_config
-from offerpilot.context_projector.loader import ContextSourceLoader
+from offerpilot.context_projector.loader import ContextSourceLoader, SourceTemporarilyUnavailable
+from offerpilot.context_sources.loader import load_optional_sources, optional_context_scope, unavailable_optional_sources
+from offerpilot.context_sources.binding_scope import current_frozen_readiness
+from offerpilot.context_sources.readiness import load_readiness_binding
 from offerpilot.pilot_runtime.continuation import (
     ApprovalAuthorityResolver,
     ConfirmationCoordinator,
@@ -972,10 +977,11 @@ def _agent_payload_tuple(value: object) -> tuple[Mapping[str, JsonValue], ...]:
 
 
 class _AgentDriver:
-    __slots__ = ("_runner",)
+    __slots__ = ("_runner", "_optional_loader" )
 
-    def __init__(self) -> None:
+    def __init__(self, optional_loader: ContextSourceLoader[Any, Any] | None = None) -> None:
         self._runner = AgentLoopRunner()
+        self._optional_loader = optional_loader
 
     def execute(self, invocation: AgentLoopInvocation) -> AgentTurnResult:
         # Every Agent Loop seed gets one proposal gate.  The origin approved
@@ -996,12 +1002,30 @@ class _AgentDriver:
             set_recorder(recorder)
         runtime_sink = cast(RuntimeEventSink | None, invocation.event_sink)
         agent_sink = _AgentEventAdapter(runtime_sink) if runtime_sink is not None else None
+        optional_loader = self._optional_loader
         try:
-            result = self._runner.run(
-                invocation,
-                run_recorder=cast(Any, recorder),
-                event_sink=agent_sink,
-            )
+            frozen_readiness = current_frozen_readiness()
+            binding_unavailable = False
+            try:
+                readiness_binding = frozen_readiness.binding if frozen_readiness is not None else (
+                    optional_loader.load(lambda connection: load_readiness_binding(
+                        connection, getattr(cast(Any, context.authority), "conversation_id")), lambda value: value)
+                    if optional_loader is not None else None
+                )
+            except SourceTemporarilyUnavailable:
+                readiness_binding = None
+                binding_unavailable = True
+            with optional_context_scope(lambda query: unavailable_optional_sources() if binding_unavailable else load_optional_sources(
+                optional_loader,
+                getattr(cast(Any, context.authority), "conversation_id"),
+                query,
+                readiness_binding=readiness_binding,
+            )) if optional_loader is not None else nullcontext():
+                result = self._runner.run(
+                    invocation,
+                    run_recorder=cast(Any, recorder),
+                    event_sink=agent_sink,
+                )
             if not isinstance(result, AgentTurnResult):
                 raise TypeError("Agent Loop must return AgentTurnResult")
             if result.pending is None:
@@ -1726,7 +1750,7 @@ def build_pilot_runtime(
         clarification_message=clarification_message,
         page_messages=page_context_messages,
     )
-    driver = _AgentDriver()
+    driver = _AgentDriver(context_source_loader)
     policy_resolver = _PolicyCatalogResolver(
         typed_catalog,
         provider_view=provider_view,

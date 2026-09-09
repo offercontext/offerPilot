@@ -98,6 +98,7 @@ from offerpilot.context_projector.gateway import (
     SingleCandidateAgentTransport,
 )
 from offerpilot.context_projector.projector import ModelSurfaceProjector, ProjectionRequest
+from offerpilot.context_sources.loader import current_optional_sources
 from offerpilot.context_projector.selector import (
     ToolSelectionResult,
     ToolSelectionSignals,
@@ -835,6 +836,7 @@ class _LoopServices:
             else cast(Callable[[], bool] | None, delivery_fence)
         )
         self.runtime_signal_sink = invocation.runtime_signal_sink
+        self.runtime_budget = getattr(invocation, "runtime_budget", None)
         self.records = [] if records is None else records
         self.failures = [] if failures is None else failures
         self.runner_invocation = invocation
@@ -975,6 +977,7 @@ class _LoopServices:
             )
         try:
             self.require_active()
+            before_provider_attempt = self._before_provider_attempt
             if is_stream:
                 if not callable(stream_surface):
                     raise TypeError("surface streaming model is missing")
@@ -982,7 +985,7 @@ class _LoopServices:
                     surface,
                     buffer_delta,
                     invocation_identity=invocation_identity,
-                    before_attempt=self.require_active,
+                    before_attempt=before_provider_attempt,
                 )
             else:
                 if not callable(complete_surface):
@@ -990,7 +993,7 @@ class _LoopServices:
                 bound = complete_surface(
                     surface,
                     invocation_identity=invocation_identity,
-                    before_attempt=self.require_active,
+                    before_attempt=before_provider_attempt,
                 )
             attempt_validator = getattr(model, "consume_agent_provider_attempt", None)
             if not callable(attempt_validator):
@@ -1049,6 +1052,21 @@ class _LoopServices:
             self.runtime_signal_sink.try_emit("first_complete_agent_response")
         return assistant
 
+    def _before_provider_attempt(self) -> None:
+        """Check liveness and reserve one physical provider attempt.
+
+        A provider chain may try the active candidate and then a fallback.  A
+        Runtime model allowance therefore belongs at the gateway's
+        per-candidate callback instead of around the logical model call.  This
+        keeps retries/fallback attempts bounded by the detached execution's
+        own budget and avoids double-counting the first candidate.
+        """
+
+        self.require_active()
+        reserve_model_call = getattr(self.runtime_budget, "reserve_model_call", None)
+        if callable(reserve_model_call):
+            reserve_model_call(purpose="agent")
+
     def project_model_surface(
         self,
         messages: list[Message],
@@ -1096,8 +1114,13 @@ class _LoopServices:
             )
             for name in ("current_scope", "request_page_context", "request_attachments")
         }
+        optional = current_optional_sources(current.content)
+        optional_by_name = {item.name: item for item in optional.contributors}
         contributors: list[ContributorResult] = []
         for name in CONTRIBUTOR_ORDER:
+            if name in optional_by_name:
+                contributors.append(optional_by_name[name])
+                continue
             status: ContributorStatus = "not_applicable"
             contributor_messages: tuple[FrozenMessage, ...] = ()
             if name == "static_policy":
@@ -1183,7 +1206,8 @@ class _LoopServices:
             ),
             provider_budgets=tuple(budgets),
             selection=gate.selection,
-            sources=tuple(sources),
+            sources=(*sources, *optional.sources),
+            optional_sources=optional,
             provider_surface_build_identity=build_identity,
         )
         return ModelSurfaceProjector().project(request)
@@ -1246,6 +1270,11 @@ class _LoopServices:
     def raise_if_cancelled(self) -> None:
         if self.cancel_check is not None and self.cancel_check():
             raise ChatRunCancelled("chat run cancelled")
+
+    def reserve_tool_call(self) -> None:
+        reserve_tool_call = getattr(self.runtime_budget, "reserve_tool_call", None)
+        if callable(reserve_tool_call):
+            reserve_tool_call()
 
     def persist_pending_before_release(
         self,
@@ -1426,6 +1455,10 @@ class AgentLoopInvocation(TransientToolRuntimeValue):
     cancel_check: CancelCheck | None
     surface_gate: SegmentSurfaceGate | None = field(default=None, repr=False, compare=False)
     stop_after_approved_write: bool = field(default=False, repr=False, compare=False)
+    # Detached Runtime supplies a budget independent from the diagnostic
+    # Journal.  It stays optional so legacy and P3A invocations keep their
+    # exact construction contract.
+    runtime_budget: object | None = field(default=None, repr=False, compare=False)
     _catalog_ownership: _AgentLoopLeaseOwnership = field(
         init=False,
         repr=False,
@@ -1751,6 +1784,7 @@ class AgentLoopRunner:
             return continuation.claim(pending, prepared)
 
         services.raise_if_cancelled()
+        services.reserve_tool_call()
         record = execute_prepared(
             prepared_result.prepared,
             invocation.tool_context,
@@ -2006,6 +2040,7 @@ class AgentLoopRunner:
                         arguments_digest=prepared.prepared.arguments_digest,
                     )
                 )
+                services.reserve_tool_call()
                 record = execute_prepared(
                     prepared.prepared,
                     invocation.tool_context,

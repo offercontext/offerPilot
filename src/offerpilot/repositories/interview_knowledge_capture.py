@@ -20,6 +20,11 @@ from offerpilot.knowledge.interview_capture import (
     serialize_capture_snapshot_with_ranges,
     source_fields_for_note,
 )
+from offerpilot.knowledge.note_lifecycle import (
+    KnowledgeNoteConflict,
+    KnowledgeNoteGone,
+    _validate_note_version,
+)
 from offerpilot.models import (
     Application,
     InterviewKnowledgeCaptureAttempt,
@@ -359,6 +364,9 @@ class InterviewKnowledgeCaptureRepository:
                 version = session.get(KnowledgeNoteVersion, attempt.confirmed_note_version_id)
                 if version is None:
                     raise InterviewKnowledgeCaptureNotFound()
+                owner = session.get(KnowledgeNote, version.note_id)
+                if owner is None or not self._note_visible(session, owner):
+                    raise InterviewKnowledgeCaptureNotFound()
                 source = session.get(KnowledgeSource, version.source_id)
                 evidence_rows = list(
                     session.scalars(
@@ -373,7 +381,7 @@ class InterviewKnowledgeCaptureRepository:
                     source_id=source.id if source else 0,
                     content=json.loads(version.content_json),
                     evidence=[
-                        {"id": row.id, "path": json.loads(row.heading_path_json)[0] if row.heading_path_json else "", "excerpt": row.canonical_excerpt}
+                        {"id": row.id, "path": (json.loads(row.heading_path_json) or [""])[0] if row.heading_path_json else "", "excerpt": row.canonical_excerpt}
                         for row in evidence_rows
                     ],
                     created=False,
@@ -559,7 +567,7 @@ class InterviewKnowledgeCaptureRepository:
                 created=True,
             )
 
-    def list_knowledge_notes(self) -> list[dict[str, Any]]:
+    def list_knowledge_notes(self, *, include_archived: bool = False) -> list[dict[str, Any]]:
         with self._session_factory() as session:
             rows = list(
                 session.scalars(
@@ -568,14 +576,36 @@ class InterviewKnowledgeCaptureRepository:
                     .order_by(KnowledgeNote.created_at.desc(), KnowledgeNote.id.desc())
                 )
             )
-            return [self._knowledge_note_payload(session, row) for row in rows]
+            return [self._knowledge_note_payload(session, row) for row in rows
+                    if self._note_visible(session, row, include_archived=include_archived)]
 
     def get_knowledge_note(self, knowledge_note_id: int) -> dict[str, Any] | None:
         with self._session_factory() as session:
             row = session.get(KnowledgeNote, knowledge_note_id)
-            if row is None or row.origin_kind != "confirmed_interview_capture":
+            if row is None or row.origin_kind != "confirmed_interview_capture" or not self._note_visible(session, row):
                 return None
             return self._knowledge_note_payload(session, row)
+
+    @staticmethod
+    def _note_visible(session: Session, row: KnowledgeNote, *, include_archived: bool = False) -> bool:
+        if row.current_version_id is None or (row.archived_at is not None and not include_archived):
+            return False
+        version = session.get(KnowledgeNoteVersion, row.current_version_id)
+        if version is None or version.note_id != row.id:
+            return False
+        source = session.get(KnowledgeSource, version.source_id)
+        if (
+            source is None
+            or source.deleted_at is not None
+            or source.archived_at is not None
+            or source.lifecycle != "active"
+        ):
+            return False
+        try:
+            _validate_note_version(session, version, source=source)
+        except (KnowledgeNoteConflict, KnowledgeNoteGone):
+            return False
+        return True
 
     @staticmethod
     def _knowledge_note_payload(session: Session, row: KnowledgeNote) -> dict[str, Any]:
@@ -583,6 +613,10 @@ class InterviewKnowledgeCaptureRepository:
         if version is None:
             return {"id": row.id, "title": row.title, "origin_kind": row.origin_kind, "version": None}
         source = session.get(KnowledgeSource, version.source_id)
+        try:
+            content, _ = _validate_note_version(session, version, source=source)
+        except (KnowledgeNoteConflict, KnowledgeNoteGone):
+            return {"id": row.id, "title": row.title, "origin_kind": row.origin_kind, "version": None}
         metadata = session.scalar(
             select(KnowledgeCapturedSourceMetadata).where(
                 KnowledgeCapturedSourceMetadata.source_id == version.source_id
@@ -602,11 +636,10 @@ class InterviewKnowledgeCaptureRepository:
             )
         )
         frozen_at = source.created_at.isoformat() if source else ""
-        content = json.loads(version.content_json)
         evidence_by_id = {
             evidence.id: {
                 "id": evidence.id,
-                "path": json.loads(evidence.heading_path_json)[0]
+                "path": (json.loads(evidence.heading_path_json) or [""])[0]
                 if evidence.heading_path_json
                 else "",
                 "excerpt": evidence.canonical_excerpt,
@@ -637,6 +670,7 @@ class InterviewKnowledgeCaptureRepository:
             "origin_kind": row.origin_kind,
             "version_id": version.id,
             "version_number": version.version_number,
+            "archived": row.archived_at is not None,
             "content": content,
             "source_id": version.source_id,
             "capture_metadata": (

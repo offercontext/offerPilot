@@ -28,6 +28,7 @@ vi.mock('antd', () => {
     Content: (props: any) => <main {...props}>{props.children}</main>,
   });
   return {
+    Modal: ({ open, children }: { open: boolean; children: React.ReactNode }) => open ? <div role="dialog">{children}</div> : null,
     Button: (props: any) => <button type="button" {...props}>{props.children}</button>,
     Layout, Spin: () => <div>loading</div>, Tabs: () => <div />,
     message: { warning: vi.fn(), success: vi.fn(), error: vi.fn() },

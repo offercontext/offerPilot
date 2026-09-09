@@ -143,7 +143,12 @@ from .deterministic import (
     DeterministicPilotAdapter,
     _DeterministicConfirmationPreflight,
 )
-from .event_sink import emit_runtime_event, require_runtime_active
+from .event_sink import (
+    InMemoryRuntimeInvocationControl,
+    emit_runtime_event,
+    require_runtime_active,
+)
+from .turn_control import invocation_scope
 from .continuation import (
     ConfirmationApprovedWritePort,
     ConfirmationCoordinator,
@@ -1757,6 +1762,134 @@ class PilotRuntime:
             if preflight is not None:
                 _invoke(preflight, {"request": request}, (request,))
 
+    def preflight_detached_confirmation(
+        self,
+        request: ConfirmationRequest,
+        *,
+        expected_turn_id: str,
+    ) -> RuntimeOutcome | None:
+        """Validate a detached confirmation before it enters the Runtime queue.
+
+        Approval preflight is deliberately provider-free and returns ``None``
+        only when the request still addresses a live operation.  It validates
+        the Ledger operation identity, token/fingerprint and live Pending
+        binding, but it does not claim delivery ownership or construct a
+        Segment.  The worker must repeat those checks immediately before its
+        continuation claim.
+
+        Rejection is a provider-free terminal action, so it is completed here
+        with the same synchronous confirmation path used by the legacy route.
+        This lets a detached HTTP adapter return the persisted cancellation
+        outcome without allocating a new Runtime generation or a model worker.
+        """
+
+        if not isinstance(request, ConfirmationRequest):
+            raise TypeError("request must be a ConfirmationRequest")
+        # Keep request-shape validation identical to the execution path.  In
+        # particular this rejects edited_args on rejection and feedback on
+        # approval before touching a Ledger repository.
+        self._validate(request)
+
+        continuation = self._confirmation_coordinator()
+        preflight_preheader: LedgerOperationPreheader | None = None
+        if type(expected_turn_id) is not str or not expected_turn_id:
+            raise ValueError("expected_turn_id must be a non-empty string")
+        if continuation is None:
+            # The detached Runtime route always has a Ledger coordinator.
+            # Treat a missing coordinator as an identity failure when the
+            # caller supplied a durable Turn identity; allowing the route to
+            # fall through would make an unbound operation executable.
+            return self._failure(
+                RuntimeFailureCode.OPERATION_IDENTITY_CONFLICT,
+                "确认请求与任务不匹配。",
+                409,
+                retryable=True,
+                conversation_id=request.conversation_id,
+            )
+        # Resolve the exact operation before either the rejection path or
+        # the approval path.  A terminal operation is still required to be
+        # bound to this Turn before its result may be replayed.
+        preflight_preheader = continuation.operation_preheader(request)
+        binding_failure = self._validate_expected_confirmation_turn(
+            continuation,
+            request,
+            expected_turn_id,
+            preflight_preheader,
+        )
+        if binding_failure is not None:
+            return binding_failure
+
+        if not request.approved:
+            control = InMemoryRuntimeInvocationControl()
+            with invocation_scope(control):
+                return self.continue_confirmation(
+                    request,
+                    transport=RuntimeTransportContext(mode="sync"),
+                    invocation_control=control,
+                    event_sink=None,
+                    execution_host=None,
+                    cancel_check=lambda: False,
+                )
+
+        if continuation is None:
+            # The preflight boundary only has the Ledger operation identity
+            # when the coordinator is installed.  The no-coordinator adapter
+            # remains handled by continue_confirmation's existing fresh
+            # Conversation/Pending validation; returning None does not grant
+            # any authority to the eventual worker.
+            return None
+
+        transport = RuntimeTransportContext(mode="sync")
+        preheader = preflight_preheader or continuation.operation_preheader(request)
+        legacy_deterministic = self._is_deterministic_confirmation(
+            request,
+            preheader=preheader,
+        )
+        if legacy_deterministic:
+            deterministic = self._dependencies.deterministic
+            if type(deterministic) is not DeterministicPilotAdapter:
+                return self._failure(
+                    RuntimeFailureCode.OPERATION_UNAVAILABLE,
+                    "unsupported runtime route",
+                    400,
+                )
+            candidate = deterministic.preflight_confirmation(
+                request,
+                preheader=preheader,
+                transport=transport,
+            )
+            if type(candidate) is not _DeterministicConfirmationPreflight:
+                return self._failure(
+                    RuntimeFailureCode.OPERATION_UNAVAILABLE,
+                    "unsupported runtime route",
+                    400,
+                )
+            if candidate.preheader is not preheader or not candidate.matched:
+                return self._failure(
+                    RuntimeFailureCode.OPERATION_UNAVAILABLE,
+                    "写入账本暂不可用。",
+                    503,
+                    retryable=True,
+                )
+            if candidate.execution is not None:
+                return candidate.execution.outcome
+            return None
+
+        replay = continuation.replay_outcome(request, preheader=preheader)
+        if replay is not None:
+            return replay
+        try:
+            continuation.preflight_live(request)
+        except ConfirmationReplayError:
+            # A concurrent terminal transition is resolved through the same
+            # replay projection as the execution path.  Never treat the
+            # detached Pending snapshot as a permission to continue.
+            replay = continuation.replay_outcome(request, preheader=preheader)
+            if replay is not None:
+                return replay
+            raise WriteOperationError("operation_result_unknown", retryable=True)
+        return None
+
     @property
     def metadata_components(self) -> TransientToolRuntimeValue:
         components = self._dependencies.metadata_components
@@ -1831,6 +1964,7 @@ class PilotRuntime:
         execution_host: AgentExecutionHost[object] | None = None,
         invocation_control: RuntimeInvocationControl | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        runtime_budget: object | None = None,
     ) -> RuntimeOutcome:
         """Execute one synchronous model turn and return a typed outcome."""
 
@@ -2421,6 +2555,7 @@ class PilotRuntime:
                 safe_event_sink,
                 safe_signal_sink,
                 checked_cancel,
+                runtime_budget=runtime_budget,
             )
             segment_lease.bind_invocation(invocation)
         except BaseException:
@@ -2605,6 +2740,7 @@ class PilotRuntime:
         signal_sink: RuntimeSignalSink[str] | None = None,
         execution_host: AgentExecutionHost[object] | None = None,
         cancel_check: Callable[[], bool] | None = None,
+        runtime_budget: object | None = None,
     ) -> RuntimeOutcome:
         """Dispatch a confirmation through the Ledger continuation boundary.
 
@@ -2735,6 +2871,7 @@ class PilotRuntime:
                 cancel_check=effective_cancel_check,
                 transport=resolved_transport,
                 replay_preheader=route_preheader,
+                runtime_budget=runtime_budget,
             )
         conversation = self._load_confirmation_conversation(request.conversation_id)
         if conversation is None:
@@ -2857,6 +2994,68 @@ class PilotRuntime:
 
     def _confirmation_coordinator(self) -> ConfirmationCoordinator | None:
         return self._dependencies.confirmation_coordinator or self._dependencies.continuation
+
+    def _validate_expected_confirmation_turn(
+        self,
+        coordinator: ConfirmationCoordinator,
+        request: ConfirmationRequest,
+        expected_turn_id: str,
+        preheader: LedgerOperationPreheader,
+    ) -> RuntimeFailureOutcome | None:
+        """Require the Ledger operation to belong to the detached Turn.
+
+        ``WriteOperation`` intentionally has no Turn column.  Runtime
+        confirmation therefore has to verify the separate provenance binding
+        before it can replay a terminal operation or reject a live Pending.
+        This read is deliberately independent of the later claim transaction;
+        the continuation repeats its own Ledger/Pending checks before doing
+        any delivery.
+        """
+
+        if type(preheader) is not LedgerOperationPreheader:
+            raise TypeError("preheader must be an exact LedgerOperationPreheader")
+        operation_id = _attribute(preheader.operation, "id")
+        if type(operation_id) is not str or not operation_id:
+            return self._failure(
+                RuntimeFailureCode.OPERATION_IDENTITY_CONFLICT,
+                "确认请求与任务不匹配。",
+                409,
+                retryable=True,
+                conversation_id=request.conversation_id,
+            )
+        dependencies = _attribute(coordinator, "dependencies")
+        write_operations = _attribute(dependencies, "write_operations")
+        session_factory = _attribute(write_operations, "session_factory")
+        if not callable(session_factory):
+            return self._failure(
+                RuntimeFailureCode.OPERATION_UNAVAILABLE,
+                "写入账本暂不可用。",
+                503,
+                retryable=True,
+                conversation_id=request.conversation_id,
+            )
+
+        # Keep the ORM seam local to this persistence-backed validation.  The
+        # service's public runtime contracts remain transport and ORM free.
+        from offerpilot.models import PilotTurnOperation, PilotTurnRecord
+
+        with session_factory() as session:
+            binding = session.get(PilotTurnOperation, operation_id)
+            turn = session.get(PilotTurnRecord, expected_turn_id)
+            if (
+                binding is None
+                or turn is None
+                or binding.turn_id != expected_turn_id
+                or turn.conversation_id != request.conversation_id
+            ):
+                return self._failure(
+                    RuntimeFailureCode.OPERATION_IDENTITY_CONFLICT,
+                    "确认请求与任务不匹配。",
+                    409,
+                    retryable=True,
+                    conversation_id=request.conversation_id,
+                )
+        return None
 
     def _is_deterministic_confirmation(
         self,
@@ -3736,6 +3935,7 @@ class PilotRuntime:
         cancel_check: Callable[[], bool],
         transport: RuntimeTransportContext,
         replay_preheader: LedgerOperationPreheader | None,
+        runtime_budget: object | None = None,
     ) -> RuntimeOutcome:
         """Run a Ledger-backed confirmation without opening the old route state.
 
@@ -3943,6 +4143,7 @@ class PilotRuntime:
                         session.state.confirmation_strategy_version
                         == EDITED_CONFIRMATION_RECEIPT_STRATEGY
                     ),
+                    runtime_budget=runtime_budget,
                 )
                 self._bind_invocation_pending_persistence(
                     invocation,
@@ -3999,7 +4200,16 @@ class PilotRuntime:
             return outcome
         except RuntimeAgentTimedOut:
             try:
-                fallback = coordinator.timeout_convergence(session)
+                # Convergence publishes only the committed origin and fixed fallback.
+                # Its fresh recovery scope must not revive the timed-out worker.
+                fallback = cast(
+                    PersistenceResult | None,
+                    self._commit_fence(
+                        control,
+                        lambda: coordinator.timeout_convergence(session),
+                        allow_timeout=True,
+                    ),
+                )
             except (RuntimeCancelled, RuntimeTransportAborted, RuntimeAgentTimedOut):
                 raise
             except Exception as exc:
@@ -6994,6 +7204,7 @@ class PilotRuntime:
                             session.state.confirmation_strategy_version
                             == EDITED_CONFIRMATION_RECEIPT_STRATEGY
                         ),
+                        runtime_budget=None,
                     )
                     self._bind_invocation_pending_persistence(
                         invocation,
@@ -7084,7 +7295,16 @@ class PilotRuntime:
             return outcome
         except RuntimeAgentTimedOut:
             try:
-                fallback = coordinator.timeout_convergence(session)
+                # Convergence publishes only the committed origin and fixed fallback.
+                # Its fresh recovery scope must not revive the timed-out worker.
+                fallback = cast(
+                    PersistenceResult | None,
+                    self._commit_fence(
+                        state.control,
+                        lambda: coordinator.timeout_convergence(session),
+                        allow_timeout=True,
+                    ),
+                )
             except (RuntimeCancelled, RuntimeTransportAborted, RuntimeAgentTimedOut):
                 raise
             except Exception as exc:
@@ -8856,6 +9076,8 @@ class PilotRuntime:
         event_sink: RuntimeEventSink,
         signal_sink: RuntimeSignalSink[str] | None,
         cancel_check: Callable[[], bool],
+        *,
+        runtime_budget: object | None = None,
     ) -> AgentLoopInvocation:
         if isinstance(assembled, Sequence) and not isinstance(assembled, (str, bytes)):
             messages = tuple(_message(item) for item in assembled)
@@ -8882,6 +9104,7 @@ class PilotRuntime:
             event_sink=cast(Any, event_sink),
             runtime_signal_sink=signal_sink,
             cancel_check=cancel_check,
+            runtime_budget=runtime_budget,
         )
         self._bind_invocation_pending_persistence(
             invocation,

@@ -724,6 +724,26 @@ class _RejectingDirectExecutionHost:
         raise RuntimeTransportAborted()
 
 
+def _runtime_stream_event_visible(control: RuntimeInvocationControl, event: RuntimeEvent) -> bool:
+    state = control.state
+    if state is InvocationState.CANCELLED:
+        return False
+    if state is not InvocationState.TIMED_OUT:
+        return True
+    # Timeout revokes worker output, but Runtime may still converge a fixed,
+    # already-persisted receipt or a safe terminal failure under its recovery fence.
+    if isinstance(event, ErrorEvent):
+        return event.pending_action is None
+    if isinstance(event, CompletedEvent) and event.persisted:
+        outcome = event.response
+        return (
+            isinstance(outcome, MessageOutcome) and outcome.persisted
+        ) or (
+            isinstance(outcome, RuntimeFailureOutcome) and outcome.pending_action is None
+        )
+    return False
+
+
 def runtime_sse_content(
     runtime: Any,
     prepared: PreparedStreamExecution,
@@ -762,7 +782,7 @@ def runtime_sse_content(
         )
         sequence = 0
         for event in events:
-            if control.state in {InvocationState.CANCELLED, InvocationState.TIMED_OUT}:
+            if not _runtime_stream_event_visible(control, event):
                 continue
             sequence += 1
             yield encode_sse_event(
@@ -795,7 +815,7 @@ def runtime_sse_content(
     sequence = 0
     try:
         for event in streamed:
-            if control.state in {InvocationState.CANCELLED, InvocationState.TIMED_OUT}:
+            if not _runtime_stream_event_visible(control, event):
                 continue
             sequence += 1
             yield encode_sse_event(

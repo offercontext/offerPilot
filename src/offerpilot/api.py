@@ -22,6 +22,7 @@ from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, Query, 
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pypdf import PdfReader
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.ai.agent_contracts import ChatModel, PendingAction
@@ -68,6 +69,10 @@ from offerpilot.reliability.trace import (
     record_mock_interview_trace,
 )
 from offerpilot.ai.client import ConfiguredAIClient
+from offerpilot.confirmed_memory.api import register_memory_routes
+from offerpilot.context_sources.api import register_context_policy_routes
+from offerpilot.context_sources.readiness_api import register_readiness_context_routes
+from offerpilot.context_sources.summary_api import register_summary_routes
 from offerpilot.ai.tool_runtime.metadata import (
     CommittedPrimaryOperationIdentityV1,
     FrozenJSONValue,
@@ -105,17 +110,40 @@ from offerpilot.config import (
 from offerpilot.context_projector.loader import ContextSourceLoader, fetch_rows
 from offerpilot.context_projector.contracts import ProjectionError
 from offerpilot.context_projector.budget import PROVIDER_FRAMING_RESERVE
+from offerpilot.context_sources.binding_scope import frozen_readiness_scope
+from offerpilot.context_sources.readiness import (
+    ReadinessContextBinding,
+    ReadinessContextRepository,
+    ReadinessContextUnavailable,
+)
 from offerpilot.pilot_runtime import (
     AttachmentReference,
     ConfirmationRequest,
+    ConfirmationRequiredOutcome,
     EditedArgs,
     PilotRuntime,
     PilotActionDescriptor,
     RuntimeFailureOutcome,
+    RuntimeTransportContext,
     StartTurnRequest,
     build_pilot_runtime,
     freeze_json_mapping,
 )
+from offerpilot.pilot_runtime.execution_budget import RuntimeBudget
+from offerpilot.runtime_transport import (
+    DirectRuntimeExecutionHost,
+    runtime_subscription_response,
+)
+from offerpilot.pilot_runtime.managed_execution import (
+    RuntimeCapacityExhausted,
+    RuntimeCursorInvalid,
+    RuntimeExecutionManager,
+    RuntimeManagerError,
+    RuntimeResyncRequired,
+    RuntimeSubmissionConflict,
+    RuntimeTurnNotFound,
+)
+from offerpilot.pilot_runtime.turn_control import invocation_scope
 from offerpilot.pilot_runtime.contracts import LegacyReadContext
 from offerpilot.pilot_runtime.legacy_route import (
     LegacyConfirmationRouteComponents,
@@ -124,6 +152,7 @@ from offerpilot.pilot_runtime.legacy_route import (
 from offerpilot.pilot_runtime.event_sink import (
     ClosedAgentSignalSink,
     RuntimeSignalLatch,
+    runtime_outcome_payload,
 )
 from offerpilot.pilot_runtime.compensation import CompensationHandlerRegistry
 from offerpilot.pilot_runtime.errors import (
@@ -181,6 +210,8 @@ from offerpilot.knowledge import (
     KnowledgeIngestService,
     KnowledgeRepository,
 )
+from offerpilot.proactive.api import register_proactive_routes
+from offerpilot.knowledge.note_api import register_knowledge_note_routes
 from offerpilot.knowledge.brief import (
     BriefSchemaError,
     derive_coverage_payload,
@@ -1344,8 +1375,9 @@ def create_app(
     application_jd_versions = ApplicationJDService(session_factory)
     application_outcomes = ApplicationOutcomesRepository(session_factory)
     chat = ChatRepository(session_factory, write_operations)
-    pilot_timeline = PilotTimelineRepository(session_factory)
+    pilot_timeline = PilotTimelineRepository(session_factory, title_from_message=_title_from_message)
     pilot_controls = PilotControlRepository(session_factory)
+    readiness_contexts = ReadinessContextRepository(session_factory)
     turn_control_registry = TurnControlRegistry(pilot_controls)
     events = ApplicationEventsRepository(session_factory)
     notes = NotesRepository(session_factory)
@@ -1411,6 +1443,14 @@ def create_app(
     app.state.interview_stories_repository = interview_stories
     app.state.product_action_proposal_repository = product_action_proposals
     app.state.knowledge_runtime = knowledge_runtime
+
+    # P4 context management routes are registered at the composition root so
+    # they share this app's authenticated workspace Session factory.
+    register_memory_routes(app, session_factory)
+    register_context_policy_routes(app, session_factory)
+    register_readiness_context_routes(app, session_factory)
+    register_summary_routes(app, session_factory)
+    register_knowledge_note_routes(app, session_factory)
 
     @app.middleware("http")
     async def cors_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -1594,10 +1634,27 @@ def create_app(
         ),
         title_from_message=_title_from_message,
     )
+    # The detached protocol owns a finite worker pool independent from the
+    # request/response lifetime.  Its operations are installed by the routes
+    # below after admission has bound the exact Turn and execution lease.
+    runtime_manager = RuntimeExecutionManager(
+        run_workers=2,
+        max_queue=32,
+        default_timeout_seconds=CHAT_AGENT_TIMEOUT_SECONDS,
+    )
+    pilot_controls.reconcile_runtime_epoch(runtime_manager.runtime_epoch)
+    app.state.runtime_manager = runtime_manager
+    proactive_runtime = register_proactive_routes(
+        app,
+        session_factory,
+        runtime_manager,
+        lambda: load_config(resolved_data_dir),
+    )
 
     @app.on_event("startup")
     def _start_knowledge_worker() -> None:
         knowledge_runtime.start()
+        proactive_runtime.start()
 
     @app.on_event("shutdown")
     def _stop_knowledge_worker() -> None:
@@ -1611,6 +1668,8 @@ def create_app(
                 if first_error is None:
                     first_error = error
 
+        attempt_cleanup(proactive_runtime.stop)
+        attempt_cleanup(runtime_manager.close)
         attempt_cleanup(turn_control_registry.close)
         attempt_cleanup(lambda: knowledge_runtime.stop(timeout=5))
         attempt_cleanup(context_source_loader.close)
@@ -5220,6 +5279,1114 @@ def create_app(
         headers.pop("content-length", None)
         headers["cache-control"] = "no-store"
         return JSONResponse(body, status_code=response.status_code, headers=headers)
+
+    # Detached Runtime HTTP is deliberately a separate protocol surface.  The
+    # legacy /api/chat routes above still own the request transport and cancel
+    # their worker when the connection closes; these routes only admit a
+    # durable execution and expose read-only views of its progress.
+    runtime_manager = cast(RuntimeExecutionManager, app.state.runtime_manager)
+    runtime_base_path = "/api/pilot/runtime/v1"
+
+    def _runtime_request_id(payload: Mapping[str, Any]) -> str | JSONResponse:
+        raw = payload.get("request_id")
+        if raw is None or raw == "":
+            return str(uuid4())
+        if type(raw) is not str:
+            return error_response(422, "request_id must be a canonical UUID v4", code="invalid_request_id")
+        try:
+            parsed = UUID(raw)
+        except (ValueError, AttributeError, TypeError):
+            return error_response(422, "request_id must be a canonical UUID v4", code="invalid_request_id")
+        if parsed.version != 4 or str(parsed) != raw:
+            return error_response(422, "request_id must be a canonical UUID v4", code="invalid_request_id")
+        return raw
+
+    def _runtime_key(request_id: str, kind: str) -> str:
+        # Keep submission and confirmation request namespaces distinct even
+        # when a caller accidentally reuses the same UUID.
+        return sha256(f"pilot-runtime-v1:{kind}:{request_id}".encode("utf-8")).hexdigest()
+
+    def _runtime_confirmation_key(
+        request_id: str,
+        turn_id: str,
+        request: ConfirmationRequest,
+    ) -> str:
+        """Digest the validated confirmation transport for durable replay CAS.
+
+        The confirmation token is represented only by its digest.  Keep the
+        operation id exactly as supplied (including an omitted value): the
+        route may fill an omitted id from the live Pending after this key is
+        captured, but a later retry must compare the same original request.
+        """
+
+        edited_args_present = not request.edited_args.is_missing()
+        edited_args = (
+            materialize_json(cast(FrozenJSONValue, request.edited_args.as_mapping))
+            if edited_args_present
+            else None
+        )
+        canonical = {
+            "protocol": "pilot-runtime-v1",
+            "kind": "confirm",
+            "request_id": request_id,
+            "turn_id": turn_id,
+            "conversation_id": request.conversation_id,
+            "operation_id": request.operation_id,
+            "confirmation_token_sha256": sha256(
+                request.confirmation_token.encode("utf-8")
+            ).hexdigest(),
+            "approved": request.approved,
+            "edited_args_present": edited_args_present,
+            "edited_args": edited_args,
+            "rejection_feedback_present": request.rejection_feedback_present,
+            "rejection_feedback": (
+                request.rejection_feedback
+                if request.rejection_feedback_present
+                else None
+            ),
+        }
+        return sha256(canonical_json(canonical).encode("utf-8")).hexdigest()
+
+    def _runtime_source_refs(request: StartTurnRequest) -> list[str]:
+        refs: list[str] = []
+        if request.context_type and request.context_ref:
+            refs.append(f"context:{request.context_type}:{request.context_ref}")
+        refs.extend(f"attachment:{item.kind}:{item.ref}" for item in request.attachments)
+        # The durable metadata is diagnostic only and must remain bounded.
+        return refs[:64]
+
+    def _runtime_start_canonical(request: StartTurnRequest) -> dict[str, Any]:
+        page_context = (
+            json.loads(json.dumps(request.page_context, ensure_ascii=False, default=dict))
+            if request.page_context is not None
+            else None
+        )
+        pilot_action = (
+            json.loads(request.pilot_action.value)
+            if request.pilot_action is not None
+            else None
+        )
+        return {
+            "message": request.message,
+            "conversation_id": request.conversation_id,
+            "context_type": request.context_type,
+            "context_ref": request.context_ref,
+            "mode": request.mode,
+            "page_context": page_context,
+            "attachments": [
+                {"kind": item.kind, "id": item.ref} for item in request.attachments
+            ],
+            "pilot_action": pilot_action,
+        }
+
+    def _runtime_finish_control(
+        control: DurableRuntimeInvocationControl,
+        state: str,
+    ) -> None:
+        try:
+            control.finish(state)
+        except BaseException:
+            # The lease expiry/reconciliation path remains the fail-closed
+            # authority if cleanup cannot reach SQLite from a worker.
+            logging.getLogger(__name__).warning(
+                "Detached Pilot control cleanup failed", exc_info=True
+            )
+
+    def _runtime_state_for_outcome(outcome: object) -> str:
+        if isinstance(outcome, ConfirmationRequiredOutcome):
+            return "waiting_confirmation"
+        if isinstance(outcome, RuntimeFailureOutcome):
+            return "failed"
+        return "completed"
+
+    def _runtime_durable_terminal_response(
+        conversation_id: int,
+        turn_id: str,
+        generation: int,
+    ) -> dict[str, Any] | None:
+        """Project a terminal response from saved Chat facts after a restart."""
+
+        latest = pilot_controls.get_runtime_execution(turn_id)
+        if latest is None or latest["execution_generation"] != generation:
+            return None
+        pending = chat.get_pending_action(conversation_id)
+        with session_factory() as session:
+            pending_owned = pending is not None and session.execute(text(
+                "SELECT 1 FROM pilot_turn_operations WHERE operation_id=:operation_id AND turn_id=:turn_id"
+            ), {"operation_id": pending.operation_id, "turn_id": turn_id}).first() is not None
+        if pending is not None and pending_owned:
+            try:
+                pending_payload = _pending_action_json(
+                    pending,
+                    runtime=cast(PilotRuntime, app.state.pilot_runtime),
+                    applications=applications,
+                    session_factory=session_factory,
+                    conversation_id=conversation_id,
+                )
+            except (AttributeError, RuntimeError, TypeError, ValueError):
+                pending_payload = {
+                    "tool_name": pending.tool_name,
+                    "operation_id": pending.operation_id,
+                    "human": pending.human,
+                    "args": _safe_tool_args(pending.args),
+                    "confirmation_token": _confirmation_token(pending),
+                    "editable_fields": [],
+                }
+            return {
+                "type": "confirmation_required",
+                "conversation_id": conversation_id,
+                "turn_id": turn_id,
+                "execution_generation": generation,
+                "pending_action": pending_payload,
+                "operation_id": pending.operation_id,
+            }
+
+        with session_factory() as session:
+            message = session.execute(text(
+                "SELECT m.content, m.operation_id FROM chat_messages m "
+                "JOIN pilot_turn_messages t ON t.message_id=m.id "
+                "WHERE t.turn_id=:turn_id AND m.conversation_id=:conversation_id AND m.role='assistant' "
+                "ORDER BY m.id DESC LIMIT 1"
+            ), {"turn_id": turn_id, "conversation_id": conversation_id}).first()
+        if message is not None:
+            payload: dict[str, Any] = {
+                "type": "message",
+                "conversation_id": conversation_id,
+                "turn_id": turn_id,
+                "execution_generation": generation,
+                "message": message[0],
+            }
+            if message[1]:
+                payload["operation_id"] = message[1]
+            return payload
+        return None
+
+    def _runtime_durable_snapshot(
+        conversation_id: int,
+        turn_id: str,
+        generation: int,
+    ) -> dict[str, Any]:
+        """Read durable Chat/Timeline facts for a fresh reconnect snapshot."""
+
+        page = pilot_timeline.read_timeline(
+            conversation_id,
+            lambda db_session: build_timeline_sources(
+                db_session,
+                conversation_id,
+                _agent_presentation_builder(),
+            ),
+            limit=200,
+        )
+        durable = dict(page)
+        durable["turn_id"] = turn_id
+        durable["execution_generation"] = generation
+        durable["messages"] = [
+            ChatMessageOut.model_validate(item).model_dump(mode="json")
+            for item in chat.list_messages(conversation_id)
+        ]
+        pending = chat.get_pending_action(conversation_id)
+        if pending is not None:
+            pending_response = _runtime_durable_terminal_response(
+                conversation_id,
+                turn_id,
+                generation,
+            )
+            # The pending row can be cleared between the first read and the
+            # terminal projection (for example, a concurrent confirmation).
+            # Keep the snapshot valid when that happens instead of calling
+            # ``.get`` on the missing projection.
+            if pending_response is not None:
+                pending_action = pending_response.get("pending_action")
+                if pending_action is not None:
+                    durable["pending_action"] = pending_action
+        return durable
+
+    def _runtime_terminal_payload(
+        response: Mapping[str, Any] | None,
+        *,
+        turn_id: str,
+        conversation_id: int,
+        generation: int,
+    ) -> dict[str, Any] | None:
+        if response is None:
+            return None
+        value = dict(response)
+        value.setdefault("conversation_id", conversation_id)
+        value.setdefault("turn_id", turn_id)
+        value.setdefault("execution_generation", generation)
+        return value
+
+    def _runtime_execution_readable(durable: Mapping[str, Any]) -> bool:
+        """Recheck live ownership and source visibility before exposing buffers."""
+        def read(connection: sqlite3.Connection) -> bool:
+            conversation = connection.execute(
+                "SELECT context_type, context_ref FROM conversations WHERE id=?",
+                (durable["conversation_id"],),
+            ).fetchone()
+            if conversation is None:
+                return False
+            refs = list(durable.get("source_refs") or [])
+            if conversation[0] == "application":
+                refs.append(f"context:application:{conversation[1]}")
+            for ref in refs:
+                if not isinstance(ref, str):
+                    return False
+                parts = ref.split(":", 2)
+                if len(parts) != 3 or parts[0] not in {"context", "attachment"}:
+                    return False
+                _, kind, raw_id = parts
+                if kind in {"workspace", "global"} and parts[0] == "context":
+                    continue
+                if not raw_id.isdecimal():
+                    return False
+                source_id = int(raw_id)
+                if kind == "application":
+                    query = "SELECT id FROM applications WHERE id=? AND deleted_at IS NULL"
+                elif kind == "resume":
+                    query = "SELECT id FROM resumes WHERE id=? AND deleted_at IS NULL"
+                elif kind == "offer":
+                    query = ("SELECT o.id FROM offers o JOIN applications a ON a.id=o.application_id "
+                             "WHERE o.id=? AND a.deleted_at IS NULL")
+                else:
+                    return False
+                if connection.execute(query, (source_id,)).fetchone() is None:
+                    return False
+            return True
+
+        try:
+            return bool(context_source_loader.load(read, lambda value: value))
+        except Exception:
+            return False
+
+    def _runtime_stream_readable(turn_id: str, generation: int) -> bool:
+        try:
+            durable = pilot_controls.get_runtime_execution(turn_id, generation)
+            return bool(durable is not None and durable["state"] not in {
+                "stopped", "interrupted", "result_unknown", "failed"
+            } and _runtime_execution_readable(durable))
+        except Exception:
+            return False
+
+    def _runtime_status_payload(
+        turn_id: str,
+        generation: int | None = None,
+    ) -> dict[str, Any] | None:
+        durable = pilot_controls.get_runtime_execution(turn_id, generation)
+        if durable is None or not _runtime_execution_readable(durable):
+            return None
+        target_generation = generation
+        if durable is not None:
+            target_generation = int(durable["execution_generation"])
+        manager_status: dict[str, Any] | None = None
+        try:
+            manager_status = cast(
+                dict[str, Any], runtime_manager.status(turn_id, generation=target_generation)
+            )
+        except (RuntimeTurnNotFound, RuntimeManagerError):
+            manager_status = None
+        if durable is None and manager_status is None:
+            return None
+        if manager_status is not None:
+            status = dict(manager_status)
+            conversation_id = int(status["conversation_id"])
+            target_generation = int(status["execution_generation"])
+            request_id = status.get("request_id")
+            state = str(status.get("state") or "result_unknown")
+            raw_outcome = status.get("outcome")
+            response = (
+                dict(cast(Mapping[str, Any], raw_outcome))
+                if isinstance(raw_outcome, Mapping) and "type" in raw_outcome
+                else None
+            )
+            actual_worker_alive = bool(status.get("actual_worker_alive", False))
+            worker_done = bool(status.get("worker_done", not actual_worker_alive))
+            accepted_at = status.get("accepted_at")
+            deadline_at = status.get("deadline_at")
+            budget = status.get("budget", {})
+        else:
+            assert durable is not None
+            conversation_id = int(durable["conversation_id"])
+            target_generation = int(durable["execution_generation"])
+            request_id = durable.get("submission_request_id")
+            state = str(durable.get("state") or "result_unknown")
+            response = None
+            actual_worker_alive = False
+            worker_done = True
+            accepted_at = None
+            deadline_at = None
+            budget = {}
+        if durable is not None and int(durable["conversation_id"]) != conversation_id:
+            return None
+        if durable["state"] != "running":
+            state = str(durable["state"])
+            if state not in {"completed", "waiting_confirmation"}:
+                response = None
+        if response is None and state in {
+            "completed",
+            "waiting_confirmation",
+        }:
+            response = _runtime_durable_terminal_response(
+                conversation_id,
+                turn_id,
+                target_generation,
+            )
+        response = _runtime_terminal_payload(
+            response,
+            turn_id=turn_id,
+            conversation_id=conversation_id,
+            generation=target_generation,
+        )
+        execution: dict[str, Any] = {
+            "protocol_version": "pilot-runtime-v1",
+            "request_id": request_id,
+            "turn_id": turn_id,
+            "conversation_id": conversation_id,
+            "execution_generation": target_generation,
+            "state": state,
+            "worker_done": worker_done,
+            "actual_worker_alive": actual_worker_alive,
+            "budget": budget,
+        }
+        payload: dict[str, Any] = {
+            "protocol_version": "pilot-runtime-v1",
+            "request_id": request_id,
+            "turn_id": turn_id,
+            "conversation_id": conversation_id,
+            "execution_generation": target_generation,
+            "state": state,
+            "execution": execution,
+            "worker_done": worker_done,
+            "actual_worker_alive": actual_worker_alive,
+            "budget": budget,
+            "recovery": {
+                "requires_resync": manager_status is None,
+                "auto_resume": False,
+            },
+            "links": {
+                "status_url": f"{runtime_base_path}/turns/{turn_id}",
+                "snapshot_url": f"{runtime_base_path}/turns/{turn_id}/snapshot",
+                "events_url": f"{runtime_base_path}/turns/{turn_id}/events",
+            },
+        }
+        if accepted_at is not None:
+            payload["accepted_at"] = accepted_at
+            execution["accepted_at"] = accepted_at
+        if deadline_at is not None:
+            payload["deadline_at"] = deadline_at
+            execution["deadline_at"] = deadline_at
+        if status_cursor := (manager_status or {}).get("event_cursor"):
+            payload["event_cursor"] = status_cursor
+            payload["snapshot_cursor"] = (manager_status or {}).get("snapshot_cursor", status_cursor)
+            execution["event_cursor"] = status_cursor
+        if manager_status is not None:
+            payload["runtime_epoch"] = manager_status.get("runtime_epoch")
+            execution["runtime_epoch"] = manager_status.get("runtime_epoch")
+        elif durable is not None:
+            payload["runtime_epoch"] = durable.get("runtime_epoch")
+            execution["runtime_epoch"] = durable.get("runtime_epoch")
+        if response is not None:
+            payload["terminal"] = {"response": response}
+        else:
+            payload["terminal"] = {}
+        return payload
+
+    def _runtime_submission_payload(submission: object) -> dict[str, Any]:
+        as_mapping = getattr(submission, "as_mapping", None)
+        if not callable(as_mapping):
+            raise TypeError("runtime manager returned an invalid submission")
+        value = cast(
+            dict[str, Any],
+            as_mapping(
+                snapshot_url=f"{runtime_base_path}/turns/{getattr(submission, 'turn_id')}/snapshot",
+                events_url=f"{runtime_base_path}/turns/{getattr(submission, 'turn_id')}/events",
+            ),
+        )
+        value["links"] = {
+            "status_url": f"{runtime_base_path}/turns/{getattr(submission, 'turn_id')}",
+            "snapshot_url": f"{runtime_base_path}/turns/{getattr(submission, 'turn_id')}/snapshot",
+            "events_url": f"{runtime_base_path}/turns/{getattr(submission, 'turn_id')}/events",
+        }
+        value["execution"] = {
+            "protocol_version": value.get("protocol_version"),
+            "request_id": value.get("request_id"),
+            "turn_id": value.get("turn_id"),
+            "conversation_id": value.get("conversation_id"),
+            "execution_generation": value.get("execution_generation"),
+            "state": value.get("state"),
+            "accepted_at": value.get("accepted_at"),
+            "deadline_at": value.get("deadline_at"),
+            "runtime_epoch": value.get("runtime_epoch"),
+        }
+        return value
+
+    def _runtime_manager_error(exc: BaseException) -> JSONResponse:
+        if isinstance(exc, RuntimeCapacityExhausted):
+            return error_response(
+                429,
+                "任务队列已满，请稍后重试。",
+                code="runtime_capacity_exhausted",
+                details={
+                    "retry_after_seconds": exc.retry_after_seconds,
+                    "retryable": True,
+                },
+            )
+        if isinstance(exc, RuntimeSubmissionConflict):
+            return error_response(409, "Runtime 请求标识已被使用。", code="runtime_submission_conflict")
+        if isinstance(exc, RuntimeCursorInvalid):
+            return error_response(409, "Runtime 游标已失效，请重新同步。", code="runtime_resync_required")
+        if isinstance(exc, RuntimeResyncRequired):
+            return error_response(409, "Runtime 进度已超出保留范围，请重新同步。", code="runtime_resync_required")
+        if isinstance(exc, RuntimeTurnNotFound):
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        return error_response(503, "Runtime 暂时不可用，请稍后重试。", code="runtime_unavailable")
+
+    def _runtime_admit_start(
+        request: StartTurnRequest,
+        request_id: str,
+    ) -> tuple[
+        StartTurnRequest,
+        PilotRuntime,
+        TurnAdmission,
+        DurableRuntimeInvocationControl,
+        ReadinessContextBinding | None,
+        bool,
+    ]:
+        frozen_source: list[_FrozenChatSourceMessages] = []
+        frozen_readiness: list[ReadinessContextBinding | None] = []
+        leases: list[ExecutionLease] = []
+        refs = _runtime_source_refs(request)
+        metadata = {
+            "protocol": "pilot-runtime-v1",
+            "runtime_epoch": runtime_manager.runtime_epoch,
+            "submission_key": _runtime_key(request_id, "start"),
+            "submission_request_id": request_id,
+            "source_refs_json": json.dumps(refs, ensure_ascii=False, separators=(",", ":")),
+        }
+
+        def freeze(session: Session, conversation: Any) -> Mapping[str, str]:
+            cast(PilotRuntime, app.state.pilot_runtime).validate_start_admission(request)
+            source = _load_chat_source_messages(
+                cast(Any, _TransactionChatSourceLoader(session)),
+                conversation,
+                [{"kind": item.kind, "id": item.ref} for item in request.attachments],
+                pending_tool_call_id=conversation.pending_tool_call_id,
+            )
+            frozen_readiness.append(
+                readiness_contexts.capture_enabled_binding_in_session(
+                    session,
+                    conversation.id,
+                )
+            )
+            frozen_source.append(source)
+            if source.context_type == "application" and source.context_ref:
+                context_ref = f"context:application:{source.context_ref}"
+                if context_ref not in refs:
+                    refs.append(context_ref)
+                metadata["source_refs_json"] = json.dumps(refs, ensure_ascii=False, separators=(",", ":"))
+            return {
+                "conversation_scope": str(source.scope_revision),
+                "current_scope": (
+                    source.context_message.surface_revision or "absent"
+                    if source.context_message is not None
+                    else "absent"
+                ),
+                "request_attachments": hashlib.sha256(
+                    json.dumps(
+                        [
+                            [message.content, message.surface_revision]
+                            for message in source.attachment_messages
+                        ],
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                ).hexdigest(),
+            }
+
+        def claim(session: Session, turn: Any) -> None:
+            leases.append(
+                pilot_controls.claim_start_in_session(
+                    session,
+                    turn.id,
+                    **metadata,
+                )
+            )
+
+        admission = pilot_timeline.admit(
+            request_id,
+            _runtime_start_canonical(request),
+            freeze_sources=freeze,
+            on_admitted=claim,
+        )
+        if not admission.created:
+            existing = pilot_controls.get_runtime_execution(admission.turn_id)
+            if existing is None:
+                raise RuntimeSubmissionConflict("request is bound to a non-Runtime execution")
+            return (
+                request,
+                cast(PilotRuntime, app.state.pilot_runtime),
+                admission,
+                cast(Any, None),
+                None,
+                True,
+            )
+        if not leases or not frozen_source or not frozen_readiness:
+            raise RuntimeManagerError("Runtime admission did not create an execution lease")
+        control = None
+        try:
+            control = turn_control_registry.create(leases[0])
+            bound_runtime = cast(PilotRuntime, app.state.pilot_runtime).with_start_ports(
+                persistence=cast(
+                    Any,
+                    ChatPersistenceCoordinator(
+                        chat.for_turn(admission.turn_id),
+                        admitted_user_message_id=admission.user_message_id,
+                    ),
+                ),
+                source_loader=cast(
+                    Any,
+                    _FreshAdmittedChatSourceLoader(frozen_source[0], _runtime_source_loader),
+                ),
+            )
+        except BaseException:
+            if control is not None:
+                _runtime_finish_control(control, "failed")
+            else:
+                pilot_controls.finish(leases[0], "failed")
+            raise
+        return (
+            replace(request, conversation_id=admission.conversation_id),
+            bound_runtime,
+            admission,
+            control,
+            frozen_readiness[0],
+            False,
+        )
+
+    @app.post(f"{runtime_base_path}/turns")
+    def submit_runtime_turn(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        typed = _normalize_runtime_start_request(payload)
+        if isinstance(typed, JSONResponse):
+            return typed
+        request_id = _runtime_request_id(payload)
+        if isinstance(request_id, JSONResponse):
+            return request_id
+        try:
+            with runtime_manager.serialized_admission():
+                if pilot_controls.get_runtime_execution_by_request(request_id) is not None:
+                    return _submit_runtime_turn(typed, request_id, None)
+                with runtime_manager.reserve_admission() as reservation:
+                    return _submit_runtime_turn(typed, request_id, reservation)
+        except RuntimeManagerError as exc:
+            return _runtime_manager_error(exc)
+
+    def _submit_runtime_turn(
+        typed: StartTurnRequest,
+        request_id: str,
+        reservation: object | None,
+    ) -> JSONResponse:
+        try:
+            (
+                typed_request,
+                bound_runtime,
+                admission,
+                control,
+                readiness_binding,
+                replayed,
+            ) = _runtime_admit_start(
+                typed,
+                request_id,
+            )
+        except TurnControlConflict:
+            return error_response(409, "当前对话已有执行中任务或待确认操作，请先处理原任务。", code="turn_execution_active")
+        except AdmissionGone:
+            return error_response(410, "原对话已删除，无法再次执行此请求。", code="turn_gone")
+        except AdmissionNotFound:
+            return error_response(404, "对话不存在。", code="conversation_not_found")
+        except AdmissionConflict:
+            return error_response(409, "请求标识已被使用或对话已归档。", code="turn_conflict")
+        except (ConversationScopeUnavailable, ConversationScopeVisibilityFailure):
+            return _source_load_failed_response()
+        except ReadinessContextUnavailable as exc:
+            code = str(exc) or "readiness_context_unavailable"
+            status_code = 404 if code == "readiness_conversation_unavailable" else 422
+            return error_response(status_code, "当前准备重点不可用。", code=code)
+        except LookupError:
+            return error_response(404, "投递不存在。", code="application_not_found")
+        except (TypeError, ValueError) as exc:
+            return error_response(422, str(exc))
+        except RuntimeManagerError as exc:
+            return _runtime_manager_error(exc)
+        except Exception:
+            return error_response(503, "任务暂时无法接纳，请稍后重试。", code="runtime_admission_failed")
+
+        if replayed:
+            status = _runtime_status_payload(admission.turn_id)
+            if status is None:
+                return error_response(409, "Runtime 请求状态不可用。", code="runtime_submission_conflict")
+            status["request_id"] = request_id
+            status["replayed"] = True
+            return JSONResponse(status, headers={"Cache-Control": "no-store"})
+
+        assert control.lease is not None
+
+        def operation(
+            sink: Any,
+            invocation_control: Any,
+            budget: RuntimeBudget,
+        ) -> object:
+            try:
+                with invocation_scope(invocation_control), frozen_readiness_scope(readiness_binding):
+                    outcome = bound_runtime.start_turn(
+                        typed_request,
+                        transport=RuntimeTransportContext(mode="sync"),
+                        event_sink=sink,
+                        execution_host=DirectRuntimeExecutionHost(),
+                        invocation_control=invocation_control,
+                        cancel_check=lambda: False,
+                        runtime_budget=budget,
+                    )
+            except RuntimeAgentTimedOut:
+                _runtime_finish_control(control, "result_unknown")
+                raise
+            except RuntimeCancelled:
+                _runtime_finish_control(control, "interrupted")
+                raise
+            except RuntimeTransportAborted:
+                _runtime_finish_control(control, "result_unknown")
+                raise
+            except BaseException:
+                _runtime_finish_control(control, "failed")
+                raise
+            _runtime_finish_control(control, _runtime_state_for_outcome(outcome))
+            return outcome
+
+        title_action: Callable[[], object] | None = None
+        title_fallback: Callable[[], object] | None = None
+        if typed.conversation_id in (None, 0) and title_model is not None:
+            def generate_title() -> None:
+                _generate_conversation_title(
+                    title_model,
+                    chat,
+                    admission.conversation_id,
+                    typed_request.message,
+                    resolved_data_dir,
+                )
+
+            def fallback_title() -> bool:
+                return chat.apply_generated_title(
+                    admission.conversation_id,
+                    _title_from_message(typed_request.message),
+                )
+
+            title_action = generate_title
+            title_fallback = fallback_title
+        try:
+            submission = runtime_manager.submit(
+                turn_id=admission.turn_id,
+                conversation_id=admission.conversation_id,
+                generation=control.lease.generation,
+                request_id=request_id,
+                operation=operation,
+                invocation_control=control,
+                title_action=title_action,
+                title_fallback=title_fallback,
+                admission_reservation=reservation,
+            )
+        except BaseException as exc:
+            _runtime_finish_control(control, "failed")
+            if isinstance(exc, RuntimeManagerError):
+                return _runtime_manager_error(exc)
+            return error_response(503, "Runtime 暂时无法接纳，请稍后重试。", code="runtime_admission_failed")
+        body = _runtime_submission_payload(submission)
+        body["replayed"] = False
+        return JSONResponse(body, status_code=202, headers={"Cache-Control": "no-store"})
+
+    @app.get(f"{runtime_base_path}/turns/{{turn_id}}")
+    def get_runtime_turn(
+        turn_id: str,
+        generation: int | None = Query(default=None, ge=1),
+    ) -> JSONResponse:
+        payload = _runtime_status_payload(turn_id, generation)
+        if payload is None:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get(f"{runtime_base_path}/requests/{{request_id}}")
+    def get_runtime_request(request_id: str) -> JSONResponse:
+        checked = _runtime_request_id({"request_id": request_id})
+        if isinstance(checked, JSONResponse):
+            return checked
+        row = pilot_controls.get_runtime_execution_by_request(checked)
+        if row is None or row.get("submission_request_id") != checked:
+            return error_response(404, "尚未找到此 Runtime 请求。", code="runtime_request_not_found")
+        payload = _runtime_status_payload(
+            cast(str, row["turn_id"]),
+            int(row["execution_generation"]),
+        )
+        if payload is None:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        payload["request_id"] = request_id
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get(f"{runtime_base_path}/turns/{{turn_id}}/snapshot")
+    def get_runtime_snapshot(
+        turn_id: str,
+        generation: int | None = Query(default=None, ge=1),
+        cursor: str | None = Query(default=None),
+        limit: int = Query(default=200, ge=1, le=200),
+    ) -> JSONResponse:
+        status = _runtime_status_payload(turn_id, generation)
+        if status is None:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        target_generation = int(status["execution_generation"])
+        conversation_id = int(status["conversation_id"])
+        try:
+            durable = _runtime_durable_snapshot(
+                conversation_id,
+                turn_id,
+                target_generation,
+            )
+        except AdmissionGone:
+            return error_response(404, "对话不存在。", code="conversation_not_found")
+        except TimelineResyncRequired:
+            return error_response(409, "时间线已变化，请重新同步。", code="timeline_resync_required")
+        except Exception:
+            return error_response(503, "任务记录暂时无法读取，请稍后重试。", code="runtime_snapshot_unavailable")
+        try:
+            snapshot = runtime_manager.snapshot(
+                turn_id,
+                generation=target_generation,
+                after=cursor,
+                limit=limit,
+                durable=durable,
+            )
+        except (RuntimeCursorInvalid, RuntimeResyncRequired) as exc:
+            return _runtime_manager_error(exc)
+        except RuntimeTurnNotFound:
+            # A process restart retains durable facts but intentionally drops
+            # the transient event ring.  Fresh snapshots remain useful; a
+            # caller carrying an old cursor must resync explicitly.
+            if cursor is not None:
+                return error_response(409, "Runtime 游标已失效，请重新同步。", code="runtime_resync_required")
+            snapshot_payload: dict[str, Any] = {
+                "stream_version": "pilot-runtime-v1",
+                "turn_id": turn_id,
+                "conversation_id": conversation_id,
+                "execution_generation": target_generation,
+                "generation": target_generation,
+                "state": status["state"],
+                "events": [],
+                "durable": durable,
+                "snapshot_cursor": None,
+                "event_cursor": None,
+                "high_watermark": 0,
+                "next_cursor": None,
+                "runtime_epoch": status.get("runtime_epoch"),
+                "budget": status.get("budget", {}),
+                "history_truncated": False,
+                "progress_gap": True,
+            }
+            if status.get("terminal", {}).get("response") is not None:
+                snapshot_payload["terminal"] = status["terminal"]
+            return JSONResponse(snapshot_payload, headers={"Cache-Control": "no-store"})
+        progress_gap_observed = snapshot.progress_gap
+        if snapshot.progress_gap:
+            # The durable read happens before the manager captures its event
+            # high watermark.  If the bounded ring reclaimed history while
+            # that read was in flight, the first durable payload may be older
+            # than the retained event tail.  Refresh once so the explicit
+            # ``progress_gap`` marker is paired with the latest P2 facts; the
+            # marker remains authoritative if events continue to outpace the
+            # reader.
+            try:
+                durable = _runtime_durable_snapshot(
+                    conversation_id,
+                    turn_id,
+                    target_generation,
+                )
+                snapshot = runtime_manager.snapshot(
+                    turn_id,
+                    generation=target_generation,
+                    after=cursor,
+                    limit=limit,
+                    durable=durable,
+                )
+            except AdmissionGone:
+                return error_response(404, "对话不存在。", code="conversation_not_found")
+            except TimelineResyncRequired:
+                return error_response(409, "时间线已变化，请重新同步。", code="timeline_resync_required")
+            except (RuntimeCursorInvalid, RuntimeResyncRequired) as exc:
+                return _runtime_manager_error(exc)
+            except RuntimeTurnNotFound:
+                if cursor is not None:
+                    return error_response(409, "Runtime 游标已失效，请重新同步。", code="runtime_resync_required")
+                # The execution may have been evicted between the two reads.
+                # Keep the first bounded snapshot rather than hiding durable
+                # recovery behind a transient manager race.
+            except Exception:
+                # ``progress_gap`` already gives the client an explicit
+                # resync signal.  If its refresh races with shutdown, return
+                # the original durable payload together with that signal.
+                pass
+        payload = snapshot.as_mapping()
+        # A gap observed at the first high-watermark read is authoritative for
+        # this response.  The refresh can race ring reclamation and report a
+        # clean second snapshot, but it cannot prove that the first read had
+        # no missing progress.
+        payload["progress_gap"] = bool(payload.get("progress_gap") or progress_gap_observed)
+        payload["request_id"] = status.get("request_id")
+        payload["event_cursor"] = payload.get("snapshot_cursor")
+        payload["terminal"] = status.get("terminal", {})
+        payload["state"] = status["state"]
+        payload["execution"] = status["execution"]
+        payload["links"] = status.get("links", {})
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+
+    @app.get(f"{runtime_base_path}/turns/{{turn_id}}/events")
+    def get_runtime_events(
+        turn_id: str,
+        after: str | None = Query(default=None),
+        generation: int | None = Query(default=None, ge=1),
+    ) -> Response:
+        status = _runtime_status_payload(turn_id, generation)
+        if status is None:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        target_generation = int(status["execution_generation"])
+        try:
+            subscription = runtime_manager.subscribe(
+                turn_id,
+                generation=target_generation,
+                after=after,
+            )
+        except (RuntimeCursorInvalid, RuntimeResyncRequired) as exc:
+            return _runtime_manager_error(exc)
+        except RuntimeTurnNotFound:
+            return error_response(410, "Runtime 实时流已结束，请读取保存的任务记录。", code="runtime_stream_unavailable")
+        return runtime_subscription_response(
+            subscription,
+            can_read=lambda: _runtime_stream_readable(turn_id, target_generation),
+        )
+
+    @app.post(f"{runtime_base_path}/turns/{{turn_id}}/interrupt")
+    def interrupt_runtime_turn(
+        turn_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        command_id = payload.get("command_id")
+        expected_generation = payload.get("expected_generation")
+        if not isinstance(command_id, str) or not isinstance(expected_generation, int) or isinstance(expected_generation, bool):
+            return error_response(422, "停止命令需要有效的 command_id 和 expected_generation。", code="invalid_turn_command")
+        try:
+            result = pilot_controls.interrupt(command_id, turn_id, expected_generation)
+            if result.get("status") in {"stopped", "result_unknown"}:
+                try:
+                    runtime_manager.interrupt(turn_id, generation=expected_generation)
+                except RuntimeTurnNotFound:
+                    pass
+                turn_control_registry.interrupted(turn_id, expected_generation)
+            response = _runtime_status_payload(turn_id, expected_generation)
+            if response is not None:
+                response["interrupt"] = result
+                return JSONResponse(response, headers={"Cache-Control": "no-store"})
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except TurnControlConflict:
+            return error_response(409, "停止命令标识已对应其他任务或代次。", code="turn_command_conflict")
+        except ValueError:
+            return error_response(422, "停止命令需要有效的 command_id 和 expected_generation。", code="invalid_turn_command")
+        except LookupError:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        except Exception:
+            return error_response(503, "停止结果暂未确认，请使用原命令重试核对。", code="turn_control_unavailable")
+
+    @app.post(f"{runtime_base_path}/turns/{{turn_id}}/confirm")
+    def confirm_runtime_turn(
+        turn_id: str,
+        payload: dict[str, Any] = Body(...),
+    ) -> JSONResponse:
+        try:
+            with runtime_manager.serialized_admission():
+                return _confirm_runtime_turn(turn_id, payload)
+        except RuntimeManagerError as exc:
+            return _runtime_manager_error(exc)
+
+    def _confirm_runtime_turn(turn_id: str, payload: dict[str, Any]) -> JSONResponse:
+        typed = _normalize_runtime_confirmation_request(payload)
+        if isinstance(typed, JSONResponse):
+            return typed
+        request_id = _runtime_request_id(payload)
+        if isinstance(request_id, JSONResponse):
+            return request_id
+        turn = pilot_timeline.get_turn(turn_id)
+        if turn is None:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        if int(turn["conversation_id"]) != typed.conversation_id:
+            return error_response(409, "确认请求与任务对话不匹配。", code="runtime_identity_conflict")
+        current_execution = pilot_controls.get_execution(turn_id)
+        if not _runtime_execution_readable(current_execution or {"conversation_id": typed.conversation_id}):
+            return error_response(404, "任务或来源不存在。", code="turn_not_found")
+        # Capture the normalized transport before resolving an omitted
+        # operation_id from the live Pending.  This keeps retries stable even
+        # if the Pending is cleared after the first execution.
+        confirmation_key = _runtime_confirmation_key(request_id, turn_id, typed)
+        existing = pilot_controls.get_runtime_execution_by_request(request_id)
+        if existing is not None:
+            if (
+                existing.get("submission_key") != confirmation_key
+                or existing.get("turn_id") != turn_id
+            ):
+                return error_response(409, "Runtime 请求标识已被使用。", code="runtime_submission_conflict")
+            status = _runtime_status_payload(
+                turn_id,
+                int(existing["execution_generation"]),
+            )
+            if status is None:
+                return error_response(409, "Runtime 请求状态不可用。", code="runtime_submission_conflict")
+            status["replayed"] = True
+            return JSONResponse(status, headers={"Cache-Control": "no-store"})
+        if typed.operation_id is None:
+            pending = chat.get_pending_action(typed.conversation_id)
+            if pending is not None and pending.operation_id:
+                typed = replace(typed, operation_id=pending.operation_id)
+        runtime = cast(PilotRuntime, app.state.pilot_runtime)
+        try:
+            preflight = runtime.preflight_detached_confirmation(typed, expected_turn_id=turn_id)
+        except (RuntimeAgentTimedOut, RuntimeCancelled, RuntimeTransportAborted) as exc:
+            return _runtime_error_response(exc)
+        except TurnControlConflict:
+            return error_response(409, "待确认操作已被更新，请刷新后重试。", code="stale_pending_action")
+        except Exception:
+            return error_response(503, "确认状态暂时无法读取，请稍后重试。", code="runtime_confirmation_unavailable")
+        if preflight is not None:
+            if isinstance(preflight, RuntimeFailureOutcome):
+                return _runtime_http_response(preflight)
+            current = _runtime_status_payload(turn_id)
+            if current is None:
+                return error_response(409, "确认结果暂不可用，请刷新任务状态。", code="operation_result_unknown")
+            response_mapping = runtime_outcome_payload(preflight)
+            if isinstance(response_mapping, Mapping):
+                terminal = _runtime_terminal_payload(
+                    cast(Mapping[str, Any], response_mapping),
+                    turn_id=turn_id,
+                    conversation_id=typed.conversation_id,
+                    generation=int(current["execution_generation"]),
+                )
+                current["terminal"] = {"response": terminal}
+            current["request_id"] = request_id
+            current["replayed"] = True
+            return JSONResponse(current, headers={"Cache-Control": "no-store"})
+
+        try:
+            with runtime_manager.reserve_admission() as reservation:
+                return _confirm_runtime_continuation(turn_id, typed, request_id, confirmation_key, reservation)
+        except RuntimeManagerError as exc:
+            return _runtime_manager_error(exc)
+
+    def _confirm_runtime_continuation(
+        turn_id: str,
+        typed: ConfirmationRequest,
+        request_id: str,
+        confirmation_key: str,
+        reservation: object,
+    ) -> JSONResponse:
+        runtime = cast(PilotRuntime, app.state.pilot_runtime)
+        source_refs: list[str] = []
+        original = pilot_controls.get_runtime_execution(turn_id)
+        if original is not None:
+            raw_refs = original.get("source_refs")
+            if isinstance(raw_refs, list) and all(isinstance(ref, str) for ref in raw_refs):
+                source_refs = list(cast(list[str], raw_refs))[:64]
+        try:
+            # Capture the source identity before the continuation is queued.
+            # ``load_binding`` returns ``None`` for workspace conversations;
+            # application conversations carry the exact selection revision
+            # into the runtime scope, where every later source read rechecks
+            # it against SQLite.
+            with session_factory() as session:
+                readiness_binding = readiness_contexts.capture_enabled_binding_in_session(
+                    session,
+                    typed.conversation_id,
+                )
+        except ReadinessContextUnavailable as exc:
+            return error_response(422, str(exc), code=str(exc) or "readiness_context_unavailable")
+        except Exception:
+            return error_response(503, "准备重点暂时无法读取，请稍后重试。", code="readiness_context_unavailable")
+        try:
+            lease = pilot_controls.claim_confirmation(
+                typed.operation_id or "",
+                expected_turn_id=turn_id,
+                protocol="pilot-runtime-v1",
+                runtime_epoch=runtime_manager.runtime_epoch,
+                submission_key=confirmation_key,
+                submission_request_id=request_id,
+                source_refs_json=json.dumps(source_refs, ensure_ascii=False, separators=(",", ":")),
+            )
+        except TurnControlConflict:
+            return error_response(409, "待确认操作已被更新，请刷新后重试。", code="stale_pending_action")
+        except (TypeError, ValueError) as exc:
+            return error_response(422, str(exc))
+        except Exception:
+            return error_response(503, "确认请求暂时无法接纳，请稍后重试。", code="runtime_confirmation_unavailable")
+        if lease is None:
+            current = _runtime_status_payload(turn_id)
+            if current is None:
+                return error_response(409, "确认结果暂不可用，请刷新任务状态。", code="operation_result_unknown")
+            current["request_id"] = request_id
+            current["replayed"] = True
+            return JSONResponse(current, headers={"Cache-Control": "no-store"})
+        try:
+            control = turn_control_registry.create(lease)
+        except BaseException:
+            pilot_controls.finish(lease, "failed")
+            return error_response(503, "Runtime 暂时无法启动，请稍后重试。", code="runtime_unavailable")
+
+        def operation(
+            sink: Any,
+            invocation_control: Any,
+            budget: RuntimeBudget,
+        ) -> object:
+            try:
+                with invocation_scope(invocation_control), frozen_readiness_scope(readiness_binding):
+                    outcome = runtime.continue_confirmation(
+                        typed,
+                        transport=RuntimeTransportContext(mode="sync"),
+                        invocation_control=invocation_control,
+                        event_sink=sink,
+                        execution_host=DirectRuntimeExecutionHost(),
+                        cancel_check=lambda: False,
+                        runtime_budget=budget,
+                    )
+            except RuntimeAgentTimedOut:
+                _runtime_finish_control(control, "result_unknown")
+                raise
+            except RuntimeCancelled:
+                _runtime_finish_control(control, "interrupted")
+                raise
+            except RuntimeTransportAborted:
+                _runtime_finish_control(control, "result_unknown")
+                raise
+            except BaseException:
+                _runtime_finish_control(control, "failed")
+                raise
+            _runtime_finish_control(control, _runtime_state_for_outcome(outcome))
+            return outcome
+
+        try:
+            submission = runtime_manager.submit(
+                turn_id=turn_id,
+                conversation_id=typed.conversation_id,
+                generation=lease.generation,
+                request_id=request_id,
+                operation=operation,
+                invocation_control=control,
+                admission_reservation=reservation,
+            )
+        except BaseException as exc:
+            _runtime_finish_control(control, "failed")
+            if isinstance(exc, RuntimeManagerError):
+                return _runtime_manager_error(exc)
+            return error_response(503, "Runtime 暂时无法接纳，请稍后重试。", code="runtime_admission_failed")
+        body = _runtime_submission_payload(submission)
+        body["replayed"] = False
+        return JSONResponse(body, status_code=202, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/chat/turns/{turn_id}")
     def get_pilot_turn(turn_id: str) -> JSONResponse:
@@ -9440,6 +10607,52 @@ class _AdmittedChatSourceLoader:
         return self.source
 
 
+class _FreshAdmittedChatSourceLoader:
+    """Revalidate an admission snapshot immediately before Agent work.
+
+    Admission freezes the source so a newly inserted user message cannot be
+    duplicated by the worker.  The worker still performs a source read before
+    preparation and compares its scope/context/attachment revisions with that
+    freeze.  A changed or withdrawn source therefore fails closed without
+    giving a queued task permission to use newer, unreviewed context.
+    """
+
+    def __init__(
+        self,
+        source: _FrozenChatSourceMessages,
+        loader: Callable[..., object],
+    ) -> None:
+        self.source = source
+        self.loader = loader
+
+    @staticmethod
+    def _revision(value: object) -> tuple[object, ...]:
+        context = getattr(value, "context_message", None)
+        context_revision = getattr(context, "surface_revision", "") if context is not None else "absent"
+        attachments = getattr(value, "attachment_messages", ())
+        attachment_revisions = tuple(
+            str(getattr(item, "surface_revision", "")) for item in attachments
+        )
+        return (
+            getattr(value, "conversation_id", None),
+            getattr(value, "context_type", None),
+            getattr(value, "context_ref", None),
+            getattr(value, "mode", None),
+            getattr(value, "scope_revision", None),
+            str(context_revision),
+            attachment_revisions,
+        )
+
+    def load(self, conversation: object, request: object, **kwargs: object) -> object:
+        current = self.loader(conversation, request, **kwargs)
+        if self._revision(current) != self._revision(self.source):
+            raise RuntimeError("source changed after admission")
+        # Return the frozen pre-user-message source.  The fresh read above is
+        # validation only; returning it would feed the admitted user message
+        # into the model a second time.
+        return self.source
+
+
 @dataclass(frozen=True, slots=True)
 class _CanonicalSourceScope:
     conversation_id: int
@@ -10668,27 +11881,32 @@ def _decode_interview_preparation_request(
         ValueError,
     ):
         return invalid_request()
-    if _decoded_json_contains_surrogate(decoded):
+    if _decoded_json_has_unsafe_structure(decoded):
         return invalid_request()
     if type(decoded) is not dict:
         return invalid_request()
     return decoded, "readiness_feedback_version_ids" in decoded
 
 
-def _decoded_json_contains_surrogate(value: Any) -> bool:
-    pending = [value]
+def _decoded_json_has_unsafe_structure(value: Any) -> bool:
+    # Valid preparation payloads nest at most four containers. Do not rely on
+    # interpreter-specific json.loads recursion limits to reject hostile input.
+    max_container_depth = 32
+    pending: list[tuple[Any, int]] = [(value, 1)]
     while pending:
-        item = pending.pop()
+        item, depth = pending.pop()
+        if type(item) in (list, dict) and depth > max_container_depth:
+            return True
         if type(item) is str:
             if any(0xD800 <= ord(character) <= 0xDFFF for character in item):
                 return True
         elif type(item) is list:
-            pending.extend(item)
+            pending.extend((child, depth + 1) for child in item)
         elif type(item) is dict:
             for key, child in item.items():
                 if any(0xD800 <= ord(character) <= 0xDFFF for character in key):
                     return True
-                pending.append(child)
+                pending.append((child, depth + 1))
     return False
 
 

@@ -13,7 +13,9 @@ import type {
 } from '@/types/chat';
 import { authHeaders } from './authToken';
 import { createApiClient } from './http';
-import { forgetConversationStarts, forgetPendingStart, listPendingStarts, markPendingStartAccepted, rememberPendingStart } from './chatSubmission';
+import { confirmRuntimeTurn, RuntimeEndedError, submitRuntimeTurn } from './pilotRuntime';
+import type { PilotTimelinePage } from '@/features/actionPresentation/contracts';
+import { forgetConversationStarts, forgetPendingStart, listPendingStarts, markPendingStartAccepted, rememberPendingStart, settlePendingStartForExecution } from './chatSubmission';
 
 const http = createApiClient({ baseURL: '/api', timeout: 130000 });
 export const SETTINGS_QUERY_KEY = ['settings'] as const;
@@ -43,11 +45,12 @@ export interface ChatContextInput {
 export interface ChatRequestOptions {
   signal?: AbortSignal;
   requestId?: string;
-  onAccepted?: (identity: { conversationId: number; turnId: string; executionGeneration?: number }) => void;
+  onAccepted?: (identity: { conversationId: number; turnId: string; executionGeneration?: number; protocol?: 'pilot-runtime-v1' }) => void;
 }
 
 export interface ChatStreamRequestOptions extends ChatRequestOptions {
   onEvent?: (event: ChatStreamEvent) => void;
+  onSnapshot?: (page: PilotTimelinePage) => void | Promise<void>;
 }
 
 export class ChatStreamError extends Error {
@@ -190,7 +193,7 @@ export function createSseParser(onEvent: (event: ChatStreamEvent) => void) {
   };
 }
 
-export async function streamChat(
+export async function legacyStreamChat(
   message: string,
   conversationId?: number,
   context?: ChatContextInput,
@@ -231,16 +234,19 @@ function settlePendingStart(requestId: string, response: ChatResponse): void {
 
 function forgetRejectedStart(requestId: string, wasPending: boolean, error: unknown): void {
   const response = (error as { response?: { status?: number; data?: { turn_id?: unknown } } })?.response;
-  const status = error instanceof ChatStreamError ? error.status : response?.status;
-  const accepted = error instanceof ChatStreamError ? error.acceptedTurn : typeof response?.data?.turn_id === 'string';
+  const status = error instanceof ChatStreamError ? error.status : response?.status ?? (error as { status?: number })?.status;
+  const accepted = error instanceof ChatStreamError ? error.acceptedTurn
+    : (error as { acceptedTurn?: boolean })?.acceptedTurn === true || typeof response?.data?.turn_id === 'string';
+  const capacityRejectedBeforeAdmission = status === 429
+    && (error as { code?: string })?.code === 'runtime_capacity_exhausted';
   // A 5xx may follow a committed start (including a lost upstream response).
   // A rejected retry also cannot disprove an earlier unknown admission.
-  if (!accepted && (status === 410 || (!wasPending && status !== undefined && [400, 401, 403, 404, 422].includes(status)))) {
+  if (!accepted && (status === 410 || capacityRejectedBeforeAdmission || (!wasPending && status !== undefined && [400, 401, 403, 404, 422].includes(status)))) {
     forgetPendingStart(requestId);
   }
 }
 
-export async function streamConfirmAction(
+export async function legacyStreamConfirmAction(
   conversationId: number,
   input: ConfirmationRequest,
   options?: ChatStreamRequestOptions,
@@ -253,6 +259,50 @@ export async function streamConfirmAction(
     },
     options,
   );
+  if (response.type === 'turn_recovered') throw new Error('confirmation_response_mismatch');
+  return response;
+}
+
+export async function streamChat(
+  message: string,
+  conversationId?: number,
+  context?: ChatContextInput,
+  options?: ChatStreamRequestOptions,
+): Promise<ChatResponse> {
+  const requestId = options?.requestId ?? crypto.randomUUID();
+  const wasPending = listPendingStarts().some((item) => item.requestId === requestId);
+  rememberPendingStart(requestId, conversationId ?? 0);
+  const response = await submitRuntimeTurn({
+    message, request_id: requestId, conversation_id: conversationId ?? 0,
+    ...context, ...(context?.context_ref !== undefined ? { context_ref: String(context.context_ref) } : {}),
+  }, {
+    ...options,
+    onAccepted: (identity) => {
+      markPendingStartAccepted(requestId, identity.conversationId, identity.turnId);
+      options?.onAccepted?.(identity);
+    },
+  }).catch((error: unknown) => {
+    if (error instanceof RuntimeEndedError) {
+      settlePendingStartForExecution({ ...error.target, state: error.state }, requestId);
+    }
+    forgetRejectedStart(requestId, wasPending, error);
+    throw error;
+  });
+  settlePendingStart(requestId, response);
+  return response;
+}
+
+export async function streamConfirmAction(
+  conversationId: number,
+  input: ConfirmationRequest,
+  options?: ChatStreamRequestOptions,
+): Promise<ChatExecutionResponse> {
+  const execution = await getPilotExecution(conversationId);
+  if (!execution) throw new Error('当前操作的任务身份不可用，请刷新确认状态。');
+  const response = await confirmRuntimeTurn(execution.turn_id, {
+    request_id: options?.requestId ?? crypto.randomUUID(), conversation_id: conversationId,
+    ...confirmationPayload(input),
+  }, options);
   if (response.type === 'turn_recovered') throw new Error('confirmation_response_mismatch');
   return response;
 }

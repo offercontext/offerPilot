@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { UITurn } from '@/components/ChatPanel/model';
 import type { PendingAction } from '@/types/chat';
-import type { PilotPresentationSnapshot } from './contracts';
-import { getPilotPresentation } from './service';
+import type { PilotPresentationSnapshot, PilotTimelinePage } from './contracts';
+import { getPilotPresentation, getPilotPresentationFromPage } from './service';
 import { mergePresentationTurns, withTransportUncertainty } from './model';
 
 /** Called once by the conversation owner; shells only consume its result. */
@@ -10,14 +10,37 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
   const [loaded, setLoaded] = useState<{ snapshot: PilotPresentationSnapshot; turns: UITurn[]; pending: PendingAction | null; revision: number } | null>(null);
   const [revision, setRevision] = useState(0);
   const latestSnapshot = useRef<PilotPresentationSnapshot | null>(null);
+  const snapshotEpoch = useRef(0);
+  const currentValues = useRef({ conversationId, turns, pending, revision });
+  currentValues.current = { conversationId, turns, pending, revision };
   const [requestState, setRequestState] = useState<{ conversationId: number; failed: boolean; refreshing: boolean } | null>(null);
   const refreshPresentation = useCallback(() => setRevision((value) => value + 1), []);
+  const acceptRuntimeSnapshot = useCallback(async (page: PilotTimelinePage, isCurrent: () => boolean = () => true) => {
+    if (!isCurrent() || currentValues.current.conversationId !== page.conversation_id) return;
+    const epoch = ++snapshotEpoch.current;
+    let snapshot: PilotPresentationSnapshot;
+    try { snapshot = await getPilotPresentationFromPage(page); }
+    catch {
+      if (isCurrent() && epoch === snapshotEpoch.current && currentValues.current.conversationId === page.conversation_id) {
+        latestSnapshot.current = null;
+        setLoaded(null);
+        setRequestState({ conversationId: page.conversation_id, failed: true, refreshing: false });
+      }
+      return;
+    }
+    if (!isCurrent() || epoch !== snapshotEpoch.current || currentValues.current.conversationId !== page.conversation_id) return;
+    latestSnapshot.current = snapshot;
+    const current = currentValues.current;
+    setLoaded({ snapshot, turns: current.turns, pending: current.pending, revision: current.revision });
+    setRequestState({ conversationId: page.conversation_id, failed: false, refreshing: false });
+  }, []);
   useEffect(() => {
     let current = true;
+    const epoch = ++snapshotEpoch.current;
     if (conversationId !== undefined && !loading) {
       setRequestState((previous) => ({ conversationId, failed: previous?.conversationId === conversationId && previous.failed, refreshing: true }));
       void getPilotPresentation(conversationId, latestSnapshot.current).then((snapshot) => {
-        if (current) {
+        if (current && epoch === snapshotEpoch.current) {
           latestSnapshot.current = snapshot;
           setLoaded({ snapshot, turns, pending, revision });
           setRequestState({ conversationId, failed: false, refreshing: false });
@@ -25,7 +48,7 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
       }).catch(() => {
         // A failed refresh must release the stale projection so the latest
         // persisted messages remain visible through the original owner.
-        if (current) {
+        if (current && epoch === snapshotEpoch.current) {
           latestSnapshot.current = null;
           setLoaded(null);
           setRequestState({ conversationId, failed: true, refreshing: false });
@@ -55,6 +78,7 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
     displayTurns,
     presentationSnapshot: snapshot,
     refreshPresentation,
+    acceptRuntimeSnapshot,
     presentationFailed: requestState?.conversationId === conversationId && requestState?.failed === true,
     presentationRefreshing: requestState?.conversationId === conversationId && requestState?.refreshing === true,
   };

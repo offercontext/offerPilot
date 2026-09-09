@@ -960,3 +960,51 @@ def test_guard_cleanup_type_error_is_called_once_without_signature_retry() -> No
     with pytest.raises(TypeError, match="callback body failure"):
         guard.complete(CompletionReason.NORMAL)
     assert calls["cleanup"] == 1
+
+
+@pytest.mark.parametrize("execution_mode", ["direct", "agent_host"])
+@pytest.mark.parametrize("terminal_state", ["timeout", "cancel"])
+@pytest.mark.parametrize("result_kind", ["message", "failure"])
+def test_timeout_stream_keeps_only_durable_terminal_receipts(execution_mode, terminal_state, result_kind):
+    from offerpilot.chat_transport import runtime_sse_content
+    from offerpilot.pilot_runtime.contracts import (
+        AssistantDeltaEvent, CancelReason, ErrorEvent, PreparationKind,
+        PreparedStreamExecution, StreamExecutionMode,
+    )
+
+    control = InMemoryRuntimeInvocationControl()
+    durable = (
+        MessageOutcome(message="committed fallback", conversation_id=1, persisted=True)
+        if result_kind == "message"
+        else RuntimeFailureOutcome(code=RuntimeFailureCode.CHAT_AGENT_TIMEOUT, message="timed out")
+    )
+
+    class Runtime:
+        def execute_prepared_stream(self, _prepared, *, event_sink, **_kwargs):
+            if terminal_state == "timeout":
+                assert control.request_timeout()
+            else:
+                assert control.request_cancel(CancelReason.EXPLICIT_CANCEL)
+            for event in (
+                AssistantDeltaEvent(delta="late token"),
+                AssistantMessageEvent(message="late message"),
+                CompletedEvent(response=MessageOutcome(message="late unpersisted", persisted=False)),
+                CompletedEvent(response=durable, persisted=False),
+                ErrorEvent(code=RuntimeFailureCode.CHAT_AGENT_TIMEOUT, message="timed out"),
+                CompletedEvent(response=durable),
+            ):
+                event_sink.emit(event)
+            return durable
+
+    prepared = PreparedStreamExecution(
+        invocation_id="timeout-terminal-test",
+        preparation_kind=(PreparationKind.DETERMINISTIC_INITIAL if execution_mode == "direct"
+                          else PreparationKind.MODEL),
+        execution_mode=StreamExecutionMode(execution_mode), opaque_state=(),
+    )
+    outcomes = []
+    frames = list(runtime_sse_content(Runtime(), prepared, control, None, "test", {}, outcomes.append))
+    names = [frame.splitlines()[0] for frame in frames]
+    assert names == (["event: error", "event: completed"] if terminal_state == "timeout" else [])
+    assert "late" not in "".join(frames)
+    assert outcomes == [durable]

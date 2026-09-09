@@ -422,7 +422,7 @@ class SafeRunRecorder:
                 budget_check=lease.checkpoint,
             )
             prepared = PreparedSnapshot(
-                manifest_schema_version=2,
+                manifest_schema_version=3 if any(name == "confirmed_readiness" for name, _ in audit.contributor_statuses) else 2,
                 manifest_json=manifest.manifest_json,
                 manifest_digest=manifest.manifest_digest,
                 logical_input_fingerprint=identity.logical_input_fingerprint,

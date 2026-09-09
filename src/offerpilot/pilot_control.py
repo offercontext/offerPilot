@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -210,6 +211,39 @@ class PilotControlRepository:
         with bind_execution_scope(None), self.session_factory() as session:
             yield session
 
+    def reconcile_runtime_epoch(self, runtime_epoch: str) -> int:
+        """Fence Runtime executions left running by an older process.
+
+        A fresh process has no in-memory worker for an old ``runtime_epoch``.
+        Mark those durable rows as ``result_unknown`` before workers accept
+        new work, and keep the corresponding Turn from looking executable.
+        Legacy rows, current-epoch rows, and already terminal rows are left
+        untouched.  The operation is a trusted control-plane write and never
+        invokes the old worker or provider.
+        """
+
+        if type(runtime_epoch) is not str or not runtime_epoch:
+            raise ValueError("runtime_epoch must be a non-empty string")
+        with self._session() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            rows = list(session.scalars(select(PilotExecution).where(
+                PilotExecution.protocol == "pilot-runtime-v1",
+                PilotExecution.state == "running",
+                PilotExecution.runtime_epoch.is_not(None),
+                PilotExecution.runtime_epoch != runtime_epoch,
+            )))
+            turn_ids = {row.turn_id for row in rows}
+            for row in rows:
+                row.state = "result_unknown"
+            if turn_ids:
+                turns = session.scalars(select(PilotTurnRecord).where(
+                    PilotTurnRecord.id.in_(turn_ids),
+                ))
+                for turn in turns:
+                    turn.state = "incomplete"
+            session.commit()
+            return len(rows)
+
     @contextmanager
     def execution_scope(self, lease: ExecutionLease) -> Iterator[ExecutionScope]:
         scope = ExecutionScope(self, lease)
@@ -229,15 +263,49 @@ class PilotControlRepository:
             row.state = "result_unknown"
         session.flush()
 
-    def claim_start(self, turn_id: str) -> ExecutionLease:
+    def claim_start(
+        self,
+        turn_id: str,
+        *,
+        protocol: str = "legacy",
+        runtime_epoch: str | None = None,
+        submission_key: str | None = None,
+        submission_request_id: str | None = None,
+        source_refs_json: str = "[]",
+    ) -> ExecutionLease:
         with self._session() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            lease = self.claim_start_in_session(session, turn_id)
+            lease = self.claim_start_in_session(
+                session,
+                turn_id,
+                protocol=protocol,
+                runtime_epoch=runtime_epoch,
+                submission_key=submission_key,
+                submission_request_id=submission_request_id,
+                source_refs_json=source_refs_json,
+            )
             session.commit()
             return lease
 
-    def claim_start_in_session(self, session: Session, turn_id: str) -> ExecutionLease:
+    def claim_start_in_session(
+        self,
+        session: Session,
+        turn_id: str,
+        *,
+        protocol: str = "legacy",
+        runtime_epoch: str | None = None,
+        submission_key: str | None = None,
+        submission_request_id: str | None = None,
+        source_refs_json: str = "[]",
+    ) -> ExecutionLease:
         """The caller owns BEGIN IMMEDIATE and admission's atomic commit."""
+        self._validate_runtime_metadata(
+            protocol,
+            runtime_epoch=runtime_epoch,
+            submission_key=submission_key,
+            submission_request_id=submission_request_id,
+            source_refs_json=source_refs_json,
+        )
         turn = session.get(PilotTurnRecord, turn_id)
         if turn is None:
             raise LookupError("Turn not found")
@@ -246,9 +314,71 @@ class PilotControlRepository:
         conversation = session.get(Conversation, turn.conversation_id)
         if conversation is None or conversation.pending_operation_id:
             raise TurnControlConflict("Conversation has a pending confirmation")
-        return self._claim(session, turn, 1)
+        return self._claim(
+            session,
+            turn,
+            1,
+            protocol=protocol,
+            runtime_epoch=runtime_epoch,
+            submission_key=submission_key,
+            submission_request_id=submission_request_id,
+            source_refs_json=source_refs_json,
+        )
 
-    def _claim(self, session: Session, turn: PilotTurnRecord, generation: int) -> ExecutionLease:
+    @staticmethod
+    def _validate_runtime_metadata(
+        protocol: str,
+        *,
+        runtime_epoch: str | None,
+        submission_key: str | None,
+        submission_request_id: str | None,
+        source_refs_json: str,
+    ) -> None:
+        if type(protocol) is not str or not protocol:
+            raise ValueError("protocol must be a non-empty string")
+        if protocol == "legacy":
+            if any(value is not None for value in (runtime_epoch, submission_key, submission_request_id)):
+                raise ValueError("legacy execution cannot carry Runtime metadata")
+            if source_refs_json != "[]":
+                raise ValueError("legacy execution cannot carry source refs")
+            return
+        if protocol != "pilot-runtime-v1":
+            raise ValueError("unsupported execution protocol")
+        for field_name, value in (
+            ("runtime_epoch", runtime_epoch),
+            ("submission_key", submission_key),
+            ("submission_request_id", submission_request_id),
+        ):
+            if type(value) is not str or not value:
+                raise ValueError(f"{field_name} is required for Runtime execution")
+        if type(source_refs_json) is not str:
+            raise TypeError("source_refs_json must be a string")
+        try:
+            decoded = json.loads(source_refs_json)
+        except json.JSONDecodeError as exc:
+            raise ValueError("source_refs_json must be valid JSON") from exc
+        if not isinstance(decoded, list) or any(not isinstance(item, str) for item in decoded):
+            raise ValueError("source_refs_json must be a JSON string array")
+
+    def _claim(
+        self,
+        session: Session,
+        turn: PilotTurnRecord,
+        generation: int,
+        *,
+        protocol: str = "legacy",
+        runtime_epoch: str | None = None,
+        submission_key: str | None = None,
+        submission_request_id: str | None = None,
+        source_refs_json: str = "[]",
+    ) -> ExecutionLease:
+        self._validate_runtime_metadata(
+            protocol,
+            runtime_epoch=runtime_epoch,
+            submission_key=submission_key,
+            submission_request_id=submission_request_id,
+            source_refs_json=source_refs_json,
+        )
         now = self.now_ms()
         self._release_expired(session, turn.conversation_id, now)
         lease = ExecutionLease(turn.id, turn.conversation_id, generation, token_hex(32))
@@ -260,11 +390,33 @@ class PilotControlRepository:
             conversation_sequence=sequence + 1,
             owner_token=lease.owner_token, state="running", renewed_at_ms=now,
             lease_until_ms=now + self.lease_ms,
+            protocol=protocol,
+            runtime_epoch=runtime_epoch,
+            submission_key=submission_key,
+            submission_request_id=submission_request_id,
+            source_refs_json=source_refs_json,
         ))
         turn.state = "started"
         return lease
 
-    def claim_confirmation(self, operation_id: str) -> ExecutionLease | None:
+    def claim_confirmation(
+        self,
+        operation_id: str,
+        *,
+        expected_turn_id: str | None = None,
+        protocol: str = "legacy",
+        runtime_epoch: str | None = None,
+        submission_key: str | None = None,
+        submission_request_id: str | None = None,
+        source_refs_json: str = "[]",
+    ) -> ExecutionLease | None:
+        self._validate_runtime_metadata(
+            protocol,
+            runtime_epoch=runtime_epoch,
+            submission_key=submission_key,
+            submission_request_id=submission_request_id,
+            source_refs_json=source_refs_json,
+        )
         with self._session() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             operation = session.get(WriteOperation, operation_id)
@@ -292,8 +444,19 @@ class PilotControlRepository:
                 if existing_turn is None or existing_turn.conversation_id != conversation.id:
                     raise TurnControlConflict("Approval belongs to another conversation")
                 turn = existing_turn
+            if expected_turn_id is not None and turn.id != expected_turn_id:
+                raise TurnControlConflict("Approval belongs to another turn")
             previous = self._latest(session, turn.id)
-            lease = self._claim(session, turn, 1 if previous is None else previous.generation + 1)
+            lease = self._claim(
+                session,
+                turn,
+                1 if previous is None else previous.generation + 1,
+                protocol=protocol,
+                runtime_epoch=runtime_epoch,
+                submission_key=submission_key,
+                submission_request_id=submission_request_id,
+                source_refs_json=source_refs_json,
+            )
             session.commit()
             return lease
 
@@ -321,25 +484,87 @@ class PilotControlRepository:
             session.commit()
             return active
 
-    def finish(self, lease: ExecutionLease, state: str) -> None:
+    @staticmethod
+    def _validate_finish_state(state: str) -> None:
         if state not in {"waiting_confirmation", "completed", "failed", "interrupted", "result_unknown"}:
             raise ValueError("Invalid execution outcome")
+
+    def _finish_in_session(self, session: Session, lease: ExecutionLease, state: str) -> None:
+        row = session.get(PilotExecution, (lease.turn_id, lease.generation))
+        if (row is None or row.owner_token != lease.owner_token
+                or row.conversation_id != lease.conversation_id or row.state != "running"):
+            return
+        row.state = state if execution_state(row, self.now_ms()) == "running" else "result_unknown"
+        conversation = session.get(Conversation, lease.conversation_id)
+        if row.state == "completed" and conversation is not None and conversation.pending_operation_id:
+            binding = session.get(PilotTurnOperation, conversation.pending_operation_id)
+            if binding is not None and binding.turn_id == lease.turn_id:
+                row.state = "waiting_confirmation"
+        turn = session.get(PilotTurnRecord, lease.turn_id)
+        if turn is not None:
+            turn.state = {"waiting_confirmation": "started", "result_unknown": "incomplete"}.get(row.state, row.state)
+
+    def finish(self, lease: ExecutionLease, state: str) -> None:
+        self._validate_finish_state(state)
         with self._session() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            row = session.get(PilotExecution, (lease.turn_id, lease.generation))
-            if (row is None or row.owner_token != lease.owner_token
-                    or row.conversation_id != lease.conversation_id or row.state != "running"):
-                return
-            row.state = state if execution_state(row, self.now_ms()) == "running" else "result_unknown"
-            conversation = session.get(Conversation, lease.conversation_id)
-            if row.state == "completed" and conversation is not None and conversation.pending_operation_id:
-                binding = session.get(PilotTurnOperation, conversation.pending_operation_id)
-                if binding is not None and binding.turn_id == lease.turn_id:
-                    row.state = "waiting_confirmation"
-            turn = session.get(PilotTurnRecord, lease.turn_id)
-            if turn is not None:
-                turn.state = {"waiting_confirmation": "started", "result_unknown": "incomplete"}.get(row.state, row.state)
+            self._finish_in_session(session, lease, state)
             session.commit()
+
+    def try_finish(self, lease: ExecutionLease, state: str) -> bool:
+        """Best-effort terminal update that never waits behind an Agent write.
+
+        Timeout/cancellation is a transport boundary.  Its caller must be able
+        to return while the worker may still hold the database transaction.  A
+        regular ``BEGIN IMMEDIATE`` honors SQLite's connection busy timeout and
+        can therefore hold the HTTP response for seconds.  Use the raw driver
+        connection for this one probe so a busy result can be rolled back and
+        the pooled connection's original timeout restored without invalidating
+        it.  A later lease expiry/recovery remains authoritative when this
+        probe loses the lock race.
+        """
+
+        self._validate_finish_state(state)
+        engine = self.session_factory.kw.get("bind")
+        if not isinstance(engine, Engine):
+            raise RuntimeError("database engine unavailable")
+        # Hold the checked-out connection until the Session has completed and
+        # the raw PRAGMA has been restored.  Restoring it after ``_session``
+        # returns could mutate a different request's connection from the pool.
+        with bind_execution_scope(None), engine.connect() as connection:
+            raw = getattr(connection.connection, "driver_connection", None)
+            if raw is None:
+                raw = getattr(connection.connection, "connection", None)
+            if raw is None:
+                raise RuntimeError("database driver connection unavailable")
+            previous_timeout = int(raw.execute("PRAGMA busy_timeout").fetchone()[0] or 0)
+            raw.execute("PRAGMA busy_timeout=0")
+            try:
+                try:
+                    raw.execute("BEGIN IMMEDIATE")
+                except sqlite3.OperationalError as exc:
+                    raw.rollback()
+                    code = getattr(exc, "sqlite_errorcode", None)
+                    # These constants are absent from older supported Python
+                    # sqlite3 stubs; SQLite's stable primary error codes are
+                    # still 5 (BUSY) and 6 (LOCKED).
+                    busy_codes = {
+                        getattr(sqlite3, "SQLITE_BUSY", 5),
+                        getattr(sqlite3, "SQLITE_LOCKED", 6),
+                    }
+                    if code in busy_codes:
+                        return False
+                    raise
+                with self.session_factory(bind=connection) as session:
+                    try:
+                        self._finish_in_session(session, lease, state)
+                        session.commit()
+                        return True
+                    except BaseException:
+                        session.rollback()
+                        raise
+            finally:
+                raw.execute(f"PRAGMA busy_timeout={previous_timeout}")
 
     def get_conversation_execution(self, conversation_id: int) -> dict[str, Any] | None:
         with self._session() as session:
@@ -354,14 +579,75 @@ class PilotControlRepository:
             return result
 
     def _view(self, row: PilotExecution) -> dict[str, Any]:
-        return {"turn_id": row.turn_id, "conversation_id": row.conversation_id,
-                "execution_generation": row.generation, "state": row.state}
+        payload = {
+            "turn_id": row.turn_id,
+            "conversation_id": row.conversation_id,
+            "execution_generation": row.generation,
+            "state": row.state,
+        }
+        if row.protocol == "pilot-runtime-v1":
+            payload.update(
+                {
+                    "protocol": row.protocol,
+                    "protocol_version": row.protocol,
+                    "runtime_epoch": row.runtime_epoch,
+                    "submission_key": row.submission_key,
+                    "submission_request_id": row.submission_request_id,
+                    "source_refs": json.loads(row.source_refs_json or "[]"),
+                }
+            )
+        return payload
 
     def get_execution(self, turn_id: str) -> dict[str, Any] | None:
         with self._session() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             row = self._latest(session, turn_id)
             if row is None:
+                return None
+            reconcile_execution_state(row, self.now_ms())
+            result = self._view(row)
+            session.commit()
+            return result
+
+    def get_runtime_execution(
+        self,
+        turn_id: str,
+        generation: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Read the exact Runtime execution metadata for one Turn."""
+
+        with self._session() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            if generation is None:
+                row = self._latest(session, turn_id)
+            else:
+                row = session.get(PilotExecution, (turn_id, generation))
+            if row is None or row.protocol != "pilot-runtime-v1":
+                session.commit()
+                return None
+            reconcile_execution_state(row, self.now_ms())
+            result = self._view(row)
+            session.commit()
+            return result
+
+    def get_runtime_execution_by_request(self, request_id: str) -> dict[str, Any] | None:
+        """Look up only the exact Runtime submission request identity."""
+
+        if type(request_id) is not str or not request_id:
+            raise ValueError("request_id must be a non-empty string")
+        with self._session() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            row = session.scalar(
+                select(PilotExecution)
+                .where(
+                    PilotExecution.protocol == "pilot-runtime-v1",
+                    PilotExecution.submission_request_id == request_id,
+                )
+                .order_by(PilotExecution.conversation_sequence.desc())
+                .limit(1)
+            )
+            if row is None:
+                session.commit()
                 return None
             reconcile_execution_state(row, self.now_ms())
             result = self._view(row)

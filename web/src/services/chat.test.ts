@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { confirmAction, createSseParser, exportBackup, sendChat, streamChat, streamConfirmAction } from './chat';
+import { confirmAction, createSseParser, exportBackup, sendChat, legacyStreamChat as streamChat, legacyStreamConfirmAction as streamConfirmAction, streamChat as runtimeStreamChat } from './chat';
 import source from './chat.ts?raw';
 import type { ChatStreamEvent, PilotPageContext } from '@/types/chat';
 import type { ConfirmationInput } from './chat';
+import { listPendingStarts, forgetPendingStart } from './chatSubmission';
 
 const confirmationToken = 'a'.repeat(64);
 const approvalInput: ConfirmationInput = {
@@ -49,10 +50,15 @@ function sseResponse(frames: string) {
   );
 }
 
+function runtimeJson(value: unknown) {
+  return new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
+}
+
 afterEach(() => {
   globalThis.fetch = originalFetch;
   postMock.mockReset();
   vi.restoreAllMocks();
+  for (const pending of listPendingStarts()) forgetPendingStart(pending.requestId);
 });
 
 describe('settings service v0.1 contract', () => {
@@ -337,5 +343,21 @@ describe('settings service v0.1 contract', () => {
       code: 'http_422',
       message: 'invalid edits',
     });
+  });
+
+  it('clears a pending marker when Runtime reports a durable terminal state without a response', async () => {
+    const requestId = crypto.randomUUID();
+    const accepted = {
+      protocol_version: 'pilot-runtime-v1', request_id: requestId, turn_id: 'turn-terminal',
+      conversation_id: 7, execution_generation: 1, state: 'running',
+    };
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(runtimeJson(accepted))
+      .mockResolvedValueOnce(runtimeJson({ ...accepted, state: 'completed', events: [], event_cursor: 'cursor-0' }))
+      .mockResolvedValueOnce(runtimeJson({ ...accepted, state: 'completed' })) as typeof fetch;
+
+    await expect(runtimeStreamChat('hi', 7, {}, { requestId })).rejects.toMatchObject({ code: 'runtime_completed' });
+    expect(listPendingStarts().some((item) => item.requestId === requestId)).toBe(false);
+    forgetPendingStart(requestId);
   });
 });

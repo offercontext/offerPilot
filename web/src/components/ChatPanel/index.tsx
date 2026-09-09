@@ -1,3 +1,5 @@
+import ConversationSummaryControl from '../ConversationSummaryControl';
+import ConversationReadinessControl from '../ConversationReadinessControl';
 import { useEffect, useReducer, useRef, useState, createElement } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Drawer, App as AntApp, Button } from 'antd';
@@ -22,6 +24,7 @@ import {
   type ConfirmationInput,
 } from '@/services/chat';
 import { getOffer } from '@/services/offers';
+import { RuntimeEndedError, RuntimeSubscriptionError } from '@/services/pilotRuntime';
 import { createChatSubmission, type ChatSubmission } from '@/services/chatSubmission';
 import { ONBOARDING_QUERY_KEY } from '@/services/onboarding';
 import type {
@@ -1145,6 +1148,13 @@ function ChatPanelView({
         await syncConversationAfterAbort(streamConversationId, visibleRequestGeneration);
         return 'stopped';
       }
+      if (e instanceof RuntimeSubscriptionError || e instanceof RuntimeEndedError) {
+        await syncConversationAfterAbort(e.target.conversation_id, visibleRequestGeneration);
+        if (!isCurrentVisibleRequest(visibleRequestGeneration)) return 'ignored';
+        setLastError(e.message);
+        setLastFailedText('');
+        return 'ignored';
+      }
       const error = e?.response?.data?.error ?? e?.message ?? '对话失败，请稍后重试';
       if (streamingAssistantActiveRef.current) {
         streamingAssistantActiveRef.current = false;
@@ -1604,6 +1614,12 @@ function ChatPanelView({
           />
 
           <section className={styles.center}>
+            <ConversationSummaryControl conversationId={convID} busy={loading} />
+            <ConversationReadinessControl
+              conversationId={convID}
+              applicationId={activeConv?.context_type === 'application' ? Number(activeConv.context_ref) : undefined}
+              busy={loading}
+            />
             <div className={styles.stream}>
               {showEmpty ? (
                 <div className={styles.empty}>
@@ -1767,6 +1783,9 @@ function ChatPanelView({
             )}
 
             {controller.executionControl.stopMessage && <p role="status">{controller.executionControl.stopMessage}</p>}
+            {controller.executionControl.execution?.protocol === 'pilot-runtime-v1'
+              && controller.executionControl.execution.state === 'running'
+              && <p role="status">关闭窗口后任务会继续；需要终止时，请点击停止。</p>}
             {controller.backgroundExecution && (
               <Button onClick={() => void selectConversation(controller.backgroundExecution!.conversation_id, { refresh: true }).catch(() => toast.error('加载对话失败，请重试。'))}>
                 返回正在执行的对话

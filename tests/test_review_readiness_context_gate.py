@@ -19,6 +19,7 @@ SELECTION_LOADER = SRC / "review_readiness" / "preparation_selection.py"
 PREPARATION_OWNER = SRC / "repositories" / "interview_preparation_proposals.py"
 _SELECTION_MODULE_KEY = "review_readiness/preparation_selection.py"
 _PREPARATION_OWNER_KEY = "repositories/interview_preparation_proposals.py"
+_READINESS_CONTEXT_OWNER_KEY = "context_sources/readiness.py"
 
 _SYNTHETIC_SELECTION = {
     "ordered_version_ids": [11, 17, 23],
@@ -138,7 +139,7 @@ def _future_contributor_findings(sources: dict[str, str]) -> list[str]:
 
 
 def _selection_loader_findings(sources: dict[str, str]) -> list[str]:
-    """Close the future loader around one direct owner-local snapshot load site."""
+    """Allow the two audited consumers, preserving the Preparation local-load gate."""
 
     findings: list[str] = []
     loader_exists = _SELECTION_MODULE_KEY in sources
@@ -168,7 +169,7 @@ def _selection_loader_findings(sources: dict[str, str]) -> list[str]:
                 for value in strings
             )
         )
-        if reaches_loader and name != _PREPARATION_OWNER_KEY:
+        if reaches_loader and name not in {_PREPARATION_OWNER_KEY, _READINESS_CONTEXT_OWNER_KEY}:
             findings.append(f"outside-owner:{name}")
 
     if not loader_exists:
@@ -371,7 +372,7 @@ def test_future_contributor_unreachability_gate_rejects_import_bypasses(source: 
     assert _future_contributor_findings({"bypass.py": source}) == ["bypass.py"]
 
 
-def test_preparation_selection_loader_has_exactly_one_future_owner() -> None:
+def test_preparation_selection_loader_has_only_approved_controlled_consumers() -> None:
     sources = {
         path.relative_to(SRC).as_posix(): path.read_text(encoding="utf-8")
         for path in _production_python_files()

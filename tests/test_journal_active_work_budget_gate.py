@@ -1058,6 +1058,7 @@ def _validate_boundary_module(tree: ast.AST) -> None:
     names = _node_names(tree) & PUBLIC_BUDGET_API
     assert not names, f"product boundary references Journal budget API: {sorted(names)}"
     module_aliases = _module_aliases(tree)
+    parents = _parents(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             assert not any(_is_budget_module_reference(alias.name) for alias in node.names)
@@ -1094,7 +1095,16 @@ def _validate_boundary_module(tree: ast.AST) -> None:
                     for argument in node.args[:1]
                 )
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            assert not _is_budget_module_reference(node.value)
+            parent = parents.get(node)
+            mapping_key = node.value == "budget" and (
+                isinstance(parent, ast.Dict) and node in parent.keys
+                or isinstance(parent, ast.Subscript) and parent.slice is node
+                or isinstance(parent, ast.Call)
+                and isinstance(parent.func, ast.Attribute)
+                and parent.func.attr == "get"
+                and bool(parent.args) and parent.args[0] is node
+            )
+            assert mapping_key or not _is_budget_module_reference(node.value)
             assert node.value not in PUBLIC_BUDGET_API
 
 
@@ -1265,6 +1275,25 @@ def test_product_surfaces_do_not_import_journal_budget_types() -> None:
     for path in ARCHITECTURE_BOUNDARY_FILES:
         assert path.is_file(), f"boundary file disappeared: {path}"
         _validate_boundary_module(_module(path))
+
+
+def test_boundary_gate_allows_runtime_budget_mapping_keys() -> None:
+    _validate_boundary_module(ast.parse(
+        'status = {"budget": {}}\n'
+        'snapshot = status.get("budget", {})\n'
+        'value = status["budget"]\n'
+    ))
+
+
+@pytest.mark.parametrize("source", (
+    'import_module("budget")',
+    '__import__("budget")',
+    'module_name = "budget"\nimport_module(module_name)',
+    'from .budget import hidden',
+    'status = {"budget": "offerpilot.agent_runtime.budget"}',
+))
+def test_boundary_gate_still_rejects_budget_module_references(source: str) -> None:
+    _expect_rejected(source, _validate_boundary_module)
 
 
 def test_append_event_bound_has_no_deadline_protocol() -> None:

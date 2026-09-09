@@ -10,6 +10,14 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from offerpilot.models import Base
+# Import feature model modules before ``Base.metadata.create_all`` so their
+# tables are registered on the shared declarative metadata.  These imports are
+# intentionally kept here (the database composition root) rather than relying
+# on whichever API module happens to be imported first.
+from offerpilot.confirmed_memory import models as _confirmed_memory_models  # noqa: F401
+from offerpilot.context_sources import models as _context_sources_models  # noqa: F401
+from offerpilot.proactive import models as _proactive_models  # noqa: F401
+from offerpilot.knowledge import note_lifecycle as _knowledge_note_lifecycle  # noqa: F401
 
 SessionFactory = sessionmaker[Session]
 
@@ -66,6 +74,19 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    runtime_columns_changed = [
+        _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
+        _ensure_column(engine, "pilot_executions", "runtime_epoch", "TEXT"),
+        _ensure_column(engine, "pilot_executions", "submission_key", "TEXT"),
+        _ensure_column(engine, "pilot_executions", "submission_request_id", "TEXT"),
+        _ensure_column(engine, "pilot_executions", "source_refs_json", "TEXT NOT NULL DEFAULT '[]'"),
+    ]
+    with engine.begin() as connection:
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_pilot_runtime_submission ON pilot_executions(submission_key) WHERE submission_key IS NOT NULL"))
+        connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_pilot_runtime_request ON pilot_executions(submission_request_id) WHERE submission_request_id IS NOT NULL"))
+        runtime_marker = connection.scalar(text("SELECT 1 FROM schema_migrations WHERE version = '0032_runtime_owned_execution'"))
+    if any(runtime_columns_changed) or runtime_marker is None:
+        _record_migration(engine, "0032_runtime_owned_execution", "Version Runtime-owned execution admission without storing request contents")
     # P2 databases already have pilot_turns; create_all does not add an index
     # to an existing table. P3's composite execution FK needs this unique key.
     for index in Base.metadata.tables["pilot_turns"].indexes:
@@ -1249,7 +1270,7 @@ def _record_migration(engine, version: str, description: str) -> None:  # type: 
 
 
 def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignore[no-untyped-def]
-    """Rebuild only the snapshot table when an existing database still has V1 checks."""
+    """Preserve snapshot rows while adding the P4 manifest version to V1/V2 checks."""
 
     with engine.begin() as conn:
         row = conn.execute(
@@ -1261,18 +1282,22 @@ def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignor
         if row is None or row[0] is None:
             return
         create_sql = str(row[0])
-        if "manifest_schema_version IN (1, 2)" in create_sql:
+        if "manifest_schema_version IN (1, 2, 3)" in create_sql:
             return
-        if "manifest_schema_version = 1" not in create_sql:
+        if "manifest_schema_version IN (1, 2)" in create_sql:
+            rebuilt_sql = create_sql.replace(
+                "manifest_schema_version IN (1, 2)", "manifest_schema_version IN (1, 2, 3)",
+            ).replace("manifest_schema_version = 2", "manifest_schema_version IN (2, 3)")
+        elif "manifest_schema_version = 1" in create_sql:
+            rebuilt_sql = create_sql.replace(
+                "manifest_schema_version = 1", "manifest_schema_version IN (1, 2, 3)",
+            ).replace(
+                "length(CAST(manifest_json AS BLOB)) <= 16384",
+                "((manifest_schema_version = 1 AND length(CAST(manifest_json AS BLOB)) <= 16384) "
+                "OR (manifest_schema_version IN (2, 3) AND length(CAST(manifest_json AS BLOB)) <= 65536))",
+            )
+        else:
             raise RuntimeError("unsupported agent_context_snapshots schema")
-        rebuilt_sql = create_sql.replace(
-            "manifest_schema_version = 1",
-            "manifest_schema_version IN (1, 2)",
-        ).replace(
-            "length(CAST(manifest_json AS BLOB)) <= 16384",
-            "((manifest_schema_version = 1 AND length(CAST(manifest_json AS BLOB)) <= 16384) "
-            "OR (manifest_schema_version = 2 AND length(CAST(manifest_json AS BLOB)) <= 65536))",
-        )
         columns = [
             str(item[1])
             for item in conn.execute(text("PRAGMA table_info(agent_context_snapshots)"))

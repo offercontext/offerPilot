@@ -52,14 +52,20 @@ function productionEntries(sources: SourceMap): [string, string][] {
     ));
 }
 
+let auditParseCache: Map<string, ts.SourceFile> | null = null;
+
 function parse(path: string, source: string): ts.SourceFile {
-  return ts.createSourceFile(
+  const cached = auditParseCache?.get(path);
+  if (cached?.text === source) return cached;
+  const parsed = ts.createSourceFile(
     path,
     source,
     ts.ScriptTarget.Latest,
     true,
     path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+  auditParseCache?.set(path, parsed);
+  return parsed;
 }
 
 function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
@@ -6163,6 +6169,18 @@ function hasPreparationMissingDefault(path: string, sourceFile: ts.SourceFile, s
 }
 
 function auditFrontendSources(sources: SourceMap): string[] {
+  // Recursive import resolution shares immutable syntax trees only within this
+  // audit. A later fixture or changed source always gets a fresh cache.
+  const previousCache = auditParseCache;
+  auditParseCache = new Map();
+  try {
+    return auditFrontendSourcesWithCache(sources);
+  } finally {
+    auditParseCache = previousCache;
+  }
+}
+
+function auditFrontendSourcesWithCache(sources: SourceMap): string[] {
   const violations = new Set<string>();
   for (const [path, source] of productionEntries(sources)) {
     const sourceFile = parse(path, source);

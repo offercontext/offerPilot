@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createChatSubmission, listPendingStarts, forgetPendingStart, rememberPendingStart, markPendingStartAccepted, forgetConversationStarts, pendingStartsSnapshot, subscribePendingStarts } from './chatSubmission';
+import { createChatSubmission, listPendingStarts, forgetPendingStart, rememberPendingStart, markPendingStartAccepted, forgetConversationStarts, pendingStartsSnapshot, subscribePendingStarts, settlePendingStartForExecution } from './chatSubmission';
 import { streamChat } from './chat';
 
 afterEach(() => {
@@ -91,12 +91,74 @@ describe('pending submissions shared by tabs', () => {
 });
 
 describe('logical chat submission identity', () => {
+  it('settles only proven terminal execution markers', () => {
+    const completedRequest = crypto.randomUUID();
+    const unknownRequest = crypto.randomUUID();
+    rememberPendingStart(completedRequest, 0);
+    markPendingStartAccepted(completedRequest, 12, 'turn-completed');
+    rememberPendingStart(unknownRequest, 0);
+    markPendingStartAccepted(unknownRequest, 12, 'turn-unknown');
+
+    settlePendingStartForExecution({
+      conversation_id: 12,
+      turn_id: 'turn-completed',
+      state: 'completed',
+    });
+    expect(listPendingStarts().map((item) => item.requestId)).toEqual([unknownRequest]);
+
+    settlePendingStartForExecution({
+      conversation_id: 12,
+      turn_id: 'turn-unknown',
+      state: 'result_unknown',
+    });
+    expect(listPendingStarts().map((item) => item.requestId)).toEqual([unknownRequest]);
+    settlePendingStartForExecution({
+      conversation_id: 99,
+      turn_id: 'turn-unknown',
+      state: 'completed',
+    });
+    expect(listPendingStarts().map((item) => item.requestId)).toEqual([unknownRequest]);
+  });
+
+  it('uses the server admission request proof when the accepted turn identity was lost', () => {
+    const requestId = crypto.randomUUID();
+    const mismatchedPairRequest = crypto.randomUUID();
+    rememberPendingStart(requestId, 0);
+    rememberPendingStart(mismatchedPairRequest, 0);
+    markPendingStartAccepted(mismatchedPairRequest, 99, 'other-turn');
+
+    settlePendingStartForExecution({
+      conversation_id: 12,
+      turn_id: 'turn-completed',
+      state: 'completed',
+      submission_request_id: requestId,
+    });
+    expect(listPendingStarts().map((item) => item.requestId)).toEqual([mismatchedPairRequest]);
+
+    const invalidProof = crypto.randomUUID();
+    rememberPendingStart(invalidProof, 0);
+    settlePendingStartForExecution({
+      conversation_id: 12,
+      turn_id: 'turn-unknown',
+      state: 'completed',
+      submission_request_id: 'not-a-uuid',
+    });
+    expect(listPendingStarts().map((item) => item.requestId)).toEqual(
+      expect.arrayContaining([mismatchedPairRequest, invalidProof]),
+    );
+    expect(listPendingStarts()).toHaveLength(2);
+  });
+
   it('retains the same key and frozen context after an unknown transport result', async () => {
     const context = { context_type: 'application', context_ref: '7', attachments: [{ kind: 'resume' as const, id: '3', label: '简历' }] };
     const submission = createChatSubmission('私密问题', undefined, context);
     context.attachments[0].id = '9';
     const fetcher = vi.fn().mockRejectedValueOnce(new Error('connection lost'))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ type: 'turn_recovered', conversation_id: 12, turn_id: 'turn-1' }), { headers: { 'content-type': 'application/json' } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        protocol_version: 'pilot-runtime-v1', conversation_id: 12, turn_id: 'turn-1',
+        execution_generation: 1, state: 'completed',
+        terminal: { response: { type: 'turn_recovered', conversation_id: 12, turn_id: 'turn-1' } },
+      }), { headers: { 'content-type': 'application/json' } }));
     vi.stubGlobal('fetch', fetcher);
     await expect(streamChat(submission.message, submission.conversationId, submission.context, { requestId: submission.requestId })).rejects.toThrow();
     expect(listPendingStarts().map((pending) => pending.requestId)).toContain(submission.requestId);
@@ -123,6 +185,16 @@ describe('logical chat submission identity', () => {
     await expect(streamChat('无效请求', 0, {})).rejects.toThrow();
     expect(listPendingStarts()).toEqual([]);
     await expect(streamChat('结果未知', 0, {})).rejects.toThrow();
+    expect(listPendingStarts()).toHaveLength(1);
+  });
+
+  it('clears a proven capacity rejection before admission but retains an unrelated 429', async () => {
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'queue full', error_code: 'runtime_capacity_exhausted' }), { status: 429 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: 'upstream limit' }), { status: 429 })));
+    await expect(streamChat('尚未接纳', 0, {})).rejects.toThrow();
+    expect(listPendingStarts()).toEqual([]);
+    await expect(streamChat('接纳结果未知', 0, {})).rejects.toThrow();
     expect(listPendingStarts()).toHaveLength(1);
   });
 });

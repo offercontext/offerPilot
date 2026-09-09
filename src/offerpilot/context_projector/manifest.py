@@ -13,7 +13,7 @@ from offerpilot.agent_runtime.events import update_digest_in_chunks
 from offerpilot.ai.tool_runtime.metadata import ProviderToolMetadataView
 from offerpilot.context_projector.contracts import CONTRIBUTOR_ORDER, RuntimeSurfaceAudit
 
-MANIFEST_SCHEMA_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 3
 MANIFEST_BYTE_CAP = 65_536
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _SAFE_NAME = re.compile(r"[a-z][a-z0-9_]{0,63}")
@@ -229,7 +229,7 @@ def _build_manifest_payload(
 
     _check_budget(budget_check)
     manifest: dict[str, object] = {
-        "manifest_schema_version": 2,
+        "manifest_schema_version": 3 if any(name == "confirmed_readiness" for name, _ in audit.contributor_statuses) else 2,
         "budget_policy_version": audit.budget_policy_version,
         "providers": providers,
         "contributors": contributors,
@@ -329,9 +329,9 @@ def validate_surface_manifest_v2(
     _check_budget(budget_check)
     if type(manifest) is not dict or set(manifest) != required or canonical_manifest != value:
         raise ManifestV2ValidationError("invalid manifest shape or canonical form")
-    if manifest["manifest_schema_version"] != 2:
+    if manifest["manifest_schema_version"] not in {2, 3}:
         raise ManifestV2ValidationError("invalid manifest version")
-    if manifest["budget_policy_version"] != "model-surface-budget-v1":
+    if manifest["budget_policy_version"] not in {"model-surface-budget-v1", "model-surface-budget-v2"}:
         raise ManifestV2ValidationError("invalid budget policy")
     _hash_array(manifest["providers"], 8, budget_check=budget_check)
     _hash_array(manifest["history_groups"], 32, budget_check=budget_check)
@@ -339,7 +339,8 @@ def validate_surface_manifest_v2(
     if not providers:
         raise ManifestV2ValidationError("empty provider chain")
     contributors = manifest["contributors"]
-    if type(contributors) is not list or len(contributors) != 10:
+    expected_order = CONTRIBUTOR_ORDER if manifest["manifest_schema_version"] == 3 else ("static_policy", "current_scope", "active_control", "request_page_context", "request_attachments", "conversation_history", "current_request", "confirmed_memory", "knowledge_context", "older_conversation_summary")
+    if type(contributors) is not list or len(contributors) != len(expected_order):
         raise ManifestV2ValidationError("invalid contributors")
     _check_budget(budget_check)
     for item in contributors:
@@ -355,7 +356,7 @@ def validate_surface_manifest_v2(
             raise ManifestV2ValidationError("invalid contributor")
         _check_budget(budget_check)
     _check_budget(budget_check)
-    if tuple(item["name"] for item in contributors) != CONTRIBUTOR_ORDER:
+    if tuple(item["name"] for item in contributors) != expected_order:
         raise ManifestV2ValidationError("invalid contributor order")
     tools = manifest["tools"]
     if type(tools) is not list or len(tools) > 26:

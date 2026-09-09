@@ -20,6 +20,21 @@ export interface PendingStart {
   turnId?: string;
 }
 
+interface TerminalExecutionIdentity {
+  conversation_id: number;
+  turn_id: string;
+  state: string;
+  submission_request_id?: string | null;
+}
+
+const TERMINAL_EXECUTION_STATES = new Set([
+  'completed',
+  'waiting_confirmation',
+  'failed',
+  'interrupted',
+  'stopped',
+]);
+
 export function createChatSubmission(message: string, conversationId: number | undefined, context: ChatContextInput): ChatSubmission {
   return { requestId: crypto.randomUUID(), message, conversationId, context: JSON.parse(JSON.stringify(context)) as ChatContextInput };
 }
@@ -99,6 +114,34 @@ export function markPendingStartAccepted(requestId: string, conversationId: numb
 
 export function forgetPendingStart(requestId: string): void {
   if (UUID_V4.test(requestId)) savePendingStart(requestId, null);
+}
+
+/**
+ * Forget a submission marker only after the exact execution reaches a durable
+ * terminal state.  A request id from the active request is authoritative; a
+ * recovered page must prove both conversation and turn identity instead of
+ * guessing from the latest task.
+ */
+export function settlePendingStartForExecution(
+  execution: TerminalExecutionIdentity,
+  requestId?: string,
+): void {
+  if (!TERMINAL_EXECUTION_STATES.has(execution.state)) return;
+  const provenRequestId = requestId && UUID_V4.test(requestId)
+    ? requestId
+    : typeof execution.submission_request_id === 'string' && UUID_V4.test(execution.submission_request_id)
+      ? execution.submission_request_id
+      : undefined;
+  const pending = listPendingStarts();
+  const marker = provenRequestId
+    ? pending.find((item) => item.requestId === provenRequestId)
+    : pending.find((item) => item.acceptedConversationId === execution.conversation_id
+      && item.turnId === execution.turn_id);
+  if (!marker) return;
+  if (provenRequestId && ((marker.acceptedConversationId !== undefined
+    && marker.acceptedConversationId !== execution.conversation_id)
+    || (marker.turnId !== undefined && marker.turnId !== execution.turn_id))) return;
+  forgetPendingStart(marker.requestId);
 }
 
 export function forgetConversationStarts(conversationId: number): void {

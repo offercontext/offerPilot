@@ -583,6 +583,17 @@ def test_raw_excessive_json_depth_is_safe_422_before_repository_or_provider(
     assert model.calls == 0
 
 
+@pytest.mark.parametrize("depth", (31, 32, 33))
+def test_raw_decoder_has_an_interpreter_independent_container_depth_bound(depth: int) -> None:
+    raw_body = ('{"nested":' * depth + '0' + '}' * depth).encode("ascii")
+    decoded = _decode_interview_preparation_request(raw_body)
+    if depth <= 32:
+        assert isinstance(decoded, tuple)
+        assert decoded[1] is False
+    else:
+        assert getattr(decoded, "status_code", None) == 422
+
+
 @pytest.mark.parametrize(
     "raw_body",
     (

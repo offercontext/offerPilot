@@ -81,7 +81,7 @@ class DurableRuntimeInvocationControl:
         if changed:
             self.execution_scope.revoked.set()
             self._heartbeat_stop.set()
-            self._finish_safely("interrupted")
+            self._finish_safely("interrupted", best_effort=True)
         return changed
 
     def request_timeout(self) -> bool:
@@ -89,7 +89,12 @@ class DurableRuntimeInvocationControl:
         if changed:
             self.execution_scope.revoked.set()
             self._heartbeat_stop.set()
-            self._finish_safely("interrupted")
+            # The Agent worker may still hold its outer BEGIN IMMEDIATE while
+            # the transport is returning the timeout.  Never wait on that
+            # transaction from the timeout control path; the lease expiry and
+            # the recovery scope remain authoritative if this probe loses the
+            # lock race.
+            self._finish_safely("interrupted", best_effort=True)
         return changed
 
     def mark_completed(self) -> bool:
@@ -140,11 +145,14 @@ class DurableRuntimeInvocationControl:
             if not self._renew_once():
                 return
 
-    def _finish_safely(self, state: str) -> None:
+    def _finish_safely(self, state: str, *, best_effort: bool = False) -> None:
         lease = self.lease
         if lease is not None:
             try:
-                self.repository.finish(lease, state)
+                finish = getattr(self.repository, "try_finish", None) if best_effort else None
+                if not callable(finish):
+                    finish = self.repository.finish
+                finish(lease, state)
             except Exception:
                 # The lease expires and all local protected commits remain
                 # fenced. Never turn a cleanup failure into an execution retry.
@@ -154,7 +162,12 @@ class DurableRuntimeInvocationControl:
         self._heartbeat_stop.set()
         if self._heartbeat is not None:
             self._heartbeat.join(timeout=0.1)
-        self._finish_safely("result_unknown" if self._clock() >= self._valid_until else state)
+        terminal_state = "result_unknown" if self._clock() >= self._valid_until else state
+        best_effort = self._inner.state in {
+            InvocationState.TIMED_OUT,
+            InvocationState.CANCELLED,
+        }
+        self._finish_safely(terminal_state, best_effort=best_effort)
         if self._on_finished is not None:
             self._on_finished(self)
 

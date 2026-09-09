@@ -1314,7 +1314,7 @@ class AgentRunRepository:
             manifest = validate_context_manifest_json(prepared.manifest_json)
         except JournalEventValidationError:
             raise JournalConflictError("context manifest is not canonical") from None
-        if prepared.manifest_schema_version not in {1, 2} or manifest.get(
+        if prepared.manifest_schema_version not in {1, 2, 3} or manifest.get(
             "manifest_schema_version"
         ) != prepared.manifest_schema_version:
             raise JournalConflictError("unsupported context manifest schema")

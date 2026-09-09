@@ -279,6 +279,16 @@ class ConfiguredAIClient:
     def _candidate_providers(self) -> list[AIProviderProfile]:
         return [provider for provider in self._providers if provider.enabled]
 
+    def complete_readonly_draft(self, messages: list[Message], *, timeout_seconds: float) -> Assistant:
+        """One explicitly budgeted proactive call, with no tools or fallback."""
+        if not 0 < timeout_seconds <= 60 or _json_bytes([_openai_message(message) for message in messages]) > 8192:
+            raise ValueError("proactive draft input or deadline exceeded")
+        provider = next((item for item in self._candidate_providers() if item.api_key), None)
+        if provider is None:
+            raise ValueError("AI provider unavailable")
+        return self._complete_with_provider(provider, messages, [],
+            timeout_seconds=timeout_seconds, output_limit=1024)
+
     def _complete_with_provider(
         self,
         provider: AIProviderProfile,
@@ -287,6 +297,8 @@ class ConfiguredAIClient:
         response_format: dict[str, Any] | None = None,
         *,
         force_api_base: bool = False,
+        timeout_seconds: float | None = None,
+        output_limit: int | None = None,
     ) -> Assistant:
         payload: dict[str, Any] = {
             "model": _litellm_model(provider),
@@ -301,6 +313,12 @@ class ConfiguredAIClient:
             payload["tool_choice"] = "auto"
         if response_format is not None and provider.supports_json_schema:
             payload["response_format"] = response_format
+
+        if timeout_seconds is not None:
+            payload["timeout"] = timeout_seconds
+            payload["num_retries"] = 0
+        if output_limit is not None:
+            payload["max_tokens"] = min(output_limit, provider.max_output_tokens or output_limit)
 
         _adapter_preflight_payload(provider, payload)
         _try_audit_provider_endpoint(provider.base_url)
