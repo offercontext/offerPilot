@@ -1,5 +1,7 @@
 from typing import Any
 
+import pytest
+
 from offerpilot.ai import client as ai_client
 from offerpilot.ai.client import ConfiguredAIClient
 from offerpilot.ai.tool_runtime.contracts import ProviderToolContract
@@ -162,3 +164,51 @@ def test_client_omits_response_format_for_provider_without_explicit_capability(m
     )
 
     assert "response_format" not in captured
+
+
+@pytest.mark.parametrize("model", ["deepseek-v4-flash", "openai/deepseek-v4-pro"])
+def test_readonly_deepseek_v4_draft_disables_thinking_but_chat_is_unchanged(monkeypatch, model):
+    captured: list[dict[str, Any]] = []
+
+    def fake_completion(**kwargs: Any) -> dict[str, Any]:
+        captured.append(kwargs)
+        return {"choices": [{"message": {"content": "draft"}}]}
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    client = ConfiguredAIClient(Config(
+        providers=[AIProviderProfile(
+            id="deepseek", provider="openai_compatible", api_key="sk-test",
+            base_url="https://api.deepseek.com/v1", model=model,
+        )],
+        active_provider_id="deepseek",
+    ))
+
+    client.complete_readonly_draft([Message(role="user", content="prepare")], timeout_seconds=5)
+    assert captured[-1]["extra_body"] == {"thinking": {"type": "disabled"}}
+
+    client.complete([Message(role="user", content="chat")], [])
+    assert "extra_body" not in captured[-1]
+
+
+@pytest.mark.parametrize(("base_url", "model"), [
+    ("https://provider.example/v1", "deepseek-v4-flash"),
+    ("https://api.deepseek.com/v1", "gpt-4o"),
+])
+def test_readonly_draft_does_not_disable_thinking_for_other_provider_or_model(monkeypatch, base_url, model):
+    captured: list[dict[str, Any]] = []
+
+    def fake_completion(**kwargs: Any) -> dict[str, Any]:
+        captured.append(kwargs)
+        return {"choices": [{"message": {"content": "draft"}}]}
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    client = ConfiguredAIClient(Config(
+        providers=[AIProviderProfile(
+            id="provider", provider="openai_compatible", api_key="sk-test",
+            base_url=base_url, model=model,
+        )],
+        active_provider_id="provider",
+    ))
+
+    client.complete_readonly_draft([Message(role="user", content="prepare")], timeout_seconds=5)
+    assert "extra_body" not in captured[-1]

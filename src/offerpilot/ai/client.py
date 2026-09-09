@@ -287,7 +287,8 @@ class ConfiguredAIClient:
         if provider is None:
             raise ValueError("AI provider unavailable")
         return self._complete_with_provider(provider, messages, [],
-            timeout_seconds=timeout_seconds, output_limit=1024)
+            timeout_seconds=timeout_seconds, output_limit=1024,
+            disable_thinking=_is_deepseek_v4_provider(provider))
 
     def _complete_with_provider(
         self,
@@ -299,6 +300,7 @@ class ConfiguredAIClient:
         force_api_base: bool = False,
         timeout_seconds: float | None = None,
         output_limit: int | None = None,
+        disable_thinking: bool = False,
     ) -> Assistant:
         payload: dict[str, Any] = {
             "model": _litellm_model(provider),
@@ -319,6 +321,8 @@ class ConfiguredAIClient:
             payload["num_retries"] = 0
         if output_limit is not None:
             payload["max_tokens"] = min(output_limit, provider.max_output_tokens or output_limit)
+        if disable_thinking:
+            payload["extra_body"] = {"thinking": {"type": "disabled"}}
 
         _adapter_preflight_payload(provider, payload)
         _try_audit_provider_endpoint(provider.base_url)
@@ -427,6 +431,12 @@ def _litellm_model(provider: AIProviderProfile) -> str:
     if provider.provider:
         return f"{provider.provider}/{provider.model}"
     return provider.model
+
+
+def _is_deepseek_v4_provider(provider: AIProviderProfile) -> bool:
+    hostname = (urlparse(provider.base_url).hostname or "").lower()
+    model = provider.model.rsplit("/", 1)[-1].strip().lower()
+    return hostname == "api.deepseek.com" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}
 
 
 def _profile_from_frozen_candidate(candidate: FrozenProviderCandidate) -> AIProviderProfile:

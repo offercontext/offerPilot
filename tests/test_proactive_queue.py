@@ -203,6 +203,39 @@ def test_no_model_budget_spent_for_reminder(queue):
         assert session.scalar(select(ProactiveJob)).model_started_at is None
 
 
+@pytest.mark.parametrize("zone,local_time", [
+    ("Asia/Shanghai", "2026-09-09T13:00:00+08:00"),
+    ("America/New_York", "2026-09-09T01:00:00-04:00"),
+])
+def test_draft_source_carries_explicit_utc_local_time_and_user_timezone(queue, zone, local_time):
+    _, repo, (app_id, _) = queue
+    repo.update_settings(ProactivePolicyUpdate(expected_revision=0, confirmed=True,
+        settings=ProactivePolicy(enabled=True, drafts_enabled=True, application_ids=[app_id],
+            timezone=zone, quiet_start_hour=0, quiet_end_hour=0)))
+    repo.discover(NOW)
+    job_id = repo.claim("worker", NOW)
+    job = repo.begin(job_id, "worker", NOW)
+    assert job["source"]["scheduled_at"] == "2026-09-09T05:00:00+00:00"
+    assert job["source"]["scheduled_at_local"] == local_time
+    assert job["source"]["timezone"] == zone
+    assert datetime.fromisoformat(job["source"]["current_time"]).timestamp() == NOW
+
+
+def test_timezone_change_fences_draft_already_started(queue):
+    _, repo, (app_id, _) = queue
+    enable(repo, app_id, draft=True)
+    repo.discover(NOW)
+    job_id = repo.claim("worker", NOW)
+    job = repo.begin(job_id, "worker", NOW)
+    policy = ProactivePolicy.model_validate(repo.settings()["settings"])
+    policy.timezone = "America/New_York"
+    policy.quiet_start_hour = policy.quiet_end_hour = 0
+    repo.update_settings(ProactivePolicyUpdate(expected_revision=repo.settings()["revision"],
+        confirmed=True, settings=policy))
+    assert not repo.dispatch_valid(job_id, "worker", job["turn_id"], 1, NOW + 1)
+    assert not repo.publish(job_id, "worker", job["turn_id"], 1, "过期时区草稿", NOW + 2)
+
+
 def test_quiet_hours_follow_timezone_and_dst():
     policy = ProactivePolicy(timezone="America/New_York")
     assert quiet(policy, datetime(2026, 3, 8, 7, tzinfo=timezone.utc).timestamp())

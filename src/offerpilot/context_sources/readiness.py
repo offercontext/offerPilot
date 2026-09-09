@@ -10,7 +10,7 @@ injection on the next projection.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import re
@@ -23,7 +23,7 @@ from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import Mapped, Session, mapped_column, sessionmaker
 
 from offerpilot.context_projector.contracts import ProjectionError, canonical_json
-from offerpilot.models import Application, Base, Conversation
+from offerpilot.models import Application, ApplicationEvent, Base, Conversation
 from offerpilot.review_readiness.preparation_selection import (
     MAX_READINESS_FEEDBACK_ENVELOPE_BYTES,
     PreparationReadinessSelectionError,
@@ -705,6 +705,20 @@ def load_readiness_source(
                 resume_id=binding.resume_id,
                 ordered_version_ids=ordered_ids,
             )
+            # Read the validated target in the same snapshot as the selection.
+            # Source-event metadata describes the past review, not this target.
+            target = session.get(ApplicationEvent, binding.target_event_id)
+            if target is None:
+                raise ProjectionError("readiness_source_unavailable")
+            scheduled = target.scheduled_at
+            if scheduled is not None:
+                scheduled = (scheduled.replace(tzinfo=timezone.utc) if scheduled.tzinfo is None
+                    else scheduled.astimezone(timezone.utc))
+            target_event: dict[str, object] = {
+                "id": target.id, "event_type": target.event_type, "round": target.round,
+                "subtype": target.subtype, "scheduled_at": scheduled.isoformat() if scheduled else None,
+                "duration_minutes": target.duration_minutes,
+            }
     except PreparationReadinessSelectionError as exc:
         raise ProjectionError("readiness_source_unavailable") from exc
     if selection.selection_fingerprint != binding.selection_fingerprint:
@@ -718,6 +732,7 @@ def load_readiness_source(
             "kind": "confirmed_readiness",
             "signal_version_id": version_id,
             "target_event_id": binding.target_event_id,
+            "target_event": target_event,
             "resume_id": binding.resume_id,
             "statement": item.statement,
             "user_note": item.user_note,

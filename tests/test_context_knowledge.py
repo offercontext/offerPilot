@@ -75,6 +75,93 @@ def test_note_and_unnoted_evidence_recalled_with_valid_references(knowledge):
     assert any(item.get("evidence_id") == "e1" for item in selected)
 
 
+def test_natural_chinese_query_recalls_late_terms_and_two_character_names(knowledge):
+    sessions, loader, _ = knowledge
+    excerpts = [
+        "蓝鲸幂等协议使用业务键 order_id 与唯一索引阻止重复订单。",
+        "紫鹭恢复流程：事务失败后先回读订单状态，再决定是否重试。验收代号紫鹭-47。",
+    ]
+    with sessions() as session:
+        source = KnowledgeSource(source_hash="natural-query", display_title="订单恢复", main_filename="b.md",
+            main_relative_path="b.md", total_bytes=200, extraction_status="extracted")
+        session.add(source)
+        session.flush()
+        canonical = "\n".join(excerpts)
+        snapshot = KnowledgeExtractionSnapshot(source_id=source.id, extractor_version="test-v1",
+            canonical_text=canonical, digest=sha256(canonical.encode()).hexdigest(), char_count=len(canonical))
+        session.add(snapshot)
+        session.flush()
+        source.active_snapshot_id = snapshot.id
+        start = 0
+        for index, excerpt in enumerate(excerpts):
+            session.add(KnowledgeEvidence(id=f"natural-{index}", source_id=source.id, snapshot_id=snapshot.id,
+                kind="text", block_kind="paragraph", ordinal=index, char_start=start, char_end=start+len(excerpt),
+                line_start=index+1, line_end=index+1, canonical_excerpt=excerpt, search_text=excerpt,
+                content_hash=sha256(excerpt.encode()).hexdigest()))
+            start += len(excerpt) + 1
+        session.commit()
+    query = ("请基于已确认的本次准备重点、个人偏好、知识笔记与来源证据、较早对话摘要，为这次面试安排一份简短准备清单。"
+             "重点核对缓存一致性 cache consistency、订单幂等的蓝鲸协议和紫鹭恢复流程。不要编造来源，不执行写操作。")
+    items = read(loader, query)
+    assert {"natural-0", "natural-1"} <= {item.get("evidence_id") for item in items}
+    # A name need not occur adjacent to the next word in the original source.
+    assert any(item.get("evidence_id") == "natural-0" for item in read(loader, "解释蓝鲸协议"))
+    assert any(item["kind"] == "confirmed_note" for item in read(loader, "请解释索引如何改善查询"))
+    assert read(loader, "x" * 500 + "紫鹭") == []
+
+
+def test_relevance_precedes_old_row_order_and_evidence_lane_stays_bounded(knowledge):
+    sessions, loader, (_, _, source_id) = knowledge
+    with sessions() as session:
+        snapshot_id = session.get(KnowledgeSource, source_id).active_snapshot_id
+        for index in range(30):
+            session.add(KnowledgeEvidence(id=f"noise-{index}", source_id=source_id, snapshot_id=snapshot_id,
+                kind="text", block_kind="paragraph", ordinal=-index-1, char_start=0, char_end=8,
+                line_start=1, line_end=1, canonical_excerpt="索引可以优化查询", search_text="请帮助准备 索引",
+                content_hash=sha256("索引可以优化查询".encode()).hexdigest()))
+        session.commit()
+    items = read(loader, "请帮助准备：事务保证一致性")
+    assert any(item.get("evidence_id") == "e1" for item in items)
+    assert len([item for item in items if item["kind"] == "evidence"]) <= 24
+
+
+def test_late_unique_term_survives_common_chinese_prefix_noise(knowledge):
+    sessions, loader, _ = knowledge
+    common = (
+        "请基于已确认的本次准备重点、个人偏好、知识笔记与来源证据、较早对话摘要，"
+        "为这次面试安排一份简短准备清单。不要编造来源，不执行写操作。"
+    )
+    target_excerpt = "稀有术语蓝鲸协议"
+    canonical = common + "\n" + target_excerpt
+    with sessions() as session:
+        source = KnowledgeSource(source_hash="prefix-noise", display_title="大库排序", main_filename="c.md",
+            main_relative_path="c.md", total_bytes=len(canonical), extraction_status="extracted")
+        session.add(source)
+        session.flush()
+        snapshot = KnowledgeExtractionSnapshot(source_id=source.id, extractor_version="test-v1",
+            canonical_text=canonical, digest=sha256(canonical.encode()).hexdigest(), char_count=len(canonical))
+        session.add(snapshot)
+        session.flush()
+        source.active_snapshot_id = snapshot.id
+        noise_rows = [KnowledgeEvidence(id=f"prefix-noise-{index}", source_id=source.id,
+            snapshot_id=snapshot.id, kind="text", block_kind="paragraph", ordinal=index,
+            char_start=0, char_end=len(common), line_start=1, line_end=1,
+            canonical_excerpt=common, search_text=common,
+            content_hash=sha256(common.encode()).hexdigest()) for index in range(4999)]
+        noise_rows.append(KnowledgeEvidence(id="prefix-target", source_id=source.id,
+            snapshot_id=snapshot.id, kind="text", block_kind="paragraph", ordinal=4999,
+            char_start=len(common) + 1, char_end=len(canonical), line_start=2, line_end=2,
+            canonical_excerpt=target_excerpt, search_text=target_excerpt,
+            content_hash=sha256(target_excerpt.encode()).hexdigest()))
+        session.add_all(noise_rows)
+        session.commit()
+
+    query = common + "重点核对稀有术语蓝鲸协议"
+    items = read(loader, query)
+    assert any(item.get("evidence_id") == "prefix-target" for item in items)
+    assert len([item for item in items if item["kind"] == "evidence"]) <= 24
+
+
 def test_revision_cas_archive_delete_and_replay_tombstone(knowledge):
     sessions, loader, (note_id, version_id, _) = knowledge
     repository = KnowledgeNoteLifecycle(sessions)

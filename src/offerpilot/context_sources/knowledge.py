@@ -48,16 +48,37 @@ def _evidence(connection: sqlite3.Connection, evidence_id: str, *, source_id: in
 
 
 def recall_knowledge(connection: sqlite3.Connection, query: str) -> list[dict[str, object]]:
-    terms = tuple(dict.fromkeys(term.lower() for term in (*re.findall(r"\w{2,32}", query[:500]), *parse_query(query[:500]).terms)))[:12]
+    # Keep the whole bounded question: a polite Chinese preamble must not use
+    # up the term budget before the actual subject. Bigrams also retain short
+    # names when the source inserts another word (蓝鲸协议 / 蓝鲸幂等协议).
+    bounded_query = query[:500]
+    short_terms = [run[index:index + 2]
+        for run in re.findall(r"[㐀-鿿豈-﫿぀-ヿ가-힯]{2,}", bounded_query)
+        for index in range(len(run) - 1)]
+    terms = tuple(dict.fromkeys(term.lower() for term in (*parse_query(bounded_query).terms, *short_terms)))
     if not terms:
         return []
-    note_predicate = " OR ".join("instr(lower(n.title || ' ' || v.content_json), ?) > 0" for _ in terms)
-    evidence_predicate = " OR ".join("instr(lower(e.search_text), ?) > 0" for _ in terms)
-    notes = fetch_rows(connection.execute(f"""SELECT n.id, n.title, v.id, v.source_id, v.content_json, v.content_hash
-        FROM knowledge_notes n JOIN knowledge_note_versions v ON v.id=n.current_version_id AND v.note_id=n.id
-        JOIN knowledge_sources s ON s.id=v.source_id WHERE n.archived_at IS NULL AND s.lifecycle='active'
-        AND s.deleted_at IS NULL AND s.archived_at IS NULL AND length(v.content_json)<=65536
-        AND ({note_predicate}) ORDER BY n.id LIMIT 24""", terms), max_rows=24)
+    # One bound JSON parameter avoids a query-depth/parameter explosion. Rank
+    # both lanes before their independent caps so old weak hits cannot hide a
+    # later relevant source; source integrity is still checked below.
+    query_terms = json.dumps(terms, ensure_ascii=False)
+    notes = fetch_rows(connection.execute("""WITH terms AS MATERIALIZED (SELECT value AS term FROM json_each(?)),
+        active_notes AS MATERIALIZED (SELECT n.id AS note_id, n.title, v.id AS version_id, v.source_id,
+            v.content_json, v.content_hash, lower(n.title || ' ' || v.content_json) AS search_text
+            FROM knowledge_notes n JOIN knowledge_note_versions v
+            ON v.id=n.current_version_id AND v.note_id=n.id
+            JOIN knowledge_sources s ON s.id=v.source_id
+            WHERE n.archived_at IS NULL AND s.lifecycle='active'
+            AND s.deleted_at IS NULL AND s.archived_at IS NULL AND length(v.content_json)<=65536),
+        matches AS MATERIALIZED (SELECT n.note_id, t.term FROM active_notes n JOIN terms t
+            ON instr(n.search_text, t.term)>0),
+        document_frequency AS (SELECT term, count(*) AS frequency FROM matches GROUP BY term),
+        scored AS (SELECT m.note_id, sum(1.0 / df.frequency) AS relevance
+            FROM matches m JOIN document_frequency df ON df.term=m.term
+            GROUP BY m.note_id)
+        SELECT n.note_id, n.title, n.version_id, n.source_id, n.content_json, n.content_hash
+        FROM active_notes n JOIN scored ON scored.note_id=n.note_id
+        ORDER BY scored.relevance DESC, n.note_id LIMIT 24""", (query_terms,)), max_rows=24)
     note_items: list[dict[str, object]] = []
     for row in notes:
         note_id, title, version_id, source_id, raw, content_hash = row
@@ -94,10 +115,20 @@ def recall_knowledge(connection: sqlite3.Connection, query: str) -> list[dict[st
         note_items.append({"kind": "confirmed_note", "note_id": note_id, "version_id": version_id,
             "source_id": source_id, "content_hash": content_hash, "title": title, "content": content,
             "evidence": evidence})
-    candidates = fetch_rows(connection.execute(f"""SELECT e.id FROM knowledge_evidence e
-        JOIN knowledge_sources s ON s.id=e.source_id WHERE s.lifecycle='active'
-        AND s.deleted_at IS NULL AND s.archived_at IS NULL AND s.active_snapshot_id=e.snapshot_id
-        AND ({evidence_predicate}) ORDER BY e.source_id,e.ordinal,e.id LIMIT 24""", terms), max_rows=24)
+    candidates = fetch_rows(connection.execute("""WITH terms AS MATERIALIZED (SELECT value AS term FROM json_each(?)),
+        active_evidence AS MATERIALIZED (SELECT e.id, e.source_id, e.ordinal,
+                lower(e.search_text) AS search_text
+            FROM knowledge_evidence e JOIN knowledge_sources s ON s.id=e.source_id
+            WHERE s.lifecycle='active' AND s.deleted_at IS NULL AND s.archived_at IS NULL
+            AND s.active_snapshot_id=e.snapshot_id),
+        matches AS MATERIALIZED (SELECT e.id, t.term FROM active_evidence e JOIN terms t
+            ON instr(e.search_text, t.term)>0),
+        document_frequency AS (SELECT term, count(*) AS frequency FROM matches GROUP BY term),
+        scored AS (SELECT m.id, sum(1.0 / df.frequency) AS relevance
+            FROM matches m JOIN document_frequency df ON df.term=m.term
+            GROUP BY m.id)
+        SELECT e.id FROM active_evidence e JOIN scored ON scored.id=e.id
+        ORDER BY scored.relevance DESC, e.source_id, e.ordinal, e.id LIMIT 24""", (query_terms,)), max_rows=24)
     evidence_items = []
     for (evidence_id,) in candidates:
         item = _evidence(connection, str(evidence_id))

@@ -130,7 +130,7 @@ export async function getRuntimeRequestExecution(requestId: string, signal?: Abo
   const rawState = value.execution?.state ?? value.state;
   const state = rawState === 'queued' || rawState === 'accepted' ? 'running' : rawState;
   if (!state || !['running', 'completed', 'waiting_confirmation', 'failed', 'stopped', 'interrupted', 'result_unknown'].includes(state)) throw new Error('runtime_state_invalid');
-  return { ...target, state, protocol };
+  return { ...target, state, protocol, submission_request_id: requestId };
 }
 
 export async function submitRuntimeTurn(body: Record<string, unknown>, options?: RuntimeObserveOptions): Promise<ChatResponse> {

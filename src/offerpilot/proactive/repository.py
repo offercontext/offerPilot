@@ -72,6 +72,13 @@ def _source(session: Session, application_id: int, event_id: int | None, kind: s
         value.update(event_id=event.id, event_type=event.event_type, subtype=event.subtype,
                      scheduled_at=event.scheduled_at.isoformat(), status=event.status, round=event.round,
                      remind_at=event.remind_at.isoformat() if event.remind_at else None)
+        if kind == "interview_draft":
+            _, policy = _policy(session)
+            scheduled = datetime.fromtimestamp(timestamp(event.scheduled_at), timezone.utc)
+            # Timezone is part of the frozen source, so changing it fences an
+            # in-flight draft just like changing the event time itself.
+            value.update(scheduled_at=scheduled.isoformat(), timezone=policy.timezone,
+                scheduled_at_local=scheduled.astimezone(ZoneInfo(policy.timezone)).isoformat())
     raw = json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     return sha256(raw.encode()).hexdigest(), value
 
@@ -281,7 +288,13 @@ class ProactiveRepository:
                 session.add(conversation)
                 session.flush()
                 row.conversation_id = conversation.id
-            result = {**_view(row), "source": source[1], "conversation_id": row.conversation_id, "lease_until": row.lease_until}
+            source_value = source[1]
+            if draft:
+                # The observation time is not a source version: it is frozen at
+                # dispatch and must not invalidate the job on every clock tick.
+                source_value = {**source_value,
+                    "current_time": datetime.fromtimestamp(now, ZoneInfo(policy.timezone)).isoformat()}
+            result = {**_view(row), "source": source_value, "conversation_id": row.conversation_id, "lease_until": row.lease_until}
             session.commit()
             return result
 

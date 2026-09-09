@@ -289,6 +289,11 @@ def test_confirmed_selection_loads_only_the_frozen_version(readiness_case) -> No
     assert loaded[0]["signal_version_id"] == case["version_id"]
     assert loaded[0]["target_event_id"] == case["target_id"]
     assert loaded[0]["resume_id"] == case["resume_id"]
+    assert loaded[0]["target_event"] == {
+        "id": case["target_id"], "event_type": "interview", "round": 3,
+        "subtype": "onsite", "scheduled_at": "2026-09-20T10:00:00+00:00", "duration_minutes": 60,
+    }
+    assert loaded[0]["source_event"]["round"] == 2
 
 
 @pytest.mark.parametrize("mutation", ["note", "retracted"])

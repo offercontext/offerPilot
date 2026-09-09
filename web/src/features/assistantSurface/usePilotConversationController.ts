@@ -214,6 +214,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     // Persisted terminal state also releases a subscriber whose network stream
     // stalled. Recovery never relies on that stream delivering its final frame.
     const ownsRequest = Boolean(request?.execution && sameExecution(request.execution, target));
+    const recoveredRequestId = ownsRequest ? request?.requestId : target.submission_request_id;
     settlePendingStartForExecution(target, ownsRequest ? request?.requestId : undefined);
     if (request && ownsRequest) {
       request.controller.abort();
@@ -230,6 +231,17 @@ export function usePilotConversationControllerState(observationEnabled = true) {
         const nextPending = pendingActionForConversation(summaries, target.conversation_id);
         setPending(nextPending);
         setLastUndo(summaries.find((item) => item.id === target.conversation_id)?.last_write_undo ?? null);
+        // Clear only the failed submission whose durable result we just read.
+        // Another task's completion must not hide a newer error or offer a
+        // misleading resend after this request has already succeeded.
+        const recoveredSubmission = lastSubmissionRef.current;
+        if (['completed', 'waiting_confirmation'].includes(target.state)
+          && recoveredRequestId && recoveredSubmission?.requestId === recoveredRequestId) {
+          setLastError(null);
+          setLastFailedText('');
+          setComposerDraft((draft) => draft === recoveredSubmission.message ? '' : draft);
+          lastSubmissionRef.current = null;
+        }
         taskStateReporterRef.current?.(nextPending ? 'waiting_confirmation' : target.state === 'failed' ? 'failed' : 'completed', target.conversation_id);
       }).catch(() => {
         if (activeConversationIdRef.current === target.conversation_id && visibleRequestGenerationRef.current === generation
