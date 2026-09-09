@@ -7,9 +7,9 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Empty, Skeleton, Tag, Typography } from 'antd';
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { listApplications } from '@/services/applications';
-import { cancelProactiveJob, listProactiveJobs } from '@/services/proactive';
+import { cancelProactiveJob, getProactiveSettings, listProactiveJobs } from '@/services/proactive';
 import type { Application } from '@/types/application';
 import {
   isProactiveJobActive,
@@ -34,12 +34,21 @@ const STATE_COLORS: Record<ProactiveJobState, string> = {
 };
 
 /** The API returns UTC Unix seconds. Keep this conversion in one place. */
-export function formatProactiveTimestamp(timestamp: number): string {
+export function formatProactiveTimestamp(timestamp: number, timezone?: string): string {
   if (!Number.isFinite(timestamp)) return '时间未知';
-  return new Intl.DateTimeFormat('zh-CN', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(new Date(timestamp * 1000));
+  try {
+    return new Intl.DateTimeFormat('zh-CN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      ...(timezone ? { timeZone: timezone } : {}),
+    }).format(new Date(timestamp * 1000));
+  } catch {
+    // A stale client may know a timezone that this browser does not support.
+    return new Intl.DateTimeFormat('zh-CN', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(timestamp * 1000));
+  }
 }
 
 function applicationLabel(application: Application | undefined, applicationId: number): string {
@@ -66,11 +75,13 @@ function getErrorCopy(errorCode: string): string | null {
 function JobCard({
   job,
   application,
+  timezone,
   cancelling,
   onCancel,
 }: {
   job: ProactiveJob;
   application?: Application;
+  timezone?: string;
   cancelling: boolean;
   onCancel: (job: ProactiveJob) => void;
 }) {
@@ -92,9 +103,9 @@ function JobCard({
 
       <div className={styles.jobMeta}>
         <span className={styles.jobMetaItem}>
-          <ClockCircleOutlined aria-hidden="true" /> 到期：{formatProactiveTimestamp(job.due_at)}
+          <ClockCircleOutlined aria-hidden="true" /> 到期：{formatProactiveTimestamp(job.due_at, timezone)}
         </span>
-        <span className={styles.jobMetaItem}>创建：{formatProactiveTimestamp(job.created_at)}</span>
+        <span className={styles.jobMetaItem}>创建：{formatProactiveTimestamp(job.created_at, timezone)}</span>
       </div>
 
       {hasResult ? (
@@ -124,6 +135,7 @@ function JobCard({
 
 export default function ProactiveInbox() {
   const queryClient = useQueryClient();
+  const titleId = useId();
   const jobsQuery = useQuery({
     queryKey: PROACTIVE_JOBS_QUERY_KEY,
     queryFn: listProactiveJobs,
@@ -132,6 +144,10 @@ export default function ProactiveInbox() {
   const applicationsQuery = useQuery({
     queryKey: APPLICATIONS_QUERY_KEY,
     queryFn: () => listApplications(),
+  });
+  const settingsQuery = useQuery({
+    queryKey: ['proactive-settings'],
+    queryFn: getProactiveSettings,
   });
   const [cancellingId, setCancellingId] = useState<string>();
   const [error, setError] = useState('');
@@ -157,7 +173,7 @@ export default function ProactiveInbox() {
 
   if (jobsQuery.isPending) {
     return (
-      <section className={styles.panel} aria-labelledby="proactive-inbox-title">
+      <section className={styles.panel} aria-labelledby={titleId}>
         <Skeleton active paragraph={{ rows: 7 }} />
       </section>
     );
@@ -165,7 +181,7 @@ export default function ProactiveInbox() {
 
   if (jobsQuery.isError) {
     return (
-      <section className={styles.panel} aria-labelledby="proactive-inbox-title">
+      <section className={styles.panel} aria-labelledby={titleId}>
         <Alert
           type="error"
           showIcon
@@ -180,12 +196,12 @@ export default function ProactiveInbox() {
   const jobs = jobsQuery.data ?? [];
 
   return (
-    <section className={styles.panel} aria-labelledby="proactive-inbox-title">
+    <section className={styles.panel} aria-labelledby={titleId}>
       <div className={styles.header}>
         <div className={styles.heading}>
           <span className={styles.headingIcon} aria-hidden="true"><BellOutlined /></span>
           <div>
-            <Typography.Title id="proactive-inbox-title" level={4} className={styles.headingTitle}>
+            <Typography.Title id={titleId} level={4} className={styles.headingTitle}>
               主动任务
             </Typography.Title>
             <p className={styles.headingCopy}>查看本地服务生成的提醒和准备结果，任务状态每 15 秒更新。</p>
@@ -218,6 +234,7 @@ export default function ProactiveInbox() {
               key={job.id}
               job={job}
               application={applicationsById.get(job.application_id)}
+              timezone={settingsQuery.data?.settings.timezone}
               cancelling={cancellingId === job.id}
               onCancel={(selected) => void cancel(selected)}
             />

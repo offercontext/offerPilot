@@ -5,6 +5,7 @@ import { formatProactiveTimestamp } from './ProactiveInbox';
 describe('ProactiveInbox', () => {
   it('interprets backend timestamps as UTC Unix seconds', () => {
     expect(formatProactiveTimestamp(0)).toContain('1970');
+    expect(formatProactiveTimestamp(0, 'Asia/Shanghai')).not.toBe(formatProactiveTimestamp(0, 'UTC'));
     expect(formatProactiveTimestamp(Number.NaN)).toBe('时间未知');
   });
 
@@ -13,5 +14,8 @@ describe('ProactiveInbox', () => {
     expect(source).toContain('不会自动执行业务操作');
     expect(source).toContain('取消任务');
     expect(source).toContain('cancelProactiveJob');
+    expect(source).toContain('useId');
+    expect(source).toContain('getProactiveSettings');
+    expect(source).toContain('timeZone');
   });
 });
