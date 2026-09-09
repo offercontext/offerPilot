@@ -1,0 +1,214 @@
+.panel {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 20px;
+  background: var(--op-surface);
+  border: 1px solid var(--op-border);
+  border-radius: 16px;
+  box-shadow: var(--op-shadow-sm);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.headingIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  background: var(--surface-selected);
+  color: var(--op-primary-strong);
+  font-size: 17px;
+}
+
+.headingTitle.ant-typography {
+  margin: 0;
+  color: var(--op-ink);
+  text-wrap: balance;
+}
+
+.headingCopy {
+  margin: 3px 0 0;
+  color: var(--op-muted);
+  font-size: 12px;
+  line-height: 1.55;
+  text-wrap: pretty;
+}
+
+.refreshButton :global(.ant-btn) {
+  min-height: 40px;
+}
+
+.list {
+  display: grid;
+  gap: 10px;
+  max-height: 620px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.job {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 15px 16px;
+  border: 1px solid var(--op-border);
+  border-radius: 13px;
+  background: var(--surface-sunken);
+  transition: border-color 0.16s var(--op-ease), box-shadow 0.16s var(--op-ease);
+}
+
+.job:hover {
+  border-color: var(--op-border-strong);
+  box-shadow: var(--op-shadow-sm);
+}
+
+.jobHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.jobTitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--op-ink);
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.jobKind {
+  color: var(--op-primary-strong);
+}
+
+.jobApplication {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--op-muted-strong);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.jobMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  color: var(--op-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.jobMetaItem {
+  font-variant-numeric: tabular-nums;
+}
+
+.result {
+  margin: 0;
+  padding: 12px 13px;
+  border-left: 3px solid var(--op-primary);
+  border-radius: 4px 9px 9px 4px;
+  background: var(--op-surface);
+  color: var(--op-ink);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.resultLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  color: var(--op-muted-strong);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.resultNotice {
+  margin-top: 8px;
+  color: var(--op-muted);
+  font-size: 11px;
+}
+
+.jobFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.jobReason {
+  min-width: 0;
+  color: var(--op-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.jobFooter :global(.ant-btn) {
+  min-height: 36px;
+  flex: 0 0 auto;
+}
+
+.empty {
+  padding: 24px 8px;
+  border: 1px dashed var(--op-border-strong);
+  border-radius: 12px;
+  background: var(--surface-sunken);
+}
+
+.error {
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .panel {
+    padding: 16px;
+  }
+
+  .header {
+    flex-direction: column;
+  }
+
+  .refreshButton,
+  .refreshButton :global(.ant-btn) {
+    width: 100%;
+  }
+
+  .jobHeader,
+  .jobFooter {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .jobFooter :global(.ant-btn) {
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .job {
+    transition: none;
+  }
+}
