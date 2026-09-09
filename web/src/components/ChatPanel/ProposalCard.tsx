@@ -4,6 +4,7 @@ import dayjs from 'dayjs';
 import type { PendingAction, PendingActionEditableField } from '@/types/chat';
 import { STATUS_LABELS, type ApplicationStatus } from '@/types/application';
 import { EVENT_TYPE_LABELS, type ScheduleEventType } from '@/types/event';
+import { OFFER_STATUS_LABELS, type OfferStatus } from '@/types/offer';
 import { selectEvidence, type EvidenceItem, type EvidenceTarget } from './model';
 import { toolMeta } from './capabilities';
 import EvidenceList from './EvidenceList';
@@ -57,6 +58,17 @@ const FIELD_LABELS: Record<string, string> = {
   duration_minutes: '时长',
   location: '地点',
   remind_at: '提醒时间',
+  closed_reason: '结束原因',
+  allow_placeholder_date: '允许日期占位',
+  text: '改写正文',
+  submitted_at: '投递时间',
+  note: '投递备注',
+  stage: '阶段',
+  result: '结果',
+  feedback_text: '原始反馈',
+  reflection_text: '我的复盘',
+  next_action_text: '下次行动',
+  occurred_at: '发生时间',
 };
 
 FIELD_LABELS.jd_text = 'JD 原文';
@@ -114,7 +126,7 @@ function actionTarget(action: PendingAction): string | null {
 
 function proposedValue(action: PendingAction): string | null {
   const status = action.args?.status;
-  if (typeof status === 'string' && status.trim()) return `状态 → ${valueLabel(status, 'status')}`;
+  if (typeof status === 'string' && status.trim()) return `状态 → ${valueLabel(status, 'status', action.tool_name)}`;
   const title = action.args?.title;
   if (typeof title === 'string' && title.trim()) return `标题 → ${title}`;
   return null;
@@ -132,9 +144,13 @@ function isScheduleEventType(value: unknown): value is ScheduleEventType {
   return typeof value === 'string' && value in EVENT_TYPE_LABELS;
 }
 
-function valueLabel(value: unknown, field?: string): string {
+function valueLabel(value: unknown, field?: string, toolName?: string): string {
   if (value === null || value === undefined || value === '') return '空';
   if (typeof value === 'boolean') return value ? '是' : '否';
+  if (field === 'status' && (toolName === 'create_offer' || toolName === 'update_offer')
+    && typeof value === 'string' && Object.prototype.hasOwnProperty.call(OFFER_STATUS_LABELS, value)) {
+    return OFFER_STATUS_LABELS[value as OfferStatus];
+  }
   if (field === 'status' && isApplicationStatus(value)) return STATUS_LABELS[value];
   if (isApplicationStatus(value)) return STATUS_LABELS[value];
   if (field === 'event_type' && isScheduleEventType(value)) return EVENT_TYPE_LABELS[value];
@@ -254,7 +270,7 @@ export default function ProposalCard({ action, loading, evidence, onConfirm, onC
             value={typeof value === 'string' ? value : undefined}
             options={(descriptor.options ?? []).map((option) => ({
               value: option,
-              label: valueLabel(option, descriptor.field),
+              label: valueLabel(option, descriptor.field, action.tool_name),
             }))}
             onChange={(next) => updateDraft(descriptor.field, next)}
           />
@@ -460,8 +476,8 @@ export default function ProposalCard({ action, loading, evidence, onConfirm, onC
         {changes.length ? (
           <div className={styles.changeList}>
             {changes.map((change) => {
-              const beforeText = valueLabel(change.before, change.field);
-              const rawAfterText = valueLabel(change.after, change.field);
+              const beforeText = valueLabel(change.before, change.field, action.tool_name);
+              const rawAfterText = valueLabel(change.after, change.field, action.tool_name);
               const afterText = summarizeLongValue(change.after, change.field) ?? rawAfterText;
               return (
                 <div key={change.field} className={styles.changeRow}>

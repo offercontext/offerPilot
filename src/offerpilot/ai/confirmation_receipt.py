@@ -38,6 +38,22 @@ _FIELD_LABELS = {
     "self_reflection": "自我反思",
     "difficulty_points": "难点",
     "mood": "情绪",
+    "company": "公司",
+    "position": "岗位",
+    "date": "日期",
+    "job_url": "岗位链接",
+    "closed_reason": "结束原因",
+    "jd_text": "JD 原文",
+    "source_url": "来源链接",
+    "text": "改写正文",
+    "submitted_at": "投递时间",
+    "note": "投递备注",
+    "stage": "阶段",
+    "result": "结果",
+    "feedback_text": "原始反馈",
+    "reflection_text": "我的复盘",
+    "next_action_text": "下次行动",
+    "occurred_at": "发生时间",
 }
 
 

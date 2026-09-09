@@ -1,6 +1,6 @@
 import dayjs, { type ConfigType } from 'dayjs';
 import type { Application, ApplicationStatus } from '@/types/application';
-import type { ScheduleEvent } from '@/types/event';
+import { EVENT_TYPE_LABELS, type ScheduleEvent } from '@/types/event';
 import type { Offer } from '@/types/offer';
 import type { PracticeStats } from '@/types/question';
 
@@ -204,7 +204,7 @@ export function derivePipelineInsights({
       kind: 'interview_soon',
       priority,
       title: `${label} 即将开始`,
-      reason: `${event.event_type} 将在 ${Math.max(1, Math.ceil(hours))} 小时后开始。`,
+      reason: `${EVENT_TYPE_LABELS[event.event_type] ?? '日程'} 将在 ${Math.max(1, Math.ceil(hours))} 小时后开始。`,
       evidence: [`日程时间：${scheduledAt.format('YYYY-MM-DD HH:mm')}`],
       primaryAction: makeAction('打开日历', 'calendar', {
         appId: event.application_id,

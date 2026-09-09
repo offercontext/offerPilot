@@ -143,6 +143,37 @@ it.each(['create_offer', 'update_offer'])('shows Chinese Offer field labels for 
   for (const field of fields) expect(labels).not.toContain(field);
 });
 
+it.each([
+  ['create_application', ['closed_reason'], ['结束原因']],
+  ['add_note', ['allow_placeholder_date'], ['允许日期占位']],
+  ['resume_rewrite_highlight', ['text'], ['改写正文']],
+  ['create_application_submission_snapshot', ['submitted_at', 'note'], ['投递时间', '投递备注']],
+  ['record_application_outcome', ['stage', 'result', 'feedback_text', 'reflection_text', 'next_action_text', 'occurred_at'],
+    ['阶段', '结果', '原始反馈', '我的复盘', '下次行动', '发生时间']],
+])('localizes editable fields on %s cards', (tool_name, fields, expectedLabels) => {
+  const card = renderProposal({
+    tool_name: tool_name as string, human: '请确认', confirmation_token: 'labels', args: {},
+    editable_fields: (fields as string[]).map((field) => ({ field, type: 'string' as const })),
+  });
+  act(() => Array.from(card.querySelectorAll('button')).find((button) => button.textContent?.includes('编辑建议'))?.click());
+  const labels = Array.from(card.querySelectorAll('label')).map((label) => label.textContent);
+  expect(labels).toEqual(expect.arrayContaining(expectedLabels as string[]));
+});
+
+it('uses Offer-specific Chinese status labels in the editor and change summary', () => {
+  const card = renderProposal({
+    tool_name: 'update_offer', human: '请确认', confirmation_token: 'status', args: { status: 'pending' },
+    proposed_changes: [{ field: 'status', before: 'negotiating', after: 'accepted' }],
+    editable_fields: [{ field: 'status', type: 'enum', options: ['pending', 'negotiating', 'accepted', 'declined', 'expired'] }],
+  });
+  act(() => Array.from(card.querySelectorAll('button')).find((button) => button.textContent?.includes('编辑建议'))?.click());
+  expect(card.textContent).toContain('待处理');
+  expect(card.textContent).toContain('谈判中');
+  expect(card.textContent).toContain('已接受');
+  expect(card.textContent).not.toContain('negotiating');
+  expect(card.textContent).not.toContain('accepted');
+});
+
 describe('deterministic Pilot JD confirmation card', () => {
   it('retries an unknown submission with its original page context after navigation', async () => {
     let owner!: PilotConversationController;

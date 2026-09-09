@@ -3,6 +3,7 @@ import { derivePipelineInsights, summarizePipelineHealth } from './pipelineInsig
 import type { Application } from '@/types/application';
 import type { Offer } from '@/types/offer';
 import type { PracticeStats } from '@/types/question';
+import { EVENT_TYPE_LABELS, type ScheduleEventType } from '@/types/event';
 
 const now = '2026-07-03T09:00:00+08:00';
 
@@ -58,6 +59,14 @@ function makePracticeStats(overrides: Partial<PracticeStats> = {}): PracticeStat
 }
 
 describe('derivePipelineInsights', () => {
+  it.each(Object.entries(EVENT_TYPE_LABELS))('localizes %s in upcoming action cards', (eventType, label) => {
+    const insights = derivePipelineInsights({ apps: [], offers: [], now,
+      events: [{ id: 9, application_id: 1, event_type: eventType as ScheduleEventType,
+        subtype: '', tags: [], round: 1, scheduled_at: '2026-07-03T10:00:00+08:00',
+        duration_minutes: 30, location: '', notes: '', status: 'planned', created_at: now }],
+    });
+    expect(insights.find((item) => item.id === 'interview-9')?.reason).toBe(`${label} 将在 1 小时后开始。`);
+  });
   it('promotes an offer deadline within 48 hours to P0 with localized deadline evidence and offer action', () => {
     const insights = derivePipelineInsights({
       apps: [],
