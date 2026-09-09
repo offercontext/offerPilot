@@ -164,10 +164,25 @@ export interface PilotTurnState {
   turn_id: string;
   conversation_id: number;
   user_message_id: number | null;
-  state: 'accepted' | 'started' | 'completed' | 'failed' | 'interrupted' | 'incomplete';
+  state: 'accepted' | 'started' | 'completed' | 'failed' | 'interrupted' | 'incomplete' | PilotExecution['state'];
+  execution_generation?: number;
   message_ids: number[];
   operation_ids: string[];
   source_versions: Record<string, string>;
+}
+
+export interface PilotExecution {
+  turn_id: string;
+  conversation_id: number;
+  execution_generation: number;
+  state: 'running' | 'waiting_confirmation' | 'completed' | 'failed' | 'interrupted' | 'stopped' | 'result_unknown';
+}
+
+export interface PilotInterruptResult {
+  command_id: string;
+  turn_id: string;
+  execution_generation: number;
+  status: 'stopped' | 'already_ended' | 'generation_changed' | 'result_unknown' | 'no_active_execution';
 }
 
 export type ChatResponse = (
@@ -184,7 +199,7 @@ export type ChatResponse = (
     }
   | { type: 'confirmation_required'; conversation_id: number; pending_action: PendingAction }
   | { type: 'turn_recovered'; conversation_id: number; turn_id: string; turn: PilotTurnState }
-) & { turn_id?: string; request_id?: string };
+) & { turn_id?: string; request_id?: string; execution_generation?: number };
 
 export type ChatExecutionResponse = Exclude<ChatResponse, { type: 'turn_recovered' }>;
 
@@ -202,6 +217,7 @@ export type ChatStreamEventName =
   | 'cancelled';
 
 export interface ChatStreamEvent<TData = Record<string, unknown>> {
+  execution_generation?: number;
   turn_id?: string;
   request_id?: string;
   run_id?: string;

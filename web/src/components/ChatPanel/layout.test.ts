@@ -455,7 +455,7 @@ describe('ChatPanel docked layout contract', () => {
     expect(component).toContain("markPendingAutoSelect('allow')");
     expect(component).toContain('if (pendingAutoSelectSuppressedRef.current) return;');
     expect(component).toContain('resolveActivePendingAction(pending, conversations, convID)');
-    expect(component).toContain('const composerDisabled = loading || !!activePending || !hasKey;');
+    expect(component).toContain("const composerDisabled = loading || controller.executionControl.execution?.state === 'running' || !!activePending || !hasKey;");
     expect(component).not.toContain('conversations.some((conversation) => conversation.pending_action)');
   });
 

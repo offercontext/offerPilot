@@ -32,7 +32,7 @@ export function PendingStartRecovery({ busy, conversationId, onOpen }: Props) {
       const turn = await getPilotRequest(requestId);
       if (epoch !== ownerEpoch.current) return;
       await onOpen(turn.conversation_id, { refresh: true });
-      if (['completed', 'failed', 'interrupted'].includes(turn.state)) {
+      if (['completed', 'failed', 'interrupted', 'stopped', 'waiting_confirmation'].includes(turn.state)) {
         forgetPendingStart(requestId);
       } else {
         setFeedback('任务已接纳，尚无最终状态记录。已显示保存的消息，可稍后再次读取。');

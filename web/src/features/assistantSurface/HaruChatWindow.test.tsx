@@ -10,6 +10,13 @@ import {
 import HaruChatWindow from './HaruChatWindow';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
+vi.mock('@/services/chat', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/chat')>(),
+  getPilotExecution: vi.fn().mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' }),
+  interruptPilotExecution: vi.fn().mockImplementation(async (target, commandId) => ({
+    command_id: commandId, turn_id: target.turn_id, execution_generation: target.execution_generation, status: 'stopped',
+  })),
+}));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -40,7 +47,10 @@ function Harness({ stop, onExpand }: { stop: () => void; onExpand?: () => void }
       kind: 'chat',
       conversationId: 7,
       controller: { abort: stop } as unknown as AbortController,
+      execution: { turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' },
     };
+    controller.setConversationId(7);
+    controller.executionControl.acceptExecution(controller.activeRequestRef.current.execution!);
     controller.setLoading(true);
     surface.reportTaskState('running');
     surface.openHaru();
@@ -100,6 +110,14 @@ function SharedDraftHarness() {
 }
 
 describe('HaruChatWindow', () => {
+  it('blocks keyboard submission when only a remote execution is running', async () => {
+    await act(async () => root?.render(
+      <AssistantSurfaceProvider><ContextHarness /></AssistantSurfaceProvider>,
+    ));
+    expect(host!.querySelector('textarea')!.disabled).toBe(true);
+    expect(host!.querySelector('[aria-label="停止生成"]')).not.toBeNull();
+  });
+
   beforeEach(() => {
     host = document.createElement('div');
     document.body.appendChild(host);
@@ -177,8 +195,10 @@ describe('HaruChatWindow', () => {
     await act(async () => root?.render(
       <AssistantSurfaceProvider><Harness stop={stop} /></AssistantSurfaceProvider>,
     ));
-    act(() => host!.querySelector<HTMLButtonElement>('[aria-label="停止生成"]')?.click());
-    act(() => host!.querySelector<HTMLButtonElement>('[aria-label="停止生成"]')?.click());
+    await act(async () => {
+      host!.querySelector<HTMLButtonElement>('[aria-label="停止生成"]')?.click();
+      host!.querySelector<HTMLButtonElement>('[aria-label="停止生成"]')?.click();
+    });
     expect(stop).toHaveBeenCalledTimes(1);
     expect(host!.querySelector('[data-task-state="running"]')).toBeNull();
     expect(host!.querySelector('[data-task-state="waiting_confirmation"]')?.textContent).toBe('等待确认');

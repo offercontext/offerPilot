@@ -12,16 +12,18 @@ from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
 from uuid import UUID, uuid4
+from time import time
 
 from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.models import (
     ChatMessage, Conversation, PilotRequestReceipt, PilotTurnRecord, PilotTurnMessage,
-    PilotTurnOperation,
+    PilotTurnOperation, PilotExecution,
     PilotTimelineState, PilotTimelineItem, PilotTimelineChange,
 )
 from offerpilot.presentation_contracts import PilotTurnItemV1
+from offerpilot.pilot_control import reconcile_execution_state
 from offerpilot.repositories.chat import (
     ConversationScopeMutationSnapshot,
     _require_active_application,
@@ -78,6 +80,7 @@ class PilotTimelineRepository:
         request: Mapping[str, Any],
         *,
         freeze_sources: Callable[[Session, Conversation], Mapping[str, str]] | None = None,
+        on_admitted: Callable[[Session, PilotTurnRecord], None] | None = None,
     ) -> TurnAdmission:
         """Persist the receipt, turn, conversation and user message atomically.
 
@@ -160,6 +163,8 @@ class PilotTimelineRepository:
                 request_key=request_key, request_digest=request_digest, turn_id=turn.id,
                 submitted_conversation_id=conversation_id,
             ))
+            if on_admitted is not None:
+                on_admitted(session, turn)
             result = TurnAdmission(turn.id, conversation.id, user.id, True)
             session.commit()
             return result
@@ -191,13 +196,17 @@ class PilotTimelineRepository:
 
     def get_turn(self, turn_id: str) -> dict[str, Any] | None:
         with self.session_factory() as session:
-            session.execute(text("BEGIN"))
+            session.execute(text("BEGIN IMMEDIATE"))
             turn = session.get(PilotTurnRecord, turn_id)
             if turn is None:
                 return None
-            return {
+            execution = session.scalar(select(PilotExecution).where(PilotExecution.turn_id == turn_id)
+                                       .order_by(PilotExecution.generation.desc()).limit(1))
+            result = {
                 "turn_id": turn.id, "conversation_id": turn.conversation_id,
-                "user_message_id": turn.user_message_id, "state": turn.state,
+                "user_message_id": turn.user_message_id,
+                "state": turn.state if execution is None else reconcile_execution_state(execution, int(time() * 1000)),
+                "execution_generation": execution.generation if execution is not None else 0,
                 "source_versions": json.loads(turn.source_versions_json),
                 "message_ids": list(session.scalars(select(PilotTurnMessage.message_id).where(
                     PilotTurnMessage.turn_id == turn_id,
@@ -206,6 +215,8 @@ class PilotTimelineRepository:
                     PilotTurnOperation.turn_id == turn_id,
                 ).order_by(PilotTurnOperation.operation_id))),
             }
+            session.commit()
+            return result
 
     def finish(self, turn_id: str, state: str) -> None:
         if state not in {"completed", "failed", "interrupted"}:

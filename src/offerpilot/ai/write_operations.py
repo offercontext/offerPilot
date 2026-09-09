@@ -20,6 +20,7 @@ from uuid import UUID, uuid4, uuid5
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+from offerpilot.pilot_control import require_execution_before_handler
 
 from offerpilot.ai.tool_authority import (
     ApprovalExecutionAuthority,
@@ -2560,6 +2561,7 @@ class WriteOperationCoordinator:
 
                 try:
                     with session.begin_nested():
+                        require_execution_before_handler(session)
                         started_recorded = project_tool_started_bound(
                             bound_context.run_recorder, session, prepared
                         )
@@ -3105,6 +3107,7 @@ class WriteOperationCoordinator:
                     self.repository.append_transition(session, operation_id, 2, "approved")
                     self.repository.append_transition(session, operation_id, 3, "claimed")
                     try:
+                        require_execution_before_handler(session)
                         visible = bound_route.execute(prepared_call)
                         owner.bind_parent_route(bound_route.primary_parent_route_handle())
                         if type(visible) is not str:

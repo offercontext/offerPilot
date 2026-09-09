@@ -2016,6 +2016,7 @@ class PilotTurnRecord(Base):
             name="ck_pilot_turn_state",
         ),
         Index("idx_pilot_turn_conversation", "conversation_id"),
+        Index("uq_pilot_turn_identity", "id", "conversation_id", unique=True),
     )
 
     id: Mapped[str] = mapped_column(String, primary_key=True)
@@ -2030,6 +2031,44 @@ class PilotTurnRecord(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp(),
     )
+
+
+class PilotExecution(Base):
+    """One non-resumable execution owner of a durable Turn."""
+
+    __tablename__ = "pilot_executions"
+    __table_args__ = (
+        ForeignKeyConstraint(["turn_id", "conversation_id"],
+                             ["pilot_turns.id", "pilot_turns.conversation_id"], ondelete="CASCADE"),
+        CheckConstraint("generation > 0", name="ck_pilot_execution_generation"),
+        CheckConstraint(
+            "state IN ('running', 'waiting_confirmation', 'completed', 'failed', "
+            "'interrupted', 'stopped', 'result_unknown')",
+            name="ck_pilot_execution_state",
+        ),
+        Index("uq_pilot_conversation_running", "conversation_id", unique=True,
+              sqlite_where=text("state = 'running'")),
+        Index("uq_pilot_conversation_execution_sequence", "conversation_id", "conversation_sequence", unique=True),
+    )
+
+    turn_id: Mapped[str] = mapped_column(String, primary_key=True)
+    generation: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_sequence: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    owner_token: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    renewed_at_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+    lease_until_ms: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class PilotInterruptCommand(Base):
+    """Content-free, immutable receipt for an exact interrupt command."""
+
+    __tablename__ = "pilot_interrupt_commands"
+    command_key: Mapped[str] = mapped_column(String, primary_key=True)
+    request_digest: Mapped[str] = mapped_column(String, nullable=False)
+    turn_id: Mapped[str | None] = mapped_column(ForeignKey("pilot_turns.id", ondelete="SET NULL"), nullable=True)
+    result_json: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class PilotTurnMessage(Base):

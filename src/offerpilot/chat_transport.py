@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+from contextvars import copy_context
 from collections.abc import AsyncIterable, Awaitable, Callable, Iterable, Mapping
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
@@ -72,6 +73,7 @@ from offerpilot.pilot_runtime.event_sink import (
     runtime_outcome_payload,
 )
 from offerpilot.sse import sse_headers
+from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl, invocation_scope
 
 
 Content: TypeAlias = Iterable[bytes | str] | AsyncIterable[bytes | str]
@@ -156,7 +158,7 @@ class SyncAgentExecutionHost(Generic[_ResultT]):
         _require_host_active(invocation_control)
 
         executor = ThreadPoolExecutor(max_workers=1)
-        future: Future[_ResultT] = executor.submit(thunk)
+        future: Future[_ResultT] = executor.submit(copy_context().run, thunk)
         cancel_futures = False
         try:
             try:
@@ -304,6 +306,7 @@ class _SseInvocationIterator(Generic[_ResultT], Iterator[RuntimeEvent]):
         self._executor = executor_factory(max_workers=1)
         sink = _QueueRuntimeEventSink(self.event_queue, self.cancel_event, control)
         self._future: Future[_ResultT] = self._executor.submit(
+            copy_context().run,
             _invoke_sse_thunk,
             thunk,
             sink,
@@ -734,6 +737,12 @@ def runtime_sse_content(
 ) -> Iterator[str]:
     """Execute one prepared stream and encode its typed events as SSE."""
 
+    def current_envelope() -> Mapping[str, object]:
+        if isinstance(control, DurableRuntimeInvocationControl) and control.lease is not None:
+            return {**envelope_metadata, "turn_id": control.lease.turn_id,
+                    "execution_generation": control.lease.generation}
+        return envelope_metadata
+
     if prepared.execution_mode is StreamExecutionMode.DIRECT:
         events: list[RuntimeEvent] = []
 
@@ -753,12 +762,14 @@ def runtime_sse_content(
         )
         sequence = 0
         for event in events:
+            if control.state in {InvocationState.CANCELLED, InvocationState.TIMED_OUT}:
+                continue
             sequence += 1
             yield encode_sse_event(
                 event,
                 seq=sequence,
                 run_id=run_id,
-                envelope=envelope_metadata,
+                envelope=current_envelope(),
             )
         set_outcome(result)
         return
@@ -784,12 +795,14 @@ def runtime_sse_content(
     sequence = 0
     try:
         for event in streamed:
+            if control.state in {InvocationState.CANCELLED, InvocationState.TIMED_OUT}:
+                continue
             sequence += 1
             yield encode_sse_event(
                 event,
                 seq=sequence,
                 run_id=run_id,
-                envelope=envelope_metadata,
+                envelope=current_envelope(),
             )
         result = streamed.result
         set_outcome(result)
@@ -854,10 +867,17 @@ def execute_runtime_sync(
     *,
     signal_sink: Any = None,
     timeout_seconds: float = CHAT_AGENT_TIMEOUT_SECONDS,
+    invocation_control: RuntimeInvocationControl | None = None,
 ) -> RuntimeOutcome:
     """Own the synchronous Agent host/control boundary for one Runtime call."""
 
-    control = InMemoryRuntimeInvocationControl()
+    control = invocation_control or InMemoryRuntimeInvocationControl()
+    with invocation_scope(control):
+        return _execute_runtime_sync(runtime, request, control, signal_sink, timeout_seconds)
+
+
+def _execute_runtime_sync(runtime: Any, request: StartTurnRequest | ConfirmationRequest,
+                          control: RuntimeInvocationControl, signal_sink: Any, timeout_seconds: float) -> RuntimeOutcome:
     host: SyncAgentExecutionHost[object] = SyncAgentExecutionHost(timeout_seconds=timeout_seconds)
     if isinstance(request, StartTurnRequest):
         return cast(
@@ -899,6 +919,7 @@ def runtime_stream_response(
     timeout_seconds: float = CHAT_AGENT_TIMEOUT_SECONDS,
     on_outcome: Callable[[object], None] | None = None,
     extra_envelope: Mapping[str, object] | None = None,
+    invocation_control: RuntimeInvocationControl | None = None,
 ) -> Response:
     """Prepare and render one guarded stream, owning all transport resources."""
 
@@ -908,12 +929,13 @@ def runtime_stream_response(
         transport_run_id=run_uuid,
         stream_version="pilot-sse-v1",
     )
-    control = InMemoryRuntimeInvocationControl()
-    prepared = runtime.prepare_stream(
-        request,
-        transport=transport,
-        invocation_control=control,
-    )
+    control = invocation_control or InMemoryRuntimeInvocationControl()
+    with invocation_scope(control):
+        prepared = runtime.prepare_stream(
+            request,
+            transport=transport,
+            invocation_control=control,
+        )
     if isinstance(prepared, ImmediateHttpOutcome):
         if on_outcome is not None:
             on_outcome(prepared)
@@ -951,16 +973,31 @@ def runtime_stream_response(
             on_conversation_id(getattr(outcome, "conversation_id", None))
 
     def body() -> object:
-        return runtime_sse_content(
-            runtime,
-            prepared,
-            control,
-            signal_sink,
-            str(run_uuid),
-            envelope,
-            set_stream_outcome,
-            agent_timeout_seconds=timeout_seconds,
-        )
+        # Each iterator is driven in a transport worker distinct from the
+        # preparation request. Enter scope there before starting nested hosts.
+        def scoped_content() -> Iterator[str]:
+            source = runtime_sse_content(
+                runtime, prepared, control, signal_sink, str(run_uuid), envelope,
+                set_stream_outcome, agent_timeout_seconds=timeout_seconds,
+            )
+            try:
+                while True:
+                    with invocation_scope(control):
+                        try:
+                            chunk = next(source)
+                        except StopIteration:
+                            return
+                        except RuntimeCancelled:
+                            if isinstance(control, DurableRuntimeInvocationControl) and not control.is_active():
+                                return
+                            raise
+                    yield chunk
+            finally:
+                with invocation_scope(control):
+                    close = getattr(source, "close", None)
+                    if close is not None:
+                        close()
+        return scoped_content()
 
     guard = PreparedStreamGuard(prepared=prepared, on_execute=body)
     return build_guarded_streaming_response(

@@ -26,6 +26,7 @@ from typing import Any, Protocol, TypeVar, cast
 from uuid import UUID, uuid4
 
 from offerpilot.ai.agent_contracts import PendingAction
+from offerpilot.pilot_control import claim_confirmation_execution, TurnControlConflict
 from offerpilot.ai.deterministic_actions import (
     PilotAction,
     PilotActionDecision,
@@ -1483,6 +1484,15 @@ class DeterministicPilotAdapter:
             )
 
         if request.approved:
+            try:
+                claimed = claim_confirmation_execution(pending.operation_id)
+            except TurnControlConflict:
+                return DeterministicExecution(self._write_error(WriteOperationError("confirmation_in_progress")))
+            if not claimed:
+                terminal = self._terminal_replay(request, conversation_id, transport=transport)
+                if terminal is not None:
+                    return terminal
+                return DeterministicExecution(self._write_error(WriteOperationError("operation_result_unknown")))
             projected_pending: list[PendingAction] = []
 
             def accept_prepared_input(projected: PreparedLegacyInputV1) -> None:

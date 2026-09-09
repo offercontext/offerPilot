@@ -783,6 +783,7 @@ def test_chat_route_failure_codes_match_the_closed_baseline_set() -> None:
         "application_outcome_invalid_request",
         "application_outcome_source_conflict",
         "chat_agent_timeout",
+        "turn_execution_failed",
         "confirmation_in_progress",
         "conversation_archived",
         "invalid_confirmation",

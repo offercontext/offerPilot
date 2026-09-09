@@ -2,11 +2,19 @@
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getConversation, listConversations } from '@/services/chat';
 import {
   AssistantSurfaceProvider,
   useAssistantSurface,
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
+
+vi.mock('@/services/chat', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/chat')>(),
+  getPilotExecution: vi.fn().mockResolvedValue(null),
+  getConversation: vi.fn().mockResolvedValue([]),
+  listConversations: vi.fn().mockResolvedValue([]),
+}));
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -19,6 +27,27 @@ afterEach(() => {
 });
 
 describe('AssistantSurfaceProvider', () => {
+  it.each([false, true])('recovers a returned conversation after background completion (changed=%s)', async (changed) => {
+    vi.mocked(getConversation).mockReset();
+    let controller!: ReturnType<typeof usePilotConversationController>;
+    function Consumer() { controller = usePilotConversationController(); return null; }
+    host = document.createElement('div'); document.body.appendChild(host); root = createRoot(host);
+    act(() => root?.render(<AssistantSurfaceProvider><Consumer /></AssistantSurfaceProvider>));
+    act(() => controller.setConversationId(7));
+    let resolve!: (messages: Awaited<ReturnType<typeof getConversation>>) => void;
+    vi.mocked(getConversation).mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
+    vi.mocked(listConversations).mockResolvedValueOnce([]);
+    let request!: NonNullable<ReturnType<typeof controller.beginActiveRequest>>;
+    act(() => { request = controller.beginActiveRequest('chat', 7)!; });
+    Object.assign(request, { visibleGeneration: 1 });
+    controller.visibleRequestGenerationRef.current = 3;
+    await act(async () => { controller.finishActiveRequest(request); });
+    expect(getConversation).toHaveBeenCalledWith(7);
+    if (changed) act(() => { controller.setConversationId(8); controller.visibleRequestGenerationRef.current += 1; });
+    await act(async () => resolve([{ id: 9, role: 'assistant', content: '后台完成结果' }] as Awaited<ReturnType<typeof getConversation>>));
+    expect(controller.turns.some((turn) => turn.content === '后台完成结果')).toBe(!changed);
+  });
+
   it('gives Haru and Pilot the same conversation controller instance', () => {
     const seen: unknown[] = [];
 
@@ -176,6 +205,11 @@ describe('AssistantSurfaceProvider', () => {
       clearActiveContext: async () => undefined,
     }));
     await expect(controller?.sendMessage('hello')).resolves.toBe('sent');
+    act(() => {
+      controller?.setConversationId(7);
+      controller?.executionControl.acceptExecution({ turn_id: 'remote-running', conversation_id: 7, execution_generation: 1, state: 'running' });
+    });
+    await expect(controller?.sendMessage('second start')).resolves.toBe('ignored');
     act(() => controller?.releaseActions(owner));
     await expect(controller?.sendMessage('hello')).resolves.toBe('ignored');
     expect(sendMessage).toHaveBeenCalledTimes(1);

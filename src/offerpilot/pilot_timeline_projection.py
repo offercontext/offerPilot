@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import json
+from time import time
 from uuid import uuid4
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from offerpilot.models import (
-    ChatMessage, PilotTurnRecord, PilotTurnMessage, PilotTurnOperation, WriteOperation,
+    ChatMessage, PilotTurnRecord, PilotTurnMessage, PilotTurnOperation, WriteOperation, PilotExecution,
 )
 from offerpilot.pilot_timeline import TimelineSource
+from offerpilot.pilot_control import reconcile_execution_state
 from offerpilot.presentation import AgentActionPresentationBuilder, build_conversation_presentation
 from offerpilot.presentation_contracts import PilotTurnItemV1
 
@@ -83,6 +85,9 @@ def build_timeline_sources(
         return []
     sources: list[TimelineSource] = []
     seen_turns: set[str] = set()
+    executions = {row.turn_id: row for row in session.scalars(select(PilotExecution).where(
+        PilotExecution.conversation_id == conversation_id,
+    ).order_by(PilotExecution.generation))}
     labels = {
         "accepted": "任务已接纳，执行结果尚未确认。",
         "started": "本轮结束状态尚未记录，以下为已保存记录。",
@@ -90,6 +95,10 @@ def build_timeline_sources(
         "failed": "本轮未完成，以下为已保存记录。",
         "interrupted": "本轮已中断，以下为已保存记录。",
         "incomplete": "历史记录，过程信息不完整。",
+        "running": "任务正在执行。",
+        "waiting_confirmation": "等待确认，当前没有正在执行的任务。",
+        "stopped": "任务已停止，已提交的更改仍保留，可在对应记录中撤销。",
+        "result_unknown": "执行结果尚未确认，以下为已保存记录。",
     }
     for item in snapshot.items:
         turn_id = (
@@ -101,12 +110,14 @@ def build_timeline_sources(
         turn = turns[turn_id]
         if turn_id not in seen_turns:
             seen_turns.add(turn_id)
+            execution = executions.get(turn_id)
+            state = turn.state if execution is None else reconcile_execution_state(execution, int(time() * 1000))
             sources.append(TimelineSource(
                 turn_id=turn_id,
                 item=PilotTurnItemV1(
-                    item_id=f"run:{turn_id}", kind="run_boundary", content=labels[turn.state],
+                    item_id=f"run:{turn_id}", kind="run_boundary", content=labels[state],
                 ),
-                source_refs=(f"turn:{turn_id}",), source_revision=turn.state,
+                source_refs=(f"turn:{turn_id}",), source_revision=f"{0 if execution is None else execution.generation}:{state}",
             ))
         sources.append(TimelineSource(
             turn_id=turn_id, item=item, source_refs=(item.item_id,),

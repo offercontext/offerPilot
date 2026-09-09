@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from threading import Lock, RLock, get_ident
-from typing import Final, cast
+from typing import Final, TypeVar, cast
 
 from .contracts import (
     AssistantDeltaEvent,
@@ -31,6 +31,8 @@ from .contracts import (
     UserMessageSavedEvent,
 )
 from .errors import RuntimeAgentTimedOut, RuntimeCancelled, RuntimeTransportAborted
+
+_ResultT = TypeVar("_ResultT")
 
 
 _EVENT_TYPES: Final[tuple[type[object], ...]] = (
@@ -334,10 +336,10 @@ class InMemoryRuntimeInvocationControl:
 
     def run_if_active(
         self,
-        action: Callable[[], object],
+        action: Callable[[], _ResultT],
         *,
         allow_timeout: bool = False,
-    ) -> tuple[bool, object | None]:
+    ) -> tuple[bool, _ResultT | None]:
         """Linearize one persistence commit against cancellation.
 
         The control lock remains held while ``action`` executes.  Therefore a

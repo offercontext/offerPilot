@@ -3,6 +3,8 @@ import type {
   ChatResponse,
   ChatExecutionResponse,
   PilotTurnState,
+  PilotExecution,
+  PilotInterruptResult,
   ChatStreamEvent,
   Conversation,
   PilotActionRequest,
@@ -16,6 +18,19 @@ import { forgetConversationStarts, forgetPendingStart, listPendingStarts, markPe
 const http = createApiClient({ baseURL: '/api', timeout: 130000 });
 export const SETTINGS_QUERY_KEY = ['settings'] as const;
 
+export async function getPilotExecution(conversationId: number): Promise<PilotExecution | null> {
+  const { data } = await http.get<{ execution: PilotExecution | null }>(`/chat/conversations/${conversationId}/execution`);
+  return data.execution;
+}
+
+export async function interruptPilotExecution(target: PilotExecution, commandId: string): Promise<PilotInterruptResult> {
+  const { data } = await http.post<PilotInterruptResult>(`/chat/turns/${target.turn_id}/interrupt`, {
+    command_id: commandId,
+    expected_generation: target.execution_generation,
+  });
+  return data;
+}
+
 export interface ChatContextInput {
   context_type?: 'workspace' | 'application' | 'global' | string;
   context_ref?: string | number;
@@ -28,7 +43,7 @@ export interface ChatContextInput {
 export interface ChatRequestOptions {
   signal?: AbortSignal;
   requestId?: string;
-  onAccepted?: (identity: { conversationId: number; turnId: string }) => void;
+  onAccepted?: (identity: { conversationId: number; turnId: string; executionGeneration?: number }) => void;
 }
 
 export interface ChatStreamRequestOptions extends ChatRequestOptions {
@@ -258,9 +273,12 @@ async function postChatStream(
   });
   const turnId = response.headers.get('X-Pilot-Turn-Id');
   const acceptedConversationId = Number(response.headers.get('X-Pilot-Conversation-Id'));
+  const executionGeneration = Number(response.headers.get('X-Pilot-Execution-Generation'));
   if (turnId && Number.isSafeInteger(acceptedConversationId) && acceptedConversationId > 0) {
     if (typeof body.request_id === 'string') markPendingStartAccepted(body.request_id, acceptedConversationId, turnId);
-    options?.onAccepted?.({ conversationId: acceptedConversationId, turnId });
+    options?.onAccepted?.({ conversationId: acceptedConversationId, turnId,
+      ...(Number.isSafeInteger(executionGeneration) && executionGeneration > 0 ? { executionGeneration } : {}),
+    });
   }
   if (!response.ok) {
     throw await streamHttpError(response);

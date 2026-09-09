@@ -106,7 +106,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   };
   const submit = async () => {
-    if (!draft.trim() || controller.loading || controller.pending) return;
+    if (!draft.trim() || controller.loading || controller.pending || controller.executionControl.execution?.state === 'running') return;
     const outcome = await controller.sendMessage(draft);
     if (outcome === 'sent') setDraft('');
   };
@@ -266,6 +266,11 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
         )}
         <PresentationRecovery failed={controller.presentationFailed} busy={controller.loading || controller.presentationRefreshing} onRefresh={controller.refreshPresentation} />
         <PendingStartRecovery busy={controller.loading} conversationId={controller.conversationId} onOpen={controller.selectConversation} />
+        {controller.backgroundExecution && (
+          <button type="button" onClick={() => void controller.selectConversation(controller.backgroundExecution!.conversation_id, { refresh: true }).catch(() => controller.setLastError('加载对话失败，请重试。'))}>
+            返回正在执行的对话
+          </button>
+        )}
         {controller.loading && !controller.hasStreamingAssistantContent ? (
           <div className={styles.thinking} role="status">
             {controller.loadingLabel || '正在理解你的问题'}
@@ -307,21 +312,23 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
           ref={inputRef}
           rows={2}
           value={draft}
-          disabled={!controller.hasKey || Boolean(controller.pending)}
+          disabled={!controller.hasKey || Boolean(controller.pending) || controller.executionControl.execution?.state === 'running'}
           placeholder={controller.pending ? '请先在 Pilot 中确认' : '问 Haru…'}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onInputKeyDown}
         />
-        {controller.loading ? (
+        {controller.loading || controller.executionControl.canStop ? (
           <button
             type="button"
             className={styles.stopButton}
             aria-label="停止生成"
+            disabled={!controller.executionControl.canStop || controller.executionControl.stopping}
             onClick={() => {
               controller.stopActiveRequest();
             }}
           >
             <StopOutlined />
+            {controller.executionControl.stopping ? '正在停止…' : controller.executionControl.retryingStop ? '重试停止' : null}
           </button>
         ) : (
           <button
@@ -334,6 +341,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
             <SendOutlined />
           </button>
         )}
+        {controller.executionControl.stopMessage && <p role="status">{controller.executionControl.stopMessage}</p>}
       </footer>
     </section>
   );

@@ -99,6 +99,7 @@ class RuntimeFailureCode(StrEnum):
     PENDING_CONFIRMATION_REQUIRED = "pending_confirmation_required"
     SOURCE_LOAD_FAILED = "source_load_failed"
     CHAT_AGENT_TIMEOUT = "chat_agent_timeout"
+    TURN_EXECUTION_FAILED = "turn_execution_failed"
     AI_PROVIDER_ERROR = "ai_provider_error"
     # Model configuration is an internal classification of the closed
     # provider-error route outcome; keep the public failure-code set closed.

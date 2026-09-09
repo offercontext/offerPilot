@@ -22,10 +22,10 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-it('restores the original conversation from persisted request identity through a read', async () => {
+it.each(['completed', 'stopped', 'waiting_confirmation'])('restores the original conversation and resolves a %s start through a read', async (state) => {
   const key = crypto.randomUUID();
   rememberPendingStart(key, 0);
-  read.mockResolvedValue({ conversation_id: 12, turn_id: 'turn', state: 'completed' });
+  read.mockResolvedValue({ conversation_id: 12, turn_id: 'turn', state });
   const open = vi.fn().mockResolvedValue(undefined);
   renderRecovery(open);
   await act(async () => host.querySelector('button')!.click());

@@ -8,9 +8,12 @@ import {
 } from 'react';
 import type { ConfirmationInput } from '@/services/chat';
 import type { ChatSubmission } from '@/services/chatSubmission';
+import { forgetPendingStart } from '@/services/chatSubmission';
 import {
   streamChat as streamChatService,
   streamConfirmAction as streamConfirmActionService,
+  getConversation,
+  listConversations,
   type ChatContextInput,
   type ChatStreamRequestOptions,
 } from '@/services/chat';
@@ -21,15 +24,17 @@ import type {
   PendingAction,
   PilotContextAttachment,
   PilotPageContext,
+  PilotExecution,
 } from '@/types/chat';
 import type {
   ActiveConversationRequestOwner,
   UITurn,
 } from '@/components/ChatPanel/model';
-import { buildChatRequestContext, pendingAutoSelectReducer } from '@/components/ChatPanel/model';
+import { buildChatRequestContext, buildTurns, pendingActionForConversation, pendingAutoSelectReducer } from '@/components/ChatPanel/model';
 import { pageContextKey } from '@/lib/pilotPageContext';
 import { usePilotPresentation } from '@/features/actionPresentation/usePilotPresentation';
 import type { AssistantTaskState } from './assistantSurfaceReducer';
+import { sameExecution, usePilotExecution } from './usePilotExecution';
 
 export type SendMessageOutcome = 'sent' | 'stopped' | 'failed' | 'ignored';
 
@@ -48,6 +53,9 @@ export interface ContextChangeNotice {
 export interface ActiveConversationRequest extends ActiveConversationRequestOwner {
   controller: AbortController;
   runId?: string;
+  execution?: PilotExecution;
+  requestId?: string;
+  visibleGeneration?: number;
 }
 
 export interface PilotConversationActions {
@@ -197,6 +205,19 @@ export function usePilotConversationControllerState() {
   const conversationsRef = useRef(conversations);
   const loadingRef = useRef(loading);
 
+  const stoppedExecution = useCallback((target: PilotExecution) => {
+    const request = activeRequestRef.current;
+    if (request?.execution && sameExecution(request.execution, target)) {
+      if (request.requestId && target.state !== 'result_unknown') forgetPendingStart(request.requestId);
+      request.controller.abort();
+      activeRequestRef.current = null;
+      setLoading(activeConversationSelectionRef.current !== null);
+      taskStateReporterRef.current?.('idle', target.conversation_id);
+    }
+    void refreshPresentation();
+  }, [refreshPresentation]);
+  const executionControl = usePilotExecution(conversationId, stoppedExecution);
+
   showArchivedRef.current = showArchived;
   activeConversationIdRef.current = conversationId;
   activePendingRef.current = pending;
@@ -319,6 +340,23 @@ export function usePilotConversationControllerState() {
     if (activeRequestRef.current !== request) return false;
     activeRequestRef.current = null;
     setLoading(activeConversationSelectionRef.current !== null);
+    const conversation = request.execution?.conversation_id ?? request.conversationId;
+    const generation = visibleRequestGenerationRef.current;
+    if (conversation !== undefined && activeConversationIdRef.current === conversation
+      && request.visibleGeneration !== undefined && request.visibleGeneration !== generation) {
+      // Returning to a running conversation invalidates the old stream callbacks.
+      // Recover persisted content independently of the optional timeline endpoint.
+      void Promise.all([getConversation(conversation), listConversations(true)]).then(([messages, summaries]) => {
+        if (activeConversationIdRef.current !== conversation || visibleRequestGenerationRef.current !== generation
+          || activeRequestRef.current || activeConversationSelectionRef.current !== null) return;
+        setTurns(buildTurns(messages));
+        setPending(pendingActionForConversation(summaries, conversation));
+        setLastUndo(summaries.find((item) => item.id === conversation)?.last_write_undo ?? null);
+      }).catch(() => {
+        if (activeConversationIdRef.current === conversation && visibleRequestGenerationRef.current === generation
+          && !activeRequestRef.current) setLastError('回复状态暂时无法读取，请重新打开对话。');
+      });
+    }
     if (request.kind === 'confirmation' || request.kind === 'undo') {
       if (confirmPhaseRef.current === 'success') {
         taskStateReporterRef.current?.('completed', request.conversationId);
@@ -392,11 +430,21 @@ export function usePilotConversationControllerState() {
     options: Omit<ChatStreamRequestOptions, 'signal'>,
   ) => {
     ensureOwnedRequest(request);
+    request.visibleGeneration = visibleRequestGenerationRef.current;
+    request.requestId = options.requestId;
     return streamChatService(message, activeConversationId, context, {
       ...options,
+      onAccepted: (identity) => {
+        if (activeRequestRef.current === request && identity.executionGeneration) {
+          request.execution = { turn_id: identity.turnId, conversation_id: identity.conversationId,
+            execution_generation: identity.executionGeneration, state: 'running' };
+          executionControl.acceptExecution(request.execution);
+        }
+        options.onAccepted?.(identity);
+      },
       signal: request.controller.signal,
     });
-  }, [ensureOwnedRequest]);
+  }, [ensureOwnedRequest, executionControl.acceptExecution]);
 
   const streamConfirmationRequest = useCallback((
     request: ActiveConversationRequest,
@@ -405,24 +453,38 @@ export function usePilotConversationControllerState() {
     options: Omit<ChatStreamRequestOptions, 'signal'>,
   ) => {
     ensureOwnedRequest(request);
+    request.visibleGeneration = visibleRequestGenerationRef.current;
     return streamConfirmActionService(activeConversationId, input, {
       ...options,
+      onEvent: (event) => {
+        if (activeRequestRef.current === request && event.turn_id && event.execution_generation
+          && event.conversation_id === activeConversationId) {
+          request.execution = { turn_id: event.turn_id, conversation_id: activeConversationId,
+            execution_generation: event.execution_generation, state: 'running' };
+          executionControl.acceptExecution(request.execution);
+        }
+        options.onEvent?.(event);
+      },
       signal: request.controller.signal,
     });
-  }, [ensureOwnedRequest]);
+  }, [ensureOwnedRequest, executionControl.acceptExecution]);
 
   const stopActiveRequest = useCallback((options: { silent?: boolean } = {}) => {
+    if (!options.silent) {
+      void executionControl.stop();
+      return executionControl.canStop;
+    }
     const activeRequest = activeRequestRef.current;
     if (!activeRequest) return false;
     activeRequest.controller.abort();
     activeRequestRef.current = null;
     setLoading(activeConversationSelectionRef.current !== null);
     taskStateReporterRef.current?.('idle');
-    if (!options.silent) stopFeedbackRef.current?.();
     return true;
-  }, []);
+  }, [executionControl.stop, executionControl.canStop]);
 
-  const sendMessage = useCallback((text: string) => actionsRef.current.sendMessage(text), []);
+  const sendMessage = useCallback((text: string) => executionControl.execution?.state === 'running'
+    ? Promise.resolve('ignored' as const) : actionsRef.current.sendMessage(text), [executionControl.execution]);
   const selectConversation = useCallback(
     (id: number, options?: { refresh?: boolean }) => actionsRef.current.selectConversation(id, options),
     [],
@@ -472,6 +534,9 @@ export function usePilotConversationControllerState() {
       : lastError || confirmError
         ? 'failed'
         : 'idle';
+
+  const backgroundExecution = activeRequestRef.current?.execution?.conversation_id !== conversationId
+    ? activeRequestRef.current?.execution ?? null : null;
 
   return useMemo(() => ({
     undoOperation,
@@ -567,6 +632,8 @@ export function usePilotConversationControllerState() {
     streamChatRequest,
     streamConfirmationRequest,
     stopActiveRequest,
+    executionControl,
+    backgroundExecution,
     sendMessage,
     selectConversation,
     startNewChat,
@@ -631,6 +698,8 @@ export function usePilotConversationControllerState() {
     dismissContextChangeNotice,
     startNewChat,
     stopActiveRequest,
+    executionControl,
+    backgroundExecution,
     streamChatRequest,
     streamConfirmationRequest,
     taskState,

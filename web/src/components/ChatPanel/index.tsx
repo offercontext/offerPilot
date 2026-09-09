@@ -1017,7 +1017,7 @@ function ChatPanelView({
 
   async function sendMessage(text: string, retry?: ChatSubmission): Promise<SendMessageOutcome> {
     const trimmed = text.trim();
-    if (!trimmed || loading || activePending) return 'ignored';
+    if (!trimmed || loading || activePending || controller.executionControl.execution?.state === 'running') return 'ignored';
     if (onOpenInterviewStoryLibrary && isInterviewStoryPilotIntent(trimmed)) {
       // This is a local navigation intent.  It must not create a Chat message,
       // call a Provider, or make a Story-domain write before the user selects
@@ -1462,7 +1462,7 @@ function ChatPanelView({
 
   useEffect(() => () => releaseActions(actionOwnerRef.current), [releaseActions]);
 
-  const composerDisabled = loading || !!activePending || !hasKey;
+  const composerDisabled = loading || controller.executionControl.execution?.state === 'running' || !!activePending || !hasKey;
   const composerDisabledReason = !hasKey
     ? '先配置 API key 后即可对话'
     : activePending
@@ -1752,17 +1752,25 @@ function ChatPanelView({
               </div>
             )}
 
-            {loading && (
+            {(loading || controller.executionControl.canStop) && (
               <div className={styles.stopDock}>
                 <Button
                   danger
                   icon={<StopOutlined />}
                   aria-label="停止当前回复"
+                  disabled={!controller.executionControl.canStop || controller.executionControl.stopping}
                   onClick={() => stopActiveRequest()}
                 >
-                  停止当前回复
+                  {controller.executionControl.stopping ? '正在停止…' : controller.executionControl.retryingStop ? '重试停止' : '停止当前回复'}
                 </Button>
               </div>
+            )}
+
+            {controller.executionControl.stopMessage && <p role="status">{controller.executionControl.stopMessage}</p>}
+            {controller.backgroundExecution && (
+              <Button onClick={() => void selectConversation(controller.backgroundExecution!.conversation_id, { refresh: true }).catch(() => toast.error('加载对话失败，请重试。'))}>
+                返回正在执行的对话
+              </Button>
             )}
 
             {!controller.presentationSnapshot && (confirmPhase !== 'idle' || lastUndo) && (

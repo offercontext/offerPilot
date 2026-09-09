@@ -66,6 +66,11 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    # P2 databases already have pilot_turns; create_all does not add an index
+    # to an existing table. P3's composite execution FK needs this unique key.
+    for index in Base.metadata.tables["pilot_turns"].indexes:
+        if index.name == "uq_pilot_turn_identity":
+            index.create(engine, checkfirst=True)
     _ensure_context_projector_manifest_v2_schema(engine)
     confirmation_receipt_migrations = [
         _ensure_column(

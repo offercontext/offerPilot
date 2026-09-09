@@ -28,6 +28,7 @@ from typing import Any, Protocol, cast
 from uuid import UUID
 
 from sqlalchemy import select
+from offerpilot.pilot_control import claim_confirmation_execution, TurnControlConflict
 
 from offerpilot.ai.agent_contracts import PendingAction, _ASDICT_GUARD
 from offerpilot.ai.agent_loop import ApprovedContinuationSegment
@@ -1693,6 +1694,13 @@ class ConfirmationCoordinator:
             execute_operation=execute,
             delivery_fence=lambda: self.delivery_fence(state),
         )
+        if approved:
+            try:
+                claimed = claim_confirmation_execution(operation_id)
+            except TurnControlConflict as exc:
+                raise WriteOperationError("confirmation_in_progress") from exc
+            if not claimed:
+                raise ConfirmationReplayError(cast(OperationReplay, self.terminal_replay(request)))
         return live_session
 
     def approve_modify(

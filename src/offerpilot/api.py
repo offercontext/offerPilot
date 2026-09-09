@@ -31,6 +31,8 @@ from offerpilot.pilot_timeline import (
 )
 from offerpilot.pilot_timeline_projection import build_timeline_sources
 from offerpilot.pilot_runtime.persistence import ChatPersistenceCoordinator
+from offerpilot.pilot_control import ExecutionLease, PilotControlRepository, TurnControlConflict
+from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl, TurnControlRegistry
 from offerpilot.ai.deterministic_actions import (
     parse_pilot_action,
 )
@@ -1343,6 +1345,8 @@ def create_app(
     application_outcomes = ApplicationOutcomesRepository(session_factory)
     chat = ChatRepository(session_factory, write_operations)
     pilot_timeline = PilotTimelineRepository(session_factory)
+    pilot_controls = PilotControlRepository(session_factory)
+    turn_control_registry = TurnControlRegistry(pilot_controls)
     events = ApplicationEventsRepository(session_factory)
     notes = NotesRepository(session_factory)
     offers = OffersRepository(session_factory)
@@ -1607,6 +1611,7 @@ def create_app(
                 if first_error is None:
                     first_error = error
 
+        attempt_cleanup(turn_control_registry.close)
         attempt_cleanup(lambda: knowledge_runtime.stop(timeout=5))
         attempt_cleanup(context_source_loader.close)
         if journal_engine is not None:
@@ -5111,20 +5116,25 @@ def create_app(
                 )
         return entries
 
-    def _finish_pilot_turn(admission: TurnAdmission, state: str) -> None:
+    def _finish_pilot_turn(admission: TurnAdmission, state: str, control: DurableRuntimeInvocationControl | None = None) -> None:
         # Display bookkeeping cannot change an already committed business result.
         # A missing final fact remains incomplete and never grants another start.
         try:
-            pilot_timeline.finish(admission.turn_id, state)
+            if control is not None:
+                control.finish(state)
+            else:
+                pilot_timeline.finish(admission.turn_id, state)
         except Exception:
             logging.getLogger(__name__).warning("Pilot terminal state persistence failed; task remains incomplete")
 
     def _admit_pilot_start(
         request: StartTurnRequest, payload: dict[str, Any],
-    ) -> tuple[StartTurnRequest, PilotRuntime, TurnAdmission, str] | JSONResponse:
+    ) -> tuple[StartTurnRequest, PilotRuntime, TurnAdmission, str, DurableRuntimeInvocationControl] | JSONResponse:
         request_id = payload.get("request_id", str(uuid4()))
         frozen_source: list[_FrozenChatSourceMessages] = []
         admission: TurnAdmission | None = None
+        leases: list[ExecutionLease] = []
+        control: DurableRuntimeInvocationControl | None = None
         canonical = {
             "message": request.message, "conversation_id": request.conversation_id,
             "context_type": request.context_type, "context_ref": request.context_ref,
@@ -5136,7 +5146,10 @@ def create_app(
 
         def failure(response: JSONResponse) -> JSONResponse:
             if admission is not None and admission.created:
-                _finish_pilot_turn(admission, "failed")
+                if control is not None:
+                    control.finish("failed")
+                elif leases:
+                    pilot_controls.finish(leases[0], "failed")
                 return _with_turn_identity(response, admission, request_id)
             return response
 
@@ -5162,22 +5175,26 @@ def create_app(
             }
 
         try:
-            admission = pilot_timeline.admit(request_id, canonical, freeze_sources=freeze)
+            def claim(session: Session, turn: Any) -> None:
+                leases.append(pilot_controls.claim_start_in_session(session, turn.id))
+
+            admission = pilot_timeline.admit(request_id, canonical, freeze_sources=freeze, on_admitted=claim)
             if not admission.created:
                 return JSONResponse({
                     "type": "turn_recovered", "turn_id": admission.turn_id,
                     "conversation_id": admission.conversation_id, "request_id": request_id,
                     "turn": pilot_timeline.get_turn(admission.turn_id),
                 }, headers={"Cache-Control": "no-store"})
-            if not pilot_timeline.claim(admission.turn_id):
-                return error_response(409, "任务已接纳，请读取原任务。", code="turn_already_claimed")
+            control = turn_control_registry.create(leases[0])
             runtime = cast(PilotRuntime, app.state.pilot_runtime).with_start_ports(
                 persistence=cast(Any, ChatPersistenceCoordinator(
                     chat.for_turn(admission.turn_id), admitted_user_message_id=admission.user_message_id,
                 )),
                 source_loader=cast(Any, _AdmittedChatSourceLoader(frozen_source[0])),
             )
-            return replace(request, conversation_id=admission.conversation_id), runtime, admission, request_id
+            return replace(request, conversation_id=admission.conversation_id), runtime, admission, request_id, control
+        except TurnControlConflict:
+            return error_response(409, "当前对话已有执行中任务或待确认操作，请先处理原任务。", code="turn_execution_active")
         except AdmissionGone:
             return error_response(410, "原对话已删除，无法再次执行此请求。", code="turn_gone")
         except AdmissionNotFound:
@@ -5196,6 +5213,9 @@ def create_app(
     def _with_turn_identity(response: JSONResponse, admission: TurnAdmission, request_id: str) -> JSONResponse:
         body = json.loads(bytes(response.body))
         body.update(turn_id=admission.turn_id, conversation_id=admission.conversation_id, request_id=request_id)
+        execution = pilot_controls.get_execution(admission.turn_id)
+        if execution is not None:
+            body["execution_generation"] = execution["execution_generation"]
         headers = dict(response.headers)
         headers.pop("content-length", None)
         headers["cache-control"] = "no-store"
@@ -5207,6 +5227,33 @@ def create_app(
         if turn is None:
             return error_response(404, "任务不存在。", code="turn_not_found")
         return JSONResponse(turn, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/chat/conversations/{conversation_id}/execution")
+    def get_pilot_execution(conversation_id: int) -> JSONResponse:
+        if chat.get_conversation(conversation_id) is None:
+            return error_response(404, "对话不存在。", code="conversation_not_found")
+        return JSONResponse({"execution": pilot_controls.get_conversation_execution(conversation_id)},
+                            headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/chat/turns/{turn_id}/interrupt")
+    def interrupt_pilot_turn(turn_id: str, payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        try:
+            command_id = payload.get("command_id")
+            generation = payload.get("expected_generation")
+            if not isinstance(command_id, str) or not isinstance(generation, int) or isinstance(generation, bool):
+                raise ValueError("Invalid interrupt identity")
+            result = pilot_controls.interrupt(command_id, turn_id, generation)
+            if result["status"] == "stopped":
+                turn_control_registry.interrupted(turn_id, result["execution_generation"])
+            return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except TurnControlConflict:
+            return error_response(409, "停止命令标识已对应其他任务或代次。", code="turn_command_conflict")
+        except ValueError:
+            return error_response(422, "停止命令需要有效的 command_id 和 expected_generation。", code="invalid_turn_command")
+        except LookupError:
+            return error_response(404, "任务不存在。", code="turn_not_found")
+        except Exception:
+            return error_response(503, "停止结果暂未确认，请使用原命令重试核对。", code="turn_control_unavailable")
 
     @app.get("/api/chat/requests/{request_id}")
     def get_pilot_request(request_id: str) -> JSONResponse:
@@ -5233,7 +5280,7 @@ def create_app(
         admitted = _admit_pilot_start(typed_request, payload)
         if isinstance(admitted, JSONResponse):
             return admitted
-        typed_request, runtime, admission, request_id = admitted
+        typed_request, runtime, admission, request_id, control = admitted
         terminal_state = "interrupted"
         title_latch: RuntimeSignalLatch | None = None
         title_sink: ClosedAgentSignalSink | None = None
@@ -5246,6 +5293,7 @@ def create_app(
                 typed_request.message,
                 resolved_data_dir,
                 None,
+                title_guard=control.run_title_if_successful,
             )
         try:
             outcome = execute_runtime_sync(
@@ -5253,12 +5301,13 @@ def create_app(
                 typed_request,
                 signal_sink=title_sink,
                 timeout_seconds=CHAT_AGENT_TIMEOUT_SECONDS,
+                invocation_control=control,
             )
             if set_title_conversation_id is not None:
                 set_title_conversation_id(getattr(outcome, "conversation_id", None))
             response = _runtime_http_response(outcome)
             terminal_state = "completed" if response.status_code < 400 else "failed"
-            _finish_pilot_turn(admission, terminal_state)
+            _finish_pilot_turn(admission, terminal_state, control)
             return _with_turn_identity(response, admission, request_id)
         except (ConversationScopeUnavailable, ConversationScopeVisibilityFailure):
             terminal_state = "failed"
@@ -5273,7 +5322,7 @@ def create_app(
         except Exception:
             return _with_turn_identity(error_response(500, "任务未返回完整结果，请读取原任务。", code="turn_execution_failed"), admission, request_id)
         finally:
-            _finish_pilot_turn(admission, terminal_state)
+            _finish_pilot_turn(admission, terminal_state, control)
             if title_latch is not None:
                 title_latch.finalize()
 
@@ -5290,13 +5339,13 @@ def create_app(
         admitted = _admit_pilot_start(typed_request, payload)
         if isinstance(admitted, JSONResponse):
             return admitted
-        typed_request, runtime, admission, request_id = admitted
+        typed_request, runtime, admission, request_id, control = admitted
         terminal_state = "interrupted"
 
         def record_outcome(outcome: object) -> None:
             nonlocal terminal_state
             terminal_state = "failed" if outcome_http_response(cast(Any, outcome)).status_code >= 400 else "completed"
-            _finish_pilot_turn(admission, terminal_state)
+            _finish_pilot_turn(admission, terminal_state, control)
         title_latch: RuntimeSignalLatch | None = None
         title_sink: ClosedAgentSignalSink | None = None
         set_title_conversation_id: Callable[[int | None], None] | None = None
@@ -5308,6 +5357,7 @@ def create_app(
                 typed_request.message,
                 resolved_data_dir,
                 None,
+                title_guard=control.run_title_if_successful,
             )
         try:
             response = runtime_stream_response(
@@ -5318,39 +5368,42 @@ def create_app(
                 on_immediate=title_latch.finalize if title_latch is not None else None,
                 background=_runtime_stream_background(
                     background_tasks, title_latch,
-                    on_finished=lambda: _finish_pilot_turn(admission, terminal_state),
+                    on_finished=lambda: _finish_pilot_turn(admission, terminal_state, control),
                 ),
                 on_outcome=record_outcome,
-                extra_envelope={"turn_id": admission.turn_id, "request_id": request_id},
+                extra_envelope={"turn_id": admission.turn_id, "request_id": request_id,
+                                "execution_generation": control.lease.generation if control.lease is not None else 0},
                 timeout_seconds=CHAT_AGENT_TIMEOUT_SECONDS,
+                invocation_control=control,
             )
             if isinstance(response, JSONResponse):
                 return _with_turn_identity(response, admission, request_id)
             response.headers["X-Pilot-Turn-Id"] = admission.turn_id
             response.headers["X-Pilot-Conversation-Id"] = str(admission.conversation_id)
+            response.headers["X-Pilot-Execution-Generation"] = str(control.lease.generation if control.lease is not None else 0)
             return response
         except (ConversationScopeUnavailable, ConversationScopeVisibilityFailure):
-            _finish_pilot_turn(admission, "failed")
+            _finish_pilot_turn(admission, "failed", control)
             if title_latch is not None:
                 title_latch.finalize()
             return _with_turn_identity(_source_load_failed_response(), admission, request_id)
         except (ConversationScopeError, TypeError, ValueError) as exc:
-            _finish_pilot_turn(admission, "failed")
+            _finish_pilot_turn(admission, "failed", control)
             if title_latch is not None:
                 title_latch.finalize()
             return _with_turn_identity(error_response(422, str(exc)), admission, request_id)
         except (RuntimeAgentTimedOut, RuntimeCancelled, RuntimeTransportAborted) as exc:
-            _finish_pilot_turn(admission, "interrupted")
+            _finish_pilot_turn(admission, "interrupted", control)
             if title_latch is not None:
                 title_latch.finalize()
             return _with_turn_identity(_runtime_error_response(exc), admission, request_id)
         except Exception:
-            _finish_pilot_turn(admission, "interrupted")
+            _finish_pilot_turn(admission, "interrupted", control)
             if title_latch is not None:
                 title_latch.finalize()
             return _with_turn_identity(error_response(500, "任务未返回完整结果，请读取原任务。", code="turn_execution_failed"), admission, request_id)
         except BaseException:
-            _finish_pilot_turn(admission, "interrupted")
+            _finish_pilot_turn(admission, "interrupted", control)
             if title_latch is not None:
                 title_latch.finalize()
             raise
@@ -5371,16 +5424,24 @@ def create_app(
                     operation_id=live_pending.operation_id,
                 )
         runtime = http_request.app.state.pilot_runtime
+        control = turn_control_registry.create() if typed_request.approved else None
+        terminal_state = "interrupted"
         try:
             outcome = execute_runtime_sync(
                 runtime,
                 typed_request,
                 signal_sink=None,
                 timeout_seconds=CHAT_AGENT_TIMEOUT_SECONDS,
+                invocation_control=control,
             )
-            return _runtime_http_response(outcome)
+            response = _runtime_http_response(outcome)
+            terminal_state = "completed" if response.status_code < 400 else "failed"
+            return response
         except (RuntimeAgentTimedOut, RuntimeCancelled, RuntimeTransportAborted) as exc:
             return _runtime_error_response(exc)
+        finally:
+            if control is not None:
+                control.finish(terminal_state)
 
     @app.post("/api/chat/undo-last-write")
     def undo_last_write(payload: dict[str, Any] = Body(...)) -> JSONResponse:
@@ -5517,14 +5578,29 @@ def create_app(
                     operation_id=live_pending.operation_id,
                 )
         runtime = http_request.app.state.pilot_runtime
+        control = turn_control_registry.create() if typed_request.approved else None
+
+        def finish_confirmation(outcome: object) -> None:
+            if control is not None:
+                control.finish("failed" if outcome_http_response(cast(Any, outcome)).status_code >= 400 else "completed")
+
         try:
             return runtime_stream_response(
                 runtime,
                 typed_request,
                 timeout_seconds=CHAT_AGENT_TIMEOUT_SECONDS,
+                invocation_control=control,
+                on_outcome=finish_confirmation,
+                background=(lambda: control.finish("interrupted")) if control is not None else None,
             )
         except (RuntimeAgentTimedOut, RuntimeCancelled, RuntimeTransportAborted) as exc:
+            if control is not None:
+                control.finish("interrupted")
             return _runtime_error_response(exc)
+        except BaseException:
+            if control is not None:
+                control.finish("interrupted")
+            raise
 
     @app.get("/api/chat/conversations")
     def list_conversations(include_archived: bool = False) -> list[dict[str, Any]]:
@@ -8869,6 +8945,8 @@ def _runtime_title_latch(
     first_message: str,
     data_dir: Path,
     conversation_id: int | None,
+    *,
+    title_guard: Callable[[Callable[[], object]], object] | None = None,
 ) -> tuple[RuntimeSignalLatch, ClosedAgentSignalSink, Callable[[int | None], None]]:
     holder = {"conversation_id": conversation_id}
 
@@ -8876,14 +8954,10 @@ def _runtime_title_latch(
         current = holder["conversation_id"]
         if type(current) is not int or current <= 0:
             return
-        background_tasks.add_task(
-            _generate_conversation_title,
-            injected,
-            chat,
-            current,
-            first_message,
-            data_dir,
-        )
+        def generate() -> None:
+            _generate_conversation_title(injected, chat, current, first_message, data_dir)
+
+        background_tasks.add_task(generate if title_guard is None else lambda: title_guard(generate))
 
     latch = RuntimeSignalLatch(register=register)
 

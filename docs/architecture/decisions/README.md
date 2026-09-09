@@ -20,6 +20,7 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 - [ADR-0006: 修改确认成功后使用确定性回执](./0006-edited-confirmation-receipts.md) — Accepted
 - [ADR-0007: 从业务事实投影共享动作展示](./0007-project-action-presentation.md) — Accepted
 - [ADR-0008: 持久化 Pilot 请求身份与增量时间线](./0008-persist-pilot-turns-and-timeline.md) — Accepted
+- [ADR-0009: 持久化执行权限并围栏化 Pilot 停止操作](./0009-fence-pilot-execution-control.md) — Accepted
 
 ### 决策链
 

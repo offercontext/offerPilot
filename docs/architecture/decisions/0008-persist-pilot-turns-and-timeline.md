@@ -31,7 +31,7 @@ Journal 是可关闭的诊断系统，不能承担请求接纳、业务身份或
 有限清理重试保留已知终态，不能把已经知道的完成改写为中断。
 
 这不是后台执行承诺：断连取消、HITL、Pending/Confirm、补偿和 provider blocks 仍由现有运行时管理。
-generation、fencing 与后台调度属于后续 P3。
+generation 与 fencing 已由 [P3A](0009-fence-pilot-execution-control.md) 落地；后台调度仍属后续 P3B。
 
 ### 展示与游标
 
