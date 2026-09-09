@@ -1,25 +1,39 @@
-# OfferPilot — 本地优先的 AI 求职工作台
+# OfferPilot — 开源、本地优先的 AI 求职与投递管理工具
 
-> 把简历、投递、面试与 Offer 放在一个由你掌控的本地工作台；AI 提供建议，你决定下一步。
+[简体中文](README.md) | [English](README.en.md)
 
-OfferPilot 是一个开源、本地优先的 AI 求职工作台，用于集中管理简历、投递进度、面试安排、复盘和 Offer。
+**集中管理投递进度、简历、面试与 Offer，让每一轮准备都有记录可查。**
 
-你可以围绕一个目标岗位整理资料、准备材料、记录进展，并把面试中的经验用于下一轮准备。需要 AI 时，再连接自己的模型服务，由 Pilot 协助查询、分析和起草。
+OfferPilot 由 offercontext 维护，是面向个人求职者的开源 AI 求职工作台。
+你可以在本地管理不同公司和岗位的投递记录，整理简历与岗位描述，
+进行模拟面试、保存复盘，并比较收到的 Offer。
 
-本仓库提供 OfferPilot 本地部署版本。另可访问 [offerContext Hub](https://hub.offercontext.cn) 使用在线服务；网站功能与数据处理方式以站内说明为准，不代表与本地版本功能一致或数据互通。
+**English:** OfferPilot by offercontext is an open-source, local-first
+AI job application tracker for individual job seekers. It supports resume
+management, interview preparation, mock interviews, interview reviews,
+offer comparison and salary negotiation preparation.
 
-[快速开始](#快速开始)｜[用户指南](docs/product-manual/产品说明书.md)｜[常见问题](docs/product-manual/产品说明书.md#s12)
+支持 Docker 或源码方式在本机部署。基础投递记录无需先配置 AI；
+使用 AI 辅助功能时，再连接自己的模型服务。
 
-## 它能帮你做什么
+[快速开始](#快速开始)｜[用户指南](docs/product-manual/产品说明书.md)｜[常见问题](#常见问题)
 
-- **简历与投递管理**：保留简历版本，跟进不同公司和岗位的进度与日程。
-- **岗位分析与材料准备**：结合简历和岗位要求，分析匹配情况，准备有针对性的投递材料。
-- **面试准备与模拟练习**：针对已安排的面试准备问题，也可以选择岗位资料和简历独立练习；AI 根据回答继续追问，并在练习结束后提供反馈。
-- **复盘与经验整理**：选择值得保留的复盘片段，整理并确认后保存为笔记，方便后续查阅；也可以把复盘重点用于下一次面试准备。
-- **Offer 对比与谈薪准备**：比较已填写的薪酬、福利、截止日等条件，整理需要沟通的问题。
-- **Pilot AI 助手**：结合求职资料查询、分析、起草内容或提出修改。
+## 主要功能
 
-Pilot 是 OfferPilot 内置的 AI 助手，Haru 是它的可选角色入口。你可以直接在页面操作，也可以通过 Pilot 获得帮助；隐藏 Haru 后仍可使用 Pilot 侧边栏。
+| 功能 | 具体用途 |
+| --- | --- |
+| 投递管理 | 按公司、岗位和阶段跟进求职进度，关联岗位描述与面试安排 |
+| 简历与材料准备 | 管理简历版本，结合岗位要求生成并审阅材料建议 |
+| 面试准备与模拟 | 根据简历和岗位描述练习问答，查看 AI 追问与反馈 |
+| 面试复盘 | 保存面试记录，选择并确认需要继续练习的重点 |
+| Offer 对比与谈薪 | 比较已填写的薪酬、福利和答复期限，准备谈薪沟通 |
+| Pilot AI 助手 | 结合求职资料查询、分析、起草内容或提出修改建议 |
+
+Pilot 是内置 AI 助手，Haru 是可选角色入口；隐藏 Haru 不影响使用 Pilot。
+
+本仓库介绍本地部署版本。在线服务可访问
+[offerContext Hub](https://hub.offercontext.cn)；
+其功能与数据处理方式以站内说明为准，不默认与本地版本一致或互通。
 
 ## 真实界面
 
@@ -109,11 +123,25 @@ uv run oc start
 - Pilot 对关键求职记录的修改默认需要你的确认；请核对系统确认卡后再执行。OfferPilot 不会自动投递，也不会替你向招聘方发送消息。
 - AI 输出可能包含错误。采用前请核对经历、数字、日期和承诺；是否投递、接受 Offer 或如何谈薪，仍由你决定。
 
-## English
+## 常见问题
 
-OfferPilot is a local-first AI job-search workspace for keeping resumes, applications, interviews, confirmed learnings, and offers together. It helps you prepare and review; you keep control of every important action.
+### 不配置 AI，也能使用 OfferPilot 吗？
 
-Follow the [Quick start](#快速开始) for Docker or source setup. You can record applications and job descriptions without configuring AI. AI features send relevant materials to your configured model service and may incur provider fees. OfferPilot does not auto-apply, send messages to recruiters, or decide which offer you should accept.
+可以。记录投递、保存岗位描述和手动编辑资料等基础功能不要求先配置 AI。
+材料生成、模拟问答和 AI 分析等功能需要配置相应的模型服务。
+
+### 本地优先是否意味着资料不会离开设备？
+
+不是。业务数据保存在本地工作区，但使用 AI 功能时，
+相关资料会发送给你配置的模型服务，并可能产生服务商费用。
+本地保存不等于所有 AI 计算都在本地完成。
+
+### OfferPilot 会自动投递简历或联系招聘方吗？
+
+不会。OfferPilot 用于管理求职过程、准备材料和整理建议，
+不自动向招聘方投递或发送消息。关键求职记录的修改默认需要用户确认。
+
+详细操作与问题排查见[用户指南](docs/product-manual/产品说明书.md#s12)。
 
 ## 许可证
 
