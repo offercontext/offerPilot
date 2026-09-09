@@ -36,6 +36,12 @@ _TASK12_SIGNAL_SYMBOLS = {
     "PreparationReadinessSelectionLoader",
     "load_canonical_readiness_signal",
 }
+_TASK12_OPTIONAL_CONTEXT_NAMES = (
+    "confirmed_readiness",
+    "confirmed_memory",
+    "knowledge_context",
+    "older_conversation_summary",
+)
 
 
 def _task12_call_terminal(node: ast.AST) -> str | None:
@@ -333,125 +339,143 @@ def _task12_readiness_dicts(
     return dictionaries, factories
 
 
-def _task12_has_confirmed_memory_disabled_guard(
-    validator: ast.FunctionDef | ast.AsyncFunctionDef,
+def _task12_has_confirmed_memory_source_guard(
+    projector: ast.FunctionDef | ast.AsyncFunctionDef,
     bindings: dict[str, str],
 ) -> bool:
-    def confirmed_status(node: ast.AST, loop_names: set[str]) -> bool:
-        if isinstance(node, ast.Attribute) and node.attr == "status" and isinstance(
-            node.value, ast.Subscript
-        ):
-            return (
-                isinstance(node.value.value, ast.Name)
-                and node.value.value.id == "contributors"
-                and (
-                    _task12_subtree_has_constant(
-                        node.value.slice, "confirmed_memory", bindings
-                    )
-                    or any(
-                        isinstance(child, ast.Name) and child.id in loop_names
-                        for child in ast.walk(node.value.slice)
-                    )
-                )
-            )
-        if isinstance(node, ast.Name):
-            return any(
-                isinstance(assignment, (ast.Assign, ast.AnnAssign))
-                and assignment.value is not None
+    """Require an identity-bound source before optional content becomes ready."""
+    parents = {
+        child: parent
+        for parent in ast.walk(projector)
+        for child in ast.iter_child_nodes(parent)
+    }
+
+    def nested_in_callable(node: ast.AST) -> bool:
+        parent = parents.get(node)
+        while parent is not None and parent is not projector:
+            if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return True
+            parent = parents.get(parent)
+        return False
+
+    def contributor_status_ready(node: ast.AST) -> bool:
+        return (
+            any(
+                isinstance(compare, ast.Compare)
+                and len(compare.ops) == 1
+                and isinstance(compare.ops[0], ast.Eq)
                 and any(
-                    isinstance(target, ast.Name) and target.id == node.id
-                    for target in (
-                        assignment.targets
-                        if isinstance(assignment, ast.Assign)
-                        else [assignment.target]
+                    isinstance(status, ast.Attribute)
+                    and status.attr == "status"
+                    and isinstance(status.value, ast.Subscript)
+                    and isinstance(status.value.value, ast.Name)
+                    and status.value.value.id == "contributors"
+                    for status in (compare.left, *compare.comparators)
+                )
+                and (
+                    _task12_constant_string(compare.left, bindings) == "ready"
+                    or any(
+                        _task12_constant_string(value, bindings) == "ready"
+                        for value in compare.comparators
                     )
                 )
-                and confirmed_status(assignment.value, loop_names)
-                for assignment in ast.walk(validator)
+                for compare in ast.walk(node)
             )
-        return False
-
-    def is_guard(node: ast.If, loop_names: set[str]) -> bool:
-        if not isinstance(node, ast.If) or not any(
-            isinstance(child, ast.Raise)
-            for statement in node.body
-            for child in ast.walk(statement)
-        ):
-            return False
-        test = node.test
-        negated = isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not)
-        if negated:
-            test = test.operand
-        mentions_confirmed = _task12_subtree_has_constant(
-            test, "confirmed_memory", bindings
-        ) or any(isinstance(child, ast.Name) and child.id in loop_names for child in ast.walk(test))
-        comparisons = [
-            child
-            for child in ast.walk(test)
-            if isinstance(child, ast.Compare)
-            and len(child.ops) == 1
-            and len(child.comparators) == 1
-        ]
-        rejects_non_disabled = any(
-            (
-                (
-                    _task12_constant_string(compare.left, bindings) == "disabled"
-                    and confirmed_status(compare.comparators[0], loop_names)
-                )
-                or (
-                    _task12_constant_string(compare.comparators[0], bindings) == "disabled"
-                    and confirmed_status(compare.left, loop_names)
-                )
-            )
-            and (
-                isinstance(compare.ops[0], (ast.IsNot, ast.NotEq, ast.NotIn))
-                if not negated
-                else isinstance(compare.ops[0], (ast.Is, ast.Eq, ast.In))
-            )
-            for compare in comparisons
         )
-        return mentions_confirmed and rejects_non_disabled
 
-    guard_index: int | None = None
-    for index, statement in enumerate(validator.body):
-        if isinstance(statement, ast.If) and is_guard(statement, set()):
-            guard_index = index
-            break
-        if isinstance(statement, (ast.For, ast.AsyncFor)) and isinstance(
-            statement.target, ast.Name
-        ) and _task12_subtree_has_constant(
-            statement.iter, "confirmed_memory", bindings
+    def source_identity_check(node: ast.AST) -> bool:
+        return any(
+            isinstance(compare, ast.Compare)
+            and len(compare.ops) == 1
+            and isinstance(compare.ops[0], ast.IsNot)
+            and any(
+                isinstance(call, ast.Call)
+                and _task12_call_terminal(call.func) == "get"
+                for call in ast.walk(compare)
+            )
+            and any(
+                isinstance(reference, ast.Subscript)
+                and isinstance(reference.value, ast.Name)
+                and reference.value.id == "contributors"
+                for reference in ast.walk(compare)
+            )
+            for compare in ast.walk(node)
+        )
+
+    def source_error(node: ast.AST) -> bool:
+        return any(
+            isinstance(raise_node, ast.Raise)
+            and any(
+                isinstance(call, ast.Call)
+                and _task12_call_terminal(call.func) == "ProjectionError"
+                and any(
+                    _task12_constant_string(argument, bindings)
+                    == "optional_contributor_source_required"
+                    for argument in call.args
+                )
+                for call in ast.walk(raise_node)
+            )
+            for raise_node in ast.walk(node)
+        )
+
+    source_bindings = [
+        assignment
+        for assignment in ast.walk(projector)
+        if isinstance(assignment, (ast.Assign, ast.AnnAssign))
+        and assignment.value is not None
+        and isinstance(assignment.value, ast.IfExp)
+        and any(
+            isinstance(child, ast.DictComp)
+            and any(
+                isinstance(attribute, ast.Attribute)
+                and attribute.attr == "optional_sources"
+                for attribute in ast.walk(child)
+            )
+            and any(
+                isinstance(attribute, ast.Attribute)
+                and attribute.attr == "contributors"
+                for attribute in ast.walk(child)
+            )
+            for child in ast.walk(assignment.value)
+        )
+        and not nested_in_callable(assignment)
+    ]
+    if not source_bindings:
+        return False
+
+    optional_names = set(_TASK12_OPTIONAL_CONTEXT_NAMES)
+    for statement in ast.walk(projector):
+        if not isinstance(statement, (ast.For, ast.AsyncFor)) or nested_in_callable(statement):
+            continue
+        if not any(
+            getattr(assignment, "lineno", 0) < getattr(statement, "lineno", 0)
+            for assignment in source_bindings
         ):
-            if any(
-                isinstance(candidate, ast.If)
-                and is_guard(candidate, {statement.target.id})
-                for candidate in statement.body
+            continue
+        if any(
+            isinstance(node, ast.Return)
+            and getattr(node, "lineno", 0) < getattr(statement, "lineno", 0)
+            for node in ast.walk(projector)
+            if not nested_in_callable(node)
+        ):
+            continue
+        names = {
+            value
+            for child in ast.walk(statement.iter)
+            if (value := _task12_constant_string(child, bindings)) is not None
+        }
+        if not optional_names.issubset(names):
+            continue
+        for candidate in ast.walk(statement):
+            if not isinstance(candidate, ast.If):
+                continue
+            if (
+                contributor_status_ready(candidate.test)
+                and source_identity_check(candidate.test)
+                and source_error(candidate)
             ):
-                guard_index = index
-                break
-    if guard_index is None:
-        return False
-    if any(
-        isinstance(node, ast.Return)
-        for statement in validator.body[: guard_index + 1]
-        for node in ast.walk(statement)
-    ):
-        return False
-    for statement in validator.body[:guard_index]:
-        if isinstance(statement, (ast.Assign, ast.AnnAssign)):
-            continue
-        if (
-            isinstance(statement, ast.Expr)
-            and isinstance(statement.value, ast.Constant)
-            and isinstance(statement.value.value, str)
-        ):
-            continue
-        if isinstance(statement, ast.If) and statement.body and all(
-            isinstance(item, ast.Raise) for item in statement.body
-        ) and not statement.orelse:
-            continue
-        return False
-    return True
+                return True
+    return False
 
 
 def _task12_scope_queries_signal(
@@ -2145,20 +2169,20 @@ def _task12_readiness_runtime_violations(sources: dict[str, str]) -> list[str]:
             findings.append(f"chat-haru:signal-query:{name}")
 
         if name == "context_projector/projector.py":
-            validator = next(
+            projector = next(
                 (
                     node
                     for node in ast.walk(tree)
                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-                    and node.name == "_validate_contributors"
+                    and node.name == "project"
                 ),
                 None,
             )
-            if validator is None or not _task12_has_confirmed_memory_disabled_guard(
-                validator, bindings
+            if projector is None or not _task12_has_confirmed_memory_source_guard(
+                projector, bindings
             ):
                 findings.append(
-                    "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+                    "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
                 )
     if _task12_chat_haru_cross_source_query(sources):
         findings.append("chat-haru:signal-query:api.py")
@@ -2187,13 +2211,24 @@ def test_future_readiness_contributor_is_absent_from_agent_runtime_call_graph() 
 
 
 def test_task12_readiness_runtime_gate_rejects_ready_registration_and_signal_queries() -> None:
+    controlled_source_guard = """
+def project(request):
+    contributors = request.contributors
+    trusted_optional = {
+        item.name: item for item in request.optional_sources.contributors
+    } if request.optional_sources else {}
+    for name in (
+        "confirmed_readiness",
+        "confirmed_memory",
+        "knowledge_context",
+        "older_conversation_summary",
+    ):
+        if contributors[name].status == "ready" and trusted_optional.get(name) is not contributors[name]:
+            raise ProjectionError("optional_contributor_source_required")
+    return contributors
+"""
     safe = {
-        "context_projector/projector.py": """
-def _validate_contributors(contributors):
-    for name in ("confirmed_memory", "knowledge_context", "older_conversation_summary"):
-        if contributors[name].status != "disabled":
-            raise ValueError(name)
-""",
+        "context_projector/projector.py": controlled_source_guard,
         "ai/agent_loop.py": """
 def contributors(names):
     result = []
@@ -2359,65 +2394,71 @@ def load_context(session):
         "chat-haru:signal-query:api.py"
     ]
 
-    missing_validator = {"context_projector/projector.py": "def project(): return None\n"}
-    assert _task12_readiness_runtime_violations(missing_validator) == [
-        "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+    missing_source_guard = {"context_projector/projector.py": "def project(): return None\n"}
+    assert _task12_readiness_runtime_violations(missing_source_guard) == [
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
     ]
 
-    reversed_validator = {
+    unbound_ready = {
         "context_projector/projector.py": '''
-def _validate_contributors(contributors):
-    if contributors["confirmed_memory"].status == "disabled":
-        raise ValueError("wrong direction")
+def project(request):
+    contributors = request.contributors
+    if contributors["confirmed_memory"].status == "ready":
+        raise ProjectionError("optional_contributor_source_required")
 ''',
     }
-    assert _task12_readiness_runtime_violations(reversed_validator) == [
-        "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+    assert _task12_readiness_runtime_violations(unbound_ready) == [
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
     ]
-    equivalent_validator = {
-        "context_projector/projector.py": '''
-def _validate_contributors(contributors):
-    for name in ("confirmed_memory",):
-        if not contributors[name].status == "disabled":
-            raise ValueError(name)
-''',
+
+    partial_source_guard = {
+        "context_projector/projector.py": controlled_source_guard.replace(
+            '"confirmed_readiness",\n        "confirmed_memory",\n        "knowledge_context",\n        "older_conversation_summary",',
+            '"confirmed_memory",',
+        ),
     }
-    assert _task12_readiness_runtime_violations(equivalent_validator) == []
-    nested_unused_validator = {
+    assert _task12_readiness_runtime_violations(partial_source_guard) == [
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
+    ]
+    nested_unused_guard = {
         "context_projector/projector.py": '''
-def _validate_contributors(contributors):
+def project(request):
     def unused():
-        if contributors["confirmed_memory"].status != "disabled":
-            raise ValueError("unused")
-    return contributors
+        trusted_optional = {item.name: item for item in request.optional_sources.contributors}
+        for name in ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"):
+            if request.contributors[name].status == "ready" and trusted_optional.get(name) is not request.contributors[name]:
+                raise ProjectionError("optional_contributor_source_required")
+    return request.contributors
 ''',
     }
-    assert _task12_readiness_runtime_violations(nested_unused_validator) == [
-        "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+    assert _task12_readiness_runtime_violations(nested_unused_guard) == [
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
     ]
     unreachable_guard = {
         "context_projector/projector.py": '''
-def _validate_contributors(contributors):
-    return contributors
-    if contributors["confirmed_memory"].status != "disabled":
-        raise ValueError("late")
+def project(request):
+    return request.contributors
+    trusted_optional = {item.name: item for item in request.optional_sources.contributors}
+    for name in ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"):
+        if request.contributors[name].status == "ready" and trusted_optional.get(name) is not request.contributors[name]:
+            raise ProjectionError("optional_contributor_source_required")
 ''',
     }
     assert _task12_readiness_runtime_violations(unreachable_guard) == [
-        "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
     ]
-    late_guard = {
+    non_identity_guard = {
         "context_projector/projector.py": '''
-def _validate_contributors(contributors):
-    consume(contributors)
-    for name in ("confirmed_memory",):
-        if contributors[name].status != "disabled":
-            raise ValueError(name)
-    return contributors
+def project(request):
+    contributors = request.contributors
+    trusted_optional = {item.name: item for item in request.optional_sources.contributors}
+    for name in ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"):
+        if contributors[name].status == "ready" and trusted_optional.get(name) != contributors[name]:
+            raise ProjectionError("optional_contributor_source_required")
 ''',
     }
-    assert _task12_readiness_runtime_violations(late_guard) == [
-        "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+    assert _task12_readiness_runtime_violations(non_identity_guard) == [
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
     ]
 
 
@@ -2430,6 +2471,41 @@ def test_task12_readiness_runtime_production_gate() -> None:
     )
     sources = {path.relative_to(SRC).as_posix(): path.read_text(encoding="utf-8") for path in paths}
     assert _task12_readiness_runtime_violations(sources) == []
+
+
+def test_task12_confirmed_memory_policy_budget_and_confirmation_proof() -> None:
+    from pydantic import ValidationError
+
+    from offerpilot.confirmed_memory.repository import MemoryMutation
+    from offerpilot.context_sources.contracts import ContributorPolicy
+    from offerpilot.context_sources.loader import _contributor
+
+    payload = {
+        "mutation_id": "00000000-0000-4000-8000-000000000001",
+        "action": "confirm",
+        "expected_version": 0,
+        "confirmed": False,
+        "content": "先给结论",
+    }
+    with pytest.raises(ValidationError):
+        MemoryMutation.model_validate(payload)
+
+    disabled, disabled_source = _contributor(
+        "confirmed_memory",
+        ContributorPolicy(enabled=False, max_units=256),
+        [{"preference": "不应进入模型上下文"}],
+    )
+    assert disabled.status == "disabled"
+    assert disabled_source is None
+
+    over_budget, over_budget_source = _contributor(
+        "confirmed_memory",
+        ContributorPolicy(enabled=True, max_units=256),
+        [{"preference": "过长偏好" * 500}],
+    )
+    assert over_budget.status == "not_applicable"
+    assert over_budget.messages == ()
+    assert over_budget_source is None
 
 
 def _tree(path: Path) -> ast.Module:
@@ -5240,8 +5316,16 @@ class Loader:
 
     compound_guard = {
         "context_projector/projector.py": '''
+def project(request):
+    contributors = request.contributors
+    trusted_optional = {item.name: item for item in request.optional_sources.contributors} if request.optional_sources else {}
+    for name in ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"):
+        if contributors[name].status == "ready" and trusted_optional.get(name) is not contributors[name]:
+            raise ProjectionError("optional_contributor_source_required")
+    return contributors
+
 def _validate_contributors(contributors):
-    """Validate disabled placeholders."""
+    """Validate contributor state."""
     for name in ("confirmed_memory", "knowledge_context", "older_conversation_summary"):
         status = contributors[name].status
         if name in {"confirmed_memory", "knowledge_context", "older_conversation_summary"} and status != "disabled":
@@ -5253,6 +5337,14 @@ def _validate_contributors(contributors):
 
     post_guard_mutation = {
         "context_projector/projector.py": '''
+def project(request):
+    contributors = request.contributors
+    trusted_optional = {item.name: item for item in request.optional_sources.contributors} if request.optional_sources else {}
+    for name in ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary"):
+        if contributors[name].status == "ready" and trusted_optional.get(name) is not contributors[name]:
+            raise ProjectionError("optional_contributor_source_required")
+    return contributors
+
 def _validate_contributors(contributors):
     for name in ("confirmed_memory", "knowledge_context", "older_conversation_summary"):
         if contributors[name].status != "disabled":
@@ -5314,7 +5406,7 @@ def _validate_contributors(contributors, other):
 '''
     }
     assert _task12_readiness_runtime_violations(wrong_object_guard) == [
-        "confirmed-memory:missing-disabled-guard:context_projector/projector.py"
+        "confirmed-memory:missing-controlled-source-guard:context_projector/projector.py"
     ]
 
     imported_route = {
