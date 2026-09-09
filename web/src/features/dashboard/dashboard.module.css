@@ -73,11 +73,9 @@
 .bar { flex: 1; border-radius: 5px 5px 0 0; background: var(--op-gradient-brand); min-height: 4px; transition: height 0.4s var(--op-ease); }
 .barLabel { font-size: 11px; color: var(--op-muted); text-align: center; margin-top: 4px; }
 
-.schedItem { display: flex; gap: 10px; margin-bottom: 10px; }
-.schedDate { text-align: center; flex-shrink: 0; }
-.schedMon { font-size: 11px; color: var(--op-muted); }
-.schedDay { font-size: 18px; font-weight: 700; color: var(--op-primary); }
-.schedText { font-size: 14px; color: var(--op-ink); padding-top: 4px; }
+.schedItem { display: flex; align-items: baseline; gap: 12px; margin-bottom: 10px; }
+.schedDate { flex-shrink: 0; min-width: 5.5em; white-space: nowrap; font-size: 14px; font-weight: 600; color: var(--op-primary); }
+.schedText { min-width: 0; overflow-wrap: anywhere; font-size: 14px; color: var(--op-ink); }
 .empty { color: var(--op-muted); font-size: 14px; }
 
 @media (max-width: 900px) {

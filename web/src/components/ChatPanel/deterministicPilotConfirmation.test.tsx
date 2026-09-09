@@ -129,6 +129,20 @@ const jdAction: PendingAction = {
   ],
 };
 
+it.each(['create_offer', 'update_offer'])('shows Chinese Offer field labels for %s', (tool_name) => {
+  const fields = ['base_monthly', 'months_per_year', 'signing_bonus', 'equity', 'perks', 'assessment'];
+  const card = renderProposal({
+    tool_name, human: '请确认 Offer 信息', confirmation_token: 'offer-labels', args: {},
+    editable_fields: fields.map((field) => ({ field, type: 'string' as const })),
+  });
+  const editor = Array.from(card.querySelectorAll('button')).find((button) => button.textContent?.includes('编辑建议'));
+  expect(editor).toBeDefined();
+  act(() => editor?.click());
+  const labels = Array.from(card.querySelectorAll('label')).map((label) => label.textContent);
+  expect(labels).toEqual(expect.arrayContaining(['月薪', '计薪月数', '签字费', '股权／期权', '福利', 'Offer 评估']));
+  for (const field of fields) expect(labels).not.toContain(field);
+});
+
 describe('deterministic Pilot JD confirmation card', () => {
   it('retries an unknown submission with its original page context after navigation', async () => {
     let owner!: PilotConversationController;

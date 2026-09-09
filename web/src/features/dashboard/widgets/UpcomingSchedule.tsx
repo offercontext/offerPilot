@@ -29,10 +29,9 @@ export default function UpcomingSchedule({
           const d = dayjs(e.scheduled_at);
           return (
             <div key={e.id} className={styles.schedItem}>
-              <div className={styles.schedDate}>
-                <div className={styles.schedMon}>{d.format('M月')}</div>
-                <div className={`${styles.schedDay} op-tnum`}>{d.format('DD')}</div>
-              </div>
+              <time className={`${styles.schedDate} op-tnum`} dateTime={d.format('YYYY-MM-DD')}>
+                {d.format('M月D日')}
+              </time>
               <div className={styles.schedText}>
                 {e.company_name ?? '安排'} {EVENT_TYPE_LABELS[e.event_type]} · {d.format('HH:mm')}
               </div>
