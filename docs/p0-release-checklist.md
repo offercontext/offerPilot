@@ -3,7 +3,7 @@
 Date: 2026-07-07
 Branch: `codex/feat/project-adjustments-review`
 
-This checklist is the v0.1 release gate. The local default gate is automated by `scripts/release-gate.ps1` and `scripts/release-gate.sh`; Docker remains an explicit opt-in step because some development machines do not have Docker available.
+The scope/status, browser walkthrough, and deferred sections below are the historical v0.1 snapshot, not current feature restrictions or a fresh verification report. See [early interview scope](archive/early-interview-version-scope.md) for the former version boundaries. The command reference is maintained for the current `scripts/release-gate.ps1` and `scripts/release-gate.sh`; verification triggers, evidence reuse, and optional-gate scope are owned by [AGENTS.md §7](../AGENTS.md#7-验证与-code-review).
 
 ## Scope Status
 
@@ -32,7 +32,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
 ./scripts/release-gate.sh
 ```
 
-The scripts wrap the following checks:
+The scripts wrap the checks below. This is an explanation of the full gate, not a second checklist to run before or after it. A release builds the frontend once, then calls local smoke with `--skip-build` / `-SkipBuild`; standalone local smoke still builds by default. Skipping requires `web/dist/index.html`, and the caller must establish that the build matches the current code and dependencies.
+
+Both runtime layers remain: local smoke launches the actual `oc start` CLI process and checks health/SPA fallback before `oc smoke`; `oc verify --profile local` runs broader business scenarios over an isolated HTTP app. The business checks overlap (and share the chat-card helper), but local verify does not replace the independent CLI startup check. This change does not merge or remove either layer. PowerShell gates explicitly stop on nonzero native-command and child-gate exit codes.
 
 The general pytest gate tests the historical Application JD implementation-scope guard with isolated Git fixtures (committed, staged, unstaged, and untracked changes). To audit an actual JD release scope, supply both `OFFERPILOT_APPLICATION_JD_BASELINE_FILE` and `OFFERPILOT_APPLICATION_JD_ALLOWLIST_FILE` and run `uv run pytest -q tests/test_application_jd_browser_harness.py -k implementation_scope_is_machine_checked`. The files must contain the previously approved baseline SHA and ASCII path allowlist, not values generated from the current diff. Setting either variable activates the real-worktree audit; a missing counterpart, invalid file, or out-of-scope change fails closed. General regression success is not evidence that a particular release's file scope was approved.
 
@@ -46,7 +48,7 @@ cd web
 npm.cmd test
 npm.cmd run build
 cd ..
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\local-smoke.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\local-smoke.ps1 -SkipBuild
 uv run oc verify --profile local --static-dir web/dist
 ```
 
@@ -84,7 +86,7 @@ This calls `scripts/install-gate.ps1` or `scripts/install-gate.sh` to verify the
 
 ## Browser Product Walkthrough
 
-Run this once against a built local app before tagging v0.1. Use the default local mode unless the test explicitly checks auth.
+Historical v0.1 walkthrough: the original instruction was to run this against a built local app before tagging v0.1. Do not treat the interview placeholder below as a current feature limit; select current product scenarios using the applicable PRD/ADR.
 
 1. Dashboard: load the app shell, confirm the dashboard summary, 7-day events, quick actions, and Pilot entry are visible.
 2. Resumes: create or open a resume, verify master resume state, completion sections, sample/PDF/manual entry points, and edit drawer behavior.

@@ -1,23 +1,30 @@
 param(
     [int]$Port = 18765,
-    [string]$DataDir = ""
+    [string]$DataDir = "",
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = "Stop"
 
 $Repo = Split-Path -Parent $PSScriptRoot
+if (-not $SkipBuild) {
+    Push-Location (Join-Path $Repo "web")
+    try {
+        npm.cmd run build
+        if ($LASTEXITCODE -ne 0) { throw "Frontend build failed (exit $LASTEXITCODE)." }
+    }
+    finally {
+        Pop-Location
+    }
+}
+if (-not (Test-Path -LiteralPath (Join-Path $Repo "web/dist/index.html") -PathType Leaf)) {
+    throw "Missing web/dist/index.html. Run a successful frontend build before using -SkipBuild."
+}
+
 if (-not $DataDir) {
     $DataDir = Join-Path ([System.IO.Path]::GetTempPath()) ("offerpilot-local-smoke-" + [System.Guid]::NewGuid().ToString("N"))
 }
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
-
-Push-Location (Join-Path $Repo "web")
-try {
-    npm.cmd run build
-}
-finally {
-    Pop-Location
-}
 
 $previousData = $env:OFFERPILOT_DATA
 $env:OFFERPILOT_DATA = $DataDir
@@ -63,17 +70,25 @@ try {
     Push-Location $Repo
     try {
         uv run oc smoke --static-dir web/dist
+        if ($LASTEXITCODE -ne 0) { throw "Core smoke failed (exit $LASTEXITCODE)." }
     }
     finally {
         Pop-Location
     }
 
-    Write-Host "Local smoke passed at http://127.0.0.1:$Port"
 }
 finally {
-    if ($server -and -not $server.HasExited) {
-        Stop-Process -Id $server.Id -Force
-        $server.WaitForExit()
+    try {
+        if ($server -and -not $server.HasExited) {
+            # The launcher owns uv/oc/Python descendants; stopping only it leaks the server.
+            taskkill.exe /PID $server.Id /T /F | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Server cleanup failed (exit $LASTEXITCODE)." }
+            if (-not $server.WaitForExit(5000)) { throw "Server cleanup did not finish." }
+        }
     }
-    $env:OFFERPILOT_DATA = $previousData
+    finally {
+        $env:OFFERPILOT_DATA = $previousData
+    }
 }
+
+Write-Host "Local smoke passed at http://127.0.0.1:$Port"

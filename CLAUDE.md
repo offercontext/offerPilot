@@ -27,5 +27,5 @@
 - 后端测试在 `tests/`；前端测试在源码附近的 `*.test.ts(x)`。repository 测试使用临时目录中的真实 SQLite，不 mock repository。
 - 安装依赖：仓库根目录 `uv sync`，`web/` 目录 `npm install`。
 - 开发启动：根目录 `uv run oc start`；前端开发在 `web/` 执行 `npm run dev`。
-- 定向测试：`uv run pytest tests/<file>.py`；前端在 `web/` 执行 `npm test -- --run <file>`。完整 gate 的适用范围见 AGENTS.md §7。
+- 定向测试：`uv run pytest tests/<file>.py`；前端在 `web/` 执行 `npm test -- <file>`。完整 gate 的适用范围见 AGENTS.md §7。
 - `.claude/settings.json` 注册了文档提醒 hook；它只在 Claude Code 的匹配工具调用中提示，不是跨 Agent 的 Git hook，也不替代验证。

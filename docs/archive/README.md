@@ -10,6 +10,7 @@
 |---|---|---|
 | Python 切换 | [切换验收](python-cutover-verification.md)、[架构审查](python-architecture-review-20260706.md) | [兼容契约](../python-rewrite-contract.md)、[发布清单](../p0-release-checklist.md) |
 | Agent 指令整理 | [2026-09-07 审计](agent-instruction-audit.md) | [AGENTS.md](../../AGENTS.md) |
+| 早期面试版本范围 | [v0.1–v0.3 阶段摘录](early-interview-version-scope.md) | [AGENTS.md §4](../../AGENTS.md#4-事实源) 的当前 PRD / ADR |
 | README 产品概览 | [2026-08-01 设计](readme/2026-08-01-readme-product-overview-design.md)、[计划](readme/2026-08-01-readme-product-overview.md) | [当前 README](../../README.md) |
 | README 旧截图刷新 | [2026-08-13 设计](readme/2026-08-13-readme-screenshot-refresh-design.md)、[计划](readme/2026-08-13-readme-screenshot-refresh.md)、[验收](readme/2026-08-13-readme-screenshot-refresh-browser-acceptance.md) | [指南与配图维护](../product-manual/维护记录.md) |
 | 早期 AI 对话调研 | [2026-07-10 调研](ai-chat-experience-research-20260710.md) | 当前 Agent 行为查代码、测试与相关实施契约 |

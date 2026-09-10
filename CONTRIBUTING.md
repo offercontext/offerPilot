@@ -12,7 +12,9 @@ Before the project broadly accepts external contributions, the maintainers shoul
 
 ## Development
 
-Use a feature branch or worktree for changes. Branch names should follow the
+Use a task-specific branch; an existing clean, dedicated worktree can be reused.
+Use an isolated worktree when user changes or concurrent tasks need protection
+(see [AGENTS.md §2](AGENTS.md#2-开工与工具)). Branch names should follow the
 repository convention:
 
 ```text
@@ -24,21 +26,53 @@ Keep commits focused and describe the user-facing or developer-facing change.
 
 ## Quality Gates
 
-Run the relevant checks before opening a pull request:
+Choose checks by impact using [AGENTS.md §7](AGENTS.md#7-验证与-code-review).
+Finishing a task or pushing a branch does not by itself require a full release
+gate. Available check commands, from the repository root (Bash):
 
 ```bash
-uv run pytest
+# Example targeted suite for CLI changes; choose files for your change.
+uv run pytest -q tests/test_cli.py
 uv run ruff check .
 uv run mypy src
-cd web && npm test -- --run
-cd web && npm run build
+(cd web && npm test && npm run build)
 ```
 
-For user-facing behavior changes, also run a local smoke check:
+Select the relevant commands above; they are not an unconditional checklist.
+`npm test` already runs once; `npm run build` includes TypeScript checking.
+When CLI startup, HTTP serving, or their integration is affected, use local smoke:
 
 ```bash
-scripts/local-smoke.sh
+bash scripts/local-smoke.sh
 ```
+
+For a release candidate or an explicitly requested complete acceptance run, use
+one full gate instead of first running the same checks individually:
+
+```bash
+bash scripts/release-gate.sh
+```
+
+On Windows, the corresponding entry points are:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\local-smoke.ps1
+# Full release acceptance (choose this instead when needed):
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
+```
+
+Standalone local smoke builds by default. The release gate builds once and passes
+`--skip-build` / `-SkipBuild` to reuse that successful build. Manual reuse requires
+a successful build of the same code and dependencies; `web/dist/index.html`
+must exist, but its existence alone is not proof of freshness. Bash retains the
+optional positional port (`bash scripts/local-smoke.sh 18799 --skip-build`);
+PowerShell uses `-Port 18799 -SkipBuild`.
+
+Add Docker, installation, or real-provider checks only for the relevant scope
+under [AGENTS.md §7](AGENTS.md#7-验证与-code-review). Script commands and optional
+flags are described in the [release checklist](docs/p0-release-checklist.md).
+Reuse verification evidence only under the unchanged-snapshot conditions in §7;
+do not infer full-gate success from targeted tests or a reviewer's assessment.
 
 If a check cannot run in your environment, include the command, failure reason,
 and residual risk in the pull request or handoff note.

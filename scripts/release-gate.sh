@@ -42,7 +42,7 @@ npm test
 npm run build
 
 cd "$ROOT"
-scripts/local-smoke.sh "$PORT"
+scripts/local-smoke.sh "$PORT" --skip-build
 uv run oc verify --profile local --static-dir web/dist
 
 if [[ "$RUN_REAL_AI" -eq 1 ]]; then

@@ -15,16 +15,19 @@ try {
     Push-Location $Repo
     try {
         uv run oc --help | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Source CLI check failed (exit $LASTEXITCODE)." }
 
         $env:UV_TOOL_DIR = $ToolDir
         $env:UV_TOOL_BIN_DIR = $BinDir
         uv tool install --force .
+        if ($LASTEXITCODE -ne 0) { throw "Tool installation failed (exit $LASTEXITCODE)." }
 
         $oc = Get-ChildItem -Path $BinDir -Filter "oc*" | Select-Object -First 1
         if (-not $oc) {
             throw "uv tool install did not create an oc executable in $BinDir"
         }
         & $oc.FullName --help | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Installed CLI check failed (exit $LASTEXITCODE)." }
     }
     finally {
         Pop-Location
