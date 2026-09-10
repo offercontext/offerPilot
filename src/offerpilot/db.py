@@ -92,6 +92,15 @@ def init_database(db_path: Path) -> SessionFactory:
     for index in Base.metadata.tables["pilot_turns"].indexes:
         if index.name == "uq_pilot_turn_identity":
             index.create(engine, checkfirst=True)
+    with engine.begin() as connection:
+        connection.execute(text(
+            "INSERT OR IGNORE INTO application_creation_workspace (id, scope_id) "
+            "VALUES (1, lower(hex(randomblob(16))))"
+        ))
+    _record_migration(
+        engine, "0029_application_creation_receipts",
+        "Add atomic Application creation receipts and local workspace identity",
+    )
     _ensure_context_projector_manifest_v2_schema(engine)
     confirmation_receipt_migrations = [
         _ensure_column(

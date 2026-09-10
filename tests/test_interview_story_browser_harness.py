@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import struct
+import tempfile
 from contextlib import suppress
 import time
 import zlib
@@ -99,64 +100,70 @@ def _run_harness(*args: str, env: dict[str, str] | None = None) -> subprocess.Co
         str(_HARNESS_PATH),
         *args,
     ]
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        env=env,
-    )
-    try:
-        stdout, stderr = process.communicate(timeout=_HARNESS_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired as exc:
-        cleanup_detail = ""
+    # Descendants can retain inherited handles after PowerShell exits. Regular
+    # files let us read diagnostics without waiting for all PIPE writers to exit.
+    with tempfile.TemporaryFile(mode="w+", errors="replace") as stdout_file, tempfile.TemporaryFile(
+        mode="w+", errors="replace",
+    ) as stderr_file:
+        process = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file, text=True, env=env)
         try:
-            cleanup = subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-            cleanup_detail = (
-                f"taskkill returncode={cleanup.returncode}\n"
-                f"{cleanup.stdout}{cleanup.stderr}"
-            )
-        except (OSError, subprocess.SubprocessError) as cleanup_error:
-            cleanup_detail = f"taskkill failed: {type(cleanup_error).__name__}: {cleanup_error}"
-        if process.poll() is None:
-            process.kill()
-        final_stdout, final_stderr = process.communicate()
-        stdout = final_stdout or _process_output_text(exc.output)
-        stderr = final_stderr or _process_output_text(exc.stderr)
-        raise AssertionError(
-            f"Interview Story browser harness timed out after {_HARNESS_TIMEOUT_SECONDS} seconds.\n"
-            f"stdout tail:\n{stdout[-_HARNESS_DIAGNOSTIC_TAIL_CHARS:]}\n"
-            f"stderr tail:\n{stderr[-_HARNESS_DIAGNOSTIC_TAIL_CHARS:]}\n"
-            f"cleanup:\n{cleanup_detail[-_HARNESS_DIAGNOSTIC_TAIL_CHARS:]}"
-        ) from exc
+            process.wait(timeout=_HARNESS_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired as exc:
+            cleanup_detail = ""
+            try:
+                cleanup = subprocess.run(
+                    ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                    check=False, capture_output=True, text=True, timeout=30,
+                )
+                cleanup_detail = f"taskkill returncode={cleanup.returncode}\n{cleanup.stdout}{cleanup.stderr}"
+            except (OSError, subprocess.SubprocessError) as cleanup_error:
+                cleanup_detail = f"taskkill failed: {type(cleanup_error).__name__}: {cleanup_error}"
+            if process.poll() is None:
+                try:
+                    process.kill()
+                except OSError as kill_error:
+                    cleanup_detail += f"\nprocess kill failed: {type(kill_error).__name__}: {kill_error}"
+            try:
+                process.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                cleanup_detail += "\nprocess exit wait timed out after 30 seconds"
+            stdout_file.seek(0)
+            stderr_file.seek(0)
+            stdout = stdout_file.read() or _process_output_text(exc.output)
+            stderr = stderr_file.read() or _process_output_text(exc.stderr)
+            raise AssertionError(
+                f"Interview Story browser harness timed out after {_HARNESS_TIMEOUT_SECONDS} seconds.\n"
+                f"stdout tail:\n{stdout[-_HARNESS_DIAGNOSTIC_TAIL_CHARS:]}\n"
+                f"stderr tail:\n{stderr[-_HARNESS_DIAGNOSTIC_TAIL_CHARS:]}\n"
+                f"cleanup:\n{cleanup_detail[-_HARNESS_DIAGNOSTIC_TAIL_CHARS:]}"
+            ) from exc
+        stdout_file.seek(0)
+        stderr_file.seek(0)
+        stdout, stderr = stdout_file.read(), stderr_file.read()
     assert process.returncode is not None
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
+@pytest.mark.parametrize("cleanup_times_out,kill_race", ((False, False), (True, False), (False, True)))
 def test_run_harness_terminates_the_process_tree_and_reports_output_on_timeout(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, cleanup_times_out: bool, kill_race: bool,
 ) -> None:
     class TimedOutProcess:
         pid = 4242
         returncode: int | None = None
 
         def __init__(self) -> None:
-            self.communicate_timeouts: list[float | None] = []
+            self.wait_timeouts: list[float | None] = []
             self.killed = False
 
-        def communicate(self, timeout: float | None = None) -> tuple[str, str]:
-            self.communicate_timeouts.append(timeout)
-            if timeout is not None:
+        def wait(self, timeout: float | None = None) -> int:
+            assert timeout is not None, "cleanup must remain bounded"
+            self.wait_timeouts.append(timeout)
+            if len(self.wait_timeouts) == 1 or cleanup_times_out:
                 raise subprocess.TimeoutExpired(
                     ["powershell"], timeout, output="partial stdout", stderr="partial stderr"
                 )
-            return "final stdout", "final stderr"
+            return 1
 
         def poll(self) -> int | None:
             return self.returncode
@@ -164,19 +171,29 @@ def test_run_harness_terminates_the_process_tree_and_reports_output_on_timeout(
         def kill(self) -> None:
             self.killed = True
             self.returncode = 1
+            if kill_race:
+                raise ProcessLookupError("process exited between poll and kill")
 
     process = TimedOutProcess()
     popen_calls: list[tuple[object, ...]] = []
     taskkill_calls: list[list[str]] = []
 
-    def fake_popen(*popen_args: object, **_popen_kwargs: object) -> TimedOutProcess:
+    def fake_popen(*popen_args: object, **popen_kwargs: object) -> TimedOutProcess:
         popen_calls.append(popen_args)
+        # A descendant holding the output handle must not keep a PIPE reader alive.
+        for channel, content in (("stdout", "final stdout"), ("stderr", "final stderr")):
+            output = popen_kwargs[channel]
+            assert output != subprocess.PIPE
+            assert hasattr(output, "write")
+            output.write(content)
+            output.flush()
         return process
 
     def fake_run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
         taskkill_calls.append(command)
         assert command == ["taskkill", "/PID", "4242", "/T", "/F"]
-        process.returncode = 1
+        if not cleanup_times_out and not kill_race:
+            process.returncode = 1
         return subprocess.CompletedProcess(command, 0, "terminated", "")
 
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
@@ -187,10 +204,63 @@ def test_run_harness_terminates_the_process_tree_and_reports_output_on_timeout(
 
     assert len(popen_calls) == 1
     assert taskkill_calls == [["taskkill", "/PID", "4242", "/T", "/F"]]
-    assert process.communicate_timeouts == [180, None]
-    assert process.killed is False
+    assert process.wait_timeouts == [180, 30]
+    assert process.killed is (cleanup_times_out or kill_race)
     assert "final stdout" in str(caught.value)
     assert "final stderr" in str(caught.value)
+    if cleanup_times_out:
+        assert "exit wait timed out" in str(caught.value)
+    if kill_race:
+        assert "process exited between poll and kill" in str(caught.value)
+
+
+@pytest.mark.parametrize("fault", ("disappeared", "enumeration", "query", "stubborn"))
+def test_stop_tree_still_stops_parent_when_child_cleanup_races(
+    tmp_path: Path, fault: str,
+) -> None:
+    source = _HARNESS_PATH.read_text(encoding="utf-8")
+    function = source[source.index("function Stop-Tree("):source.index("function Remove-IsolatedTempData")]
+    script = tmp_path / "cleanup-probe.ps1"
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        f"$script:fault = '{fault}'\n"
+        "$script:alive = @{ 1 = $true; 2 = $true }\n"
+        "$script:stopped = [System.Collections.Generic.List[int]]::new()\n"
+        "$script:enumerations = 0\n"
+        "function Get-CimInstance {\n"
+        "  $script:enumerations++\n"
+        "  if ($script:fault -eq 'enumeration' -and $script:enumerations -eq 2) { throw 'enumeration failure' }\n"
+        "  [pscustomobject]@{ ProcessId = 2; ParentProcessId = 1 }\n"
+        "}\n"
+        "function Get-Process { param([int]$Id)\n"
+        "  if ($script:fault -eq 'query') { throw 'process query denied' }\n"
+        "  if ($script:alive[$Id]) { [pscustomobject]@{ Id = $Id } }\n"
+        "}\n"
+        "function Stop-Process { param([int]$Id, [switch]$Force)\n"
+        "  $script:stopped.Add($Id)\n"
+        "  if ($Id -eq 2 -and $script:fault -eq 'stubborn') { throw 'forced stop failure' }\n"
+        "  $script:alive[$Id] = $false\n"
+        "  if ($Id -eq 2 -and $script:fault -eq 'disappeared') { throw 'process already exited' }\n"
+        "}\n"
+        + function
+        + "\n$failure = ''\n"
+        "try { Stop-Tree ([pscustomobject]@{ Id = 1 }) 'owned tree' } catch { $failure = $_.Exception.Message }\n"
+        "[pscustomobject]@{ alive = @($script:alive.Values | Where-Object { $_ }); stopped = @($script:stopped); failure = $failure } | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script)],
+        capture_output=True, text=True, timeout=45, check=True,
+    )
+    report = json.loads(result.stdout)
+    assert report["alive"] == ([True] if fault == "stubborn" else [])
+    assert report["stopped"] == [2, 1]
+    assert bool(report["failure"]) is (fault != "disappeared")
+    if fault == "query":
+        assert "process query denied" in report["failure"]
+    if fault == "stubborn":
+        assert "forced stop failure" in report["failure"]
+        assert "did not exit" in report["failure"]
 
 
 def _write_gray_png(path: Path, *, width: int = 1455, height: int = 1200) -> None:
@@ -975,6 +1045,53 @@ def test_story_browser_harness_records_a_single_viewport_screenshot_matrix(tmp_p
     matrix = json.loads(manifest.read_text(encoding="utf-8"))
     assert len(matrix) == 10
     assert all(item["width"] == 1455 and item["height"] == 1200 and len(item["sha256"]) == 64 for item in matrix)
+
+
+@pytest.mark.parametrize("exit_code", (0, 7))
+def test_isolated_python_keeps_json_stdout_separate_from_diagnostics(
+    tmp_path: Path, exit_code: int,
+) -> None:
+    source = _HARNESS_PATH.read_text(encoding="utf-8")
+    function = source[
+        source.index("function Invoke-IsolatedPython("):
+        source.index("function Wait-ForHttpReady(")
+    ]
+    repo = _HARNESS_PATH.parents[1]
+    project_python = repo / ".venv" / "Scripts" / "python.exe"
+
+    def literal(path: Path) -> str:
+        return "'" + str(path).replace("'", "''") + "'"
+
+    wrapper = tmp_path / "probe.ps1"
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        + f"$repo = {literal(repo)}\n"
+        + f"$projectPython = {literal(project_python)}\n"
+        + f"$tempData = {literal(tmp_path)}\n"
+        + function
+        + "$code = @'\n"
+        + "import sys\nprint('{\"value\": 1}')\n"
+        + "print('isolated diagnostic sentinel', file=sys.stderr)\n"
+        + f"raise SystemExit({exit_code})\n"
+        + "'@\n"
+        + "$raw = Invoke-IsolatedPython 'json-probe' $code\n"
+        + "[Console]::Out.WriteLine((($raw -join '') | ConvertFrom-Json).value)\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(wrapper)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if exit_code == 0:
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "1"
+        assert "isolated diagnostic sentinel" in result.stderr
+    else:
+        assert result.returncode != 0
+        assert "failed with exit code 7" in result.stderr
+        assert "isolated diagnostic sentinel" in result.stderr
+        assert '"value": 1' in result.stderr
+    assert not list(tmp_path.glob("json-probe-*"))
 
 
 def test_story_browser_harness_starts_audited_chromium_before_honoring_completion_signal(tmp_path: Path) -> None:

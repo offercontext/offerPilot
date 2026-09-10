@@ -7710,11 +7710,10 @@ def test_chat_confirm_result_cas_loss_stays_stale_on_followup_failure(
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
+@pytest.mark.parametrize("slow_before_write", [False, True])
 def test_chat_confirm_timeout_after_write_returns_completed_fallback(
-    tmp_path, monkeypatch, endpoint
+    tmp_path, monkeypatch, endpoint, slow_before_write
 ):
-    import offerpilot.api as api_module
-
     model = TimeoutAfterPendingModel(
         ToolCall(
             id="slow-confirm",
@@ -7723,7 +7722,18 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
         )
     )
     _, client, _, pending = _create_status_confirmation(tmp_path, model)
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 5.0)
+    # The model injects timeout only after the approved origin has committed.
+    # A short host deadline can win before that boundary on a loaded machine.
+    if slow_before_write:
+        original_update = ApplicationsRepository.update_application_status_scoped
+
+        def delayed_update(self, constraint, app_id, status, closed_reason=""):
+            time.sleep(6.0)
+            return original_update(self, constraint, app_id, status, closed_reason)
+
+        monkeypatch.setattr(
+            ApplicationsRepository, "update_application_status_scoped", delayed_update
+        )
 
     response = client.post(
         endpoint,
@@ -7734,6 +7744,7 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
         },
     )
 
+    assert model.calls == 2, response.text
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         events = _parse_sse_events(response.text)

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, posix, relative } from 'node:path';
 import ts from 'typescript';
@@ -6168,6 +6169,16 @@ function hasPreparationMissingDefault(path: string, sourceFile: ts.SourceFile, s
   return violation;
 }
 
+// ADR-0006 explicitly permits the exact, runtime-validated Application intake
+// envelope. Pin the reviewed adapter, not a directory, API name, or comment:
+// any adapter change requires review + its runtime/negative-fixture tests.
+const APPLICATION_CREATION_RECOVERY_PATH = 'web/src/services/applicationCreationRecovery.ts';
+const APPLICATION_CREATION_RECOVERY_SHA256 = '358c68441a45c89f3747293e1b2bb5034276d481268abd426321ea6bc77f6944';
+function isReviewedApplicationCreationRecovery(path: string, source: string): boolean {
+  return path === APPLICATION_CREATION_RECOVERY_PATH
+    && createHash('sha256').update(source.replace(/\r\n/g, '\n')).digest('hex') === APPLICATION_CREATION_RECOVERY_SHA256;
+}
+
 function auditFrontendSources(sources: SourceMap): string[] {
   // Recursive import resolution shares immutable syntax trees only within this
   // audit. A later fixture or changed source always gets a fresh cache.
@@ -6200,7 +6211,8 @@ function auditFrontendSourcesWithCache(sources: SourceMap): string[] {
       violations.add('ui:generic-operation-undo');
     }
     if (endpoints.some((endpoint) => /(?:\/api)?\/stories(?:\/|$)/i.test(endpoint))) violations.add('ui:stories-api-alias');
-    if (hasSensitiveClientPersistence(sourceFile, path, sources)) violations.add('privacy:sensitive-client-persistence');
+    if (hasSensitiveClientPersistence(sourceFile, path, sources)
+      && !isReviewedApplicationCreationRecovery(path, source)) violations.add('privacy:sensitive-client-persistence');
     if (hasPreparationMissingDefault(path, sourceFile, sources)) violations.add('preparation:missing-defaulted-empty');
   }
   return [...violations];
@@ -6367,6 +6379,22 @@ describe('review readiness negative fixture gate', () => {
       expect(auditFrontendSources(new Map([
         ['web/src/layout/AppShell.tsx', source],
       ]))).toContain('privacy:sensitive-client-persistence');
+    }
+  });
+
+  it('permits only the reviewed credential-free Application recovery adapter', () => {
+    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const approved = readFileSync(join(root, APPLICATION_CREATION_RECOVERY_PATH), 'utf8');
+    expect(isReviewedApplicationCreationRecovery(APPLICATION_CREATION_RECOVERY_PATH, approved)).toBe(true);
+    expect(auditFrontendSources(new Map([[APPLICATION_CREATION_RECOVERY_PATH, approved]]))).toEqual([]);
+    for (const [path, source] of [
+      ['web/src/services/otherRecovery.ts', approved],
+      [APPLICATION_CREATION_RECOVERY_PATH, approved + '\nconsole.log(confirmation_token);'],
+      [APPLICATION_CREATION_RECOVERY_PATH, approved.replace('const validated = decodePendingCreation(scope, serialized);', 'const validated = record;')],
+      [APPLICATION_CREATION_RECOVERY_PATH, `localStorage.setItem('draft', JSON.stringify({ idempotency_key, confirmation_token }));`],
+    ]) {
+      expect(isReviewedApplicationCreationRecovery(path, source)).toBe(false);
+      expect(auditFrontendSources(new Map([[path, source]]))).toContain('privacy:sensitive-client-persistence');
     }
   });
 

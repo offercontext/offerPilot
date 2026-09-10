@@ -1108,6 +1108,7 @@ function AppShellContent() {
   const [pilotOnboardingFocusToken, setPilotOnboardingFocusToken] = useState(0);
   const nextPilotOnboardingFocusToken = useRef(0);
   const [selected, setSelected] = useState<Application | null>(null);
+  const [intakeApplicationId, setIntakeApplicationId] = useState<number | null>(null);
   const applicationJdDraftsRef = useRef(new Map<number, ApplicationJdDraft>());
   const [applicationJdDrafts, setApplicationJdDrafts] = useState<Record<number, ApplicationJdDraft>>({});
   const [interviewReviewProposalAttempts, setInterviewReviewProposalAttempts] = useState<Record<number, InterviewReviewProposalAttemptState>>({});
@@ -2313,6 +2314,7 @@ function AppShellContent() {
   const workspaceContent = selectedApp ? (
     <ApplicationDetail
       application={selectedApp}
+      initialTab={selectedApp.id === intakeApplicationId ? 'preparation' : 'overview'}
       taskController={coreTaskController}
       onLaunchTask={launchTaskFromApplicationDetail}
       onConfirmedFitToMaterial={launchConfirmedFitToMaterial}
@@ -2807,7 +2809,7 @@ function AppShellContent() {
         />
       ) : null}
 
-      <AddApplicationForm open={addOpen} onClose={() => setAddOpen(false)} />
+      <AddApplicationForm open={addOpen} onClose={() => setAddOpen(false)} onCreated={(application) => { setIntakeApplicationId(application.id); openApplicationDetail(application); }} />
       <CommandPalette
         open={paletteOpen}
         onClose={() => setPaletteOpen(false)}

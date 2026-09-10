@@ -2896,6 +2896,8 @@ def _story_is_terminal_post_state(
             story.status == "archived"
             and story.current_version_id == undo["created_version_id"]
             and story.story_revision == cast(int, undo["expected_story_revision"]) + 1
+            and story.archived_at is not None
+            and story.archived_at == story.updated_at
         )
     return (
         story.status == "active"
@@ -5691,7 +5693,6 @@ class ProductActionCompensationCoordinator:
                         "product_action_compensation_permission_denied",
                         status_code=403,
                     )
-                handler._revalidate_owner(session, record)
                 state = self._load_state(session, operation_id)
                 replay = self._validate_state(session, state, record, operation_id)
                 if replay is not None:
@@ -5701,6 +5702,9 @@ class ProductActionCompensationCoordinator:
                     raise ProductActionIntegrityError(
                         "product_action_compensation_execution_absent"
                     )
+                # Another request may have committed between publication and this lock.
+                # Terminal replay validates its final domain, not the pre-undo owner state.
+                handler._revalidate_owner(session, record)
                 operation = state.operation
                 input_fingerprint = self._input_fingerprint(record, operation)
                 now = datetime.now(timezone.utc)

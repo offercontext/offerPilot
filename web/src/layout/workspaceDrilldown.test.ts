@@ -21,7 +21,6 @@ const migratedWorkspaceFlows = [
   ['AI settings', aiSettings],
   ['application detail', applicationDetail],
   ['material kit', materialKit],
-  ['offer compare', offerCompare],
   ['question generator', questionBank],
   ['review form', reviewForm],
   ['resume editor', resumeEditor],
@@ -79,6 +78,17 @@ describe('workspace drill-down layout contract', () => {
     expect(reviewManagement).toContain('if (drawerOpen) {');
     expect(offerCenter).toContain('if (compareOpen) {');
     expect(offerCompare).toContain('返回 Offer 中心');
+  });
+
+  it('keeps Offer comparison in the workspace and permits only its local settings drawer', () => {
+    expect(offerCompare).toContain('return <section className={styles.workspace}');
+    const drawers = offerCompare.match(/<Drawer\b/g) ?? [];
+    expect(drawers).toHaveLength(1);
+    const settingsDrawer = offerCompare.slice(offerCompare.indexOf('<Drawer'), offerCompare.indexOf('</Drawer>'));
+    expect(settingsDrawer).toContain('title="调整对比项"');
+    expect(settingsDrawer).toContain('open={settingsOpen}');
+    expect(settingsDrawer).toContain('onClose={() => setSettingsOpen(false)}');
+    expect(offerCompare).not.toMatch(/return\s*\(?\s*<Drawer\b/);
   });
 
   it('opens AI settings inside workspace content instead of the shell edge', () => {

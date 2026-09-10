@@ -112,14 +112,44 @@ function Get-Sha256([string]$Path) {
 function Stop-Tree([object]$process, [string]$label = 'local process') {
   if ($null -eq $process) { return }
   $processId = [int]$process.Id
-  $children = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ParentProcessId -eq $processId })
-  foreach ($child in $children) { Stop-Tree ([pscustomobject]@{ Id = $child.ProcessId }) "$label child" }
-  $running = Get-Process -Id $processId -ErrorAction SilentlyContinue
-  if ($null -ne $running) { Stop-Process -Id $processId -Force -ErrorAction Stop }
+  $cleanupFailures = [System.Collections.Generic.List[string]]::new()
+  try {
+    $children = @(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.ParentProcessId -eq $processId })
+    foreach ($child in $children) {
+      try { Stop-Tree ([pscustomobject]@{ Id = $child.ProcessId }) "$label child" }
+      catch { $cleanupFailures.Add($_.Exception.Message) }
+    }
+  } catch { $cleanupFailures.Add($_.Exception.Message) }
+  try { Stop-Process -Id $processId -Force -ErrorAction Stop }
+  catch {
+    $stopFailure = $_.Exception.Message
+    try {
+      # Only a confirmed exit makes a concurrent Stop-Process failure harmless.
+      if ($null -ne (Get-TrackedProcess $processId)) { $cleanupFailures.Add($stopFailure) }
+    } catch {
+      $cleanupFailures.Add($stopFailure)
+      $cleanupFailures.Add($_.Exception.Message)
+    }
+  }
   $deadline = [DateTime]::UtcNow.AddSeconds(15)
-  while ($null -ne (Get-Process -Id $processId -ErrorAction SilentlyContinue)) {
-    if ([DateTime]::UtcNow -ge $deadline) { throw "$label process $processId did not exit during cleanup." }
+  while ($true) {
+    try { $running = Get-TrackedProcess $processId }
+    catch { $cleanupFailures.Add($_.Exception.Message); break }
+    if ($null -eq $running) { break }
+    if ([DateTime]::UtcNow -ge $deadline) {
+      $cleanupFailures.Add("$label process $processId did not exit during cleanup.")
+      break
+    }
     Start-Sleep -Milliseconds 100
+  }
+  if ($cleanupFailures.Count -gt 0) { throw "$label cleanup could not be verified: $($cleanupFailures -join '; ')" }
+}
+
+function Get-TrackedProcess([int]$processId) {
+  try { Get-Process -Id $processId -ErrorAction Stop }
+  catch {
+    if ($_.FullyQualifiedErrorId -eq 'NoProcessFoundForGivenId,Microsoft.PowerShell.Commands.GetProcessCommand') { return $null }
+    throw
   }
 }
 
@@ -152,10 +182,13 @@ function Invoke-IsolatedPython([string]$label, [string]$code) {
     $process = Start-Process -FilePath $projectPython -WorkingDirectory $repo -ArgumentList @($scriptPath) -PassThru -Wait -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath
     $output = @(
       if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath }
+    )
+    $diagnostics = @(
       if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath }
     )
     $exitCode = $process.ExitCode
-    if ($exitCode -ne 0) { throw "$label failed with exit code ${exitCode}: $($output -join [Environment]::NewLine)" }
+    if ($exitCode -ne 0) { throw "$label failed with exit code ${exitCode}: $(($output + $diagnostics) -join [Environment]::NewLine)" }
+    if ($diagnostics.Count -gt 0) { [Console]::Error.WriteLine(($diagnostics -join [Environment]::NewLine)) }
     return @($output)
   } finally {
     Remove-Item -LiteralPath $scriptPath -Force -ErrorAction SilentlyContinue
@@ -1192,11 +1225,14 @@ finally {
   foreach ($item in $processesToClean) {
     $processId = if ($null -eq $item.Process) { $null } else { [int]$item.Process.Id }
     try { Stop-Tree $item.Process $item.Label }
-    catch { $cleanupErrors.Add([string]$item.Label) }
+    catch { $cleanupErrors.Add("$($item.Label): $($_.Exception.Message)") }
+    $exited = $false
+    try { $exited = ($null -eq $processId -or $null -eq (Get-TrackedProcess $processId)) }
+    catch { $cleanupErrors.Add("$($item.Label) exit verification: $($_.Exception.Message)") }
     $cleanupProcesses.Add([pscustomobject]@{
       label = [string]$item.Label
       process_id = $processId
-      exited = ($null -eq $processId -or $null -eq (Get-Process -Id $processId -ErrorAction SilentlyContinue))
+      exited = $exited
     })
   }
   try {

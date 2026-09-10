@@ -119,6 +119,29 @@ class Application(Base):
     )
 
 
+class ApplicationCreationWorkspace(Base):
+    """Identity of this single-user database; never derived from credentials."""
+
+    __tablename__ = "application_creation_workspace"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    scope_id: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+
+
+class ApplicationCreationReceipt(Base):
+    __tablename__ = "application_creation_receipts"
+    __table_args__ = (UniqueConstraint("scope_id", "operation", "idempotency_key"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    scope_id: Mapped[str] = mapped_column(String, nullable=False)
+    operation: Mapped[str] = mapped_column(String, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String, nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    # Deliberately not cascading: deleting a resource cannot free a request key.
+    application_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    jd_version_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    result_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class ApplicationJDVersion(Base):
     __tablename__ = "application_jd_versions"
     __table_args__ = (

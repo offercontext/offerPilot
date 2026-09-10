@@ -1729,6 +1729,81 @@ def test_twenty_way_race_has_one_signal_executor_and_one_compensation(tmp_path) 
     assert len(versions) == 2
 
 
+@pytest.mark.parametrize("corrupt_terminal", [False, True])
+def test_execution_replays_compensation_committed_after_publication(
+    tmp_path,
+    monkeypatch,
+    corrupt_terminal: bool,
+) -> None:
+    session_factory = init_database(tmp_path / "execution-publication-race.sqlite3")
+    seeded, proposed, _repository, _keys = _create_committed_signal(session_factory)
+    issuer, coordinator = _compensation_stack(session_factory)
+    with session_factory() as session:
+        signal = session.scalar(select(InterviewReadinessSignal))
+        assert signal is not None
+        signal_id = signal.id
+    proofs = tuple(
+        issuer.issue(
+            application_id=seeded["application_id"],
+            signal_id=signal_id,
+            parent_operation_id=proposed.operation_id,
+        )
+        for _ in range(2)
+    )
+    original_execute = coordinator._execute_proposed
+    original_retract = coordinator._readiness_repository.retract_signal_in_session
+    interleaved = False
+    executions = 0
+
+    def counted(*args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal executions
+        executions += 1
+        return original_retract(*args, **kwargs)
+
+    def commit_competing_request(record, operation_id):  # type: ignore[no-untyped-def]
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            winner = coordinator.execute(proofs[1])
+            assert winner.status == "committed" and not winner.replayed
+            if corrupt_terminal:
+                with session_factory() as session:
+                    session.execute(text(
+                        "DROP TRIGGER trg_interview_readiness_signal_version_immutable"
+                    ))
+                    retracted = session.scalar(select(InterviewReadinessSignalVersion).where(
+                        InterviewReadinessSignalVersion.signal_id == signal_id,
+                        InterviewReadinessSignalVersion.disposition == "retracted",
+                    ))
+                    assert retracted is not None
+                    retracted.user_note = "tampered after competing commit"
+                    session.commit()
+        return original_execute(record, operation_id)
+
+    monkeypatch.setattr(coordinator, "_execute_proposed", commit_competing_request)
+    monkeypatch.setattr(
+        coordinator._readiness_repository, "retract_signal_in_session", counted
+    )
+    if corrupt_terminal:
+        with pytest.raises(ProductActionIntegrityError, match="readiness_signal_retraction_copy"):
+            coordinator.execute(proofs[0])
+    else:
+        result = coordinator.execute(proofs[0])
+        assert result.status == "committed" and result.replayed
+    assert executions == 1
+    operation_id = product_action_compensation_operation_id(
+        proposed.operation_id, "undo:save_review_readiness_signal"
+    )
+    with session_factory() as session:
+        assert len(tuple(session.scalars(select(InterviewReadinessSignalVersion)))) == 2
+        transitions = tuple(session.scalars(
+            select(WriteOperationTransition.seq)
+            .where(WriteOperationTransition.operation_id == operation_id)
+            .order_by(WriteOperationTransition.seq)
+        ))
+    assert transitions == (1, 2, 3, 4)
+
+
 def test_signal_compensation_never_enters_provider_or_agent_fallback(
     tmp_path,
     monkeypatch,

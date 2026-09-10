@@ -34,6 +34,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
 
 The scripts wrap the following checks:
 
+The general pytest gate tests the historical Application JD implementation-scope guard with isolated Git fixtures (committed, staged, unstaged, and untracked changes). To audit an actual JD release scope, supply both `OFFERPILOT_APPLICATION_JD_BASELINE_FILE` and `OFFERPILOT_APPLICATION_JD_ALLOWLIST_FILE` and run `uv run pytest -q tests/test_application_jd_browser_harness.py -k implementation_scope_is_machine_checked`. The files must contain the previously approved baseline SHA and ASCII path allowlist, not values generated from the current diff. Setting either variable activates the real-worktree audit; a missing counterpart, invalid file, or out-of-scope change fails closed. General regression success is not evidence that a particular release's file scope was approved.
+
+Frontend tests use `web/vitest.config.ts` to cap worker concurrency at four while retaining every test and the production source audit's thirty-second budget. This avoids CPU/IO contention from host-dependent default worker counts; `npm test` remains the full frontend gate.
+
 ```powershell
 uv run pytest -q
 uv run ruff check .

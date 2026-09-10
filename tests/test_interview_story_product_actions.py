@@ -2224,6 +2224,80 @@ def test_story_undo_rejects_corrupt_archived_terminal_lifecycle_without_writes(
         ).fetchone() == (0,)
 
 
+@pytest.mark.parametrize("tamper", ("none", "archived_at", "updated_at"))
+def test_story_undo_replays_competing_commit_only_with_exact_archive_timestamps(
+    story_client,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper: str,
+) -> None:
+    client, data_dir = story_client
+    note = _note(client)
+    attempt = client.post(
+        "/api/interview-story-proposals",
+        json=_proposal_request(note["id"]),
+    ).json()
+    confirmed = client.post(
+        f"/api/interview-story-proposals/{attempt['id']}/confirm",
+        json=_confirmation_from_attempt(attempt),
+    ).json()
+    issuer = client.app.state.interview_story_undo_issuer
+    coordinator = client.app.state.product_action_compensation_coordinator
+    proofs = tuple(issuer.issue(
+        story_id=confirmed["story_id"],
+        parent_operation_id=attempt["product_action"]["operation_id"],
+    ) for _ in range(2))
+    original_execute = coordinator._execute_proposed
+    original_undo = coordinator._story_repository.undo_product_action_in_session
+    interleaved = False
+    executions = 0
+
+    def counted(*args: Any, **kwargs: Any) -> Any:
+        nonlocal executions
+        executions += 1
+        return original_undo(*args, **kwargs)
+
+    def commit_competing_request(record: Any, operation_id: str) -> Any:
+        nonlocal interleaved
+        if not interleaved:
+            interleaved = True
+            winner = coordinator.execute(proofs[1])
+            assert winner.status == "committed" and not winner.replayed
+            with sqlite3.connect(data_dir / "data.db") as connection:
+                if tamper == "archived_at":
+                    connection.execute(
+                        "UPDATE interview_stories SET archived_at=created_at WHERE id=?",
+                        (confirmed["story_id"],),
+                    )
+                elif tamper == "updated_at":
+                    connection.execute(
+                        "UPDATE interview_stories SET updated_at=datetime(updated_at, '+1 second') "
+                        "WHERE id=?",
+                        (confirmed["story_id"],),
+                    )
+                connection.commit()
+        return original_execute(record, operation_id)
+
+    monkeypatch.setattr(coordinator, "_execute_proposed", commit_competing_request)
+    monkeypatch.setattr(
+        coordinator._story_repository, "undo_product_action_in_session", counted
+    )
+    if tamper == "none":
+        result = coordinator.execute(proofs[0])
+        assert result.status == "committed" and result.replayed
+    else:
+        with pytest.raises(ProductActionIntegrityError):
+            coordinator.execute(proofs[0])
+    assert executions == 1
+    with sqlite3.connect(data_dir / "data.db") as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM write_operations WHERE operation_role='compensation'"
+        ).fetchone() == (1,)
+        assert connection.execute(
+            "SELECT COUNT(*) FROM write_operation_transitions WHERE operation_id IN "
+            "(SELECT id FROM write_operations WHERE operation_role='compensation')"
+        ).fetchone() == (4,)
+
+
 @pytest.mark.parametrize("archived_at", (None, "1999-01-01 00:00:00.000000"))
 def test_story_undo_terminal_replay_revalidates_archived_timestamp(
     story_client,
@@ -3941,10 +4015,12 @@ def test_actual_story_restore_undo_title_cap_and_cap_plus_one_rollback(
 
 
 @pytest.mark.parametrize("commit_then_raise", [False, True])
+@pytest.mark.parametrize("unrelated_commit", [False, True])
 def test_ready_four_object_publication_reconciles_commit_unknown_without_provider_recall(
     story_client,
     monkeypatch: pytest.MonkeyPatch,
     commit_then_raise: bool,
+    unrelated_commit: bool,
 ) -> None:
     client, data_dir = story_client
     note = _note(client)
@@ -3956,9 +4032,13 @@ def test_ready_four_object_publication_reconciles_commit_unknown_without_provide
     frozen = _provider_story(claim.source_snapshot)
     original_commit = Session.commit
     attempts = 0
+    owner_thread_id = threading.get_ident()
 
     def lose_first_commit(session: Session) -> None:
         nonlocal attempts
+        if threading.get_ident() != owner_thread_id:
+            original_commit(session)
+            return
         attempts += 1
         if commit_then_raise:
             original_commit(session)
@@ -3971,6 +4051,17 @@ def test_ready_four_object_publication_reconciles_commit_unknown_without_provide
         original_commit(session)
 
     monkeypatch.setattr(Session, "commit", lose_first_commit)
+    if unrelated_commit:
+        def commit_background_session() -> None:
+            with repository._session_factory() as session:
+                try:
+                    session.commit()
+                except OperationalError:
+                    session.rollback()
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            pool.submit(commit_background_session).result()
+        assert attempts == 0, "background commits must not consume the publication fault"
     assert repository.complete_proposal(
         attempt_id=claim.attempt_id,
         generation_revision=claim.generation_revision,
@@ -4214,11 +4305,13 @@ def test_first_publication_commit_unknown_then_concurrent_decisions_stay_atomic(
         ("product_action_bundle_unreadable", "unknown"),
     ],
 )
+@pytest.mark.parametrize("unrelated_commit", (False, True))
 def test_ready_publication_commit_unknown_fails_closed_on_partial_or_unreadable(
     story_client,
     monkeypatch: pytest.MonkeyPatch,
     integrity_code: str,
     expected: str,
+    unrelated_commit: bool,
 ) -> None:
     client, data_dir = story_client
     note = _note(client)
@@ -4230,9 +4323,13 @@ def test_ready_publication_commit_unknown_fails_closed_on_partial_or_unreadable(
 
     original_commit = Session.commit
     commits = 0
+    owner_thread_id = threading.get_ident()
 
     def lose_first_commit(session: Session) -> None:
         nonlocal commits
+        if threading.get_ident() != owner_thread_id:
+            original_commit(session)
+            return
         commits += 1
         if commits == 1:
             raise OperationalError(
@@ -4252,6 +4349,16 @@ def test_ready_publication_commit_unknown_fails_closed_on_partial_or_unreadable(
             "reconcile_publication_in_session",
             reconcile,
         )
+        if unrelated_commit:
+            def commit_background_session() -> None:
+                with repository._session_factory() as session:
+                    try:
+                        session.commit()
+                    except OperationalError:
+                        session.rollback()
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(commit_background_session).result()
         error_type = (
             ProductActionIntegrityError
             if expected == "integrity"

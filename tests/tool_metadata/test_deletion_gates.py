@@ -379,10 +379,49 @@ def _classification_violations(path: Path, source: str) -> list[str]:
             and assertion.body[0].exc.func.id == "RuntimeError"
         )
 
+    def repository_identity_filter_is_allowed(node: ast.AST) -> bool:
+        # These predicates locate persisted evidence/receipts, not execution routes.
+        expected = {
+            SRC / "repositories" / "application_creation.py":
+                ("create", "ApplicationCreationReceipt", "operation"),
+            SRC / "repositories" / "application_preparation_access.py":
+                ("can_prepare_application", "WriteOperation", "tool_name"),
+        }.get(path)
+        if expected is None or not isinstance(node, ast.Compare):
+            return False
+        owner = _enclosing_function(node, parents)
+        owner_name, model_name, field_name = expected
+        if (
+            owner is None or owner.name != owner_name
+            or len(node.ops) != 1 or not isinstance(node.ops[0], ast.Eq)
+            or len(node.comparators) != 1
+            or not isinstance(node.comparators[0], ast.Constant)
+            or node.comparators[0].value != "create_application"
+            or not isinstance(node.left, ast.Attribute) or node.left.attr != field_name
+            or not isinstance(node.left.value, ast.Name) or node.left.value.id != model_name
+        ):
+            return False
+        where = parents.get(node)
+        if (
+            not isinstance(where, ast.Call) or node not in where.args
+            or not isinstance(where.func, ast.Attribute) or where.func.attr != "where"
+        ):
+            return False
+        selection = where.func.value
+        return (
+            isinstance(selection, ast.Call)
+            and isinstance(selection.func, ast.Name) and selection.func.id == "select"
+            and not selection.keywords and len(selection.args) == 1
+            and isinstance(selection.args[0], ast.Name) and selection.args[0].id == model_name
+        )
+
     def literal_is_allowed(node: ast.AST) -> bool:
         smoke_owner: ast.AST | None = node
         while smoke_owner is not None:
-            if smoke_assertion_is_allowed(smoke_owner):
+            if (
+                smoke_assertion_is_allowed(smoke_owner)
+                or repository_identity_filter_is_allowed(smoke_owner)
+            ):
                 return True
             smoke_owner = parents.get(smoke_owner)
         if path in _CLASSIFICATION_LITERAL_ALLOWLIST:
@@ -1259,6 +1298,32 @@ def test_smoke_classification_allowlist_is_exact_owner_and_assertion_only() -> N
         "return execute_create_application()",
     )
     assert _classification_violations(SRC / "smoke.py", routing_body)
+
+
+@pytest.mark.parametrize(
+    ("module", "owner", "model", "field"),
+    (
+        ("application_creation", "create", "ApplicationCreationReceipt", "operation"),
+        ("application_preparation_access", "can_prepare_application", "WriteOperation", "tool_name"),
+    ),
+)
+def test_repository_identity_filter_allowlist_is_exact_sql_predicate_only(
+    module: str, owner: str, model: str, field: str,
+) -> None:
+    path = SRC / "repositories" / f"{module}.py"
+    predicate = f"{model}.{field} == 'create_application'"
+    source = f"def {owner}(session):\n    return select({model}).where({predicate})\n"
+    assert _classification_violations(path, source) == []
+    assert _classification_violations(Path("fixture.py"), source)
+    for changed in (
+        source.replace(f"def {owner}(", "def route("),
+        source.replace(f"{model}.{field}", "operation.tool_name"),
+        source.replace(f"select({model})", "select(OtherModel)"),
+        source.replace("create_application", "update_application_status"),
+        f"def {owner}(session):\n    if {predicate}:\n        return execute_tool()\n",
+        f"def {owner}(session):\n    return select({model}).where(route({predicate}))\n",
+    ):
+        assert _classification_violations(path, changed), changed
 
 
 def test_tool_specs_allow_only_static_declarations_not_name_switches() -> None:

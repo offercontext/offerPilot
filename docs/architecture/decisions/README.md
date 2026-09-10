@@ -5,6 +5,10 @@
 
 ## 当前记录
 
+### 投递录入
+
+- [ADR-0006: 单条岗位录入的原子创建与恢复](./0006-reliable-single-application-intake.md) — Accepted
+
 ### Knowledge 系统
 
 - [ADR-0001: 采用 SQLite 作为 Knowledge 运行时唯一事实源](./0001-sqlite-as-knowledge-ssot.md) — Accepted

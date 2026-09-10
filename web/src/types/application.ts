@@ -71,3 +71,14 @@ export const KANBAN_COLUMNS: ApplicationStatus[] = [
   'offer',
   'closed',
 ];
+
+export interface ApplicationCreationInput extends ApplicationInput {
+  expected_scope_id?: string;
+  idempotency_key: string;
+  initial_jd: { jd_text: string; source_url: string | null } | null;
+}
+export interface ApplicationCreationResult extends Application { jd_version_id: number | null; }
+export interface ApplicationDuplicates {
+  items: (Application & { match_reason: 'url' | 'exact_name' | 'prefix' })[];
+  has_more: boolean;
+}

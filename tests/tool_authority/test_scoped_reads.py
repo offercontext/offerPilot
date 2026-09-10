@@ -603,6 +603,25 @@ def test_every_final_scoped_read_is_one_statement(seeded) -> None:
         event.remove(engine, "before_cursor_execute", capture)
 
 
+def test_application_index_distinguishes_status_mismatch_from_unavailable_scope(seeded) -> None:
+    factory = AuthorityFactory()
+    _, authority, constraint = _constraint(factory, context_ref=seeded["first"].id)
+    with seeded["session_factory"]() as session:
+        apps = _bind_scoped(seeded["applications"], session, factory, authority, constraint)
+        assert apps.list_application_index_scoped(constraint, status="interview") == []
+        assert [row.id for row in apps.list_application_index_scoped(constraint, status="applied")] == [
+            seeded["first"].id
+        ]
+
+    for unavailable_id in (seeded["deleted"].id, 999999):
+        factory = AuthorityFactory()
+        _, authority, constraint = _constraint(factory, context_ref=unavailable_id)
+        with seeded["session_factory"]() as session:
+            apps = _bind_scoped(seeded["applications"], session, factory, authority, constraint)
+            with pytest.raises(ScopeAccessDenied):
+                apps.list_application_index_scoped(constraint, status="interview")
+
+
 def test_application_index_limit_has_stable_id_tie_breaker(tmp_path) -> None:
     session_factory = init_database(tmp_path / "stable-index.db")
     applied_at = datetime(2026, 9, 2, tzinfo=timezone.utc)

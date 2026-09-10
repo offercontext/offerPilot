@@ -374,6 +374,7 @@ export function projectApplicationInterviewChoices(
 }
 
 interface ApplicationDetailProps {
+  initialTab?: ApplicationDetailTab;
   application: Application | null;
   open: boolean;
   onClose: () => void;
@@ -451,7 +452,7 @@ interface ApplicationDetailProps {
   onApplicationJdDraftChange?: (applicationId: number, patch: Partial<ApplicationJdDraft> | null) => void;
 }
 
-export default function ApplicationDetail({ application, open, onClose, taskController, onLaunchTask, onConfirmedFitToMaterial, onTaskSurfaceGuardChange, onOpenOffers, offers, offersLoading = false, offersError = false, onRetryOffers, onMockInterview: _onMockInterview, onAskPilot, onOpenPilotOpportunityFit: _onOpenPilotOpportunityFit, externalTaskBlocked = false, onOpportunityFitOwnerStateChange, onOpportunityFitProjectionChange, opportunityFitOwnerStore, pilotInterviewReviewApplicationId, onPilotInterviewReviewFocusConsumed, pilotInterviewPreparationApplicationId, pilotInterviewPreparationEventId, onPilotInterviewPreparationFocusConsumed, onAttachToPilot, interviewReviewProposalAttempts, onInterviewReviewProposalAttemptChange, reviewReadinessDrafts, onReviewReadinessDraftChange, onOpenReviewStory, onOpenReadinessPractice, onInterviewNoteChanged, interviewKnowledgeCaptureDrafts, onInterviewKnowledgeCaptureDraftChange, onInterviewKnowledgeCaptureNoteChanged, resumes, resumesLoading = false, resumesError = false, taskNow, interviewPreparationAttempts, onInterviewPreparationAttemptChange, interviewPreparationDrafts, onInterviewPreparationDraftChange, interviewPreparationKnowledgeOptions = [], interviewPreparationSelection, offerNegotiationDrafts = {}, onOfferNegotiationDraftChange, onOpenOfferNegotiationPilot, offerNegotiationEntryPoint = 'ui', nextStepSuggestions, nextStepSessionState = null, onSetDisposition, onNextStepNavigate, isNavigationAvailable, onNextStepReadonlyNavigate, isReadonlyNavigationAvailable, applicationJdDraft, onApplicationJdDraftChange }: ApplicationDetailProps) {
+export default function ApplicationDetail({ initialTab = 'overview', application, open, onClose, taskController, onLaunchTask, onConfirmedFitToMaterial, onTaskSurfaceGuardChange, onOpenOffers, offers, offersLoading = false, offersError = false, onRetryOffers, onMockInterview: _onMockInterview, onAskPilot, onOpenPilotOpportunityFit: _onOpenPilotOpportunityFit, externalTaskBlocked = false, onOpportunityFitOwnerStateChange, onOpportunityFitProjectionChange, opportunityFitOwnerStore, pilotInterviewReviewApplicationId, onPilotInterviewReviewFocusConsumed, pilotInterviewPreparationApplicationId, pilotInterviewPreparationEventId, onPilotInterviewPreparationFocusConsumed, onAttachToPilot, interviewReviewProposalAttempts, onInterviewReviewProposalAttemptChange, reviewReadinessDrafts, onReviewReadinessDraftChange, onOpenReviewStory, onOpenReadinessPractice, onInterviewNoteChanged, interviewKnowledgeCaptureDrafts, onInterviewKnowledgeCaptureDraftChange, onInterviewKnowledgeCaptureNoteChanged, resumes, resumesLoading = false, resumesError = false, taskNow, interviewPreparationAttempts, onInterviewPreparationAttemptChange, interviewPreparationDrafts, onInterviewPreparationDraftChange, interviewPreparationKnowledgeOptions = [], interviewPreparationSelection, offerNegotiationDrafts = {}, onOfferNegotiationDraftChange, onOpenOfferNegotiationPilot, offerNegotiationEntryPoint = 'ui', nextStepSuggestions, nextStepSessionState = null, onSetDisposition, onNextStepNavigate, isNavigationAvailable, onNextStepReadonlyNavigate, isReadonlyNavigationAvailable, applicationJdDraft, onApplicationJdDraftChange }: ApplicationDetailProps) {
   const queryClient = useQueryClient();
   const [eventFormOpen, setEventFormOpen] = useState(false);
   const [materialKitPrefill, setMaterialKitPrefill] = useState<{
@@ -643,14 +644,14 @@ export default function ApplicationDetail({ application, open, onClose, taskCont
     scheduleNavigationRef.current = null;
     scheduleReturnRef.current = null;
     scheduleFormResultRef.current = 'cancel';
-    setActiveTab('overview');
+    setActiveTab(initialTab);
     setPilotPreparationChooserOpen(false);
     setPilotPreparationChoices([]);
     setPilotReviewChooserOpen(false);
     setPilotReviewChoices([]);
     handledPilotReviewIntentRef.current = null;
     handledPilotPreparationIntentRef.current = null;
-  }, [application?.id, open]);
+  }, [application?.id, open, initialTab]);
 
   useEffect(() => {
     const active = effectiveTaskController.getState().active;
@@ -1767,15 +1768,21 @@ export default function ApplicationDetail({ application, open, onClose, taskCont
               <span className={styles.jdHistoryMeta}>
                 <strong>版本 {version.version_number}</strong>
                 <span>{version.source_kind === 'pilot' ? 'Pilot 保存' : '界面保存'}</span>
+                <span>{dayjs(version.created_at).format('YYYY-MM-DD HH:mm:ss')}</span>
               </span>
               <span className={styles.jdHistoryPreview}>{version.preview.slice(0, 160)}</span>
             </button>
           ))}
-          {!jdHistoryQuery.isLoading && (jdHistoryQuery.data ?? []).length === 0 ? (
+          {jdHistoryQuery.isError && <Alert type="error" message="历史读取失败" action={<Button onClick={() => void jdHistoryQuery.refetch()}>重试</Button>} />}
+          {jdDetailQuery.isError && <Alert type="error" message="版本详情读取失败" action={<Button onClick={() => void jdDetailQuery.refetch()}>重试</Button>} />}
+          {!jdHistoryQuery.isLoading && !jdHistoryQuery.isError && (jdHistoryQuery.data ?? []).length === 0 ? (
             <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无岗位资料历史" />
           ) : null}
           {selectedJdVersion !== null && jdDetailQuery.data && (
             <div className={styles.jdHistoryDetail}>
+              <div>版本 {jdDetailQuery.data.version_number} · {jdDetailQuery.data.source_kind === 'pilot' ? 'Pilot 保存' : '界面保存'}</div>
+              <div>保存时间：{dayjs(jdDetailQuery.data.created_at).format('YYYY-MM-DD HH:mm:ss')}</div>
+              <div>本版来源：{jdDetailQuery.data.source_url || '未填写'}</div>
               {jdDetailQuery.data.jd_text}
             </div>
           )}

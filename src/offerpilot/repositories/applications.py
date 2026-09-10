@@ -243,7 +243,8 @@ class ApplicationsRepository:
             rows = session.execute(statement).all()
         if not rows or rows[0]._scope_application_id is None:
             raise ScopeAccessDenied("application scope is unavailable")
-        return [_application_index_row(row) for row in rows if row.application_id is not None]
+        # SQL already restricts identity; discard only the outer-join NULL sentinel.
+        return [_application_index_row(row) for row in rows if row[0] is not None]
 
     def get_application_scoped(
         self,

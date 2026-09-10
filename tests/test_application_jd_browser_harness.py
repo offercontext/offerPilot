@@ -15,6 +15,7 @@ ROOT = Path(__file__).parents[1]
 HARNESS = ROOT / "scripts" / "application-jd-real-ai-browser-harness.ps1"
 AUDIT = ROOT / "scripts" / "browser-network-audit.py"
 ALLOWLIST_FILE_ENV = "OFFERPILOT_APPLICATION_JD_ALLOWLIST_FILE"
+BASELINE_FILE_ENV = "OFFERPILOT_APPLICATION_JD_BASELINE_FILE"
 
 
 def _changed_paths_since(root: Path, baseline: str) -> set[str]:
@@ -261,13 +262,80 @@ def test_application_jd_harness_diagnostic_report_is_outside_cleaned_fixture() -
     assert "Remove-Item -LiteralPath $stageDiagnosticReport" not in script
 
 
-def test_application_jd_implementation_scope_is_machine_checked() -> None:
-    baseline_file = os.environ.get("OFFERPILOT_APPLICATION_JD_BASELINE_FILE")
+def _assert_recorded_implementation_scope() -> None:
+    baseline_file = os.environ.get(BASELINE_FILE_ENV)
     if not baseline_file:
-        pytest.fail("release gate must supply OFFERPILOT_APPLICATION_JD_BASELINE_FILE")
+        pytest.fail(f"release gate must supply {BASELINE_FILE_ENV}")
     baseline = Path(baseline_file).read_text(encoding="ascii").strip()
     assert baseline
     assert_application_jd_implementation_scope(ROOT, baseline)
+
+
+@pytest.mark.parametrize("change_state", ["committed", "staged", "unstaged", "untracked"])
+def test_application_jd_implementation_scope_is_machine_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change_state: str
+) -> None:
+    # The historical JD release can still audit its externally approved scope.
+    # A general regression run must not require that release's temporary files.
+    if BASELINE_FILE_ENV in os.environ or ALLOWLIST_FILE_ENV in os.environ:
+        _assert_recorded_implementation_scope()
+
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def git(*args: str) -> str:
+        result = subprocess.run(
+            ["git", *args], cwd=root, capture_output=True, text=True, encoding="utf-8", check=True
+        )
+        return result.stdout.strip()
+
+    def commit() -> None:
+        git("-c", "user.name=Scope Test", "-c", "user.email=scope@example.invalid",
+            "-c", "commit.gpgsign=false", "commit", "-m", "test: AI 范围检查夹具")
+
+    git("init", "-q")
+    for name in ("approved.txt", "outside.txt"):
+        (root / name).write_text("baseline", encoding="ascii")
+    git("add", ".")
+    commit()
+    baseline = git("rev-parse", "HEAD")
+    allowlist = tmp_path / "allowlist.txt"
+    allowlist.write_text("approved.txt\n", encoding="ascii")
+    monkeypatch.setenv(ALLOWLIST_FILE_ENV, str(allowlist))
+    (root / "approved.txt").write_text("approved edit", encoding="ascii")
+    assert_application_jd_implementation_scope(root, baseline)
+
+    unexpected = "untracked.txt" if change_state == "untracked" else "outside.txt"
+    (root / unexpected).write_text("unapproved edit", encoding="ascii")
+    if change_state in {"staged", "committed"}:
+        git("add", unexpected)
+    if change_state == "committed":
+        commit()
+    with pytest.raises(AssertionError, match="outside the tracked allowlist"):
+        assert_application_jd_implementation_scope(root, baseline)
+
+
+def test_application_jd_recorded_scope_requires_baseline(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(BASELINE_FILE_ENV, raising=False)
+    with pytest.raises(pytest.fail.Exception, match=BASELINE_FILE_ENV):
+        _assert_recorded_implementation_scope()
+
+
+def test_application_jd_recorded_scope_requires_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(ALLOWLIST_FILE_ENV, raising=False)
+    with pytest.raises(pytest.fail.Exception, match=ALLOWLIST_FILE_ENV):
+        _approved_allowlist_from_environment()
+
+
+@pytest.mark.parametrize("contents", ["", "approved.txt\napproved.txt\n"])
+def test_application_jd_recorded_scope_rejects_invalid_allowlist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: str
+) -> None:
+    allowlist = tmp_path / "allowlist.txt"
+    allowlist.write_text(contents, encoding="ascii")
+    monkeypatch.setenv(ALLOWLIST_FILE_ENV, str(allowlist))
+    with pytest.raises(AssertionError, match="allowlist is invalid"):
+        _approved_allowlist_from_environment()
 
 
 def test_release_report_uses_all_consumer_harness_stage() -> None:

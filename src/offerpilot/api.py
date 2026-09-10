@@ -201,6 +201,7 @@ from offerpilot.review_readiness.repository import (
     ReviewReadinessReadNotFound,
     ReviewReadinessReadUnavailable,
 )
+from offerpilot.repositories.application_creation import ApplicationCreationService
 from offerpilot.db import journal_session_factory_for_data_dir, session_factory_for_data_dir
 from offerpilot.diagnostics import append_log_entry, read_recent_log_page
 from offerpilot.knowledge import (
@@ -1252,6 +1253,7 @@ def create_app(
     session_factory = session_factory_for_data_dir(resolved_data_dir)
     app_config = load_config(resolved_data_dir)
     applications = ApplicationsRepository(session_factory)
+    application_creation = ApplicationCreationService(session_factory)
     try:
         ledger_key = load_or_create_ledger_key(resolved_data_dir, session_factory)
     except BaseException:
@@ -2406,11 +2408,29 @@ def create_app(
         apps = applications.list(status=parsed_status)
         return [ApplicationOut.model_validate(item).model_dump(mode="json") for item in apps]
 
+    @app.get("/api/applications/creation-context")
+    def application_creation_context() -> dict[str, str]:
+        return {"scope_id": application_creation.scope_id()}
+
+    @app.get("/api/applications/duplicates")
+    def application_duplicates(
+        company_name: str = "", position_name: str = "", job_url: str = "",
+    ) -> dict[str, Any]:
+        return application_creation.duplicates(company_name, position_name, job_url)
+
     @app.post("/api/applications", status_code=201)
     def create_application(payload: dict[str, Any] = Body(...)) -> JSONResponse:
+        if (
+            "expected_scope_id" in payload
+            and payload["expected_scope_id"] != application_creation.scope_id()
+        ):
+            return error_response(
+                409, "工作区已变化，请回到原工作区恢复提交",
+                code="application_creation_scope_conflict",
+            )
         company_name = str(payload.get("company_name") or "")
         position_name = str(payload.get("position_name") or "")
-        if not company_name or not position_name:
+        if not company_name.strip() or not position_name.strip():
             return error_response(400, "company_name and position_name are required")
 
         parsed_status = _parse_application_status(str(payload.get("status") or "applied"))
@@ -2418,7 +2438,7 @@ def create_app(
             return parsed_status
 
         try:
-            app_model = applications.create(
+            result, replayed = application_creation.create(
                 ApplicationCreate(
                     company_name=company_name,
                     position_name=position_name,
@@ -2427,12 +2447,15 @@ def create_app(
                     source="web",
                     notes=str(payload.get("notes") or ""),
                     closed_reason=str(payload.get("closed_reason") or ""),
-                )
+                ),
+                payload.get("initial_jd"), payload.get("idempotency_key"),
             )
+        except JDVersionError as exc:
+            return error_response(exc.status_code, str(exc), code=exc.code)
         except ValueError as exc:
             return error_response(400, str(exc))
         return JSONResponse(
-            ApplicationOut.model_validate(app_model).model_dump(mode="json"), status_code=201
+            result, status_code=200 if replayed else 201
         )
 
     @app.get("/api/applications/{app_id}/job-description")
@@ -9772,7 +9795,7 @@ def _application_jd_summary_json(version: Any) -> dict[str, Any]:
         "preview": version.preview
         if hasattr(version, "preview")
         else (version.jd_text if len(version.jd_text) <= 240 else version.jd_text[:240] + "…"),
-        "created_at": version.created_at.isoformat() if version.created_at is not None else None,
+        "created_at": _format_rfc3339(version.created_at) if version.created_at is not None else None,
     }
 
 

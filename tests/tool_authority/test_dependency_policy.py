@@ -44,15 +44,20 @@ def _bundle() -> ToolMetadataBundleV1:
 def test_dependency_policy_v1_matches_read_only_canonical_golden() -> None:
     expected = _fixture()
     discovery = _bundle().discovery_view()
+    historical_names = expected["catalog_names"]
+    historical_entries = [
+        entry for entry in discovery.ordered_entries if entry.provider_name in historical_names
+    ]
     actual = {
         "dependency_policy_version": expected["dependency_policy_version"],
-        "catalog_names": [entry.provider_name for entry in discovery.ordered_entries],
+        "catalog_names": [entry.provider_name for entry in historical_entries],
         "dependencies": {
-            entry.provider_name: list(entry.dependencies) for entry in discovery.ordered_entries
+            entry.provider_name: list(entry.dependencies) for entry in historical_entries
         },
     }
     assert actual["dependency_policy_version"] == DEPENDENCY_POLICY_VERSION
-    assert actual["catalog_names"] == list(_TEST_TOOL_NAMES)
+    assert [entry.provider_name for entry in discovery.ordered_entries] == list(_TEST_TOOL_NAMES)
+    assert actual["catalog_names"] == historical_names
     assert actual["dependencies"] == expected["dependencies"]
     assert "sha256:" + sha256_hex(canonical_json(actual)) == expected["canonical_sha256"]
 

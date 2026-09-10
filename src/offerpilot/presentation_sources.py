@@ -17,7 +17,9 @@ from offerpilot.ai.tool_authority.policy import (
     decide_binding,
 )
 from offerpilot.ai.tool_authority.visibility import AuthorityApplicationVisibilityQuery
-from offerpilot.ai.tool_runtime.metadata import FrozenJSONObject, ToolMetadataBundleV1, freeze_json
+from offerpilot.ai.tool_runtime.metadata import (
+    FrozenJSONObject, ToolMetadataBundleV1, WriteOperationMetadataV1, freeze_json,
+)
 from offerpilot.ai.tool_runtime.policy_types import UndoPolicy
 from offerpilot.ai.write_operations import (
     TerminalPayload, WriteOperationRepository, compensation_operation_id,
@@ -167,9 +169,9 @@ def agent_undo_state(
         if handle is None:
             return 'unknown'
         metadata = lease.require_spec(handle).metadata.operation
-        if getattr(metadata, 'undo_policy', None) is not UndoPolicy.REQUIRED:
+        if type(metadata) is not WriteOperationMetadataV1 or metadata.undo_policy is not UndoPolicy.REQUIRED:
             return 'unsupported'
-        kind = getattr(metadata, 'compensation_kind', None)
+        kind = metadata.compensation_kind
         if kind is None:
             return 'unknown'
         compensation_id = compensation_operation_id(operation.id, kind.value)
