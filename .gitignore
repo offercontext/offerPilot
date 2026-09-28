@@ -51,11 +51,12 @@ build/
 /tickets*.md
 /*.png
 
-# Docs 默认按本地工件忽略,仅跟踪 SSOT。
+# Docs 默认按本地工件忽略,跟踪 SSOT 与公开学习内容。
 # SSOT 边界以 docs/architecture/documentation-rules.md 为准。
 docs/*
 !docs/architecture/
 !docs/archive/
+!docs/learn/
 !docs/BUGS.md
 !docs/p0-release-checklist.md
 !docs/python-rewrite-contract.md
