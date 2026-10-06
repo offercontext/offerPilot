@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Windows venv redirector 导致桌面后端身份校验误拒绝（2026-10-06）
+
+**现象：** [Windows CI run 37443589988](https://github.com/offercontext/offerPilot/actions/runs/37443589988) 的桌面专项回归为 47 通过、1 失败；ready 报告 PID 5524，`subprocess.Popen.pid` 为 2552，持久化和退出验证在身份断言处中断。Electron 开发入口也采用同样的精确 PID 假设。
+
+**根因：** Windows Python 3.12 venv 的 `python.exe` 是 redirector，会创建实际解释器子进程并转发标准流、等待退出；启动句柄的 PID 因而不一定等于 Python 内部 `os.getpid()`。见 [Python venv 文档](https://docs.python.org/3.12/library/venv.html) 和 [CPython 3.12.10 launcher 实现](https://github.com/python/cpython/blob/v3.12.10/PC/launcher.c)。
+
+**修复：** ready 增加 `parent_pid`；只在 Windows 开发入口显式接受父 PID 等于所持有 launcher PID 的一次转发，同时严格检查实际 PID 为正安全整数，保留原 loopback/token 健康检查。冻结程序、默认调用及其他平台仍要求精确 PID。Python 进程回归验证两次启动的直属关系、EOF 正常退出、端口不再监听以及同端口数据恢复；Node 回归覆盖允许与拒绝路径。退出仍通过所持有进程的 stdin pipe，不对 ready 的任意 PID 发信号。
+
+**教训：** 区分平台启动器与实际工作进程；修复身份模型时显式限制可接受的关系和调用场景，不能删除身份断言、扩大到任意后代或跳过目标平台测试。开发进程通过不能替代冻结包和 Windows 安装/UI 验收。
+
 ## 写后超时回归被额外的墙钟截止抢跑（2026-09-10）
 
 **现象：** Chat 流式确认的写后超时回归在全量测试失败，单独重跑通过。现场已有已提交的业务写入，但没有第二次模型调用，也未落库预期的完成消息。

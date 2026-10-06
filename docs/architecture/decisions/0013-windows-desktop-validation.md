@@ -15,6 +15,8 @@
 
 新增桌面组合入口，不改变 Web/CLI 入口的默认使用方式。Electron 负责后端启动、ready/health 等待、窗口与退出生命周期；后端保留监听 socket，并在 ASGI 完成启动后通过 stdout 输出带版本的 ready 消息。父进程持有 stdin pipe，EOF 触发有界退出，避免父窗口结束后遗留后台服务器。日志走 stderr，不得输出会话密钥。
 
+ready 报告实际 PID 与父 PID。冻结程序保持精确子进程 PID 校验；Windows 开发环境的 Python venv redirector 允许一次直属子进程转发，但必须显式启用、校验正安全整数 PID 及父 PID 等于所启动的 launcher PID，并继续执行原有本地鉴权健康检查。关闭与强制终止仍操作 Electron 持有的子进程和 stdin pipe，不能信任协议中的 PID 来终止其他进程。
+
 桌面 HTTP 只绑定 `127.0.0.1`。每次启动由主进程生成独立随机 token；主进程只向当前窗口的精确本地 origin 注入 token。后端在最外层校验唯一 Host、Origin 和 token，覆盖 API、静态文件、健康检查及 preflight；它独立于用户可编辑的产品 auth 设置。会话密钥不存 URL、localStorage 或工作区配置。它防止来自其他网页的无凭据访问，不承诺防御同一系统用户下的恶意软件。
 
 首次由操作系统分配端口并持久化，以后复用端口及 Electron persistent session，避免 origin 改变导致前端状态丢失。端口被占用时明确失败，禁止自动换端口绕过。Electron 持有单实例锁。桌面工作区位于用户 AppData，与原 CLI 默认工作区分离；不自动迁移或覆盖旧数据，不在安装资源目录写数据库。

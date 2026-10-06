@@ -2,8 +2,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const http = require('node:http');
 const { PassThrough } = require('node:stream');
-const { isLocalOrigin, isSameOrigin, waitForReady, stopBackend } = require('../lifecycle.cjs');
+const { TOKEN_HEADER, isLocalOrigin, isSameOrigin, waitForReady, checkHealth, stopBackend } = require('../lifecycle.cjs');
 function backend() {
   const child = new EventEmitter();
   Object.assign(child, { pid: 42, stdout: new PassThrough(), stdin: new PassThrough(), exitCode: null, signalCode: null });
@@ -32,6 +33,64 @@ test('readiness validates process identity and protocol and tolerates unrelated 
     const other = backend(); const result = waitForReady(other, 100); ready(other, changes);
     await assert.rejects(result, /Invalid backend/);
   }
+});
+test('Windows development redirector accepts only the owned one-hop child', async () => {
+  const child = backend();
+  const result = waitForReady(child, 100, { allowPythonRedirector: true });
+  ready(child, { pid: 43, parent_pid: child.pid });
+  assert.equal((await result).pid, 43);
+
+  // A direct interpreter still works when the optional redirector path is enabled.
+  const direct = backend();
+  const directResult = waitForReady(direct, 100, { allowPythonRedirector: true });
+  ready(direct, { parent_pid: 1 });
+  assert.equal((await directResult).pid, direct.pid);
+});
+test('redirector identity cannot weaken the default packaged identity contract', async () => {
+  for (const options of [undefined, { allowPythonRedirector: false }, { allowPythonRedirector: 'true' }]) {
+    const child = backend();
+    const result = waitForReady(child, 100, options);
+    ready(child, { pid: 43, parent_pid: child.pid });
+    await assert.rejects(result, /Invalid backend/);
+  }
+});
+test('redirector readiness rejects unrelated parents, malformed PIDs and other protocol failures', async () => {
+  for (const changes of [
+    { parent_pid: undefined }, { parent_pid: 1 }, { parent_pid: '42' },
+    { parent_pid: null }, { parent_pid: 43 },
+    { pid: undefined }, { pid: null }, { pid: '43' }, { pid: true },
+    { pid: 0 }, { pid: -1 }, { pid: 43.5 }, { pid: Number.MAX_SAFE_INTEGER + 1 },
+    { protocol: 2 }, { origin: 'http://evil.test:1234' },
+  ]) {
+    const child = backend();
+    const result = waitForReady(child, 100, { allowPythonRedirector: true });
+    ready(child, { pid: 43, parent_pid: child.pid, ...changes });
+    await assert.rejects(result, /Invalid backend/, JSON.stringify(changes));
+  }
+  for (const pid of [undefined, null, 0, -1, 42.5, '42', Number.MAX_SAFE_INTEGER + 1]) {
+    const child = backend();
+    child.pid = pid;
+    const result = waitForReady(child, 100, { allowPythonRedirector: true });
+    ready(child, { pid: 43, parent_pid: pid });
+    await assert.rejects(result, /Invalid backend/);
+  }
+});
+test('redirector readiness still requires the authenticated health check', async (t) => {
+  const token = 'fresh-session-token';
+  const server = http.createServer((request, response) => {
+    assert.equal(request.url, '/api/health');
+    const authenticated = request.headers[TOKEN_HEADER.toLowerCase()] === token;
+    response.writeHead(authenticated ? 200 : 401).end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const child = backend();
+  const result = waitForReady(child, 100, { allowPythonRedirector: true });
+  ready(child, { pid: 43, parent_pid: child.pid, origin });
+  const metadata = await result;
+  await assert.rejects(checkHealth(metadata.origin, 'wrong-token'), /health check failed/);
+  await checkHealth(metadata.origin, token);
 });
 test('readiness failure, spawn error, early exit and timeout reject', async () => {
   const child = backend(); const result = waitForReady(child, 100);

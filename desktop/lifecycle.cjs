@@ -14,7 +14,7 @@ function isLocalOrigin(value) {
 function isSameOrigin(value, origin) {
   try { return new URL(value).origin === origin; } catch { return false; }
 }
-function waitForReady(child, timeoutMs = 60000) {
+function waitForReady(child, timeoutMs = 60000, { allowPythonRedirector = false } = {}) {
   return new Promise((resolve, reject) => {
     const lines = createInterface({ input: child.stdout });
     const timer = setTimeout(() => finish(new Error('Backend startup timed out.')), timeoutMs);
@@ -36,7 +36,14 @@ function waitForReady(child, timeoutMs = 60000) {
       if (message.type === 'offerpilot.desktop.error') {
         finish(new Error('Backend startup failed. Check the desktop log for details.'));
       } else if (message.type === 'offerpilot.desktop.ready') {
-        if (message.protocol !== 1 || message.pid !== child.pid || !isLocalOrigin(message.origin)) {
+        // Windows venv python.exe can launch the real interpreter as one child.
+        // Only development callers may opt into that explicitly owned hop;
+        // frozen executables must still report the exact PID that we spawned.
+        const ownedProcess = Number.isSafeInteger(child.pid) && child.pid > 0
+          && Number.isSafeInteger(message.pid) && message.pid > 0
+          && (message.pid === child.pid
+            || (allowPythonRedirector === true && message.parent_pid === child.pid));
+        if (message.protocol !== 1 || !ownedProcess || !isLocalOrigin(message.origin)) {
           finish(new Error('Invalid backend readiness response.'));
         } else finish(null, message);
       }

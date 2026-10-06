@@ -249,6 +249,7 @@ def main(argv: list[str] | None = None) -> int:
                             "protocol": PROTOCOL_VERSION,
                             "origin": security.origin,
                             "pid": os.getpid(),
+                            "parent_pid": os.getppid(),
                         },
                     ),
                 )

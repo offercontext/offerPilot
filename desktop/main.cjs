@@ -61,7 +61,9 @@ async function start() {
       app.quit();
     }
   });
-  const ready = await waitForReady(child);
+  const ready = await waitForReady(child, 60000, {
+    allowPythonRedirector: !app.isPackaged && process.platform === 'win32',
+  });
   await checkHealth(ready.origin, token);
   if (quitting) return;
   if (port && Number(new URL(ready.origin).port) !== port) throw new Error('Backend changed the saved port unexpectedly.');

@@ -5,6 +5,7 @@
 ## 组成与边界
 
 - `desktop/main.cjs` 启动一个 PyInstaller 后端子进程，等待 ready 协议及健康检查，再打开 Electron 窗口。
+- ready 同时报告实际 `pid` 与 `parent_pid`。冻结程序必须与启动的 PID 完全一致；仅 Windows 开发模式允许 venv redirector 的直属解释器子进程，要求正安全整数 PID 且 `parent_pid` 等于所持有的 launcher PID。所有模式仍须通过相同 loopback/token 健康检查；退出始终关闭所持有的 stdin pipe，不向协议报告的 PID 发送终止信号。见 [Python venv 说明](https://docs.python.org/3.12/library/venv.html)。
 - Python 仍使用 `uv.lock` 的应用依赖。打包工具通过 `uv run --with` 单独固定为 PyInstaller 6.16.0、hooks-contrib 2025.9，不加入运行时依赖。这是一组固定的验证工具版本，不宣称是最新版；选择固定版本是为了便于复现本次构建，升级须重新执行冻结进程与目标 Windows 验收。
 - `desktop/backend.spec` 收集 LiteLLM 数据、动态 provider 模块、依赖 metadata、tiktoken namespace 插件、SQLite dialect 和 uvicorn 动态实现。构建预热并打包 OpenAI tokenizer 缓存；下载或校验失败会阻止构建。固定 Knowledge tokenizer 为原来的 cl100k_base。
 - 冻结入口使用随包 LiteLLM 模型价格表，避免启动时访问远端价格表。真实 AI 请求仍需要用户自行配置 provider、网络与凭据，未由此验收覆盖。

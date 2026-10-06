@@ -187,9 +187,23 @@ def _backend(data_dir, static_dir, *, token=TOKEN, port=0, env_only=False, extra
             process.stdout.close()
 
 
-def _close_parent(process):
+def _assert_owned_backend(process, ready):
+    assert type(ready["pid"]) is int and 0 < ready["pid"] <= 2**53 - 1
+    if ready["pid"] != process.pid:
+        # CPython's Windows venv redirector owns one interpreter child. Keep
+        # direct-PID identity mandatory everywhere else, including frozen smoke.
+        assert sys.platform == "win32" and sys.prefix != sys.base_prefix
+        assert ready["parent_pid"] == process.pid
+    else:
+        assert ready["parent_pid"] == os.getpid()
+
+
+def _close_parent(process, port):
     process.stdin.close()
     assert process.wait(timeout=20) == 0
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.settimeout(1)
+        assert listener.connect_ex(("127.0.0.1", port)) != 0
 
 
 def test_process_ready_security_persistence_and_parent_eof(tmp_path, static_dir):
@@ -198,7 +212,7 @@ def test_process_ready_security_persistence_and_parent_eof(tmp_path, static_dir)
     with _backend(data_dir, static_dir, env_only=True) as (process, ready, _, stderr):
         assert ready["type"] == "offerpilot.desktop.ready"
         assert ready["protocol"] == 1
-        assert ready["pid"] == process.pid
+        _assert_owned_backend(process, ready)
         origin = ready["origin"]
         port = urlsplit(origin).port
         with httpx.Client(base_url=origin, trust_env=False) as client:
@@ -215,13 +229,14 @@ def test_process_ready_security_persistence_and_parent_eof(tmp_path, static_dir)
             assert created.status_code == 201
             application_id = created.json()["id"]
             assert client.put("/api/settings", headers=headers, json={"model": "desktop-test-model"}).status_code == 200
-        _close_parent(process)
+        _close_parent(process, port)
         stderr.seek(0)
         assert TOKEN not in stderr.read()
 
     next_token = secrets.token_hex(32)
     with _backend(data_dir, static_dir, token=next_token, port=port) as (process, ready, _, _):
         assert ready["type"] == "offerpilot.desktop.ready"
+        _assert_owned_backend(process, ready)
         assert ready["origin"] == origin
         with httpx.Client(base_url=origin, headers={TOKEN_HEADER: next_token}, trust_env=False) as client:
             assert client.get("/api/health", headers={TOKEN_HEADER: TOKEN}).status_code == 401
@@ -230,7 +245,7 @@ def test_process_ready_security_persistence_and_parent_eof(tmp_path, static_dir)
             assert application.json()["company_name"] == "Persistent desktop company"
             assert client.get("/api/settings").json()["model"] == "desktop-test-model"
             assert client.get("/api/auth/status").json()["authenticated"] is True
-        _close_parent(process)
+        _close_parent(process, port)
     config_text = (data_dir / "config.json").read_text(encoding="utf-8")
     assert TOKEN not in config_text
     assert next_token not in config_text
