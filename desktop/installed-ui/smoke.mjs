@@ -10,6 +10,7 @@ import { extractFile } from '@electron/asar';
 import { hash, treeFiles, verifyPayload, normalizeSourceText } from './integrity.mjs';
 import { safeFailure, commandFailure, recordSecurityBeforeValidation } from './diagnostics.mjs';
 import { observeDevToolsDisabled } from './devtools-probe.mjs';
+import { verifyApplicationDetail } from './detail-ui.mjs';
 import { PIN, SYNTHETIC, validateRequest, publicApplication, sameWindowsPath,
   selectOwnedProcesses, validateListeners, validateSecurity } from './contract.mjs';
 
@@ -181,10 +182,6 @@ async function closeNormally() {
   owned = [];
   await checkpoint(`launch-${info.number}-normal-close-and-port-release`);
 }
-async function verifyDetail(page) {
-  await page.getByRole('heading', { name: `${SYNTHETIC.company_name} · ${SYNTHETIC.position_name}`, exact: true }).waitFor();
-  await page.getByText(SYNTHETIC.notes, { exact: true }).waitFor();
-}
 async function openList(page, record, shot) {
   stage = `${shot}-list-navigation`;
   const back = page.getByRole('button', { name: '返回上一层', exact: true });
@@ -299,7 +296,7 @@ try {
   const record = publicApplication(await response.json());
   report.application = record; // Only these five whitelisted fields; no raw response/header/body dumps.
   stage = 'saved-detail-content';
-  await verifyDetail(first.page);
+  await verifyApplicationDetail(first.page, SYNTHETIC, (step) => { stage = `saved-detail-${step}`; });
   await screenshot(first.page, '02-saved-detail');
   await openList(first.page, record, '03-saved-list');
   stage = 'theme-ui-toggle';
@@ -325,7 +322,7 @@ try {
   const row = await openList(second.page, record, '04-restarted-list');
   stage = 'restart-detail-content';
   await row.click();
-  await verifyDetail(second.page);
+  await verifyApplicationDetail(second.page, SYNTHETIC, (step) => { stage = `restart-detail-${step}`; });
   await screenshot(second.page, '05-restarted-detail');
   stage = 'data-location';
   assert.equal(await exists(path.join(userData, 'data', 'data.db')), true);
