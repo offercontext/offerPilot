@@ -65,10 +65,18 @@ test('debug and backend listeners must remain loopback and match the saved port'
 });
 test('each packaged security property and unsafe switch is fail closed', () => {
   const security = { packaged: true, nodeIntegration: false, contextIsolation: true, sandbox: true,
-    webSecurity: true, devTools: false, devToolsOpened: false, unsafeSwitches: [] };
+    webSecurity: true, devToolsOpened: false, unsafeSwitches: [],
+    devToolsProbe: { beforeOpen: false, beforeContents: false, openedEvent: false, afterOpen: false, afterContents: false } };
   validateSecurity(security);
-  for (const key of Object.keys(security).filter((key) => key !== 'unsafeSwitches')) {
+  for (const key of Object.keys(security).filter((key) => !['unsafeSwitches', 'devToolsProbe'].includes(key))) {
     assert.throws(() => validateSecurity({ ...security, [key]: !security[key] }));
   }
   assert.throws(() => validateSecurity({ ...security, unsafeSwitches: ['no-sandbox'] }));
+  assert.throws(() => validateSecurity({ ...security, devTools: true }));
+  assert.throws(() => validateSecurity({ ...security, devToolsProbe: undefined }));
+  for (const key of Object.keys(security.devToolsProbe)) {
+    for (const value of [true, undefined, null, 'false']) {
+      assert.throws(() => validateSecurity({ ...security, devToolsProbe: { ...security.devToolsProbe, [key]: value } }));
+    }
+  }
 });

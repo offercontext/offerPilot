@@ -8,7 +8,8 @@ import { _electron } from 'playwright-core';
 import { getCurrentFuseWire, FuseState, FuseV1Options } from '@electron/fuses';
 import { extractFile } from '@electron/asar';
 import { hash, treeFiles, verifyPayload, normalizeSourceText } from './integrity.mjs';
-import { safeFailure, commandFailure } from './diagnostics.mjs';
+import { safeFailure, commandFailure, recordSecurityBeforeValidation } from './diagnostics.mjs';
+import { observeDevToolsDisabled } from './devtools-probe.mjs';
 import { PIN, SYNTHETIC, validateRequest, publicApplication, sameWindowsPath,
   selectOwnedProcesses, validateListeners, validateSecurity } from './contract.mjs';
 
@@ -136,13 +137,23 @@ async function launch(number) {
       unsafeSwitches: ['no-sandbox', 'disable-web-security', 'disable-site-isolation-trials',
         'allow-running-insecure-content', 'ignore-certificate-errors'].filter((name) => app.commandLine.hasSwitch(name)) };
   });
-  validateSecurity(security);
-  assert.equal(fatalNetwork, false, 'external renderer request observed');
   const info = { number, mainPid: processes.main.pid, backendPid: processes.backend.pid,
     mainCreated: processes.main.created, backendCreated: processes.backend.created,
-    port, realAppData: true, security, ...listeners };
+    port, realAppData: true, observedExternalRendererRequests: fatalNetwork, ...listeners };
   report.launches.push(info);
   current = { app, page, info, debugEndpoints: snapshot.listeners.filter((item) => item.pid === identity.pid).map(({ address, port }) => ({ address, port })) };
+  // Persist bounded observations first: a failed assertion must not erase its evidence.
+  await recordSecurityBeforeValidation(info, security, writeReport);
+  stage = `launch-${number}-devtools-disabled-probe`;
+  security.devToolsProbe = await app.evaluate(observeDevToolsDisabled);
+  await recordSecurityBeforeValidation(info, security, writeReport);
+  stage = `launch-${number}-runtime-security`;
+  validateSecurity(security);
+  info.securityValidation = 'passed';
+  stage = `launch-${number}-external-network`;
+  info.observedExternalRendererRequests = fatalNetwork;
+  await writeReport();
+  assert.equal(fatalNetwork, false, 'external renderer request observed');
   await checkpoint(`launch-${number}-identity-and-security`);
   return current;
 }
@@ -159,6 +170,9 @@ async function closeNormally() {
   await waitUntil(async () => !(await endpointOpen({ port: info.port })) &&
     (await Promise.all(debugEndpoints.map(endpointOpen))).every((value) => !value), 15000);
   assert.equal(await savedPort(), info.port);
+  stage = `launch-${info.number}-external-network-after-close`;
+  info.observedExternalRendererRequests = fatalNetwork;
+  await writeReport();
   assert.equal(fatalNetwork, false);
   info.normalClose = true;
   info.mainBackendAndRendererExited = true;
@@ -321,6 +335,9 @@ try {
   await closeNormally();
   stage = 'final-integrity';
   assert.equal(await hash(exe), exeHashBefore, 'test must not modify installed executable/fuses');
+  stage = 'final-external-network';
+  report.observedExternalRendererRequests = fatalNetwork;
+  await writeReport();
   assert.equal(fatalNetwork, false);
   await checkpoint(stage, { executableUnchanged: true, observedExternalRendererRequests: false });
   report.status = 'passed';

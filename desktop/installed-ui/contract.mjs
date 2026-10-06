@@ -90,7 +90,9 @@ export function validateSecurity(security) {
   assert.equal(security.contextIsolation, true);
   assert.equal(security.sandbox, true);
   assert.equal(security.webSecurity, true);
-  assert.equal(security.devTools, false);
+  if (security.devTools !== undefined) assert.equal(security.devTools, false);
+  assert.deepEqual(security.devToolsProbe, { beforeOpen: false, beforeContents: false,
+    openedEvent: false, afterOpen: false, afterContents: false });
   assert.equal(security.devToolsOpened, false);
   assert.deepEqual(security.unsafeSwitches, []);
 }

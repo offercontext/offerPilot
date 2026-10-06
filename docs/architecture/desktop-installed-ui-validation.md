@@ -35,12 +35,20 @@
 3. 使用 NSIS `/S /currentuser /D=<全新目录>` 安装，`/D` 最后且不加引号；目标位于 RUNNER_TEMP，路径包含中文和空格。要求安装退出码 0 且没有自动启动。
 4. 检查实际安装的 exe、app.asar、冻结后端与 `_internal`、前端 assets、LICENSE；逐文件 SHA256 对比解包 payload。app.asar 的 main/lifecycle 另与固定源提交对比，源码文本仅将 CRLF 规范化为 LF；二进制 payload 对比始终严格逐字节。记录安装 exe 摘要、资源数量和版本核对结果。
 5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
-6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。
+6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。DevTools 禁用按下述严格行为探针验证。
 7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
 8. 仅在真实 UI 输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。从“添加第一条投递”进入表单，执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”。不使用“仍然创建”兜底，不配置 provider、岗位 URL、JD、简历或真实凭据。
 9. 只监听这次 UI 发起的 POST 回执，保留 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。通过 UI 切换明暗模式。
 10. 正常调用窗口关闭路径，要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
 11. 再次正常退出并核对进程/端口清理与 exe 完整性。任何启动、保护、持久化、正常关闭或清理问题均为失败；失败后的清理不能改成成功。
+
+### Electron 44.5.1 的 DevTools 观测限制
+
+固定版本的 [`SaveLastPreferences()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/web_contents_preferences.cc#L362-L383) 不返回 `devTools` 键，因此不能把 `getLastWebPreferences().devTools === undefined` 当成产品打开了 DevTools，也不能把 undefined 默认为 false。原 helper 对该 getter 的 false 断言会造成假失败。
+
+本 helper 保留精确安装 payload/源入口匹配与 `app.isPackaged === true`，并用公开 API 做独立禁用探针：先采样 `isDevToolsOpened()` 和 `devToolsWebContents` 是否存在；注册 `devtools-opened` 监听后尝试 `openDevTools({ mode: 'detach', activate: false })`，固定观察 1 秒，再采样。前后打开状态、前后 contents 存在状态与 opened 事件五项必须全为 false；缺项、出现事件或创建 contents 都失败，不能靠随后关闭变成通过。监听在 finally 移除，失败仍走既有清理。官方固定版本 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_contents.cc#L3201-L3245) 在禁用时直接返回；这不需要修改任何 app 保护设置。
+
+getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也必须为 false。所有安全观测先保存再断言，错误字段只用固定名称，不能输出原始 preferences。外部网络观测使用独立失败阶段，避免与安全属性混淆。此探针不把临时 CDP 测试启动变成正常无调试启动的证明。
 
 正常关闭通过 `BrowserWindow.close()` 走窗口关闭与 app 的 before-quit 路径，不以强杀作为成功退出。失败才允许清理已由 CIM 证实身份的本次测试进程，清理前重新核对路径、父子关系及创建时间，防止 PID 复用。不会删除测试 profile；runner 生命周期负责最终环境销毁。
 
