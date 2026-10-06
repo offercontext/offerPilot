@@ -1247,6 +1247,7 @@ def create_app(
     static_dir: Optional[Path] = None,
     *,
     run_recorder_factory: RunRecorderFactory | None = None,
+    transport_authenticator: Callable[[Request], bool] | None = None,
 ) -> FastAPI:
     resolved_data_dir = data_dir or resolve_data_dir()
     resolved_static_dir = static_dir or _find_static_dir()
@@ -1485,7 +1486,15 @@ def create_app(
         if request.method == "OPTIONS":
             response = Response(status_code=200)
         else:
-            auth_response = _auth_guard_response(request, resolved_data_dir)
+            # A separately secured transport may authenticate this request without
+            # changing the persisted web-login configuration. Ordinary web apps
+            # never receive this callback and keep their existing auth behavior.
+            transport_authenticated = (
+                transport_authenticator is not None and transport_authenticator(request)
+            )
+            auth_response = (
+                None if transport_authenticated else _auth_guard_response(request, resolved_data_dir)
+            )
             response = auth_response if auth_response is not None else await call_next(request)
         origin = request.headers.get("origin")
         same_origin = f"{request.url.scheme}://{request.url.netloc}"
@@ -2379,6 +2388,7 @@ def create_app(
         return {
             "auth_enabled": cfg.auth_enabled,
             "authenticated": (not cfg.auth_enabled)
+            or (transport_authenticator is not None and transport_authenticator(request))
             or _request_has_valid_auth_token(request, cfg.auth_token),
         }
 

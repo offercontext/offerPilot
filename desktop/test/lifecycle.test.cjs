@@ -1,0 +1,55 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const { PassThrough } = require('node:stream');
+const { isLocalOrigin, isSameOrigin, waitForReady, stopBackend } = require('../lifecycle.cjs');
+function backend() {
+  const child = new EventEmitter();
+  Object.assign(child, { pid: 42, stdout: new PassThrough(), stdin: new PassThrough(), exitCode: null, signalCode: null });
+  child.kill = () => { child.signalCode = 'SIGTERM'; child.emit('exit', null, 'SIGTERM'); };
+  return child;
+}
+function ready(child, changes = {}) {
+  child.stdout.write(`${JSON.stringify({type: 'offerpilot.desktop.ready', protocol: 1, origin: 'http://127.0.0.1:12345', pid: 42, ...changes})}\n`);
+}
+test('accept only a literal IPv4 loopback origin, never URL credentials or paths', () => {
+  assert.equal(isLocalOrigin('http://127.0.0.1:12345'), true);
+  for (const value of ['https://127.0.0.1:123', 'http://localhost:123', 'http://127.0.0.1:0', 'http://127.0.0.1:123/a', 'http://evil.test:123', 'http://user@127.0.0.1:123', 'http://127.0.0.1:123?x=1']) assert.equal(isLocalOrigin(value), false, value);
+});
+test('origin checks do not leak token to a changed port or deceptive hostname', () => {
+  const origin = 'http://127.0.0.1:12345';
+  assert.equal(isSameOrigin(`${origin}/api/settings`, origin), true);
+  for (const url of ['http://127.0.0.1:12346/', 'http://127.0.0.1.evil.test:12345/', 'file:///tmp/a', 'invalid']) assert.equal(isSameOrigin(url, origin), false);
+});
+test('readiness validates process identity and protocol and tolerates unrelated output', async () => {
+  const child = backend();
+  const promise = waitForReady(child, 100);
+  child.stdout.write('ordinary output\n');
+  ready(child);
+  assert.equal((await promise).origin, 'http://127.0.0.1:12345');
+  for (const changes of [{pid: 43}, {protocol: 2}, {origin: 'http://evil.test:1234'}]) {
+    const other = backend(); const result = waitForReady(other, 100); ready(other, changes);
+    await assert.rejects(result, /Invalid backend/);
+  }
+});
+test('readiness failure, spawn error, early exit and timeout reject', async () => {
+  const child = backend(); const result = waitForReady(child, 100);
+  child.stdout.write('{"type":"offerpilot.desktop.error"}\n');
+  await assert.rejects(result, /startup failed/);
+  const failed = backend(); const error = waitForReady(failed, 100); failed.emit('error', new Error('ENOENT'));
+  await assert.rejects(error, /Could not start/);
+  const exited = backend(); const exit = waitForReady(exited, 100); exited.emit('exit', 1);
+  await assert.rejects(exit, /exited before startup/);
+  await assert.rejects(waitForReady(backend(), 5), /timed out/);
+});
+test('shutdown closes stdin, waits for exit, and kills only after grace period', async () => {
+  const child = backend();
+  child.stdin.once('finish', () => setTimeout(() => {child.exitCode = 0; child.emit('exit', 0);}, 2));
+  await stopBackend(child, 100);
+  assert.equal(child.stdin.writableEnded, true);
+  assert.equal(child.exitCode, 0);
+  assert.equal(child.signalCode, null);
+  const stuck = backend(); await stopBackend(stuck, 5);
+  assert.equal(stuck.signalCode, 'SIGTERM');
+});

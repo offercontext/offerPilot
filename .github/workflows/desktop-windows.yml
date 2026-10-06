@@ -1,0 +1,95 @@
+name: Windows desktop validation (unsigned)
+
+# Review-only pilot. The exact validation branch is the only push activation.
+# Pushing it and starting its Windows run require separate user authorization.
+on:
+  push:
+    branches:
+      - feat/20261005-windows-desktop-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-validation:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      PYTHONUTF8: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      ONNXRUNTIME_NODE_INSTALL: skip
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+      - name: Install locked dependencies
+        run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
+          npm ci --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop install failed" }
+      - name: Repository release and installation checks
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-gate.ps1 -Install
+          if ($LASTEXITCODE -ne 0) { throw "Repository release gate failed" }
+          npm test --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop lifecycle tests failed" }
+      - name: Freeze existing Python backend
+        run: |
+          uv run --frozen --with pyinstaller==6.16.0 --with pyinstaller-hooks-contrib==2025.9 python desktop/build-backend.py
+          if ($LASTEXITCODE -ne 0) { throw "Frozen backend build failed" }
+      - name: Frozen process persistence and security smoke
+        run: |
+          python desktop/smoke-backend.py --backend desktop/backend-dist/offerpilot-backend/offerpilot-backend.exe --static-dir web/dist
+          if ($LASTEXITCODE -ne 0) { throw "Frozen backend smoke failed" }
+      - name: Build unsigned NSIS installer without publishing
+        run: |
+          npm run build:win --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
+      - name: Verify packaged resource layout and backend
+        run: |
+          python desktop/smoke-backend.py --backend desktop/dist/win-unpacked/resources/backend/offerpilot-backend.exe --static-dir desktop/dist/win-unpacked/resources/web
+          if ($LASTEXITCODE -ne 0) { throw "Packaged resource smoke failed" }
+      - name: Hash installers for review
+        run: |
+          $installers = @(Get-ChildItem -Path desktop/dist -Filter '*-setup.exe')
+          if ($installers.Count -eq 0) { throw "No Windows installer produced" }
+          foreach ($installer in $installers) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)" | Set-Content -Encoding utf8 -LiteralPath "$($installer.FullName).sha256"
+          }
+          @(
+            "UNSIGNED WINDOWS VALIDATION BUILD: not a production release.",
+            "Commit: $env:GITHUB_SHA",
+            "Automated gates do not validate installer execution or the Electron UI.",
+            "Complete docs/architecture/desktop-validation.md on a clean Windows account."
+          ) | Set-Content -Encoding utf8 desktop/dist/VALIDATION-NOTES.txt
+      - name: Upload unsigned review artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: offerpilot-windows-unsigned-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/dist/*-setup.exe
+            desktop/dist/*-setup.exe.sha256
+            desktop/dist/VALIDATION-NOTES.txt

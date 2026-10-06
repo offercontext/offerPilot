@@ -71,3 +71,9 @@ docs/*
 # Local browser and whiteboard verification artifacts
 .playwright-mcp/
 diagrams/
+
+# Desktop validation build (source and lockfile remain tracked)
+desktop/node_modules/
+desktop/dist/
+desktop/backend-dist/
+desktop/.build/

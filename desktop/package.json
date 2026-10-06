@@ -1,0 +1,40 @@
+{
+  "name": "offerpilot-desktop",
+  "version": "0.1.0-desktop.1",
+  "private": true,
+  "description": "OfferPilot Windows desktop validation build",
+  "author": "OfferPilot contributors",
+  "license": "AGPL-3.0-only",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.cjs",
+    "build:win": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "org.offerpilot.desktop",
+    "productName": "OfferPilot Desktop",
+    "asar": true,
+    "directories": { "output": "dist" },
+    "files": ["main.cjs", "lifecycle.cjs", "package.json"],
+    "extraResources": [
+      { "from": "backend-dist/offerpilot-backend", "to": "backend" },
+      { "from": "../web/dist", "to": "web" },
+      { "from": "../LICENSE", "to": "LICENSE" }
+    ],
+    "win": { "target": [{"target": "nsis", "arch": ["x64"]}], "artifactName": "OfferPilot-Desktop-${version}-win-${arch}-setup.${ext}" },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": false,
+      "createDesktopShortcut": true
+    },
+    "publish": null
+  }
+}
