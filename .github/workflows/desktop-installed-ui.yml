@@ -29,7 +29,6 @@ jobs:
       actions: read
     env:
       UI_EVIDENCE_DIR: ${{ github.workspace }}/desktop/installed-ui/evidence
-      UI_ARTIFACT_DIR: ${{ runner.temp }}/offerpilot-pinned-installer
       UI_SOURCE_DIR: ${{ github.workspace }}/.installed-ui-source
     steps:
       - uses: actions/checkout@v4
@@ -37,6 +36,12 @@ jobs:
           persist-credentials: false
       - name: Record honest scope before any validation
         run: |
+          # runner context is unavailable in job.env; initialize this after allocation.
+          if (-not $env:RUNNER_TEMP -or -not (Test-Path -LiteralPath $env:RUNNER_TEMP -PathType Container)) {
+            throw 'Runner temporary directory is unavailable'
+          }
+          $artifactDir = Join-Path $env:RUNNER_TEMP 'offerpilot-pinned-installer'
+          "UI_ARTIFACT_DIR=$artifactDir" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           New-Item -ItemType Directory -Force $env:UI_EVIDENCE_DIR | Out-Null
           @(
             'EXPERIMENTAL INSTALLED WINDOWS UI EVIDENCE. NOT RELEASE READY.',

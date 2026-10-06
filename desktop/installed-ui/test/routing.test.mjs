@@ -80,3 +80,39 @@ test('automation does not request a browser install, mutation of fuses or weaken
   assert.match(smoke, /chromiumSandbox: true, bypassCSP: false/);
   assert.doesNotMatch(smoke, /flipFuses\s*\(|webSecurity:\s*false|contextIsolation:\s*false|sandbox:\s*false|nodeIntegration:\s*true|devTools:\s*true|storageState\s*\(|\.tracing\./);
 });
+
+// GitHub validates job.env before a runner exists. YAML parsing alone cannot catch this.
+// https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#context-availability
+function assertValidJobEnvContexts(env) {
+  const allowedContexts = new Set(['github', 'needs', 'strategy', 'matrix', 'vars', 'secrets', 'inputs']);
+  for (const value of Object.values(env)) {
+    for (const [, expression] of String(value).matchAll(/\$\{\{([\s\S]*?)\}\}/g)) {
+      for (const [, context] of expression.matchAll(/(?<![\w.])([A-Za-z_]\w*)\s*[.[]/g)) {
+        assert.ok(allowedContexts.has(context), `unsupported job.env context: ${context}`);
+      }
+    }
+  }
+}
+test('job environment rejects runner-only context before workflow scheduling', () => {
+  const job = ui.jobs['installed-ui'];
+  assertValidJobEnvContexts(job.env);
+  assert.throws(() => assertValidJobEnvContexts({ ...job.env,
+    UI_ARTIFACT_DIR: '${{ runner.temp }}/offerpilot-pinned-installer' }), /unsupported job.env context: runner/);
+  for (const context of ['env', 'steps', 'job']) {
+    assert.throws(() => assertValidJobEnvContexts({ VALUE: `\${{ ${context}.value }}` }), /unsupported job.env context/);
+  }
+});
+test('runtime artifact directory is initialized for subsequent steps before use', () => {
+  const job = ui.jobs['installed-ui'];
+  assert.equal(job.env.UI_ARTIFACT_DIR, undefined, 'runtime directory cannot be a job-level expression');
+  const firstRunIndex = job.steps.findIndex((step) => step.run);
+  const initialize = job.steps[firstRunIndex].run;
+  assert.match(initialize, /if \(-not \$env:RUNNER_TEMP -or -not \(Test-Path -LiteralPath \$env:RUNNER_TEMP -PathType Container\)\)/);
+  assert.match(initialize, /\$artifactDir = Join-Path \$env:RUNNER_TEMP 'offerpilot-pinned-installer'/);
+  assert.match(initialize, /"UI_ARTIFACT_DIR=\$artifactDir" \| Out-File -FilePath \$env:GITHUB_ENV -Encoding utf8 -Append/);
+  const downloadIndex = job.steps.findIndex((step) => step.uses === 'actions/download-artifact@v4');
+  assert.ok(firstRunIndex >= 0 && firstRunIndex < downloadIndex);
+  assert.equal(job.steps[downloadIndex].with.path, '${{ env.UI_ARTIFACT_DIR }}');
+  const smokeIndex = job.steps.findIndex((step) => step.run?.includes('npm.cmd run smoke'));
+  assert.ok(smokeIndex > downloadIndex, 'smoke inherits the same initialized directory after download');
+});
