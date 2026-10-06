@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "repository": "offercontext/offerPilot",
+  "branch": "feat/20261005-windows-desktop-validation",
+  "commit": "744fce4ab3bdde1b6a4aa8accd9e626b306c6d74",
+  "runId": 37454260377,
+  "artifactId": 11409501649,
+  "artifactName": "offerpilot-windows-experimental-validation-744fce4ab3bdde1b6a4aa8accd9e626b306c6d74",
+  "artifactDigest": "sha256:cd58641cf668d71e26ceabe0b290194c72d490038da9037297df1b2a17cfd375",
+  "installer": "OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe",
+  "installerSha256": "371a416d5566bbdd33f8b28fd1a3514350972cddb5bb02bc406c8915286a320d"
+}
