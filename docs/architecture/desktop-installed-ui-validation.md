@@ -1,0 +1,68 @@
+# 固定 Windows 安装包的 UI 自验
+
+状态：限定分支上的实验验证辅助工具。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+
+## 固定输入与独立路由
+
+- 源提交：`744fce4ab3bdde1b6a4aa8accd9e626b306c6d74`。
+- 源 run：[37454260377](https://github.com/offercontext/offerPilot/actions/runs/37454260377)。完整回归仍独立进行；本流程不重跑、不取消、不替代该 run。
+- Artifact：`11409501649`，名称 `offerpilot-windows-experimental-validation-744fce4ab3bdde1b6a4aa8accd9e626b306c6d74`。
+- Artifact 元数据摘要：`sha256:cd58641cf668d71e26ceabe0b290194c72d490038da9037297df1b2a17cfd375`。
+- 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
+- 安装包 SHA256：`371a416d5566bbdd33f8b28fd1a3514350972cddb5bb02bc406c8915286a320d`。
+
+`desktop/installed-ui/contract.mjs` 固定以上值。执行要求 `desktop/installed-ui/request.json` 的全部键和值精确匹配，不接受 URL、任意 run、输入参数或额外键；缺少请求文件直接失败。只读 job token 验证原 run 的仓库、分支、head SHA、workflow 路径，安装包 job 已成功，以及 artifact ID、名称、摘要、未过期状态与归属。完整回归是否通过不能从安装包 job 推导。
+
+下载由官方 `actions/download-artifact@v4` 使用固定仓库、run 与名称完成。验证 metadata digest 并不伪装成本地重算 ZIP：下载 action 解压 artifact，执行前另对安装包字节计算硬编码 SHA256，任一不符都不执行。没有应用重建步骤。
+
+两次提交、两次独立 push 激活：
+
+1. 先提交 helper、独立 workflow、本文和原 workflow 的 3 条窄 `paths-ignore`；标题包含 `[skip ci]`，避免路由引导提交启动旧全量工作流。此提交不包含 `request.json`。先单独 push，并核对远端已出现该 bootstrap 提交且没有新增旧验证 run。
+2. 确认第一步后，再仅加入经过审阅的 `request.json`，单独第二次 push，触发 `.github/workflows/desktop-installed-ui.yml`；旧 `desktop-windows.yml` 因忽略该路径而不重跑。
+
+不能把这两个提交合并到一次 push：同一 push 的改动范围会包含旧 workflow 文件，从而重新触发旧全量验证。
+
+两个 workflow 的 push 都只接受精确分支 `feat/20261005-windows-desktop-validation`，并保留可选 dispatch。独立 UI job 额外检查仓库和分支，dispatch 不含参数；默认分支尚无此 workflow 时，不保证 GitHub 手动入口可用。没有自动取消或自动替换已有 run。
+
+旧 workflow 只忽略 `desktop/installed-ui/**`、`.github/workflows/desktop-installed-ui.yml` 和本文。它自己的配置、产品源码、桌面 package/锁文件及所有构建路径仍触发原验证。UI workflow 的 push 仅监听上述三个路径；混合产品和 UI 改动会触发两个流程。路由单测覆盖这些情况。
+
+## 执行内容
+
+辅助依赖位于独立 package/lock：`playwright-core` 1.63.0、`@electron/fuses` 2.1.3、`@electron/asar` 4.3.1、`yaml` 2.8.1。只装该锁定包，使用 `npm ci --ignore-scripts`；不安装额外浏览器，不修改根 desktop 依赖。
+
+1. 要求真实 Windows。真实 `%APPDATA%\OfferPilot Desktop` 在安装和首启前必须不存在；如果存在就失败，绝不删除或替换。应用主动设置 userData，因此既不伪造 APPDATA，也不用 `--user-data-dir`。
+2. 核对安装包 SHA256；用 runner 已有 7-Zip 只读提取 NSIS 内嵌 `app-64.7z`。这份 payload 从已核对的安装包派生，不是假设旧 artifact 含有 manifest。
+3. 使用 NSIS `/S /currentuser /D=<全新目录>` 安装，`/D` 最后且不加引号；目标位于 RUNNER_TEMP，路径包含中文和空格。要求安装退出码 0 且没有自动启动。
+4. 检查实际安装的 exe、app.asar、冻结后端与 `_internal`、前端 assets、LICENSE；逐文件 SHA256 对比解包 payload。app.asar 的 main/lifecycle 另与固定源提交对比，源码文本仅将 CRLF 规范化为 LF；二进制 payload 对比始终严格逐字节。记录安装 exe 摘要、资源数量和版本核对结果。
+5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
+6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。
+7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
+8. 仅在真实 UI 输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。从“添加第一条投递”进入表单，执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”。不使用“仍然创建”兜底，不配置 provider、岗位 URL、JD、简历或真实凭据。
+9. 只监听这次 UI 发起的 POST 回执，保留 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。通过 UI 切换明暗模式。
+10. 正常调用窗口关闭路径，要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
+11. 再次正常退出并核对进程/端口清理与 exe 完整性。任何启动、保护、持久化、正常关闭或清理问题均为失败；失败后的清理不能改成成功。
+
+正常关闭通过 `BrowserWindow.close()` 走窗口关闭与 app 的 before-quit 路径，不以强杀作为成功退出。失败才允许清理已由 CIM 证实身份的本次测试进程，清理前重新核对路径、父子关系及创建时间，防止 PID 复用。不会删除测试 profile；runner 生命周期负责最终环境销毁。
+
+## 证据与不能声称的结论
+
+成功与失败都尝试上传固定白名单：scope、源验证 JSON、结构化结果 JSON 和有限 UI 截图。不会上传 userData、数据库、配置、真实求职材料、原始应用日志、token、headers、HAR、trace 或 debug websocket URL。异常只报告固定的细分失败阶段、白名单错误类别/代码和辅助命令退出码，不序列化可能含敏感信息的 Playwright/API 错误消息、堆栈或 stderr。
+
+运行报告保留包装来源、真实进程身份、端口、保护布尔值、合成记录、已通过阶段与失败阶段。附件缺失、超时、取消、跳过或清理后仍有遗留进程都不是通过证据。截图只反映该测试的合成数据。
+
+GitHub hosted Windows runner 通常使用管理员环境，UAC 已由平台关闭；本流程不更改 UAC、SmartScreen、Defender、沙箱或任何操作系统防护。它不能证明普通用户安装提示、UAC/SmartScreen 行为、没有开发工具的干净账户体验、桌面快捷方式或正常无调试启动已通过。临时 inspect/CDP 测试启动与正常用户启动必须分别描述。
+
+本项补充“安装后实际 UI 保存与完整退出重启”证据，不是生产 release pass，也不覆盖真实 AI、语音、签名、升级/卸载、真实用户数据恢复或全部人工清单。原 [Windows 验证说明](desktop-validation.md) 的人工验收与发布义务继续适用。
+
+## 本地辅助验证
+
+```sh
+npm ci --prefix desktop/installed-ui --ignore-scripts
+npm test --prefix desktop/installed-ui
+node --check desktop/installed-ui/smoke.mjs
+node --check desktop/installed-ui/verify-artifact.mjs
+```
+
+这些命令可在 Linux 检验 pin、错误传播、证据字段、进程归属/监听约束及 YAML 路由。PowerShell、NSIS、CIM 和真实 Electron UI 必须以 Windows run 结果验证，不用 Linux 结果替代。
+
+官方行为依据：[Playwright Electron](https://playwright.dev/docs/api/class-electron)、[ElectronApplication](https://playwright.dev/docs/api/class-electronapplication)、[Electron fuse 只读 API](https://packages.electronjs.org/fuses/v2.1.1/functions/getCurrentFuseWire.html)、[NSIS 命令行](https://nsis.sourceforge.io/Docs/Chapter3.html)、[GitHub artifact 下载](https://github.com/actions/download-artifact)、[hosted runner 权限](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#administrative-privileges)、[跳过 push CI](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/skip-workflow-runs)。

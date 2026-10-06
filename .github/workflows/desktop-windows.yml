@@ -6,6 +6,10 @@ on:
   push:
     branches:
       - feat/20261005-windows-desktop-validation
+    paths-ignore:
+      - 'desktop/installed-ui/**'
+      - '.github/workflows/desktop-installed-ui.yml'
+      - 'docs/architecture/desktop-installed-ui-validation.md'
   workflow_dispatch:
 
 permissions:
