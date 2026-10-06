@@ -1,7 +1,7 @@
 name: Windows desktop validation (unsigned)
 
-# Review-only pilot. The exact validation branch is the only push activation.
-# Pushing it and starting its Windows run require separate user authorization.
+# Experimental validation only. Packaging never implies release readiness.
+# Only this exact branch activates push builds; dispatch remains optional.
 on:
   push:
     branches:
@@ -11,20 +11,39 @@ on:
 permissions:
   contents: read
 
+# Do not cancel existing runs implicitly; supersession needs explicit approval.
+
+env:
+  LITELLM_LOCAL_MODEL_COST_MAP: "True"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
-  windows-validation:
+  validation-package:
+    name: Experimental installer and desktop smoke
     runs-on: windows-2022
-    timeout-minutes: 90
-    env:
-      LITELLM_LOCAL_MODEL_COST_MAP: "True"
-      PYTHONUTF8: "1"
-      CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      ONNXRUNTIME_NODE_INSTALL: skip
-    defaults:
-      run:
-        shell: pwsh
+    timeout-minutes: 60
+    # Intentionally independent of full-regression. Its artifact is NOT a release.
     steps:
       - uses: actions/checkout@v4
+      - name: Record validation scope and run identity
+        run: |
+          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          @(
+            "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT RELEASE READY.",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Full regression runs independently and is required for release readiness.",
+            "This job must pass every focused, build and frozen smoke check before uploading an installer.",
+            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
+          ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -39,57 +58,198 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             desktop/package-lock.json
-      - name: Install locked dependencies
+      - name: Install locked validation dependencies
         run: |
+          Start-Transcript -Path desktop/ci-evidence/01-install.log
           uv sync --frozen
           if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
-          npm ci --prefix web
+          npm.cmd ci --prefix web
           if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
-          npm ci --prefix desktop
+          npm.cmd ci --prefix desktop
           if ($LASTEXITCODE -ne 0) { throw "Desktop install failed" }
-      - name: Repository release and installation checks
+          Stop-Transcript
+      - name: Required desktop, auth and static regression tests
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-gate.ps1 -Install
-          if ($LASTEXITCODE -ne 0) { throw "Repository release gate failed" }
-          npm test --prefix desktop
+          Start-Transcript -Path desktop/ci-evidence/02-focused-tests.log
+          uv run --frozen pytest -v tests/test_desktop.py tests/test_auth_api.py tests/test_static_frontend.py --durations=15 --junitxml=desktop/ci-evidence/focused-pytest.xml
+          if ($LASTEXITCODE -ne 0) { throw "Focused desktop regression tests failed" }
+          npm.cmd test --prefix desktop
           if ($LASTEXITCODE -ne 0) { throw "Desktop lifecycle tests failed" }
+          Stop-Transcript
+      - name: Required lint, desktop types and frontend build
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03-static-checks.log
+          uv run --frozen ruff check .
+          if ($LASTEXITCODE -ne 0) { throw "Ruff failed" }
+          uv run --frozen mypy src/offerpilot/desktop.py src/offerpilot/api.py
+          if ($LASTEXITCODE -ne 0) { throw "Desktop type check failed" }
+          npm.cmd run build --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+          Stop-Transcript
       - name: Freeze existing Python backend
         run: |
+          Start-Transcript -Path desktop/ci-evidence/04-freeze.log
           uv run --frozen --with pyinstaller==6.16.0 --with pyinstaller-hooks-contrib==2025.9 python desktop/build-backend.py
           if ($LASTEXITCODE -ne 0) { throw "Frozen backend build failed" }
-      - name: Frozen process persistence and security smoke
+          Stop-Transcript
+      - name: Required frozen process persistence and security smoke
         run: |
+          Start-Transcript -Path desktop/ci-evidence/05-frozen-smoke.log
           python desktop/smoke-backend.py --backend desktop/backend-dist/offerpilot-backend/offerpilot-backend.exe --static-dir web/dist
           if ($LASTEXITCODE -ne 0) { throw "Frozen backend smoke failed" }
+          Stop-Transcript
       - name: Build unsigned NSIS installer without publishing
         run: |
-          npm run build:win --prefix desktop
+          Start-Transcript -Path desktop/ci-evidence/06-nsis.log
+          npm.cmd run build:win --prefix desktop
           if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
-      - name: Verify packaged resource layout and backend
+          Stop-Transcript
+      - name: Required packaged resource layout and backend smoke
         run: |
+          Start-Transcript -Path desktop/ci-evidence/07-packaged-smoke.log
           python desktop/smoke-backend.py --backend desktop/dist/win-unpacked/resources/backend/offerpilot-backend.exe --static-dir desktop/dist/win-unpacked/resources/web
           if ($LASTEXITCODE -ne 0) { throw "Packaged resource smoke failed" }
-      - name: Hash installers for review
+          Stop-Transcript
+      - name: Hash installers and disclose validation-only scope
         run: |
           $installers = @(Get-ChildItem -Path desktop/dist -Filter '*-setup.exe')
           if ($installers.Count -eq 0) { throw "No Windows installer produced" }
           foreach ($installer in $installers) {
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
-            "$hash  $($installer.Name)" | Set-Content -Encoding utf8 -LiteralPath "$($installer.FullName).sha256"
+            "$hash  $($installer.Name)" | Set-Content -Encoding ascii -LiteralPath "$($installer.FullName).sha256"
           }
           @(
-            "UNSIGNED WINDOWS VALIDATION BUILD: not a production release.",
+            "EXPERIMENTAL, UNSIGNED WINDOWS VALIDATION BUILD. NOT RELEASE READY.",
             "Commit: $env:GITHUB_SHA",
-            "Automated gates do not validate installer execution or the Electron UI.",
-            "Complete docs/architecture/desktop-validation.md on a clean Windows account."
-          ) | Set-Content -Encoding utf8 desktop/dist/VALIDATION-NOTES.txt
-      - name: Upload unsigned review artifacts
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, frozen and packaged-resource smoke passed.",
+            "Full release/regression gate: separate job in the same run; NOT certified by this artifact.",
+            "Check 'Full release regression (required for release)' and the final status job for its actual result.",
+            "Pending, failed, cancelled, timed-out or skipped full regression is not a pass.",
+            "Automated checks do not validate installer execution or the Electron UI.",
+            "Complete docs/architecture/desktop-validation.md on a clean Windows account before claiming desktop acceptance."
+          ) | Tee-Object -FilePath desktop/dist/VALIDATION-NOTES.txt
+          Get-Content desktop/dist/VALIDATION-NOTES.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Upload experimental validation installer
         uses: actions/upload-artifact@v4
         with:
-          name: offerpilot-windows-unsigned-${{ github.sha }}
+          name: offerpilot-windows-experimental-validation-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
             desktop/dist/*-setup.exe
             desktop/dist/*-setup.exe.sha256
             desktop/dist/VALIDATION-NOTES.txt
+      - name: Preserve validation evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: desktop/ci-evidence/
+
+  full-regression:
+    name: Full release regression (required for release)
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record full gate scope and run identity
+        run: |
+          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          @(
+            "Full, unsharded scripts/release-gate.ps1 -Install is required for release readiness.",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
+          ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked regression dependencies
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/01-install.log
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
+          Stop-Transcript
+      - name: Complete repository release and installation gate
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/02-full-release-gate.log
+          $stdout = Join-Path $PWD "desktop/ci-evidence/full-gate-stdout.log"
+          $stderr = Join-Path $PWD "desktop/ci-evidence/full-gate-stderr.log"
+          $started = [DateTime]::UtcNow
+          # Execute the existing gate unchanged. Do not set PYTEST_ADDOPTS:
+          # nested tests also invoke pytest and parse its collection output.
+          $gate = Start-Process -FilePath powershell -WorkingDirectory $PWD -NoNewWindow -PassThru `
+            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/release-gate.ps1', '-Install') `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          while (-not $gate.WaitForExit(60000)) {
+            $elapsed = [Math]::Round(([DateTime]::UtcNow - $started).TotalMinutes, 1)
+            Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Full release gate running: $elapsed minutes. Latest stdout/stderr:"
+            Get-Content -LiteralPath $stdout -Tail 3 -ErrorAction SilentlyContinue
+            Get-Content -LiteralPath $stderr -Tail 3 -ErrorAction SilentlyContinue
+          }
+          $gate.WaitForExit()
+          Get-Content -LiteralPath $stdout
+          Get-Content -LiteralPath $stderr
+          Write-Host "Full release gate exited $($gate.ExitCode) at $([DateTime]::UtcNow.ToString('o'))"
+          if ($gate.ExitCode -ne 0) { throw "Repository release gate failed (exit $($gate.ExitCode))" }
+          Stop-Transcript
+      - name: Preserve full gate evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-full-regression-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: desktop/ci-evidence/
+
+  validation-status:
+    name: Validation results (both jobs must pass)
+    if: ${{ always() }}
+    needs: [validation-package, full-regression]
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - name: Report actual results without promoting the artifact to a release
+        env:
+          PACKAGE_RESULT: ${{ needs.validation-package.result }}
+          REGRESSION_RESULT: ${{ needs.full-regression.result }}
+        run: |
+          $report = @(
+            "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT A PRODUCTION RELEASE.",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Validation package job: $env:PACKAGE_RESULT",
+            "Required full regression job: $env:REGRESSION_RESULT",
+            "An installer artifact alone does not establish a full regression pass.",
+            "Windows installer execution and Electron UI acceptance still require manual evidence."
+          )
+          $report | Tee-Object -FilePath WINDOWS-VALIDATION-STATUS.txt
+          $report | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ($env:PACKAGE_RESULT -ne 'success' -or $env:REGRESSION_RESULT -ne 'success') {
+            throw "Validation is incomplete: both jobs must pass; failure, cancellation and skipped jobs are not success."
+          }
+      - name: Preserve actual workflow status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation-status-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: WINDOWS-VALIDATION-STATUS.txt

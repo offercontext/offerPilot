@@ -21,7 +21,7 @@
 
 首轮采用保守 renderer 权限：sandbox、context isolation、禁用 Node integration，拒绝弹窗/下载/麦克风及跨源导航，CSP 限制外部资源。语音、外部模型素材及导出等未验证能力须显式列为范围外。打包资源包括 tokenizer 缓存和本地 LiteLLM 价格表，基础启动不能依赖临时下载。
 
-Windows workflow 仅对精确验证分支 `feat/20261005-windows-desktop-validation` 的 push 激活，并保留可选人工触发；不响应 master、其他分支或 PR，不发布 release。产物为未签名 NSIS 安装包及 SHA256。当前仅保存本地配置；推送该分支及随之执行远端构建需要另行明确授权。可选 `workflow_dispatch` 的默认分支注册条件不构成自动修改默认分支的授权。详细命令、目录和人工清单仅维护在 [桌面验证说明](../desktop-validation.md)。
+Windows workflow 仅对精确验证分支 `feat/20261005-windows-desktop-validation` 的 push 激活，并保留可选人工触发；不响应 master、其他分支或 PR，不发布 release。产物为未签名 NSIS 安装包及 SHA256。推送该分支及随之执行远端构建须有明确授权。实验包构建与原有完整发布回归在独立 job 执行；前者必须通过桌面专项、冻结及打包资源检查才上传，并明确不是生产发行版，不能替代完整 `release-gate.ps1 -Install` 的通过证据。最终状态如实汇总，失败、取消或跳过的完整回归不能算成功。可选 `workflow_dispatch` 的默认分支注册条件不构成自动修改默认分支的授权。详细命令、目录和人工清单仅维护在 [桌面验证说明](../desktop-validation.md)。
 
 ## Consequences
 

@@ -57,15 +57,23 @@ npm.cmd run build:win --prefix desktop
 
 PyInstaller 必须在目标平台构建。在 Linux 构建并 smoke 通过，仅证明 Linux 冻结依赖与协议，不是 Windows `.exe` 或 NSIS 证据。
 
-## 限定分支 CI（尚未执行）
+## 限定分支 CI：验证包与完整发布回归
 
-`.github/workflows/desktop-windows.yml` 只对精确分支 `feat/20261005-windows-desktop-validation` 的 push 自动运行，同时保留可选 `workflow_dispatch`；不响应 master、其他分支、PR 或 release。当前仅保存本地配置，不推送、不触发远端构建。推送该验证分支会启动 Windows 构建，因此必须先明确获得“推送分支并运行工作流”的授权。首次可通过这个限定分支 push 激活，无需为此修改默认分支。
+`.github/workflows/desktop-windows.yml` 只对精确分支 `feat/20261005-windows-desktop-validation` 的 push 自动运行，同时保留可选 `workflow_dispatch`；不响应 master、其他分支、PR 或 release。推送该验证分支会启动 Windows 构建，执行前须有明确的“推送分支并运行工作流”授权。首次可通过这个限定分支 push 激活，无需为此修改默认分支。具体执行结果以对应 commit 和 run 的记录为准，本说明不声明任何尚未完成的检查通过。
 
 可选人工运行入口受 GitHub 平台限制：`workflow_dispatch` 工作流需要先存在于默认分支；新功能分支上的同名配置并不自动满足这个条件。不为启用人工入口而自动写默认分支。见 [GitHub 手动运行说明](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)。也可以直接在 Windows 运行前面的本地脚本。
 
-工作流使用 Windows runner，运行上述 gate、冻结 smoke 和 `electron-builder --win nsis --x64 --publish never`，上传未签名 installer、SHA256 与验证说明供审查，保留 14 天，不创建 release 或发布到下载站。
+CI 使用两个相互独立的 Windows job，避免完整产品回归尚在执行时阻塞实验安装包构建：
 
-工作流成功不代表用户桌面安装或 UI 验收通过。Artifact 的可见范围继承仓库设置，不能视为公开发布流程。本次仅准备工作流，不推送、不触发远端构建。
+1. `Experimental installer and desktop smoke`：锁定依赖安装后，必须通过 `tests/test_desktop.py`、`tests/test_auth_api.py`、`tests/test_static_frontend.py`，Node 桌面生命周期测试、全仓 ruff、桌面入口及 API 组合层 mypy、前端构建、PyInstaller 冻结、严格冻结进程 smoke、`electron-builder --win nsis --x64 --publish never` 及打包资源副本 smoke，才生成 SHA256 并上传 installer。任一步失败都不能上传安装包。该 job 不依赖完整回归，最长 60 分钟。
+2. `Full release regression (required for release)`：原样执行 `scripts/release-gate.ps1 -Install`，保留完整未分片 pytest、ruff、mypy、前端测试和构建、真实 CLI/HTTP smoke、`oc verify --profile local` 与安装检查；不删测试、不因实验包成功而豁免，最长 90 分钟。保留 gate 原始输出，不通过环境变量改变 pytest 或嵌套 pytest 的参数；每分钟输出已运行时长与最近日志，并保存完整 stdout/stderr，便于观察长时间运行阶段。
+3. 最后的 `Validation results (both jobs must pass)` 汇总两个真实结论。任一失败、取消或跳过均不能成为成功；超时同样没有通过证据。只有两个 job 都成功才能通过此状态检查，且仍不代表生产发布就绪。
+
+安装包 artifact 名含 `experimental-validation`，附 `VALIDATION-NOTES.txt`，明确未签名、仅供验证、不是生产发行版；记录 commit、run 链接与 attempt，并要求查看同一 run 的独立完整回归结果。完整 gate 仍在运行或失败时，实验包可能已可下载，不能据此宣称完整验收通过。完整发布回归通过仍是发布就绪的必要条件，不能由局部检查替代。
+
+每个 job 保存分阶段日志，实验包 job 另保存专项 pytest 的 JUnit 报告；成功与失败均尝试上传证据；强制取消或超时可能截断报告，需同时查看 GitHub 原始日志，缺失的报告不是通过证据。最终状态也独立保存。Artifact 保留 14 天、可见范围继承仓库设置，不创建 release 或发布到下载站。未配置自动取消或替换已有 run；启动后续 run 前先核对当前运行状态。取消旧 run 需要明确授权，并保留其实际取消状态及可取得的日志，不能将取消算作通过。
+
+前面的本地 `desktop/validate-windows.ps1` 保持串行完整 gate 行为，不提供跳过完整回归的发布捷径。CI 独立构建只是尽早取得实验安装包；安装程序执行、Electron 渲染、UI 保存与重启仍必须完成下方人工验收。
 
 ## 自动 smoke 的证据范围
 
