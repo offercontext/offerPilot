@@ -1,3 +1,7 @@
+.list {
+  min-width: 0;
+}
+
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -15,6 +19,7 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .company {
@@ -31,3 +36,14 @@
   color: var(--op-muted);
   font-size: 12px;
 }
+
+.company,
+.position,
+.muted {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fallbackDock:empty { display: none; }

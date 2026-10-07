@@ -1,0 +1,9 @@
+<!doctype html><html><head><meta charset="UTF-8"><title>Desktop layout regression</title><style>body{margin:0;background:#eee}iframe{border:0;display:block}</style></head><body><script type="module">
+const params = new URLSearchParams(location.search);
+const frame = document.createElement('iframe');
+frame.title = 'Desktop layout fixture';
+frame.width = params.get('width') || '1008';
+frame.height = '689';
+frame.src = './fixture.html?' + params;
+document.body.append(frame);
+</script></body></html>

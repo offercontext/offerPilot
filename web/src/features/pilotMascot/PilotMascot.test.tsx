@@ -156,13 +156,65 @@ describe('PilotMascot', () => {
   it('keeps Pilot usable when the Live2D runtime fails', async () => {
     const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
     const props = await renderMascot({ runtime: broken });
-    expect(container.textContent).toContain('Haru 暂时休息中');
+    expect(container.textContent).toContain('Haru 模型未加载');
+    expect(container.querySelector<HTMLElement>('aside')?.style.width).toBe('156px');
+    expect(container.querySelector<HTMLElement>('aside')?.style.height).toBe('48px');
     expect(container.querySelector('[role="status"]')?.getAttribute('aria-hidden')).toBeNull();
     const fallbackTrigger = container.querySelector<HTMLButtonElement>('.characterButton')
       ?? container.querySelector<HTMLButtonElement>('button');
     expect(fallbackTrigger?.getAttribute('aria-haspopup')).toBe('dialog');
     act(() => container.querySelector('button')!.click());
     expect(props.onTogglePilot).toHaveBeenCalledTimes(1);
+  });
+
+  it('docks the failed entrance when the list appears and restores it when the list leaves', async () => {
+    const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
+    await renderMascot({ runtime: broken });
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    await act(async () => { document.body.append(dock); });
+    expect(dock.querySelector('aside')?.getAttribute('data-load-failed')).toBe('true');
+    expect(dock.querySelector<HTMLElement>('aside')?.style.position).toBe('relative');
+    await act(async () => { dock.remove(); });
+    expect(container.querySelector('aside')?.getAttribute('data-load-failed')).toBe('true');
+    expect(dock.querySelector('aside')).toBeNull();
+  });
+
+  it('reports the new dock anchor and updates it when the content scrolls', async () => {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.tagName !== 'BUTTON') return original.call(this);
+      const left = this.closest('[data-pilot-mascot-fallback-dock]') ? 400 : 800;
+      return { x: left, y: 100, left, top: 100, right: left + 156, bottom: 148, width: 156, height: 48, toJSON: () => ({}) };
+    });
+    const onAnchorRectChange = vi.fn();
+    const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
+    await renderMascot({ runtime: broken, onAnchorRectChange });
+    expect(onAnchorRectChange).toHaveBeenLastCalledWith({ left: 800, top: 100, right: 956, bottom: 148 });
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    await act(async () => { document.body.append(dock); });
+    expect(onAnchorRectChange).toHaveBeenLastCalledWith({ left: 400, top: 100, right: 556, bottom: 148 });
+    onAnchorRectChange.mockClear();
+    act(() => dock.dispatchEvent(new Event('scroll')));
+    expect(onAnchorRectChange).toHaveBeenCalledOnce();
+    await act(async () => { dock.remove(); });
+  });
+
+  it('retries with the connected canvas after leaving the failure dock', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    document.body.append(dock);
+    const mount = vi.fn().mockRejectedValueOnce(new Error('model failed')).mockResolvedValue(runtimeController());
+    const props = await renderMascot({ runtime: { mount } });
+    expect(dock.querySelector('aside')).not.toBeNull();
+    await act(async () => { root.render(<PilotMascot {...props} animationLevel="minimal" />); });
+    const mountedCanvas = mount.mock.calls[mount.mock.calls.length - 1]?.[0] as HTMLCanvasElement;
+    expect(mountedCanvas.isConnected).toBe(true);
+    expect(mountedCanvas).toBe(container.querySelector('canvas'));
+    expect(container.querySelector('[data-load-failed]')).toBeNull();
+    expect(dock.querySelector('aside')).toBeNull();
+    dock.remove();
   });
 
   it('reports the real trigger rect after position, size, and viewport changes', async () => {

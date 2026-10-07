@@ -151,21 +151,32 @@
 .bubble strong { font-size: 13px; }
 .bubble span { color: var(--op-muted); font-size: 12px; }
 
-.fallback {
-  position: absolute;
-  inset: auto 26px 30px;
-  min-height: 180px;
-  display: grid;
-  place-content: center;
-  gap: 10px;
-  border: 1px dashed color-mix(in srgb, var(--op-primary) 30%, var(--op-border));
-  border-radius: 80px 80px 24px 24px;
-  background: linear-gradient(180deg, rgba(124, 92, 255, 0.08), rgba(124, 92, 255, 0.02));
-  color: var(--op-primary);
-  font-size: 12px;
+.loadFailed .canvasHost,
+.loadFailed .glow,
+.loadFailed .nameplate { display: none; }
+
+.loadFailed .characterButton {
+  border-radius: 12px;
+  background: var(--op-surface);
+  border: 1px solid var(--op-border);
+  box-shadow: 0 4px 16px rgba(43, 31, 88, 0.12);
 }
 
-.fallback :global(.anticon) { font-size: 30px; }
+.loadFailed .contextMenu { right: 0; bottom: 56px; }
+.loadFailed .bubble { top: auto; bottom: 56px; right: 0; }
+
+.fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--op-primary);
+  font-size: 12px;
+  text-align: left;
+}
+
+.fallback small { display: block; color: var(--op-muted); font-size: 10px; }
+.fallback :global(.anticon) { font-size: 22px; }
 
 .contextMenu {
   position: absolute;

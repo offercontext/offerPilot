@@ -71,6 +71,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
           npm.cmd ci --prefix desktop
           if ($LASTEXITCODE -ne 0) { throw "Desktop install failed" }
+          npm.cmd ci --prefix desktop/installed-ui --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Isolated layout helper install failed" }
           Stop-Transcript
       - name: Required desktop, auth and static regression tests
         run: |
@@ -89,6 +91,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Desktop type check failed" }
           npm.cmd run build --prefix web
           if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+          Stop-Transcript
+      - name: Required rendered viewport and interaction regression
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03b-layout.log
+          node web/node_modules/typescript/bin/tsc --project web/tests/desktop-layout/tsconfig.json
+          if ($LASTEXITCODE -ne 0) { throw "Layout fixture types failed" }
+          node web/tests/desktop-layout/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Rendered layout regression failed" }
           Stop-Transcript
       - name: Freeze existing Python backend
         run: |
@@ -127,11 +137,11 @@ jobs:
             "Commit: $env:GITHUB_SHA",
             "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
-            "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, frozen and packaged-resource smoke passed.",
+            "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, rendered component viewport regressions, frozen and packaged-resource smoke passed.",
             "Full release/regression gate: separate job in the same run; NOT certified by this artifact.",
             "Check 'Full release regression (required for release)' and the final status job for its actual result.",
             "Pending, failed, cancelled, timed-out or skipped full regression is not a pass.",
-            "Automated checks do not validate installer execution or the Electron UI.",
+            "Browser component fixtures do not validate installer execution, desktop CSP or the installed Electron UI.",
             "Complete docs/architecture/desktop-validation.md on a clean Windows account before claiming desktop acceptance."
           ) | Tee-Object -FilePath desktop/dist/VALIDATION-NOTES.txt
           Get-Content desktop/dist/VALIDATION-NOTES.txt | Add-Content $env:GITHUB_STEP_SUMMARY

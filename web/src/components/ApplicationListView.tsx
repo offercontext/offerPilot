@@ -65,10 +65,11 @@ export default function ApplicationListView({
     {
       title: '投递',
       key: 'application',
+      width: 260,
       render: (_, row) => (
         <div className={styles.meta}>
-          <span className={styles.company}>{row.company_name}</span>
-          <span className={styles.position}>{row.position_name}</span>
+          <span className={styles.company} title={row.company_name}>{row.company_name}</span>
+          <span className={styles.position} title={row.position_name}>{row.position_name}</span>
         </div>
       ),
     },
@@ -84,13 +85,13 @@ export default function ApplicationListView({
       title: '来源',
       dataIndex: 'source',
       width: 120,
-      render: (value: string) => <span className={styles.muted}>{value || '-'}</span>,
+      render: (value: string) => <span className={styles.muted} title={value}>{value || '-'}</span>,
     },
     {
       title: '下一事件',
       key: 'next_event',
       width: 220,
-      render: (_, row) => <span className={styles.muted}>{formatNextApplicationEvent(row, events)}</span>,
+      render: (_, row) => <span className={styles.muted} title={formatNextApplicationEvent(row, events)}>{formatNextApplicationEvent(row, events)}</span>,
     },
     {
       title: '更新时间',
@@ -118,7 +119,7 @@ export default function ApplicationListView({
   ];
 
   return (
-    <section aria-label="投递列表">
+    <section className={styles.list} aria-label="投递列表">
       <div className={styles.toolbar}>
         <Input.Search
           className={styles.search}
@@ -141,24 +142,29 @@ export default function ApplicationListView({
           onChange={(value) => updateViewState({ sortBy: value })}
           style={{ width: 160 }}
         />
+        <div className={styles.fallbackDock} data-pilot-mascot-fallback-dock />
       </div>
-      <Table<Application>
-        rowKey="id"
-        columns={columns}
-        dataSource={rows}
-        pagination={{ pageSize: 10, showSizeChanger: false }}
-        onRow={(row) => ({
-          ...(onAttachToPilot
-            ? createPilotAttachmentDragBinding({
-                kind: 'application',
-                id: String(row.id),
-                label: `${row.company_name} · ${row.position_name}`,
-              })
-            : {}),
-          onClick: () => onOpenDetail(row),
-          style: { cursor: 'pointer' },
-        })}
-      />
+      <div data-pilot-mascot-safe-area>
+        <Table<Application>
+          rowKey="id"
+          tableLayout="fixed"
+          scroll={{ x: 982 }}
+          columns={columns}
+          dataSource={rows}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          onRow={(row) => ({
+            ...(onAttachToPilot
+              ? createPilotAttachmentDragBinding({
+                  kind: 'application',
+                  id: String(row.id),
+                  label: `${row.company_name} · ${row.position_name}`,
+                })
+              : {}),
+            onClick: () => onOpenDetail(row),
+            style: { cursor: 'pointer' },
+          })}
+        />
+      </div>
     </section>
   );
 }

@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
 import { CloseOutlined, MessageOutlined, MinusOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
@@ -69,6 +70,7 @@ const MASCOT_FRAME = {
   expanded: { width: 238, height: 370 },
   narrowDesktop: { width: 150, height: 238 },
   compact: { width: 116, height: 174 },
+  fallback: { width: 156, height: 48 },
 } as const;
 
 function notificationCopy(notification: PilotMascotNotification | null | undefined) {
@@ -106,6 +108,7 @@ export default function PilotMascot({
   const latestActivityRef = useRef(activity);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [fallbackDock, setFallbackDock] = useState<HTMLElement | null>(null);
   const [localPosition, setLocalPosition] = useState<PilotMascotPosition>(() => {
     const key = placement === 'interview-studio' ? 'interview_studio' : 'normal';
     return readPilotMascotPositions()[key];
@@ -126,11 +129,15 @@ export default function PilotMascot({
   const placementKey: PilotMascotPlacement = studioPlacement ? 'interview_studio' : 'normal';
 
   useEffect(() => {
+    setLoadFailed(false);
+  }, [animationLevel, reducedMotionRevision, runtime]);
+
+  useEffect(() => {
+    if (loadFailed) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const abortController = new AbortController();
     let disposed = false;
-    setLoadFailed(false);
     void runtime.mount(canvas, abortController.signal, animationLevel).then((controller) => {
       if (disposed) {
         controller.dispose();
@@ -150,7 +157,7 @@ export default function PilotMascot({
       runtimeControllerRef.current?.dispose();
       runtimeControllerRef.current = undefined;
     };
-  }, [animationLevel, reducedMotionRevision, runtime]);
+  }, [animationLevel, loadFailed, reducedMotionRevision, runtime]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -194,15 +201,15 @@ export default function PilotMascot({
     : placement === 'pilot-page'
       ? '聚焦 Pilot 输入框'
       : panelOpen ? '收起 OfferPilot 领航员' : '打开 OfferPilot 领航员';
-  const buttonLabel = loadFailed ? `${actionLabel}（Haru 暂时休息中）` : actionLabel;
+  const buttonLabel = loadFailed ? `${actionLabel}（Haru 模型未加载，Pilot 仍可使用）` : actionLabel;
 
-  const frame = compact || panelOpen || placement === 'pilot-page' || (studioPlacement && viewport.height < 740)
+  const frame = loadFailed ? MASCOT_FRAME.fallback : compact || panelOpen || placement === 'pilot-page' || (studioPlacement && viewport.height < 740)
     ? MASCOT_FRAME.compact
     : viewport.width <= 900
       ? MASCOT_FRAME.narrowDesktop
       : MASCOT_FRAME.expanded;
-  const frameWidth = Math.round(frame.width * normalizedZoom * 10) / 10;
-  const frameHeight = Math.round(frame.height * normalizedZoom * 10) / 10;
+  const frameWidth = Math.round(frame.width * (loadFailed ? 1 : normalizedZoom) * 10) / 10;
+  const frameHeight = Math.round(frame.height * (loadFailed ? 1 : normalizedZoom) * 10) / 10;
   const activePosition = position ?? localPosition;
   void safeAreaRevision;
   const measuredSafeAreas = typeof document !== 'undefined' && studioPlacement
@@ -250,7 +257,13 @@ export default function PilotMascot({
     const observer = new ResizeObserver(() => reportAnchorRect());
     observer.observe(anchor);
     return () => observer.disconnect();
-  }, [frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
+  }, [fallbackDock, loadFailed, frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
+
+  useEffect(() => {
+    if (!loadFailed || !fallbackDock) return;
+    document.addEventListener('scroll', reportAnchorRect, true);
+    return () => document.removeEventListener('scroll', reportAnchorRect, true);
+  }, [fallbackDock, loadFailed, reportAnchorRect]);
 
   useEffect(() => {
     if (!studioPlacement || typeof document === 'undefined' || typeof ResizeObserver === 'undefined') return;
@@ -284,11 +297,12 @@ export default function PilotMascot({
   };
 
   useEffect(() => {
+    if (loadFailed) return;
     if (Math.abs(constrainedPosition.xRatio - activePosition.xRatio) < 0.001 && Math.abs(constrainedPosition.yRatio - activePosition.yRatio) < 0.001) return;
     setLocalPosition(constrainedPosition);
     writePilotMascotPosition(placementKey, constrainedPosition);
     onPositionChange?.(constrainedPosition);
-  }, [activePosition.xRatio, activePosition.yRatio, constrainedPosition.xRatio, constrainedPosition.yRatio, onPositionChange]);
+  }, [activePosition.xRatio, activePosition.yRatio, constrainedPosition.xRatio, constrainedPosition.yRatio, loadFailed, onPositionChange]);
 
   const finishDrag = (event?: PointerEvent<HTMLButtonElement>) => {
     const drag = dragRef.current;
@@ -303,7 +317,7 @@ export default function PilotMascot({
 
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startPosition: activePosition, moved: false };
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startPosition: constrainedPosition, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -332,17 +346,32 @@ export default function PilotMascot({
     setMenuOpen(false);
   };
 
-  return (
+  useLayoutEffect(() => {
+    if (!loadFailed || studioPlacement) {
+      setFallbackDock(null);
+      return;
+    }
+    const updateDock = () => setFallbackDock(document.querySelector<HTMLElement>('[data-pilot-mascot-fallback-dock]'));
+    updateDock();
+    const observer = new MutationObserver(updateDock);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [loadFailed, studioPlacement]);
+  const dockedFallback = loadFailed ? fallbackDock : null;
+  const mascot = (
     <aside
-      className={`${styles.mascot} ${panelOpen ? styles.compact : ''} ${
+      className={`${styles.mascot} ${panelOpen ? styles.compact : ''} ${loadFailed ? styles.loadFailed : ''} ${
         placement === 'pilot-page' ? styles.pilotPage : ''
       } ${studioPlacement ? styles.interviewStudio : styles.normalLayout} ${dragRef.current?.moved ? styles.dragging : ''}`}
+      data-load-failed={loadFailed ? 'true' : undefined}
       data-activity={activity}
       data-notification={notification?.status}
       data-animation-level={animationLevel}
       data-interview-studio-companion={studioPlacement ? 'true' : undefined}
       aria-label="Haru 助手"
-      style={{ width: frameWidth, height: frameHeight, left: `${frameLeft}px`, top: `${frameTop}px`, right: 'auto', bottom: 'auto' }}
+      style={dockedFallback
+        ? { position: 'relative', width: frameWidth, height: frameHeight, inset: 'auto' }
+        : { width: frameWidth, height: frameHeight, left: `${frameLeft}px`, top: `${frameTop}px`, right: 'auto', bottom: 'auto' }}
     >
       {notification || (!panelOpen && activity !== 'idle') ? (
         <div className={styles.bubble} role="status" aria-live="polite">
@@ -355,11 +384,12 @@ export default function PilotMascot({
         className={styles.characterButton}
         ref={triggerRef}
         aria-label={buttonLabel}
+        title={loadFailed ? 'Haru 模型未加载，点击仍可使用 Pilot；右键可隐藏角色' : undefined}
         aria-expanded={placement === 'pilot-page' ? undefined : panelOpen}
         aria-haspopup={menuOpen ? 'menu' : placement === 'contextual' ? 'dialog' : undefined}
         aria-controls={panelOpen ? 'haru-chat-window' : menuOpen ? 'pilot-mascot-menu' : undefined}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
+        onPointerDown={dockedFallback ? undefined : handlePointerDown}
+        onPointerMove={dockedFallback ? undefined : handlePointerMove}
         onPointerUp={(event) => finishDrag(event)}
         onPointerCancel={(event) => finishDrag(event)}
         onClick={() => { if (!suppressClickRef.current) onTogglePilot(); }}
@@ -381,7 +411,7 @@ export default function PilotMascot({
         {loadFailed ? (
           <span className={styles.fallback} role="status" aria-live="polite">
             <MessageOutlined />
-            <span>Haru 暂时休息中</span>
+            <span>打开 Pilot<small>Haru 模型未加载</small></span>
           </span>
         ) : null}
         <span className={styles.nameplate} aria-hidden="true">
@@ -390,7 +420,8 @@ export default function PilotMascot({
         </span>
       </button>
       {menuOpen ? (
-        <div id="pilot-mascot-menu" className={styles.contextMenu} role="menu" ref={menuRef}>
+        <div id="pilot-mascot-menu" className={styles.contextMenu} role="menu" ref={menuRef}
+          style={loadFailed && (dockedFallback || frameTop < 300) ? { top: 56, bottom: 'auto' } : undefined}>
           <div className={styles.zoomHeading} aria-hidden="true">
             <span>角色大小</span>
             <strong>{zoomPercent}%</strong>
@@ -454,4 +485,5 @@ export default function PilotMascot({
       ) : null}
     </aside>
   );
+  return dockedFallback ? createPortal(mascot, dockedFallback) : mascot;
 }
