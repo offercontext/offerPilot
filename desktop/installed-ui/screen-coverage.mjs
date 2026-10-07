@@ -32,12 +32,22 @@ async function settleDialog(surface) {
     await Promise.all(animations.filter(a => a.effect?.getTiming().iterations !== Infinity)
       .map(a => a.finished.catch(() => {})));
   });
-  assert.equal(await surface.evaluate(node => {
-    for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
-      const style = getComputedStyle(ancestor);
-      if (Number(style.opacity) < 0.95 || style.visibility !== 'visible') return false;
+  // Ant Design can attach the enter animation one frame after visibility.
+  // Poll the final paint state instead of asserting before that animation exists.
+  assert.equal(await surface.evaluate(async node => {
+    const painted = () => {
+      for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+        const style = getComputedStyle(ancestor);
+        if (Number(style.opacity) < 0.999 || style.visibility !== 'visible') return false;
+        if (ancestor.getAnimations().some(a => a.playState === 'running' && a.effect?.getTiming().iterations !== Infinity)) return false;
+      }
+      return node.isConnected && node.getBoundingClientRect().width > 0;
+    };
+    const deadline = performance.now() + 5000;
+    while (!painted() && performance.now() < deadline) {
+      await new Promise(resolve => requestAnimationFrame(resolve));
     }
-    return node.getBoundingClientRect().width > 0;
+    return painted();
   }), true, 'dialog content must be fully painted before screenshot');
 }
 async function command(page, name) {
@@ -68,6 +78,13 @@ async function navigate(page, view) {
   }
   await page.waitForURL((url) => url.searchParams.get('view') === view || (view === 'dashboard' && !url.searchParams.has('view') && url.pathname === '/'));
   await ready(page);
+  // The interview tab preserves its nested story/growth view across navigation.
+  // Return through the visible product control before asserting the root screen.
+  if (view === 'interview') {
+    const returnToInterview = btn(page, '返回面试');
+    if (await returnToInterview.count() === 1) await returnToInterview.click();
+    await ready(page);
+  }
   if (view === 'pilot') await btn(page, '退出沉浸模式，返回原页面').waitFor();
   else {
     assert.equal(await page.getByRole('navigation', exact('主导航')).getByRole('button', exact(item.module)).getAttribute('aria-current'), 'page');
@@ -379,7 +396,7 @@ async function applicationDetailFlows(qa, page, record) {
   await qa.run('S04', 'application-more-menu', ['投递详情', '更多操作'], async () => {
     await openApplication(page, record);
     await page.getByTestId('application-more-actions').click();
-    await page.getByRole('menuitem', exact('安排日程')).waitFor();
+    await settleDialog(page.getByRole('menuitem', exact('安排日程')));
     await qa.capture('application-more-menu');
     await page.keyboard.press('Escape');
     await page.getByRole('menuitem', exact('安排日程')).waitFor({ state: 'hidden' });
@@ -520,6 +537,10 @@ async function applicationDetailFlows(qa, page, record) {
       await qa.size(width, 689);
       await form.getByLabel('面试问题', { exact: true }).scrollIntoViewIfNeeded();
       await qa.capture(`interview-manual-review-fields-${width}`);
+      const bottomField = form.getByLabel('难点/薄弱点', { exact: true });
+      await bottomField.scrollIntoViewIfNeeded();
+      await bottomField.click({ trial: true });
+      await qa.capture(`interview-manual-review-bottom-${width}`);
       await btn(form, '保存复盘').scrollIntoViewIfNeeded();
       await btn(form, '保存复盘').click({ trial: true });
       await qa.capture(`interview-manual-review-controls-${width}`);
@@ -772,10 +793,11 @@ async function knowledgeFlows(qa, page) {
     }
     await btn(page, '编辑标题').click();
     const edit = dialog(page, '编辑展示标题');
+    await settleDialog(edit);
     await qa.capture('knowledge-edit-title-cancel');
     await closeDialog(page, '编辑展示标题');
     await btn(page, '永久删除该资料').click();
-    await dialog(page, '永久删除该资料').waitFor();
+    await settleDialog(dialog(page, '永久删除该资料'));
     await qa.capture('knowledge-delete-confirmation-cancel-only');
     await closeDialog(page, '永久删除该资料');
     qa.observed('empty validation; local text import keeps Brief not started; four detail tabs; title/delete dialogs cancelled');
