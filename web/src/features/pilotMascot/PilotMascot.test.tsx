@@ -153,6 +153,39 @@ describe('PilotMascot', () => {
     expect(document.activeElement?.textContent).toContain('隐藏角色');
   });
 
+  it('keeps a normal model inside reserved sidebar space without remounting on dock changes', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-sidebar-dock', '');
+    let bounds = { left: 12, top: 340, width: 190, height: 150, right: 202, bottom: 490 };
+    vi.spyOn(dock, 'getBoundingClientRect').mockImplementation(() => bounds as DOMRect);
+    document.body.append(dock);
+    const mounted = runtime();
+    const props = await renderMascot({ runtime: mounted, zoom: 1.4 });
+    const assertInside = () => {
+      const aside = container.querySelector<HTMLElement>('aside')!;
+      expect(aside.dataset.sidebarDocked).toBe('true');
+      const left = parseFloat(aside.style.left); const top = parseFloat(aside.style.top);
+      expect(left).toBeGreaterThanOrEqual(bounds.left);
+      expect(top).toBeGreaterThanOrEqual(bounds.top);
+      expect(left + parseFloat(aside.style.width)).toBeLessThanOrEqual(bounds.right + 0.1);
+      expect(top + parseFloat(aside.style.height)).toBeLessThanOrEqual(bounds.bottom + 0.1);
+    };
+    assertInside();
+    const originalLeft = container.querySelector<HTMLElement>('aside')!.style.left;
+    act(() => container.querySelector('button')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === '左下')!.click());
+    assertInside();
+    expect(container.querySelector<HTMLElement>('aside')!.style.left).not.toBe(originalLeft);
+    bounds = { left: 12, top: 340, width: 160, height: 120, right: 172, bottom: 460 };
+    await act(async () => { window.dispatchEvent(new Event('resize')); });
+    assertInside();
+    expect(mounted.mount).toHaveBeenCalledTimes(1);
+    await act(async () => { dock.remove(); });
+    expect(container.querySelector<HTMLElement>('aside')?.dataset.sidebarDocked).toBeUndefined();
+    expect(mounted.mount).toHaveBeenCalledTimes(1);
+    expect(props.onTogglePilot).not.toHaveBeenCalled();
+  });
+
   it('keeps Pilot usable when the Live2D runtime fails', async () => {
     const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
     const props = await renderMascot({ runtime: broken });

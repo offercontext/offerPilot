@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ConfigProvider, Layout } from 'antd';
+import { ConfigProvider, Layout, Row, Col } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import ResumeLibraryView from '../../src/components/ResumeLibraryView';
 import type { Resume } from '../../src/types/resume';
 import zhCN from 'antd/locale/zh_CN';
+import OfferCard from '../../src/components/OfferCard';
 import OfferNegotiationDrawer from '../../src/components/OfferNegotiationDrawer';
 import { CoreTaskSurfaceHost } from '../../src/features/coreTaskSurface/CoreTaskSurfaceHost';
 import { createCoreTaskSurfaceController } from '../../src/features/coreTaskSurface/controller';
@@ -72,7 +73,7 @@ function Fixture() {
       <Layout className="op-app-main" style={{ background: 'var(--op-layout-bg)', minWidth: 0, width: '100%' }}>
         <TopBar compact={surface === 'offer'} onSearch={() => {}} onOpenSettings={() => {}} />
         <Layout.Content className="op-app-content" style={{ padding: '0 24px 24px' }}>
-          {surface === 'resumes' ? <QueryClientProvider client={resumeClient}><ResumeLibraryView /></QueryClientProvider> : surface === 'offer' ? <CoreTaskSurfaceHost controller={taskController}>
+          {surface === 'offer-cards' ? <Row gutter={[16, 16]} data-offer-cards-fixture>{['InternationalInfrastructureCompanyWithoutSpaces'.repeat(3), '中文超长公司名称研发创新团队'.repeat(3)].map((company, index) => <Col key={company} xs={24} sm={12} md={8}><OfferCard offer={{ ...offer, id: 7 + index, company_name: company, position_name: index ? '超长中文岗位名称高级软件研发工程师与跨团队质量负责人'.repeat(3) : 'SeniorSoftwareEngineerWithLongUnbrokenEnglishPosition'.repeat(3), equity: 'UnbrokenEquityDescription'.repeat(4) }} selected={false} onToggleSelect={() => {}} onCoach={() => {}} onView={() => {}} onOpenApplication={() => {}} /></Col>)}</Row> : surface === 'resumes' ? <QueryClientProvider client={resumeClient}><ResumeLibraryView /></QueryClientProvider> : surface === 'offer' ? <CoreTaskSurfaceHost controller={taskController}>
             <OfferNegotiationDrawer open offer={offer} onClose={() => taskController.close(active.generation)} />
           </CoreTaskSurfaceHost> : surface === 'quick' ? <InterviewReadinessCenter fixedMode="quick" resumes={[
             { id: 11, title: `${label} · InternationalInfrastructureResume`, is_master: true, parent_resume_id: null, deleted_at: null },

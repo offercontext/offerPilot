@@ -82,6 +82,8 @@ export default function Sidebar({ view, onChange, reminderCount }: Props) {
         );
       })}
 
+      <div className={styles.mascotSlot} data-pilot-mascot-sidebar-dock aria-hidden="true" />
+
       <section className={styles.utility} aria-labelledby="sidebar-group-utility">
         <h2 id="sidebar-group-utility" className={styles.groupLabel}>辅助</h2>
         <button

@@ -1,6 +1,6 @@
 .mascot {
   position: fixed;
-  z-index: 1050;
+  z-index: 900;
   right: 20px;
   bottom: 18px;
   width: 238px;
@@ -303,3 +303,8 @@
 @media (max-width: 767px) {
   .mascot { display: none; }
 }
+
+/* Normal global character stays in reserved navigation whitespace. */
+.sidebarDock { transition: none; }
+.sidebarDock .bubble { left: 0; right: 0; top: 0; width: auto; max-width: 100%; }
+.sidebarDock .contextMenu { left: 0; right: auto; bottom: 0; }

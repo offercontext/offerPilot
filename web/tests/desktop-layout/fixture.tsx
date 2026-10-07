@@ -82,7 +82,7 @@ function Fixture() {
         <TopBar onSearch={() => {}} onOpenSettings={() => {}} primaryAction={{ label: '添加投递', onClick: () => {} }} />
         <Layout.Content className="op-app-content" style={{ padding: '0 24px 24px' }}>
           <Tabs activeKey="list" items={[{ key: 'board', label: '看板' }, { key: 'list', label: '列表' }]} />
-          {globalHeader ? <p>Global header layout fixture; production header and fallback components.</p> : <ApplicationListView applications={records} events={[]} onOpenDetail={setDetail} onAskPilot={() => setPilot(true)} />}
+          {globalHeader ? <div data-global-controls>{Array.from({ length: 10 }, (_, index) => <div key={index} style={{ display: 'flex', justifyContent: 'flex-end', margin: '18px 0' }}><button type="button" onClick={() => setPilot(true)}>全局操作 {index + 1}</button></div>)}</div> : <ApplicationListView applications={records} events={[]} onOpenDetail={setDetail} onAskPilot={() => setPilot(true)} />}
           <output data-layout-result={checks} aria-label="布局回归结果" style={{ fontSize: 11, color: 'var(--op-muted)' }}>{checks}</output>
         </Layout.Content>
       </Layout>

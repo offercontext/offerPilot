@@ -168,6 +168,53 @@ try {
       } finally { await page.close(); }
     }
   }
+  for (const width of [900, 1008, 1280, 1440]) {
+    for (const height of [600, 689]) {
+      for (const theme of ['dark', 'light']) {
+        const name = `${width}x${height}-sidebar-normal-${theme}`;
+        const page = await browser.newPage({ viewport: { width, height }, colorScheme: theme });
+        page.setDefaultTimeout(15000);
+        try {
+          await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/fixture.html?surface=header&mascot=normal&theme=${theme}`);
+          const mascot = page.locator('[data-sidebar-docked="true"][data-runtime-ready="true"]');
+          await mascot.waitFor();
+          const assertDock = async () => assert.equal(await mascot.evaluate(node => {
+            const r = node.getBoundingClientRect();
+            const slot = document.querySelector('[data-pilot-mascot-sidebar-dock]').getBoundingClientRect();
+            return r.left >= slot.left - 1 && r.right <= slot.right + 1 && r.top >= slot.top - 1 && r.bottom <= slot.bottom + 1
+              && r.top >= 0 && r.bottom <= innerHeight;
+          }), true, 'normal character must fit reserved sidebar area');
+          await assertDock();
+          for (const button of await page.locator('[data-global-controls] button').all()) {
+            await button.scrollIntoViewIfNeeded(); await button.click({ trial: true });
+          }
+          for (const label of ['设置', '切换明暗模式']) {
+            const button = page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: label, exact: true });
+            const r = await button.boundingBox(); assert.ok(r && r.y >= 0 && r.y + r.height <= height);
+            await button.click({ trial: true });
+          }
+          await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
+          await mascot.getByRole('button').click({ button: 'right' });
+          await page.getByRole('menuitem', { name: '左下', exact: true }).click();
+          await assertDock();
+          await mascot.getByRole('button').click();
+          const modal = page.getByRole('dialog', { name: 'Pilot', exact: true });
+          await modal.waitFor();
+          assert.equal(await page.evaluate(() => {
+            const node = document.querySelector('[data-sidebar-docked]'); const r = node.getBoundingClientRect();
+            return !document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest('[aria-label="Haru 助手"]');
+          }), true, 'modal mask must cover normal character interaction');
+          await page.screenshot({ path: path.join(output, `${name}-modal.png`), animations: 'disabled' });
+          await modal.getByRole('button', { name: 'Close', exact: true }).click();
+          await modal.waitFor({ state: 'hidden' });
+          results.push({ name, status: 'passed' });
+        } catch (error) {
+          await page.screenshot({ path: path.join(output, `${name}-failed.png`), animations: 'disabled' });
+          results.push({ name, status: 'failed', error: String(error) });
+        } finally { await page.close(); }
+      }
+    }
+  }
   await runTaskPanelCases(browser, output, results);
   assert.equal(results.filter(item => item.status === 'failed').length, 0, JSON.stringify(results.filter(item => item.status === 'failed')));
 } finally {

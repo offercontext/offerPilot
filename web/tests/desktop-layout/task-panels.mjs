@@ -141,10 +141,42 @@ async function checkResumes(page) {
   }
 }
 
+async function checkOfferCards(page) {
+  const cards = page.locator('[data-offer-cards-fixture] .ant-card');
+  await cards.nth(1).waitFor();
+  const geometry = await cards.evaluateAll(nodes => nodes.map(card => {
+    const body = card.querySelector('.ant-card-body');
+    const position = body.firstElementChild;
+    const range = document.createRange();
+    range.selectNodeContents(position);
+    const bounds = body.getBoundingClientRect();
+    return {
+      fits: body.scrollWidth <= body.clientWidth + 1,
+      textFits: [...range.getClientRects()].every(rect => rect.left >= bounds.left && rect.right <= bounds.right + 1),
+      lines: range.getClientRects().length,
+      fullTitle: position.title === position.textContent,
+      companyTitle: card.querySelector('.ant-card-head-title [title]')?.title,
+    };
+  }));
+  for (const card of geometry) {
+    assert.equal(card.fits, true, 'long Offer labels and equity must stay inside their card');
+    assert.equal(card.textFits, true, 'unbroken position text must wrap inside the body');
+    assert.ok(card.lines > 1, 'fixture must exercise real multiline wrapping');
+    assert.equal(card.fullTitle, true, 'complete position remains available');
+    assert.ok(card.companyTitle?.length > 30, 'truncated company keeps its complete title');
+  }
+  for (const card of await cards.all()) {
+    for (const button of await card.getByRole('button').all()) {
+      await button.scrollIntoViewIfNeeded();
+      await button.click({ trial: true });
+    }
+  }
+}
+
 export async function runTaskPanelCases(browser, output, results) {
   for (const width of [900, 1008, 1280, 1440]) {
     for (const theme of ['dark', 'light']) {
-      for (const surface of ['offer', 'haru', 'quick', 'resumes']) {
+      for (const surface of ['offer', 'haru', 'quick', 'resumes', 'offer-cards']) {
         for (const language of surface === 'haru' ? ['zh', 'en'] : ['zh']) {
           const name = `${width}x689-${surface}-${theme}-${language}`;
           const page = await browser.newPage({ viewport: { width, height: 689 }, colorScheme: theme });
@@ -165,7 +197,8 @@ export async function runTaskPanelCases(browser, output, results) {
           });
           try {
             await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/task-panels.html?surface=${surface}&theme=${theme}&language=${language}`);
-            if (surface === 'offer') await checkOffer(page);
+            if (surface === 'offer-cards') await checkOfferCards(page);
+            else if (surface === 'offer') await checkOffer(page);
             else if (surface === 'haru') await checkHaru(page);
             else if (surface === 'quick') await checkQuickPractice(page);
             else await checkResumes(page);
