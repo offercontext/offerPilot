@@ -121,6 +121,18 @@ async function captureWidths(qa, page, name, extra = {}) {
     }
   } finally { if (qa.canProceed()) await qa.size(1280); }
 }
+async function captureAnchoredWidths(qa, page, name, anchors) {
+  try {
+    for (const width of WIDTHS) {
+      await qa.size(width, 689);
+      for (const [label, target] of anchors) {
+        await target.scrollIntoViewIfNeeded();
+        await ready(page);
+        await qa.capture(`${name}-${label}-${width}x689`);
+      }
+    }
+  } finally { if (qa.canProceed()) await qa.size(1280); }
+}
 async function openApplication(page, record) {
   await navigate(page, 'applications-list');
   const list = region(page, '投递列表');
@@ -504,7 +516,15 @@ async function applicationDetailFlows(qa, page, record) {
     await form.getByLabel('面试问题', { exact: true }).fill(`${prefix} 如何确认保存没有丢失？`);
     await form.getByLabel('自我反思', { exact: true }).fill('先核对记录身份，再关闭并重新打开检查。');
     await form.getByLabel('难点/薄弱点', { exact: true }).fill('需要覆盖取消和返回路径。');
-    await captureWidths(qa, page, 'interview-manual-review');
+    for (const width of WIDTHS) {
+      await qa.size(width, 689);
+      await form.getByLabel('面试问题', { exact: true }).scrollIntoViewIfNeeded();
+      await qa.capture(`interview-manual-review-fields-${width}`);
+      await btn(form, '保存复盘').scrollIntoViewIfNeeded();
+      await btn(form, '保存复盘').click({ trial: true });
+      await qa.capture(`interview-manual-review-controls-${width}`);
+    }
+    await qa.size(1280);
     const note = await responseFromUI(page, new RegExp(`^/api/applications/${record.id}/notes$`), 'POST', () => btn(form, '保存复盘').click());
     assert.equal(note.application_event_id, completed.id); qa.fixture('interview-note', note.id);
     await form.waitFor({ state: 'hidden' });
@@ -618,7 +638,7 @@ async function resumeFlows(qa, page) {
     await editor.getByPlaceholder('简历标题', { exact: true }).fill(`${title}-未保存`);
     await btn(editor, '取消').click();
     const guard = dialog(page, '有未保存的更改');
-    await guard.waitFor();
+    await settleDialog(guard);
     await qa.capture('resume-dirty-close-guard');
     await btn(guard, '继续编辑').click();
     assert.equal(await editor.isVisible(), true);
@@ -718,6 +738,12 @@ async function knowledgeFlows(qa, page) {
       await navigate(page, 'knowledge'); await btn(page, label).click();
       await dialog(page, title).waitFor();
       await captureWidths(qa, page, `knowledge-${key}-input`);
+      if (key === 'bundle') {
+        const submit = btn(dialog(page, title), '开始导入');
+        await captureAnchoredWidths(qa, page, 'knowledge-bundle', [['footer', submit]]);
+        await submit.click({ trial: true });
+        qa.observed('upload title and footer captured; submit reachable by ordinary pointer, without uploading a file');
+      }
       await closeDialog(page, title);
       await page.getByPlaceholder('搜索资料内容（中文/英文关键词）', { exact: true }).waitFor();
       qa.observed('real input dialog opens at all native widths; cancel returns to sources');
@@ -774,7 +800,11 @@ async function storyFlows(qa, page) {
       assert.equal(options.length, 1, 'only the explicit synthetic assertion can be bound');
       await input.selectOption(options[0]);
     }
-    await captureWidths(qa, page, 'story-manual-draft');
+    await captureAnchoredWidths(qa, page, 'story-manual-draft', [
+      ['title', form.getByRole('textbox', exact('手动故事标题'))],
+      ['action', form.getByRole('textbox', exact('手动故事行动'))],
+      ['save', btn(form, '确认手动保存故事版本')],
+    ]);
     const story = await responseFromUI(page, /^\/api\/interview-stories$/, 'POST', () => btn(form, '确认手动保存故事版本').click());
     qa.fixture('interview-story', story.id);
     await form.waitFor({ state: 'hidden' });
@@ -876,7 +906,11 @@ async function offerFlows(qa, page, applications) {
     await form.getByLabel('本次沟通目标', { exact: true }).fill('合成演练：确认薪酬构成');
     await form.getByLabel('本次顾虑', { exact: true }).fill('尚未核对福利细节');
     await form.getByLabel('沟通场景', { exact: true }).fill('仅供本地界面验收');
-    await captureWidths(qa, page, 'offer-negotiation-unsent-draft');
+    await captureAnchoredWidths(qa, page, 'offer-negotiation-unsent-draft', [
+      ['inputs', form.getByLabel('本次沟通目标', { exact: true })],
+      ['facts', form.getByRole('heading', exact('本次将使用的 Offer 事实'))],
+      ['facts-end', form.getByTestId('offer-negotiation-input-facts').locator('*').last()],
+    ]);
     await btn(form, '关闭').click();
     await form.waitFor({ state: 'hidden' });
     qa.observed('bound Offer input facts and editable preflight; close returns without provider submission');
