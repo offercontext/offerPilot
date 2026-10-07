@@ -51,7 +51,8 @@ test('native viewport and global overflow checks reject simulation mismatch or c
 test('installed flows use public UI and native sizing without fixtures or external/model invocations', () => {
   const flow = fs.readFileSync(new URL('../screen-coverage.mjs', import.meta.url), 'utf8');
   const recorder = fs.readFileSync(new URL('../coverage-recorder.mjs', import.meta.url), 'utf8');
-  assert.match(recorder, /win\.setContentSize\(value, 900\)/);
+  assert.match(recorder, /win\.setContentSize\(value\.width, value\.height\)/);
+  assert.match(recorder, /window\.innerWidth === value\.width && window\.innerHeight === value\.height/);
   for (const value of [flow,recorder]) assert.doesNotMatch(value, /setViewportSize|page\.route\(|route\.fulfill|localStorage|sessionStorage|setQueryData|sqlite|page\.request\.|fetch\(/);
   assert.doesNotMatch(flow, /btn\([^\n]*'(?:发送|根据所选内容整理故事|开始录音|下载模型)'\)\.click/);
   assert.match(flow, /responseFromUI/);

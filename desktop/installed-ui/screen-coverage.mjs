@@ -87,9 +87,9 @@ async function responseFromUI(page, route, method, action) {
 }
 async function captureWidths(qa, page, name, extra = {}) {
   for (const width of WIDTHS) {
-    await qa.size(width);
+    await qa.size(width, 689);
     await ready(page);
-    await qa.capture(`${name}-${width}`, extra);
+    await qa.capture(`${name}-${width}x689`, extra);
   }
   await qa.size(1280);
 }
@@ -251,7 +251,7 @@ export async function extendedFlows(qa, page, initialRecord) {
     const list = region(page, '投递列表');
     await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(primary.company_name);
     await list.locator(`tr[data-row-key="${primary.id}"]`).waitFor();
-    await qa.size(900);
+    await qa.size(900, 689);
     const table = region(page, '投递表格，可横向滚动');
     await table.waitFor();
     const content = table.locator('.ant-table-content');

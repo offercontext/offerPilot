@@ -11,7 +11,7 @@ try {
   if (process.env.GITHUB_REPOSITORY !== PIN.repository || process.env.GITHUB_REF !== `refs/heads/${PIN.branch}`) {
     throw new Error('unexpected execution repository or branch');
   }
-  stage = 'source-artifact-metadata';
+  stage = 'product-build-artifact-metadata';
   const token = process.env.GH_TOKEN;
   if (!token) throw new Error('read token required');
   async function read(suffix) {
@@ -25,9 +25,10 @@ try {
   const result = validateMetadata(...await Promise.all([
     read(`runs/${PIN.runId}`), read(`artifacts/${PIN.artifactId}`),
     read(`runs/${PIN.runId}/artifacts?per_page=100`), read(`runs/${PIN.runId}/jobs?per_page=100`),
+    read(`runs/${PIN.fullRegressionRunId}`),
   ]));
   await fs.writeFile(path.join(evidence, 'source.json'), JSON.stringify({ status: 'passed', ...result }, null, 2) + '\n');
-  console.log('Pinned source run, successful packaging job and artifact identity/digest verified.');
+  console.log('Pinned product/full-gate identity, build activation run and successful packaging artifact verified independently.');
 } catch (error) {
   // Never print raw API bodies, credentials, transport errors, or arbitrary exception text.
   await fs.writeFile(path.join(evidence, 'source.json'), JSON.stringify({ status: 'failed', stage, ...safeFailure(error) }, null, 2) + '\n');

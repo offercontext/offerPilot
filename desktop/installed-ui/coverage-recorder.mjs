@@ -43,26 +43,31 @@ export function observeRuntime(page) {
 export async function createCoverage({ app, page, evidence, pin, installedExeSha256, runtime, setStage }) {
   const dir = path.join(evidence, 'screens');
   await fs.mkdir(dir, { recursive: true });
-  const report = { schema: 1, sourceCommit: pin.commit, sourceRun: pin.runId, artifactId: pin.artifactId,
+  const report = { schema: 2, sourceCommit: pin.commit, buildCommit: pin.buildCommit, buildWorkflow: pin.buildWorkflow,
+    buildRunId: pin.runId, fullRegressionRunId: pin.fullRegressionRunId, artifactId: pin.artifactId,
     installerSha256: pin.installerSha256, installedExeSha256, execution: 'real-installed-electron-native-content-size',
+    screenshotAnimationPolicy: 'CSS finite transitions fast-forwarded and infinite CSS animations temporarily cancelled by Playwright; not an animation-quality test',
     syntheticProfileOnly: true, aiInvocationsAuthorized: false, browserFixturesUsed: false, expectedRootCases: ROOT_CASES.length,
     cases: [], screens: [], fixtures: [], summary: null, runtime: null };
   let active;
   let sequence = 0;
   let width = 1280;
+  let height = 900;
   const save = async () => {
     report.summary = summarizeCoverage(report.cases);
     report.runtime = runtime.snapshot();
     await fs.writeFile(path.join(evidence, 'coverage.json'), `${JSON.stringify(report, null, 2)}\n`);
   };
-  const size = async (requested) => {
+  const size = async (requested, requestedHeight = 900) => {
     const window = await app.browserWindow(page);
-    await window.evaluate((win, value) => win.setContentSize(value, 900), requested);
-    await page.waitForFunction((value) => window.innerWidth === value, requested);
+    await window.evaluate((win, value) => win.setContentSize(value.width, value.height), { width: requested, height: requestedHeight });
+    await page.waitForFunction((value) => window.innerWidth === value.width && window.innerHeight === value.height, { width: requested, height: requestedHeight });
     width = requested;
+    height = requestedHeight;
   };
   const capture = async (label, extra = {}) => {
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
+    await page.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
     const measured = await page.evaluate(() => {
       const controls = [...document.querySelectorAll('button, input, textarea, select, [role="button"]')];
       let haruCoveredControls = 0;
@@ -81,13 +86,13 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
         documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
         theme: document.documentElement.dataset.theme || 'unknown', haruCoveredControls };
     });
-    await page.screenshot({ path: path.join(dir, filename), timeout: 15000 });
     const item = { filename: `screens/${filename}`, caseId: active?.caseId || null,
       ...measured, fixtureIds: report.fixtures.map(({ kind, id }) => ({ kind, id })), ...extra };
     report.screens.push(item);
     active?.screenshots.push(item.filename);
     await save(); // Geometry failures keep their screenshot.
     checkGeometry(measured, width);
+    if (measured.height !== height) throw new Error('native content height changed before capture');
     if (measured.haruCoveredControls > 0) throw new Error('Haru intercepts visible product controls');
     return measured;
   };

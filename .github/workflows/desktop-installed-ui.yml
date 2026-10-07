@@ -45,13 +45,16 @@ jobs:
           New-Item -ItemType Directory -Force $env:UI_EVIDENCE_DIR | Out-Null
           @(
             'EXPERIMENTAL INSTALLED WINDOWS UI EVIDENCE. NOT RELEASE READY.',
-            'Reuses installer from source 744fce4ab3bdde1b6a4aa8accd9e626b306c6d74, run 37454260377.',
+            'Product source commit: d853bd2eb117929e73530bb5036256801278b235.',
+            'Installer build activation commit: 16a8f2f7eb12350288caf15af29593cfdb6f583e.',
+            'Installer build workflow: .github/workflows/desktop-layout-retry.yml; build run: 37630142396.',
+            'Independent full regression: https://github.com/offercontext/offerPilot/actions/runs/37626960710 (not certified by this job).',
             'No rebuild and no rerun, replacement or cancellation of independent full regression.',
             'Playwright temporarily uses loopback Node inspect/CDP; normal undebugged launch is distinct.',
             'Hosted Windows runners are administrator environments with UAC disabled by the platform.',
             'No OS protection changes. Ordinary-user/UAC/SmartScreen/clean-no-devtools experience is not proven.',
             'Only synthetic data, screenshots and whitelisted JSON are retained; no userData/config/token/headers/HAR/trace.',
-            "Helper commit: $env:GITHUB_SHA",
+            "Installed-UI helper commit: $env:GITHUB_SHA",
             "UI run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
           ) | Set-Content -Encoding utf8 -LiteralPath (Join-Path $env:UI_EVIDENCE_DIR 'scope.txt')
       - uses: actions/setup-node@v4
@@ -65,7 +68,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'UI helper dependency installation failed' }
           npm.cmd test --prefix desktop/installed-ui
           if ($LASTEXITCODE -ne 0) { throw 'UI helper contract/routing checks failed' }
-      - name: Verify exact request and fixed source metadata
+      - name: Verify exact product, build and artifact metadata
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -74,16 +77,16 @@ jobs:
       - name: Read original source for packaged entrypoint comparison
         uses: actions/checkout@v4
         with:
-          ref: 744fce4ab3bdde1b6a4aa8accd9e626b306c6d74
+          ref: d853bd2eb117929e73530bb5036256801278b235
           path: .installed-ui-source
           persist-credentials: false
-      - name: Download only the approved artifact from the fixed source run
+      - name: Download only the approved artifact from the fixed build run
         uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
           repository: offercontext/offerPilot
-          run-id: 37454260377
-          name: offerpilot-windows-experimental-validation-744fce4ab3bdde1b6a4aa8accd9e626b306c6d74
+          run-id: 37630142396
+          name: offerpilot-windows-ui-retry-d853bd2eb117929e73530bb5036256801278b235-16a8f2f7eb12350288caf15af29593cfdb6f583e
           path: ${{ env.UI_ARTIFACT_DIR }}
       - name: Execute installer, real Electron UI and complete restart checks
         run: |
@@ -93,7 +96,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installed-ui-evidence-744fce4a-${{ github.run_id }}-${{ github.run_attempt }}
+          name: windows-installed-ui-evidence-d853bd2e-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 14
           path: |

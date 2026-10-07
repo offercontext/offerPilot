@@ -7,18 +7,18 @@ import { EventEmitter } from 'node:events';
 import { createCoverage, observeRuntime } from '../coverage-recorder.mjs';
 import { PIN } from '../contract.mjs';
 
-async function fixture(t, { pendingWrite=false, overflow=false, covered=0 }={}) {
+async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrongHeight=false }={}) {
   const evidence = await fs.mkdtemp(path.join(os.tmpdir(), 'offerpilot-unit-coverage-'));
   t.after(() => fs.rm(evidence,{recursive:true,force:true}));
-  let reloads=0; let width=1280;
+  let reloads=0; let width=1280; let height=900;
   const sizes=[];
   const page={
-    async evaluate() { return {width,height:900,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered}; },
+    async evaluate() { return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered}; },
     async screenshot({path}) { await fs.writeFile(path,'UNIT TEST ONLY, NOT A PRODUCT SCREENSHOT'); },
     async reload() { reloads++; },
-    async waitForFunction(callback,value) { assert.equal(width,value); },
+    async waitForFunction(callback,value) { assert.equal(width,value.width); assert.equal(height,value.height); },
   };
-  const app={async browserWindow() { return { async evaluate(callback,value) { callback({setContentSize(w,h){ sizes.push([w,h]); width=w; }},value); } }; }};
+  const app={async browserWindow() { return { async evaluate(callback,value) { callback({setContentSize(w,h){ sizes.push([w,h]); width=w; height=h; }},value); } }; }};
   let calls = 0; let critical = 0; const classifications = {};
   const runtime={snapshot:()=>({classifications:{...classifications},ownRequestFailures:[],ownCriticalFailureCount:critical}),hasPendingWrite:()=>pendingWrite && ++calls > 1};
   const qa=await createCoverage({app,page,evidence,pin:PIN,installedExeSha256:'unit-fixture-hash',runtime,setStage(){}});
@@ -38,6 +38,28 @@ test('recorder writes pin, native measured size, explicit assertion and screensh
   assert.deepEqual(report.screens[0].fixtureIds,[{kind:'application',id:27}]);
   assert.equal(report.screens[0].width,900);
   assert.equal(report.summary.functionalPasses,1);
+});
+
+test('recorder uses actual native 689px content height for screenshot regression',async(t)=>{
+  const {qa,evidence,sizes}=await fixture(t);
+  await qa.size(1008,689);
+  await qa.run('R05','list-1008x689',['投递','列表'],async()=>{
+    qa.observed('native viewport verified'); await qa.capture('list-1008x689');
+  });
+  const report=JSON.parse(await fs.readFile(path.join(evidence,'coverage.json'),'utf8'));
+  assert.deepEqual(sizes,[[1008,689]]);
+  assert.equal(report.screens[0].width,1008); assert.equal(report.screens[0].height,689);
+});
+
+test('a changed native height cannot pass screenshot geometry',async(t)=>{
+  const {qa,evidence}=await fixture(t,{wrongHeight:true});
+  await qa.size(1008,689);
+  await qa.run('R05','wrong-height',['投递','列表'],async()=>{
+    qa.observed('window sized'); await qa.capture('wrong-height');
+  });
+  const report=JSON.parse(await fs.readFile(path.join(evidence,'coverage.json'),'utf8'));
+  assert.equal(report.cases[0].outcome,'FAIL');
+  assert.ok(report.cases[0].screenshots.length>0);
 });
 
 test('geometry failure retains screenshot, remains failed, and independent case still executes',async(t)=>{

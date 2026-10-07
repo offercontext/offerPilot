@@ -1,21 +1,27 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-07 扩展逐屏脚本已加入；下列旧 pin 仍是执行契约，不能视为本轮新 UI 构建的通过证据。新构建完成后必须一起审阅并更新 contract/request/workflow 的精确来源，不能猜测 artifact ID 或摘要。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+状态：限定分支上的实验验证辅助工具。2026-10-07 扩展逐屏脚本已加入；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。真实安装 UI 尚待执行，不能把组件渲染的 36 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
 
 ## 固定输入与独立路由
 
-- 源提交：`744fce4ab3bdde1b6a4aa8accd9e626b306c6d74`。
-- 源 run：[37454260377](https://github.com/offercontext/offerPilot/actions/runs/37454260377)。完整回归仍独立进行；本流程不重跑、不取消、不替代该 run。
-- Artifact：`11409501649`，名称 `offerpilot-windows-experimental-validation-744fce4ab3bdde1b6a4aa8accd9e626b306c6d74`。
-- Artifact 元数据摘要：`sha256:cd58641cf668d71e26ceabe0b290194c72d490038da9037297df1b2a17cfd375`。
+- 源提交：`d853bd2eb117929e73530bb5036256801278b235`。
+- 构建 run：[37630142396](https://github.com/offercontext/offerPilot/actions/runs/37630142396)。完整回归归属独立 run [37626960710](https://github.com/offercontext/offerPilot/actions/runs/37626960710)；本流程不重跑、不取消、不替代它。
+- Artifact：`11487515170`，名称 `offerpilot-windows-ui-retry-d853bd2eb117929e73530bb5036256801278b235-16a8f2f7eb12350288caf15af29593cfdb6f583e`。
+- Artifact 元数据摘要：`sha256:bcdcd7447bed7f0be11e51030c8cfc6aa8eba79eebdb3ae4f9fe5a4a6fc4ae53`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`371a416d5566bbdd33f8b28fd1a3514350972cddb5bb02bc406c8915286a320d`。
+- 安装包 SHA256：`09edde023a586cffb7212afe13337d37e9e02e8a9fb8647188ab90984a8bd004`。
 
-`desktop/installed-ui/contract.mjs` 固定以上值。执行要求 `desktop/installed-ui/request.json` 的全部键和值精确匹配，不接受 URL、任意 run、输入参数或额外键；缺少请求文件直接失败。只读 job token 验证原 run 的仓库、分支、head SHA、workflow 路径，安装包 job 已成功，以及 artifact ID、名称、摘要、未过期状态与归属。完整回归是否通过不能从安装包 job 推导。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `d853bd2eb117929e73530bb5036256801278b235`，构建激活提交为 `16a8f2f7eb12350288caf15af29593cfdb6f583e`，构建工作流为 `desktop-layout-retry.yml`，构建 run 为 `37630142396`，独立完整回归 run 为 `37626960710`。
+
+普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
+
+`source.json`、`result.json` 与 `coverage.json` 分别标注产品 SHA、构建 SHA/工作流/run 和 full-gate run；来源代码 checkout 及已安装 main/lifecycle 对比始终使用产品 `commit`，不是 helper 激活提交。安装包哈希、payload 字节校验、摘要与成功打包 job 检查不变。完整回归 metadata 仅校验来源归属，仍记 `not-certified-by-this-job`，不能从打包成功或本次 UI 通过推导 full-gate 通过。
+
+`desktop/installed-ui/contract.mjs` 固定以上值。执行要求 `desktop/installed-ui/request.json` 的全部键和值精确匹配，不接受 URL、任意 run、输入参数或额外键；缺少请求文件直接失败。只读 job token 分别验证构建 run 与独立完整回归 run 的仓库、分支、head SHA、workflow 路径，再验证安装包 job 已成功，以及 artifact ID、名称、摘要、未过期状态与构建归属。完整回归是否通过不能从安装包 job 推导。
 
 下载由官方 `actions/download-artifact@v4` 使用固定仓库、run 与名称完成。验证 metadata digest 并不伪装成本地重算 ZIP：下载 action 解压 artifact，执行前另对安装包字节计算硬编码 SHA256，任一不符都不执行。没有应用重建步骤。
 
-两次提交、两次独立 push 激活：
+首次建立 UI 路由时采用两次提交、两次独立 push 激活（现已完成；本轮仅更新既有 UI 辅助路径及精确 pin，可直接单次激活）：
 
 1. 先提交 helper、独立 workflow、本文和原 workflow 的 3 条窄 `paths-ignore`；标题包含 `[skip ci]`，避免路由引导提交启动旧全量工作流。此提交不包含 `request.json`。先单独 push，并核对远端已出现该 bootstrap 提交且没有新增旧验证 run。
 2. 确认第一步后，再仅加入经过审阅的 `request.json`，单独第二次 push，触发 `.github/workflows/desktop-installed-ui.yml`；旧 `desktop-windows.yml` 因忽略该路径而不重跑。
@@ -24,7 +30,7 @@
 
 两个 workflow 的 push 都只接受精确分支 `feat/20261005-windows-desktop-validation`，并保留可选 dispatch。独立 UI job 额外检查仓库和分支，dispatch 不含参数；默认分支尚无此 workflow 时，不保证 GitHub 手动入口可用。没有自动取消或自动替换已有 run。
 
-旧 workflow 只忽略 `desktop/installed-ui/**`、`.github/workflows/desktop-installed-ui.yml` 和本文。它自己的配置、产品源码、桌面 package/锁文件及所有构建路径仍触发原验证。UI workflow 的 push 仅监听上述三个路径；混合产品和 UI 改动会触发两个流程。路由单测覆盖这些情况。
+原 workflow 仅忽略 `desktop/installed-ui/**`、`.github/workflows/desktop-installed-ui.yml`、本文，以及限定布局重试的 `desktop/layout-retry/**` 和 `.github/workflows/desktop-layout-retry.yml`。它自己的配置、产品源码、桌面 package/锁文件及所有构建路径仍触发原验证。UI workflow 的 push 仅监听上述三个路径；混合产品和 UI 改动会触发两个流程。路由单测覆盖这些情况。
 
 ## 执行内容
 
@@ -55,7 +61,7 @@
 
 每个 case 记录 `surfaceId/caseId/uiPath/kind/outcome/assertions/screenshots`，每张截图记录实测 viewport、主题、合成记录 ID；顶层记录精确源码/安装包/实际 EXE 摘要。单个界面失败会保存白名单诊断和现场截图，然后继续独立界面；只在没有未决 UI 写请求时使用正常 reload 恢复。写请求传输失败会保留 sticky 未知结果屏障，阻止后续 UI 操作；不会将 requestfailed 当成已确认未写入。未走到的根页面/子界面在收尾列为 NOT RUN，不补造 PASS。
 
-`coverage.json` 的 summary 区分 `visualPasses` 与 `functionalPasses`；存在 FAIL 时最终进程失败，即使后续生命周期检查通过。只有 BLOCKED/NOT RUN 时，运行状态为 `passed-with-coverage-limitations`，coverage 为 `incomplete`。`humanVisualReview=required-not-automated` 明确图片仍需人工检查，不把几何断言等同于“每个功能无问题”。Windows job 上限扩为 60 分钟，独立全量回归路由不变。
+`coverage.json` 的 summary 区分 `visualPasses` 与 `functionalPasses`；存在 FAIL 时最终进程失败，即使后续生命周期检查通过。只有 BLOCKED/NOT RUN 时，运行状态为 `passed-with-coverage-limitations`，coverage 为 `incomplete`。`humanVisualReview=required-not-automated` 明确图片仍需人工检查，不把几何断言等同于“每个功能无问题”。根页面常规截图使用900px内容高度；关键子界面、长列表与横滚回归额外使用689px真实窗口内容高度，并记录实测尺寸。截图先结束有限CSS过渡再读几何，避免把切换动画当最终布局。Windows job 上限扩为 60 分钟，独立全量回归路由不变。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 

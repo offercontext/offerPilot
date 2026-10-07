@@ -2,16 +2,19 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 export const PIN = Object.freeze({
-  schema: 1,
+  schema: 2,
   repository: 'offercontext/offerPilot',
   branch: 'feat/20261005-windows-desktop-validation',
-  commit: '744fce4ab3bdde1b6a4aa8accd9e626b306c6d74',
-  runId: 37454260377,
-  artifactId: 11409501649,
-  artifactName: 'offerpilot-windows-experimental-validation-744fce4ab3bdde1b6a4aa8accd9e626b306c6d74',
-  artifactDigest: 'sha256:cd58641cf668d71e26ceabe0b290194c72d490038da9037297df1b2a17cfd375',
+  commit: 'd853bd2eb117929e73530bb5036256801278b235',
+  buildCommit: '16a8f2f7eb12350288caf15af29593cfdb6f583e',
+  buildWorkflow: '.github/workflows/desktop-layout-retry.yml',
+  fullRegressionRunId: 37626960710,
+  runId: 37630142396,
+  artifactId: 11487515170,
+  artifactName: 'offerpilot-windows-ui-retry-d853bd2eb117929e73530bb5036256801278b235-16a8f2f7eb12350288caf15af29593cfdb6f583e',
+  artifactDigest: 'sha256:bcdcd7447bed7f0be11e51030c8cfc6aa8eba79eebdb3ae4f9fe5a4a6fc4ae53',
   installer: 'OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe',
-  installerSha256: '371a416d5566bbdd33f8b28fd1a3514350972cddb5bb02bc406c8915286a320d',
+  installerSha256: '09edde023a586cffb7212afe13337d37e9e02e8a9fb8647188ab90984a8bd004',
 });
 export const SYNTHETIC = Object.freeze({
   company_name: '桌面验收中文公司',
@@ -21,38 +24,71 @@ export const SYNTHETIC = Object.freeze({
 });
 export function validateRequest(request) {
   assert.deepEqual(request, PIN, 'request must exactly equal the reviewed pin');
-  return PIN;
+  return validateReviewedPin(PIN);
 }
-export function validateMetadata(run, artifact, artifacts, jobs) {
-  assert.equal(run.id, PIN.runId);
-  assert.equal(run.head_sha, PIN.commit);
-  assert.equal(run.head_branch, PIN.branch);
-  assert.equal(run.path, '.github/workflows/desktop-windows.yml');
+// The production caller always supplies the reviewed constant PIN. The optional
+// pin argument makes distinct-source/build test fixtures possible, not a runtime input.
+export function validateReviewedPin(pin) {
+  assert.deepEqual(Object.keys(pin).sort(), Object.keys(PIN).sort());
+  assert.equal(pin.schema, 2);
+  assert.equal(pin.repository, 'offercontext/offerPilot');
+  assert.equal(pin.branch, 'feat/20261005-windows-desktop-validation');
+  for (const key of ['commit', 'buildCommit']) assert.match(pin[key], /^[a-f0-9]{40}$/);
+  for (const key of ['runId', 'fullRegressionRunId', 'artifactId']) assert.ok(Number.isSafeInteger(pin[key]) && pin[key] > 0);
+  assert.match(pin.artifactDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.match(pin.installerSha256, /^[a-f0-9]{64}$/);
+  assert.equal(pin.installer, 'OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe');
+  assert.ok(['.github/workflows/desktop-windows.yml', '.github/workflows/desktop-layout-retry.yml'].includes(pin.buildWorkflow));
+  if (pin.buildWorkflow === '.github/workflows/desktop-windows.yml') {
+    assert.equal(pin.buildCommit, pin.commit, 'ordinary build must use its product head');
+    assert.equal(pin.fullRegressionRunId, pin.runId, 'ordinary build keeps the original full-gate provenance');
+  } else {
+    assert.notEqual(pin.buildCommit, pin.commit, 'retry activation and product source must remain distinct');
+    assert.notEqual(pin.fullRegressionRunId, pin.runId, 'retry cannot replace the independent full gate');
+  }
+  return pin;
+}
+function validateRunIdentity(run, { id, commit, workflow }, pin) {
+  assert.equal(run.id, id);
+  assert.equal(run.head_sha, commit);
+  assert.equal(run.head_branch, pin.branch);
+  assert.equal(run.path, workflow);
   assert.equal(run.event, 'push');
-  assert.equal(run.repository?.full_name, PIN.repository);
-  assert.equal(run.head_repository?.full_name, PIN.repository);
-  assert.equal(artifact.id, PIN.artifactId);
-  assert.equal(artifact.name, PIN.artifactName);
+  assert.equal(run.repository?.full_name, pin.repository);
+  assert.equal(run.head_repository?.full_name, pin.repository);
+  assert.ok(Number.isSafeInteger(run.repository?.id) && run.repository.id > 0);
+  assert.equal(run.head_repository?.id, run.repository.id);
+}
+export function validateMetadata(run, artifact, artifacts, jobs, fullRegressionRun, reviewedPin = PIN) {
+  const pin = validateReviewedPin(reviewedPin);
+  validateRunIdentity(run, { id: pin.runId, commit: pin.buildCommit, workflow: pin.buildWorkflow }, pin);
+  validateRunIdentity(fullRegressionRun, { id: pin.fullRegressionRunId, commit: pin.commit,
+    workflow: '.github/workflows/desktop-windows.yml' }, pin);
+  assert.equal(fullRegressionRun.repository.id, run.repository.id);
+  assert.equal(artifact.id, pin.artifactId);
+  assert.equal(artifact.name, pin.artifactName);
   assert.equal(artifact.expired, false);
-  assert.equal(artifact.digest, PIN.artifactDigest);
-  assert.equal(artifact.workflow_run?.id, PIN.runId);
-  assert.equal(artifact.workflow_run?.head_sha, PIN.commit);
-  assert.equal(artifact.workflow_run?.head_branch, PIN.branch);
-  assert.equal(artifact.workflow_run?.repository_id, run.repository?.id);
-  assert.equal(artifact.workflow_run?.head_repository_id, run.head_repository?.id);
+  assert.equal(artifact.digest, pin.artifactDigest);
+  assert.equal(artifact.workflow_run?.id, pin.runId);
+  assert.equal(artifact.workflow_run?.head_sha, pin.buildCommit);
+  assert.equal(artifact.workflow_run?.head_branch, pin.branch);
+  assert.equal(artifact.workflow_run?.repository_id, run.repository.id);
+  assert.equal(artifact.workflow_run?.head_repository_id, run.head_repository.id);
   assert.equal(artifacts.total_count, artifacts.artifacts.length, 'artifact listing must be complete');
-  const selected = artifacts.artifacts.filter((item) => item.name === PIN.artifactName);
+  const selected = artifacts.artifacts.filter((item) => item.name === pin.artifactName);
   assert.equal(selected.length, 1);
-  assert.equal(selected[0].id, PIN.artifactId);
-  assert.equal(selected[0].digest, PIN.artifactDigest);
+  assert.equal(selected[0].id, pin.artifactId);
+  assert.equal(selected[0].digest, pin.artifactDigest);
   assert.equal(jobs.total_count, jobs.jobs.length, 'job listing must be complete');
   const packaging = jobs.jobs.filter((job) => job.name === 'Experimental installer and desktop smoke');
   assert.equal(packaging.length, 1);
   assert.equal(packaging[0].status, 'completed');
   assert.equal(packaging[0].conclusion, 'success');
-  // Full regression deliberately remains independent: never infer its result here.
-  return { runId: PIN.runId, artifactId: PIN.artifactId, commit: PIN.commit,
-    digest: PIN.artifactDigest, packaging: 'success', fullRegression: 'not-certified-by-this-job' };
+  // Full regression remains independent: checking its identity is not certifying its result.
+  return { runId: pin.runId, artifactId: pin.artifactId, commit: pin.commit,
+    buildCommit: pin.buildCommit, buildWorkflow: pin.buildWorkflow,
+    fullRegressionRunId: pin.fullRegressionRunId, digest: pin.artifactDigest,
+    packaging: 'success', fullRegression: 'not-certified-by-this-job' };
 }
 export function publicApplication(value) {
   assert.ok(Number.isSafeInteger(value?.id) && value.id > 0, 'positive application ID required');

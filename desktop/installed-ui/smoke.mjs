@@ -20,7 +20,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const evidence = path.resolve(process.env.UI_EVIDENCE_DIR || path.join(here, 'evidence'));
 const source = path.resolve(process.env.UI_SOURCE_DIR || '.installed-ui-source');
 const artifact = path.resolve(process.env.UI_ARTIFACT_DIR || '.installed-ui-artifact');
-const report = { status: 'running', sourceCommit: PIN.commit, sourceRun: PIN.runId, artifactId: PIN.artifactId,
+const report = { status: 'running', sourceCommit: PIN.commit, buildCommit: PIN.buildCommit, buildWorkflow: PIN.buildWorkflow,
+  buildRunId: PIN.runId, fullRegressionRunId: PIN.fullRegressionRunId, artifactId: PIN.artifactId,
   scope: 'experimental-installed-UI-with-temporary-loopback-debugging', releaseReady: false,
   ordinaryUserUacSmartScreenValidated: false, normalUndebuggedLaunchValidated: false,
   fullRegression: 'independent-not-certified', stages: [], launches: [] };
