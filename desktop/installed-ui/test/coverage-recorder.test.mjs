@@ -16,7 +16,7 @@ async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrong
     async evaluate(_callback,args) { if(args?.rules)return {observedView:'applications-list',visibleSurfaces:[args.targetId],targetSurfaceConfirmed:true}; return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered}; },
     async screenshot({path}) { await fs.writeFile(path,'UNIT TEST ONLY, NOT A PRODUCT SCREENSHOT'); },
     async reload() { reloads++; },
-    async waitForFunction(callback,value) { assert.equal(width,value.width); assert.equal(height,value.height); },
+    async waitForFunction(callback,value,options) { if (value === undefined) { assert.equal(options.timeout,5000); assert.equal(options.polling,'raf'); return; } assert.equal(width,value.width); assert.equal(height,value.height); },
   };
   const app={async browserWindow() { return { async evaluate(callback,value) { callback({setContentSize(w,h){ sizes.push([w,h]); width=w; height=h; }},value); } }; }};
   let calls = 0; let critical = 0; const classifications = {};

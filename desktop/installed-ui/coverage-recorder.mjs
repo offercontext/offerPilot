@@ -39,6 +39,29 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
   };
   const capture = async (label, extra = {}) => {
     markUiStep(page, 'screenshot-capture');
+    // All captures share this gate: a dialog that has a box but is still
+    // entering must never be accepted as its final visible screenshot.
+    await page.waitForFunction(() => {
+      const surfaces = [...document.querySelectorAll('[role="dialog"], [role="menu"], .ant-drawer-content-wrapper')]
+        .filter(node => node.getClientRects().length && getComputedStyle(node).visibility === 'visible');
+      const boxes = [];
+      for (const node of surfaces) {
+        for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+          const style = getComputedStyle(ancestor);
+          if (Number(style.opacity) < 0.999 || style.visibility !== 'visible') return false;
+          if (ancestor.getAnimations().some(animation => animation.playState === 'running'
+            && animation.effect?.getTiming().iterations !== Infinity)) return false;
+        }
+        const rect = node.getBoundingClientRect();
+        boxes.push([rect.x, rect.y, rect.width, rect.height].map(value => Math.round(value * 100) / 100));
+      }
+      const key = JSON.stringify(boxes);
+      const prior = window.__offerpilotScreenshotPaint;
+      const frames = prior?.key === key ? prior.frames + 1 : 1;
+      window.__offerpilotScreenshotPaint = { key, frames };
+      return frames >= 3;
+    }, undefined, { timeout: 5000, polling: 'raf' });
+    await page.evaluate(() => { delete window.__offerpilotScreenshotPaint; });
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
     await page.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
     const measured = await page.evaluate(measureScreenGeometry);
