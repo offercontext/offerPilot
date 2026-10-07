@@ -167,6 +167,89 @@ describe('PilotMascot', () => {
     expect(props.onTogglePilot).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps a normal list character compact and outside a tall table at maximum zoom', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.getBoundingClientRect = () => ({ left: 240, top: 200, right: 800, bottom: 1200, width: 560, height: 1000, x: 240, y: 200, toJSON: () => ({}) });
+    document.body.append(dock, table);
+    try {
+      await renderMascot({ zoom: 1.3, position: { xRatio: 0.9, yRatio: 0.8 } });
+      const mascot = container.querySelector<HTMLElement>('aside')!;
+      expect(mascot.style.width).toBe('150.8px');
+      expect(mascot.style.height).toBe('226.2px');
+      expect(mascot.dataset.pilotListCharacter).toBe('true');
+      expect(Number.parseFloat(mascot.style.left)).toBeGreaterThanOrEqual(800);
+      expect(dock.querySelector('canvas')).toBeNull();
+    } finally {
+      await act(async () => { dock.remove(); table.remove(); });
+    }
+  });
+
+  it('releases a lane when only its own scrolling chrome prevents the full-width table from fitting', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const list = document.createElement('section');
+    Object.defineProperty(list, 'clientWidth', { value: 1016 });
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.dataset.pilotTableMinWidth = '982';
+    const bottom = window.innerHeight - 190;
+    table.getBoundingClientRect = () => ({ left: 240, top: 200, right: 800, bottom, width: 560, height: bottom - 200, x: 240, y: 200, toJSON: () => ({}) });
+    const scroll = document.createElement('div');
+    scroll.className = 'ant-table-content';
+    Object.defineProperties(scroll, { offsetHeight: { value: 200 }, clientHeight: { value: 192 } });
+    const hint = document.createElement('p');
+    hint.setAttribute('data-pilot-mascot-scroll-hint', '');
+    hint.getBoundingClientRect = () => ({ height: 18 } as DOMRect);
+    table.append(hint, scroll);
+    list.append(table);
+    document.body.append(dock, list);
+    try {
+      await renderMascot();
+      expect(container.querySelector<HTMLElement>('aside')?.dataset.pilotListCharacter).toBeUndefined();
+    } finally {
+      await act(async () => { dock.remove(); list.remove(); });
+    }
+  });
+
+  it('does not reserve desktop space for the hidden mobile character', async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.getBoundingClientRect = () => ({ left: 16, top: 200, right: 359, bottom: 1200, width: 343, height: 1000, x: 16, y: 200, toJSON: () => ({}) });
+    document.body.append(dock, table);
+    try {
+      await renderMascot();
+      expect(container.querySelector<HTMLElement>('aside')?.dataset.pilotListCharacter).toBeUndefined();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+      await act(async () => { dock.remove(); table.remove(); });
+    }
+  });
+
+  it('does not reserve a side lane when the normal character fits below a short list', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.getBoundingClientRect = () => ({ left: 240, top: 200, right: 984, bottom: 300, width: 744, height: 100, x: 240, y: 200, toJSON: () => ({}) });
+    document.body.append(dock, table);
+    try {
+      await renderMascot({ position: { xRatio: 0.9, yRatio: 0.8 } });
+      const mascot = container.querySelector<HTMLElement>('aside')!;
+      expect(mascot.style.width).toBe('116px');
+      expect(mascot.dataset.pilotListCharacter).toBeUndefined();
+      expect(Number.parseFloat(mascot.style.top)).toBeGreaterThanOrEqual(300);
+    } finally {
+      await act(async () => { dock.remove(); table.remove(); });
+    }
+  });
+
   it('docks the failed entrance when the list appears and restores it when the list leaves', async () => {
     const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
     await renderMascot({ runtime: broken });

@@ -47,3 +47,16 @@
 }
 
 .fallbackDock:empty { display: none; }
+
+/* Reserve the character's maximum compact zoom (116 × 1.3) plus two 16px gaps.
+   The space is released immediately when Haru is hidden or falls back. */
+@media (min-width: 768px) {
+  :global(body:has([data-pilot-list-character='true'])) .tableArea { margin-right: 184px; }
+}
+.tableArea { min-width: 0; }
+.tableArea:focus-visible { outline: 2px solid var(--op-primary); outline-offset: 4px; }
+.scrollHint { margin: 0 0 8px; color: var(--op-muted); font-size: 12px; }
+.tableArea :global(.ant-table-content) { scrollbar-width: thin; scrollbar-color: var(--op-muted) var(--op-surface); }
+.tableArea :global(.ant-table-content)::-webkit-scrollbar { height: 10px; }
+.tableArea :global(.ant-table-content)::-webkit-scrollbar-track { background: var(--op-surface); }
+.tableArea :global(.ant-table-content)::-webkit-scrollbar-thumb { background: var(--op-muted); border-radius: 5px; }

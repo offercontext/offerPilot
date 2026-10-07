@@ -203,13 +203,30 @@ export default function PilotMascot({
       : panelOpen ? '收起 OfferPilot 领航员' : '打开 OfferPilot 领航员';
   const buttonLabel = loadFailed ? `${actionLabel}（Haru 模型未加载，Pilot 仍可使用）` : actionLabel;
 
-  const frame = loadFailed ? MASCOT_FRAME.fallback : compact || panelOpen || placement === 'pilot-page' || (studioPlacement && viewport.height < 740)
+  const frame = loadFailed ? MASCOT_FRAME.fallback : fallbackDock || compact || panelOpen || placement === 'pilot-page' || (studioPlacement && viewport.height < 740)
     ? MASCOT_FRAME.compact
     : viewport.width <= 900
       ? MASCOT_FRAME.narrowDesktop
       : MASCOT_FRAME.expanded;
   const frameWidth = Math.round(frame.width * (loadFailed ? 1 : normalizedZoom) * 10) / 10;
   const frameHeight = Math.round(frame.height * (loadFailed ? 1 : normalizedZoom) * 10) / 10;
+  const listTable = fallbackDock && !loadFailed
+    ? document.querySelector<HTMLElement>('[data-pilot-mascot-safe-area]')
+    : null;
+  const listTableRect = listTable?.getBoundingClientRect();
+  const scrollContent = listTable?.querySelector<HTMLElement>('.ant-table-content');
+  const scrollHint = listTable?.querySelector<HTMLElement>('[data-pilot-mascot-scroll-hint]');
+  const renderedScrollSpace = (scrollHint ? scrollHint.getBoundingClientRect().height + 8 : 0)
+    + (scrollContent ? scrollContent.offsetHeight - scrollContent.clientHeight : 0);
+  const fullWidthWouldScroll = Boolean(listTable && listTable.parentElement
+    && listTable.parentElement.clientWidth < Number(listTable.dataset.pilotTableMinWidth));
+  // Decide from the full-width layout, not the lane's own added hint/scrollbar.
+  // Otherwise filtering/paginating a long list can retain an unnecessary lane.
+  const fullWidthTableBottom = listTableRect
+    ? listTableRect.bottom - renderedScrollSpace + (fullWidthWouldScroll ? 36 : 0)
+    : 0;
+  const needsListGutter = Boolean(viewport.width >= 768 && listTableRect
+    && fullWidthTableBottom + frameHeight + 32 > viewport.height);
   const activePosition = position ?? localPosition;
   void safeAreaRevision;
   const measuredSafeAreas = typeof document !== 'undefined' && studioPlacement
@@ -225,7 +242,11 @@ export default function PilotMascot({
       )),
     ].map((element) => element?.getBoundingClientRect())
       .filter((rect): rect is DOMRect => Boolean(rect && rect.width > 0 && rect.height > 0))
-    : [];
+    : fallbackDock && !loadFailed
+      ? Array.from(document.querySelectorAll<HTMLElement>(
+        '[data-pilot-mascot-safe-area], [data-pilot-mascot-toolbar], .op-topbar, .op-sidebar',
+      )).map((element) => element.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0)
+      : [];
   const safeAreas: PilotMascotRect[] = measuredSafeAreas.map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }));
   const constrainedPosition = positionPilotMascotOutsideSafeAreas(activePosition, viewport, { width: frameWidth, height: frameHeight }, safeAreas);
   const frameLeft = constrainedPosition.xRatio * viewport.width - frameWidth / 2;
@@ -260,9 +281,18 @@ export default function PilotMascot({
   }, [fallbackDock, loadFailed, frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
 
   useEffect(() => {
-    if (!loadFailed || !fallbackDock) return;
-    document.addEventListener('scroll', reportAnchorRect, true);
-    return () => document.removeEventListener('scroll', reportAnchorRect, true);
+    if (!fallbackDock) return;
+    const update = () => {
+      if (loadFailed) reportAnchorRect();
+      else setSafeAreaRevision((revision) => revision + 1);
+    };
+    document.addEventListener('scroll', update, true);
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    document.querySelectorAll('[data-pilot-mascot-safe-area], [data-pilot-mascot-toolbar]').forEach((element) => observer?.observe(element));
+    return () => {
+      document.removeEventListener('scroll', update, true);
+      observer?.disconnect();
+    };
   }, [fallbackDock, loadFailed, reportAnchorRect]);
 
   useEffect(() => {
@@ -347,7 +377,7 @@ export default function PilotMascot({
   };
 
   useLayoutEffect(() => {
-    if (!loadFailed || studioPlacement) {
+    if (studioPlacement) {
       setFallbackDock(null);
       return;
     }
@@ -356,7 +386,7 @@ export default function PilotMascot({
     const observer = new MutationObserver(updateDock);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
-  }, [loadFailed, studioPlacement]);
+  }, [studioPlacement]);
   const dockedFallback = loadFailed ? fallbackDock : null;
   const mascot = (
     <aside
@@ -364,6 +394,7 @@ export default function PilotMascot({
         placement === 'pilot-page' ? styles.pilotPage : ''
       } ${studioPlacement ? styles.interviewStudio : styles.normalLayout} ${dragRef.current?.moved ? styles.dragging : ''}`}
       data-load-failed={loadFailed ? 'true' : undefined}
+      data-pilot-list-character={needsListGutter ? 'true' : undefined}
       data-activity={activity}
       data-notification={notification?.status}
       data-animation-level={animationLevel}

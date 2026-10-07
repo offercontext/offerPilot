@@ -42,23 +42,74 @@ try {
           if (mascot === 'normal') {
             await page.waitForFunction(() => ['ready', 'failed'].includes(document.documentElement.dataset.live2dState));
             assert.equal(await page.locator('html').getAttribute('data-live2d-state'), 'ready', `${name}: real Live2D mount`);
+            await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
+            const overlap = await page.evaluate(() => {
+              const mascot = document.querySelector('aside[aria-label="Haru 助手"]').getBoundingClientRect();
+              const table = document.querySelector('[data-pilot-mascot-safe-area]').getBoundingClientRect();
+              return mascot.left < table.right && mascot.right > table.left && mascot.top < table.bottom && mascot.bottom > table.top;
+            });
+            assert.equal(overlap, false, 'normal character must not obscure table or pagination');
           }
-          await page.screenshot({ path: path.join(output, `${name}.png`) });
+          if (mascot !== 'normal') await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
+          if (count > 10) {
+            const search = page.getByPlaceholder('搜索公司、岗位、备注');
+            await search.fill(`layout-row-${count}`);
+            await page.waitForFunction(() => document.querySelectorAll('tr[data-row-key]').length === 1);
+            if (mascot === 'normal') await page.waitForFunction(() => !document.querySelector('[data-pilot-list-character]'));
+            await page.screenshot({ path: path.join(output, `${name}-filtered-one.png`), animations: 'disabled' });
+            await search.fill('');
+            await page.waitForFunction(() => document.querySelectorAll('tr[data-row-key]').length === 10);
+            if (mascot === 'normal') await page.waitForFunction(() => document.querySelector('[data-pilot-list-character]'));
+          }
           if (count) {
-            await page.locator('tr[data-row-key="1"] td').first().click();
+            const visibleRow = page.locator('tr[data-row-key]').first();
+            const rowId = await visibleRow.getAttribute('data-row-key');
+            assert.ok(rowId, 'current page must expose a real record id');
+            const completeText = await visibleRow.locator('td').first().locator('[title]').evaluateAll(nodes => nodes.map(node => node.getAttribute('title')));
+            assert.equal(completeText.length, 2);
+            await visibleRow.locator('td').first().click();
             await page.getByRole('dialog').waitFor();
-            assert.match(await page.getByRole('dialog').innerText(), /特别长的公司名称以验证不会逐字折行/);
+            for (const text of completeText) {
+              assert.ok(text && text.length > 20);
+              assert.equal(await page.getByRole('dialog').getByText(text, { exact: true }).count(), 1);
+            }
             await page.getByRole('button', { name: 'Close', exact: true }).click();
             await page.getByRole('dialog').waitFor({ state: 'hidden' });
             const table = page.locator('.ant-table-content');
-            await table.evaluate(node => { node.scrollLeft = node.scrollWidth; });
-            await page.locator('tr[data-row-key="1"]').getByRole('button', { name: '问 Pilot' }).click();
+            const overflow = await table.evaluate(node => node.scrollWidth > node.clientWidth);
+            if (overflow) {
+              await page.getByRole('region', { name: '投递表格，可横向滚动' }).focus();
+              await page.keyboard.press('ArrowRight');
+              await page.waitForFunction(() => document.querySelector('.ant-table-content').scrollLeft > 0);
+              await page.keyboard.press('ArrowLeft');
+              await page.waitForFunction(() => document.querySelector('.ant-table-content').scrollLeft === 0);
+              await table.hover();
+              await page.mouse.wheel(1200, 0);
+              await page.waitForFunction(() => document.querySelector('.ant-table-content').scrollLeft > 0);
+              await page.screenshot({ path: path.join(output, `${name}-scrolled-right.png`), animations: 'disabled' });
+            }
+            await page.locator(`tr[data-row-key="${rowId}"]`).getByRole('button', { name: '问 Pilot' }).click();
             await page.getByRole('dialog').waitFor();
             await page.getByRole('button', { name: 'Close', exact: true }).click();
             if (count > 10) {
               await page.getByTitle('2', { exact: true }).click();
               assert.equal(await page.locator('tr[data-row-key]').count(), 2);
+              if (mascot === 'normal' && width >= 1280) await page.waitForFunction(() => !document.querySelector('[data-pilot-list-character]'));
+              await page.screenshot({ path: path.join(output, `${name}-page-two.png`), animations: 'disabled' });
             }
+          }
+          if (count) {
+            await page.getByPlaceholder('搜索公司、岗位、备注').click();
+            let keyboardPilot = false;
+            for (let tab = 0; tab < 12; tab++) {
+              await page.keyboard.press('Tab');
+              keyboardPilot = await page.evaluate(() => document.activeElement?.textContent?.includes('问 Pilot'));
+              if (keyboardPilot) break;
+            }
+            assert.equal(keyboardPilot, true, 'Pilot table action must be keyboard reachable');
+            await page.keyboard.press('Enter');
+            await page.getByRole('dialog').waitFor();
+            await page.getByRole('button', { name: 'Close', exact: true }).click();
           }
           if (mascot === 'failure') {
             const trigger = page.getByRole('button', { name: /打开 OfferPilot 领航员（Haru 模型未加载/ });
@@ -71,7 +122,7 @@ try {
           }
           results.push({ name, status: 'passed' });
         } catch (error) {
-          await page.screenshot({ path: path.join(output, `${name}-failed.png`) });
+          await page.screenshot({ path: path.join(output, `${name}-failed.png`), animations: 'disabled' });
           results.push({ name, status: 'failed', error: String(error) });
         } finally { await page.close(); }
       }

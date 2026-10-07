@@ -36,7 +36,7 @@ const records: Application[] = Array.from({ length: count }, (_, i) => ({
   id: i + 1,
   company_name: i % 2 ? 'InternationalCompanyWithAnExtremelyLongUnbrokenEnglishNameForLayoutRegression' : '桌面验收中文公司和特别长的公司名称以验证不会逐字折行',
   position_name: i % 2 ? 'SeniorPlatformEngineerWithAnUnbrokenTitleAndAdditionalResponsibilities' : '本地持久化测试岗位与特别长的岗位名称完整内容',
-  status: 'pending', source: 'web', notes: '', job_url: '', applied_at: '',
+  status: 'pending', source: 'web', notes: `layout-row-${i + 1}`, job_url: '', applied_at: '',
   created_at: '2026-10-06T12:27:00', updated_at: '2026-10-06T12:27:00',
 }));
 

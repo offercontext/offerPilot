@@ -1,6 +1,6 @@
 import { Button, Input, Select, Table, Tag } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import type { Application, ApplicationStatus } from '@/types/application';
@@ -47,6 +47,17 @@ export default function ApplicationListView({
   viewState,
   onViewStateChange,
 }: ApplicationListViewProps) {
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [horizontalOverflow, setHorizontalOverflow] = useState(false);
+  useEffect(() => {
+    const content = tableRef.current?.querySelector<HTMLElement>('.ant-table-content');
+    if (!content) return;
+    const update = () => setHorizontalOverflow(content.scrollWidth > content.clientWidth);
+    update();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    observer?.observe(content);
+    return () => observer?.disconnect();
+  }, []);
   const [localViewState, setLocalViewState] = useState<ApplicationViewState>(DEFAULT_APPLICATION_VIEW_STATE);
   const currentViewState = viewState ?? localViewState;
   const { keyword, status, sortBy } = currentViewState;
@@ -120,7 +131,7 @@ export default function ApplicationListView({
 
   return (
     <section className={styles.list} aria-label="投递列表">
-      <div className={styles.toolbar}>
+      <div className={styles.toolbar} data-pilot-mascot-toolbar>
         <Input.Search
           className={styles.search}
           allowClear
@@ -144,7 +155,15 @@ export default function ApplicationListView({
         />
         <div className={styles.fallbackDock} data-pilot-mascot-fallback-dock />
       </div>
-      <div data-pilot-mascot-safe-area>
+      <div className={styles.tableArea} data-pilot-mascot-safe-area data-pilot-table-min-width={982} ref={tableRef}
+        role="region" aria-label="投递表格，可横向滚动" tabIndex={horizontalOverflow ? 0 : undefined}
+        aria-describedby={horizontalOverflow ? 'application-table-scroll-hint' : undefined}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+          event.preventDefault();
+          tableRef.current?.querySelector('.ant-table-content')?.scrollBy({ left: event.key === 'ArrowRight' ? 240 : -240 });
+        }}>
+        {horizontalOverflow ? <p id="application-table-scroll-hint" data-pilot-mascot-scroll-hint className={styles.scrollHint}>左右滚动查看其余列；聚焦表格后也可按 ← →</p> : null}
         <Table<Application>
           rowKey="id"
           tableLayout="fixed"
