@@ -157,6 +157,8 @@ describe('PilotMascot', () => {
     const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
     const props = await renderMascot({ runtime: broken });
     expect(container.textContent).toContain('Haru 模型未加载');
+    expect(container.querySelector('aside')?.getAttribute('data-runtime-ready')).toBeNull();
+    expect(container.querySelector('aside')?.getAttribute('data-load-failure-reason')).toBe('unknown');
     expect(container.querySelector<HTMLElement>('aside')?.style.width).toBe('156px');
     expect(container.querySelector<HTMLElement>('aside')?.style.height).toBe('48px');
     expect(container.querySelector('[role="status"]')?.getAttribute('aria-hidden')).toBeNull();
@@ -165,6 +167,14 @@ describe('PilotMascot', () => {
     expect(fallbackTrigger?.getAttribute('aria-haspopup')).toBe('dialog');
     act(() => container.querySelector('button')!.click());
     expect(props.onTogglePilot).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes only a bounded mount-failure category without raw error details', async () => {
+    const message = 'Current environment does not allow unsafe-eval secret-token=not-for-dom';
+    await renderMascot({ runtime: { mount: vi.fn().mockRejectedValue(new Error(message)) } });
+    expect(container.querySelector('aside')?.getAttribute('data-load-failure-reason')).toBe('dynamic-code-policy');
+    expect(container.innerHTML).not.toContain('secret-token');
+    expect(container.innerHTML).not.toContain(message);
   });
 
   it('keeps a normal list character compact and outside a tall table at maximum zoom', async () => {
@@ -357,6 +367,7 @@ describe('PilotMascot', () => {
     expect(mountedCanvas.isConnected).toBe(true);
     expect(mountedCanvas).toBe(container.querySelector('canvas'));
     expect(container.querySelector('[data-load-failed]')).toBeNull();
+    expect(container.querySelector('aside')?.getAttribute('data-runtime-ready')).toBe('true');
     expect(dock.querySelector('aside')).toBeNull();
     dock.remove();
   });

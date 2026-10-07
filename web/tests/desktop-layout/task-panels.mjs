@@ -113,10 +113,38 @@ async function checkQuickPractice(page) {
   assert.ok(geometry.checkboxSize.height >= 14 && geometry.checkboxSize.height <= 22);
 }
 
+async function checkResumes(page) {
+  const cards = page.locator('.op-app-content .ant-card');
+  await cards.nth(1).waitFor();
+  assert.equal(await cards.count(), 2, 'base and derived resume cards required');
+  const layout = await page.locator('.op-app-content').evaluate(main => {
+    const bounds = main.getBoundingClientRect();
+    return { width: main.clientWidth, scrollWidth: main.scrollWidth,
+      cardsFit: [...main.querySelectorAll('.ant-card')].every(card => {
+        const r = card.getBoundingClientRect();
+        return r.left >= bounds.left && r.right <= bounds.right;
+      }),
+      contentFits: [...main.querySelectorAll('.ant-card, .ant-card-body')].every(card => card.scrollWidth <= card.clientWidth + 1),
+      tagWraps: [...main.querySelectorAll('.ant-tag')].some(tag => tag.textContent.includes('基于') && getComputedStyle(tag).whiteSpace === 'normal'),
+    };
+  });
+  assert.ok(layout.scrollWidth <= layout.width + 1, 'resume library must not horizontally scroll its main content');
+  assert.equal(layout.cardsFit, true, 'both cards must fit the content column');
+  assert.equal(layout.contentFits, true, 'long title and lineage must not overflow a card');
+  assert.equal(layout.tagWraps, true, 'fixture must exercise a wrapping derived-resume lineage');
+  for (const card of await cards.all()) {
+    for (const button of await card.getByRole('button').all()) {
+      if (await button.isDisabled()) continue;
+      await button.scrollIntoViewIfNeeded();
+      await button.click({ trial: true });
+    }
+  }
+}
+
 export async function runTaskPanelCases(browser, output, results) {
   for (const width of [900, 1008, 1280, 1440]) {
     for (const theme of ['dark', 'light']) {
-      for (const surface of ['offer', 'haru', 'quick']) {
+      for (const surface of ['offer', 'haru', 'quick', 'resumes']) {
         for (const language of surface === 'haru' ? ['zh', 'en'] : ['zh']) {
           const name = `${width}x689-${surface}-${theme}-${language}`;
           const page = await browser.newPage({ viewport: { width, height: 689 }, colorScheme: theme });
@@ -139,12 +167,20 @@ export async function runTaskPanelCases(browser, output, results) {
             await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/task-panels.html?surface=${surface}&theme=${theme}&language=${language}`);
             if (surface === 'offer') await checkOffer(page);
             else if (surface === 'haru') await checkHaru(page);
-            else await checkQuickPractice(page);
-            await page.locator('.op-app-content').evaluate(node => { node.scrollTop = 0; });
+            else if (surface === 'quick') await checkQuickPractice(page);
+            else await checkResumes(page);
+            await page.locator('.op-app-content').evaluate(node => { node.scrollTop = 0; window.scrollTo(0, 0); });
             await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
             if (surface === 'quick') {
-              await page.locator('[data-testid="quick-practice-panel"] .ant-checkbox-wrapper').scrollIntoViewIfNeeded();
+              await page.getByRole('button', { name: /进入快速练习/ }).scrollIntoViewIfNeeded();
               await page.screenshot({ path: path.join(output, `${name}-controls.png`), animations: 'disabled' });
+            }
+            if (surface === 'resumes') {
+              const cards = page.locator('.op-app-content .ant-card');
+              for (let index = 0; index < await cards.count(); index++) {
+                await cards.nth(index).getByRole('button', { name: '对比版本', exact: true }).scrollIntoViewIfNeeded();
+                await page.screenshot({ path: path.join(output, `${name}-card-${index + 1}.png`), animations: 'disabled' });
+              }
             }
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false, 'page must not overflow horizontally');
             assert.deepEqual(unexpectedRequests, [], 'fixture must not call live services or mutate data');

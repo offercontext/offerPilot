@@ -313,10 +313,15 @@ export function createLive2dPilotMascotRuntime(
 const unsharedLive2dPilotMascotRuntime = createLive2dPilotMascotRuntime({
   async loadModules() {
     await ensureCubismCore();
-    const [{ Application, Ticker }, { Live2DModel }] = await Promise.all([
+    const [{ Application, Ticker, ShaderSystem }, { Live2DModel }, { install }] = await Promise.all([
       import('pixi.js'),
       import('pixi-live2d-display/cubism4'),
+      import('@pixi/unsafe-eval'),
     ]);
+    // Despite its name, this official Pixi adapter removes dynamic Function use.
+    // Patch the same Pixi instance before any Application constructs a renderer;
+    // Electron keeps its strict CSP (no unsafe-eval) and sandbox unchanged.
+    install({ ShaderSystem });
     return {
       Application: Application as unknown as Live2dRuntimeModules['Application'],
       Ticker,

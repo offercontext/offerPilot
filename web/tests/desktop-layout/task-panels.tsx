@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ConfigProvider, Layout } from 'antd';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import ResumeLibraryView from '../../src/components/ResumeLibraryView';
+import type { Resume } from '../../src/types/resume';
 import zhCN from 'antd/locale/zh_CN';
 import OfferNegotiationDrawer from '../../src/components/OfferNegotiationDrawer';
 import { CoreTaskSurfaceHost } from '../../src/features/coreTaskSurface/CoreTaskSurfaceHost';
@@ -28,6 +31,18 @@ const offer: Offer = {
   base_monthly: 28000, months_per_year: 12, signing_bonus: 0, equity: '', perks: '', deadline: '',
   notes: '', assessment: '', total_cash: 336000, created_at: '2026-10-07T00:00:00Z', updated_at: '2026-10-07T00:00:00Z',
 };
+const resumeClient = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity, retry: false } } });
+const resumeBase: Resume = {
+  id: 11, name: '', title: '中文超长基础简历名称研发创新与跨区域协作团队'.repeat(3),
+  file_path: '', parsed_data: '', parse_status: 'done', is_master: true, parent_resume_id: null,
+  source: 'manual', source_file_path: '', content_json: { career_intent: { target_roles: ['SoftwareInfrastructureEngineerWithoutSpaces'.repeat(3)] } },
+  deleted_at: null, created_at: '2026-10-07T12:00:00Z', completion_percent: 50,
+  missing_sections: ['education', 'experience', 'projects'], is_complete: false,
+};
+resumeClient.setQueryData(['resumes'], [resumeBase, {
+  ...resumeBase, id: 12, title: 'InternationalInfrastructureAndReliabilityEngineerWithoutWhitespace'.repeat(3),
+  is_master: false, parent_resume_id: 11,
+}]);
 const taskController = createCoreTaskSurfaceController();
 taskController.launch({ ref: { taskId: 'application.offer_review', applicationId: 42 }, source: 'application_header' });
 const active = taskController.getState().active!;
@@ -53,11 +68,11 @@ function HaruFixture() {
 function Fixture() {
   return <ConfigProvider locale={zhCN} theme={theme === 'dark' ? darkTheme : lightTheme}><ThemeProvider>
     <Layout className="op-app-shell" style={{ minHeight: '100dvh', background: 'var(--op-layout-bg)' }} hasSider>
-      <Sidebar view={surface === 'offer' ? 'offers' : surface === 'quick' ? 'interview' : 'applications-list'} onChange={() => {}} reminderCount={1} />
+      <Sidebar view={surface === 'offer' ? 'offers' : surface === 'quick' ? 'interview' : surface === 'resumes' ? 'resumes' : 'applications-list'} onChange={() => {}} reminderCount={1} />
       <Layout className="op-app-main" style={{ background: 'var(--op-layout-bg)', minWidth: 0, width: '100%' }}>
         <TopBar compact={surface === 'offer'} onSearch={() => {}} onOpenSettings={() => {}} />
         <Layout.Content className="op-app-content" style={{ padding: '0 24px 24px' }}>
-          {surface === 'offer' ? <CoreTaskSurfaceHost controller={taskController}>
+          {surface === 'resumes' ? <QueryClientProvider client={resumeClient}><ResumeLibraryView /></QueryClientProvider> : surface === 'offer' ? <CoreTaskSurfaceHost controller={taskController}>
             <OfferNegotiationDrawer open offer={offer} onClose={() => taskController.close(active.generation)} />
           </CoreTaskSurfaceHost> : surface === 'quick' ? <InterviewReadinessCenter fixedMode="quick" resumes={[
             { id: 11, title: `${label} · InternationalInfrastructureResume`, is_master: true, parent_resume_id: null, deleted_at: null },

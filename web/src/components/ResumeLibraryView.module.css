@@ -34,7 +34,7 @@
 }
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
   gap: 14px;
 }
 .emptyState {
@@ -118,6 +118,7 @@
 .dropTitle { font-size: 15px; color: var(--op-text); font-weight: 600; }
 .dropHint { font-size: 12px; color: var(--op-muted); margin-top: 4px; }
 .card {
+  min-width: 0;
   animation: fadeUp 280ms var(--op-ease) both;
 }
 @keyframes fadeUp {
@@ -886,9 +887,6 @@
   .compareBody { padding-left: 18px; padding-right: 18px; }
   .compareValues { grid-template-columns: 1fr; }
 }
-@media (max-width: 1100px) {
-  .grid { grid-template-columns: repeat(2, 1fr); }
-}
 @media (max-width: 900px) {
   .header {
     flex-direction: column;
@@ -935,7 +933,4 @@
     border-right: 0;
     border-bottom: 1px solid var(--op-border);
   }
-}
-@media (max-width: 768px) {
-  .grid { grid-template-columns: 1fr; }
 }

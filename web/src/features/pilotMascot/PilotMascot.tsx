@@ -1,4 +1,5 @@
 import { createPortal } from 'react-dom';
+import { classifyMascotFailure, type MascotFailureReason } from './mascotFailure';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
 import { CloseOutlined, MessageOutlined, MinusOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
@@ -108,6 +109,8 @@ export default function PilotMascot({
   const latestActivityRef = useRef(activity);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [loadFailureReason, setLoadFailureReason] = useState<MascotFailureReason>();
   const [fallbackDock, setFallbackDock] = useState<HTMLElement | null>(null);
   const [globalFallbackDock, setGlobalFallbackDock] = useState<HTMLElement | null>(null);
   const [localPosition, setLocalPosition] = useState<PilotMascotPosition>(() => {
@@ -131,9 +134,11 @@ export default function PilotMascot({
 
   useEffect(() => {
     setLoadFailed(false);
+    setLoadFailureReason(undefined);
   }, [animationLevel, reducedMotionRevision, runtime]);
 
   useEffect(() => {
+    setRuntimeReady(false);
     if (loadFailed) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -149,8 +154,13 @@ export default function PilotMascot({
       // Animated hair and limbs therefore keep a safe render boundary.
       controller.setZoom(1);
       controller.setActivity(latestActivityRef.current);
-    }).catch(() => {
-      if (!disposed && !abortController.signal.aborted) setLoadFailed(true);
+      setRuntimeReady(true);
+    }).catch((error: unknown) => {
+      if (!disposed && !abortController.signal.aborted) {
+        setRuntimeReady(false);
+        setLoadFailureReason(classifyMascotFailure(error));
+        setLoadFailed(true);
+      }
     });
     return () => {
       disposed = true;
@@ -403,7 +413,9 @@ export default function PilotMascot({
       className={`${styles.mascot} ${panelOpen ? styles.compact : ''} ${loadFailed ? styles.loadFailed : ''} ${
         placement === 'pilot-page' ? styles.pilotPage : ''
       } ${studioPlacement ? styles.interviewStudio : styles.normalLayout} ${dragRef.current?.moved ? styles.dragging : ''}`}
+      data-runtime-ready={runtimeReady ? 'true' : undefined}
       data-load-failed={loadFailed ? 'true' : undefined}
+      data-load-failure-reason={loadFailed ? loadFailureReason : undefined}
       data-global-fallback={loadFailed && !fallbackDock && globalFallbackDock ? 'true' : undefined}
       data-pilot-list-character={needsListGutter ? 'true' : undefined}
       data-activity={activity}
