@@ -11,6 +11,8 @@ import { hash, treeFiles, verifyPayload, normalizeSourceText } from './integrity
 import { safeFailure, commandFailure, recordSecurityBeforeValidation } from './diagnostics.mjs';
 import { observeDevToolsDisabled } from './devtools-probe.mjs';
 import { verifyApplicationDetail } from './detail-ui.mjs';
+import { createCoverage, observeRuntime } from './coverage-recorder.mjs';
+import { rootSweep, extendedFlows } from './screen-coverage.mjs';
 import { PIN, SYNTHETIC, validateRequest, publicApplication, sameWindowsPath,
   selectOwnedProcesses, validateListeners, validateSecurity } from './contract.mjs';
 
@@ -31,6 +33,7 @@ let userData;
 let installDir;
 let environment;
 let fatalNetwork = false;
+let coverage;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function exists(filename) { try { await fs.access(filename); return true; } catch { return false; } }
 async function writeReport() {
@@ -111,6 +114,7 @@ async function launch(number) {
   stage = `launch-${number}-first-window`;
   const page = await app.firstWindow({ timeout: 90000 });
   current.page = page;
+  const runtime = observeRuntime(page);
   page.setDefaultTimeout(20000);
   stage = `launch-${number}-navigation-render`;
   await page.getByRole('navigation', { name: '主导航', exact: true }).waitFor();
@@ -142,7 +146,7 @@ async function launch(number) {
     mainCreated: processes.main.created, backendCreated: processes.backend.created,
     port, realAppData: true, observedExternalRendererRequests: fatalNetwork, ...listeners };
   report.launches.push(info);
-  current = { app, page, info, debugEndpoints: snapshot.listeners.filter((item) => item.pid === identity.pid).map(({ address, port }) => ({ address, port })) };
+  current = { app, page, info, runtime, debugEndpoints: snapshot.listeners.filter((item) => item.pid === identity.pid).map(({ address, port }) => ({ address, port })) };
   // Persist bounded observations first: a failed assertion must not erase its evidence.
   await recordSecurityBeforeValidation(info, security, writeReport);
   stage = `launch-${number}-devtools-disabled-probe`;
@@ -274,6 +278,9 @@ try {
   const first = await launch(1);
   stage = 'first-ui-screenshot';
   await screenshot(first.page, '01-first-launch');
+  coverage = await createCoverage({ app: first.app, page: first.page, evidence, pin: PIN,
+    installedExeSha256: exeHashBefore, runtime: first.runtime, setStage: (value) => { stage = value; } });
+  await rootSweep(coverage, first.page, 'empty-before-fixtures');
   stage = 'onboarding-create-application';
   await first.page.locator('button[data-onboarding-action="create_first_application"]').click();
   const form = first.page.getByRole('dialog', { name: '添加投递', exact: true });
@@ -299,6 +306,12 @@ try {
   await verifyApplicationDetail(first.page, SYNTHETIC, (step) => { stage = `saved-detail-${step}`; });
   await screenshot(first.page, '02-saved-detail');
   await openList(first.page, record, '03-saved-list');
+  await extendedFlows(coverage, first.page, record);
+  report.screenCoverage = coverage.report.summary;
+  report.screenCoverageFile = 'coverage.json';
+  await writeReport();
+  stage = 'coverage-unresolved-write-barrier';
+  assert.equal(first.runtime.hasPendingWrite(), false, 'unresolved UI write blocks further UI mutation/restart steps');
   stage = 'theme-ui-toggle';
   const oldTheme = await first.page.locator('html').getAttribute('data-theme');
   assert.ok(['light', 'dark'].includes(oldTheme));
@@ -337,7 +350,9 @@ try {
   await writeReport();
   assert.equal(fatalNetwork, false);
   await checkpoint(stage, { executableUnchanged: true, observedExternalRendererRequests: false });
-  report.status = 'passed';
+  stage = 'expanded-screen-coverage';
+  assert.equal(coverage.report.summary.counts.FAIL, 0, 'installed screen assertions failed; lifecycle results remain independent');
+  report.status = coverage.report.summary.status === 'incomplete' ? 'passed-with-coverage-limitations' : 'passed';
 } catch (error) {
   // Keep failures failed, including launch/close/cleanup/security/persistence failures.
   // Playwright errors may embed process logs and websocket endpoints: do not serialize them.
@@ -371,6 +386,11 @@ try {
   }
   process.exitCode = 1;
 } finally {
+  if (coverage) {
+    await coverage.finish();
+    report.screenCoverage = coverage.report.summary;
+    report.screenCoverageFile = 'coverage.json';
+  }
   await writeReport();
   console.log(`Installed UI result: ${report.status}. Experimental evidence only; not a release gate.`);
 }

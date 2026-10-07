@@ -28,7 +28,7 @@ test('exact branch and exact narrow paths, without alternate triggers or auto-ca
     assert.equal(workflow.concurrency, undefined);
     for (const job of Object.values(workflow.jobs)) assert.equal(job.concurrency, undefined);
   }
-  assert.deepEqual(original.on.push['paths-ignore'], allowed);
+  assert.deepEqual(original.on.push['paths-ignore'], [allowed[0], 'desktop/layout-retry/**', '.github/workflows/desktop-layout-retry.yml', ...allowed.slice(1)]);
   assert.deepEqual(ui.on.push.paths, allowed);
   assert.equal(original.on.push.paths, undefined);
   assert.equal(ui.on.push['paths-ignore'], undefined);
@@ -49,6 +49,25 @@ test('push routing matrix isolates UI-only activation and retains all product/bu
     assert.deepEqual(routes(branch, ['desktop/main.cjs', 'desktop/installed-ui/request.json']), { original: false, ui: false });
   }
 });
+test('layout retry activates only its reviewed request and preserves product routes', () => {
+  const retry = parse(fs.readFileSync(path.join(root, '.github/workflows/desktop-layout-retry.yml'), 'utf8'));
+  assert.deepEqual(retry.on.push.branches, [PIN.branch]);
+  assert.deepEqual(retry.on.push.paths, ['desktop/layout-retry/request.json']);
+  assert.deepEqual(retry.permissions, { contents: 'read' });
+  assert.equal(retry.concurrency, undefined);
+  for (const file of ['desktop/layout-retry/request.json', 'desktop/layout-retry/run.mjs', '.github/workflows/desktop-layout-retry.yml']) {
+    assert.deepEqual(routes(PIN.branch, [file]), { original: false, ui: false });
+  }
+  assert.deepEqual(routes(PIN.branch, ['desktop/layout-retry/request.json', 'web/src/App.tsx']), { original: true, ui: false });
+  const job = retry.jobs['layout-package-retry'];
+  assert.equal(job.concurrency, undefined);
+  const source = job.steps.find(step => step.uses === 'actions/checkout@v4' && step.with.ref);
+  assert.equal(source.with.ref, 'd853bd2eb117929e73530bb5036256801278b235');
+  const script = job.steps.map(step => step.run || '').join('\n');
+  assert.match(script, /\$request\.helper_sha -ne \$parent/);
+  assert.match(script, /Only browser test driver may differ/);
+  assert.doesNotMatch(script, /release-gate|rerun|cancel-workflow/);
+});
 test('dedicated job is read-only, branch-guarded and downloads only the hard pin', () => {
   assert.deepEqual(ui.permissions, {});
   assert.deepEqual(Object.keys(ui.jobs), ['installed-ui']);
@@ -66,7 +85,7 @@ test('dedicated job is read-only, branch-guarded and downloads only the hard pin
   const upload = job.steps.find((step) => step.uses === 'actions/upload-artifact@v4');
   assert.equal(upload.if, '${{ always() }}');
   assert.equal(upload.with['if-no-files-found'], 'error');
-  assert.deepEqual(upload.with.path.trim().split('\n'), ['scope.txt', 'source.json', 'result.json',
+  assert.deepEqual(upload.with.path.trim().split('\n'), ['scope.txt', 'source.json', 'result.json', 'coverage.json', 'screens/*.png',
     '01-first-launch.png', '02-saved-detail.png', '03-saved-list.png', '04-restarted-list.png', '05-restarted-detail.png', 'failure.png']
     .map((name) => `desktop/installed-ui/evidence/${name}`));
   const script = job.steps.map((step) => step.run || '').join('\n');

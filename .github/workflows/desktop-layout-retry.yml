@@ -1,52 +1,69 @@
-name: Windows desktop validation (unsigned)
+name: Pinned UI layout and installer retry
 
-# Experimental validation only. Packaging never implies release readiness.
-# Only this exact branch activates push builds; dispatch remains optional.
+# Test-helper activation only. Does not rebuild or replace the independent full gate.
 on:
   push:
-    branches:
-      - feat/20261005-windows-desktop-validation
-    paths-ignore:
-      - 'desktop/installed-ui/**'
-      - 'desktop/layout-retry/**'
-      - '.github/workflows/desktop-layout-retry.yml'
-      - '.github/workflows/desktop-installed-ui.yml'
-      - 'docs/architecture/desktop-installed-ui-validation.md'
+    branches: [feat/20261005-windows-desktop-validation]
+    paths: ['desktop/layout-retry/request.json']
   workflow_dispatch:
-
 permissions:
   contents: read
-
-# Do not cancel existing runs implicitly; supersession needs explicit approval.
-
 env:
+  PRODUCT_SHA: d853bd2eb117929e73530bb5036256801278b235
   LITELLM_LOCAL_MODEL_COST_MAP: "True"
   PYTHONUTF8: "1"
   PYTHONUNBUFFERED: "1"
   CSC_IDENTITY_AUTO_DISCOVERY: "false"
   ONNXRUNTIME_NODE_INSTALL: skip
-
 defaults:
   run:
     shell: pwsh
-
+    working-directory: .layout-product
 jobs:
-  validation-package:
+  layout-package-retry:
     name: Experimental installer and desktop smoke
     runs-on: windows-2022
     timeout-minutes: 60
     # Intentionally independent of full-regression. Its artifact is NOT a release.
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify bounded retry request
+        working-directory: .
+        run: |
+          $request = Get-Content desktop/layout-retry/request.json -Raw | ConvertFrom-Json
+          if ($request.product_sha -ne $env:PRODUCT_SHA -or $request.full_regression_run -ne 37626960710) { throw 'Unexpected product or regression identity' }
+          $parent = git rev-parse HEAD~1
+          if ($request.helper_sha -ne $parent) { throw 'Helper revision must be the reviewed parent commit' }
+          $changed = @(git diff --name-only $request.helper_sha HEAD)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'desktop/layout-retry/request.json') { throw 'Activation must change only the request' }
+          "REVIEWED_HELPER_SHA=$($request.helper_sha)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/checkout@v4
+        with:
+          ref: d853bd2eb117929e73530bb5036256801278b235
+          path: .layout-product
+          persist-credentials: false
+      - name: Overlay reviewed test helper without changing product files
+        run: |
+          $source = git rev-parse HEAD
+          if ($source -ne $env:PRODUCT_SHA) { throw 'Wrong product checkout' }
+          Copy-Item ../desktop/layout-retry/run.mjs web/tests/desktop-layout/run.mjs -Force
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'web/tests/desktop-layout/run.mjs') { throw 'Only browser test driver may differ from pinned product tree' }
       - name: Record validation scope and run identity
         run: |
           New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
           @(
             "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT RELEASE READY.",
-            "Commit: $env:GITHUB_SHA",
+            "Product commit: $env:PRODUCT_SHA",
+            "Reviewed helper commit: $env:REVIEWED_HELPER_SHA",
+            "Helper activation commit: $env:GITHUB_SHA",
+            "Independent full gate: https://github.com/offercontext/offerPilot/actions/runs/37626960710",
             "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
-            "Full regression runs independently and is required for release readiness.",
+            "Full regression remains independent in original run 37626960710 and is required for release readiness.",
             "This job must pass every focused, build and frozen smoke check before uploading an installer.",
             "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
           ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
@@ -62,8 +79,8 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: |
-            web/package-lock.json
-            desktop/package-lock.json
+            .layout-product/web/package-lock.json
+            .layout-product/desktop/package-lock.json
       - name: Install locked validation dependencies
         run: |
           Start-Transcript -Path desktop/ci-evidence/01-install.log
@@ -136,12 +153,15 @@ jobs:
           }
           @(
             "EXPERIMENTAL, UNSIGNED WINDOWS VALIDATION BUILD. NOT RELEASE READY.",
-            "Commit: $env:GITHUB_SHA",
+            "Product commit: $env:PRODUCT_SHA",
+            "Reviewed helper commit: $env:REVIEWED_HELPER_SHA",
+            "Helper activation commit: $env:GITHUB_SHA",
+            "Independent full gate: https://github.com/offercontext/offerPilot/actions/runs/37626960710",
             "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
             "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, rendered component viewport regressions, frozen and packaged-resource smoke passed.",
-            "Full release/regression gate: separate job in the same run; NOT certified by this artifact.",
-            "Check 'Full release regression (required for release)' and the final status job for its actual result.",
+            "Full release/regression gate: original run 37626960710; NOT certified by this helper retry artifact.",
+            "Check the original full regression job for its actual result; no skipped or running gate is a pass.",
             "Pending, failed, cancelled, timed-out or skipped full regression is not a pass.",
             "Browser component fixtures do not validate installer execution, desktop CSP or the installed Electron UI.",
             "Complete docs/architecture/desktop-validation.md on a clean Windows account before claiming desktop acceptance."
@@ -150,122 +170,18 @@ jobs:
       - name: Upload experimental validation installer
         uses: actions/upload-artifact@v4
         with:
-          name: offerpilot-windows-experimental-validation-${{ github.sha }}
+          name: offerpilot-windows-ui-retry-${{ env.PRODUCT_SHA }}-${{ github.sha }}
           if-no-files-found: error
           retention-days: 14
           path: |
-            desktop/dist/*-setup.exe
-            desktop/dist/*-setup.exe.sha256
-            desktop/dist/VALIDATION-NOTES.txt
+            .layout-product/desktop/dist/*-setup.exe
+            .layout-product/desktop/dist/*-setup.exe.sha256
+            .layout-product/desktop/dist/VALIDATION-NOTES.txt
       - name: Preserve validation evidence even on failure
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: windows-validation-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          name: windows-ui-retry-evidence-${{ github.sha }}-${{ github.run_attempt }}
           if-no-files-found: warn
           retention-days: 14
-          path: desktop/ci-evidence/
-
-  full-regression:
-    name: Full release regression (required for release)
-    runs-on: windows-2022
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v4
-      - name: Record full gate scope and run identity
-        run: |
-          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
-          @(
-            "Full, unsharded scripts/release-gate.ps1 -Install is required for release readiness.",
-            "Commit: $env:GITHUB_SHA",
-            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
-            "Attempt: $env:GITHUB_RUN_ATTEMPT",
-            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
-          ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          architecture: x64
-      - uses: astral-sh/setup-uv@v6
-        with:
-          version: "0.12.19"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install locked regression dependencies
-        run: |
-          Start-Transcript -Path desktop/ci-evidence/01-install.log
-          uv sync --frozen
-          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
-          npm.cmd ci --prefix web
-          if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
-          Stop-Transcript
-      - name: Complete repository release and installation gate
-        run: |
-          Start-Transcript -Path desktop/ci-evidence/02-full-release-gate.log
-          $stdout = Join-Path $PWD "desktop/ci-evidence/full-gate-stdout.log"
-          $stderr = Join-Path $PWD "desktop/ci-evidence/full-gate-stderr.log"
-          $started = [DateTime]::UtcNow
-          # Execute the existing gate unchanged. Do not set PYTEST_ADDOPTS:
-          # nested tests also invoke pytest and parse its collection output.
-          $gate = Start-Process -FilePath powershell -WorkingDirectory $PWD -NoNewWindow -PassThru `
-            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/release-gate.ps1', '-Install') `
-            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          while (-not $gate.WaitForExit(60000)) {
-            $elapsed = [Math]::Round(([DateTime]::UtcNow - $started).TotalMinutes, 1)
-            Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Full release gate running: $elapsed minutes. Latest stdout/stderr:"
-            Get-Content -LiteralPath $stdout -Tail 3 -ErrorAction SilentlyContinue
-            Get-Content -LiteralPath $stderr -Tail 3 -ErrorAction SilentlyContinue
-          }
-          $gate.WaitForExit()
-          Get-Content -LiteralPath $stdout
-          Get-Content -LiteralPath $stderr
-          Write-Host "Full release gate exited $($gate.ExitCode) at $([DateTime]::UtcNow.ToString('o'))"
-          if ($gate.ExitCode -ne 0) { throw "Repository release gate failed (exit $($gate.ExitCode))" }
-          Stop-Transcript
-      - name: Preserve full gate evidence even on failure
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-full-regression-evidence-${{ github.sha }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          retention-days: 14
-          path: desktop/ci-evidence/
-
-  validation-status:
-    name: Validation results (both jobs must pass)
-    if: ${{ always() }}
-    needs: [validation-package, full-regression]
-    runs-on: windows-2022
-    timeout-minutes: 5
-    steps:
-      - name: Report actual results without promoting the artifact to a release
-        env:
-          PACKAGE_RESULT: ${{ needs.validation-package.result }}
-          REGRESSION_RESULT: ${{ needs.full-regression.result }}
-        run: |
-          $report = @(
-            "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT A PRODUCTION RELEASE.",
-            "Commit: $env:GITHUB_SHA",
-            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
-            "Attempt: $env:GITHUB_RUN_ATTEMPT",
-            "Validation package job: $env:PACKAGE_RESULT",
-            "Required full regression job: $env:REGRESSION_RESULT",
-            "An installer artifact alone does not establish a full regression pass.",
-            "Windows installer execution and Electron UI acceptance still require manual evidence."
-          )
-          $report | Tee-Object -FilePath WINDOWS-VALIDATION-STATUS.txt
-          $report | Add-Content $env:GITHUB_STEP_SUMMARY
-          if ($env:PACKAGE_RESULT -ne 'success' -or $env:REGRESSION_RESULT -ne 'success') {
-            throw "Validation is incomplete: both jobs must pass; failure, cancellation and skipped jobs are not success."
-          }
-      - name: Preserve actual workflow status
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-validation-status-${{ github.sha }}-${{ github.run_attempt }}
-          if-no-files-found: warn
-          retention-days: 14
-          path: WINDOWS-VALIDATION-STATUS.txt
+          path: .layout-product/desktop/ci-evidence/

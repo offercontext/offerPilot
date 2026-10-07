@@ -1,6 +1,6 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+状态：限定分支上的实验验证辅助工具。2026-10-07 扩展逐屏脚本已加入；下列旧 pin 仍是执行契约，不能视为本轮新 UI 构建的通过证据。新构建完成后必须一起审阅并更新 contract/request/workflow 的精确来源，不能猜测 artifact ID 或摘要。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
 
 ## 固定输入与独立路由
 
@@ -37,10 +37,25 @@
 5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
 6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。DevTools 禁用按下述严格行为探针验证。
 7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
-8. 仅在真实 UI 输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。从“添加第一条投递”进入表单，执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”。不使用“仍然创建”兜底，不配置 provider、岗位 URL、JD、简历或真实凭据。
-9. 只监听这次 UI 发起的 POST 回执，保留 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。通过 UI 切换明暗模式。
+8. 先在空白 profile 扫描全部 13 个根页面，再从“添加第一条投递”进入表单，输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”；不使用“仍然创建”兜底。之后通过公开 UI 创建额外合成记录，流程和边界见下节。不会配置 provider 或真实凭据。
+9. 初始投递只保留这次 UI 发起 POST 回执的 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。执行新增逐屏检查后，通过 UI 切换明暗模式，继续原来的关闭重启验收。
 10. 正常调用窗口关闭路径，要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
 11. 再次正常退出并核对进程/端口清理与 exe 完整性。任何启动、保护、持久化、正常关闭或清理问题均为失败；失败后的清理不能改成成功。
+
+### 逐屏与交互覆盖
+
+`coverage-model.mjs` 列出 R01–R13 根页面、S01–S31 主要子界面及结果枚举；`screen-coverage.mjs` 驱动真实安装窗口中的控件。`coverage-recorder.mjs` 使用 `BrowserWindow.setContentSize` 设置 900、1008、1280、1440 内容宽度，并读取 `innerWidth/innerHeight` 核对；不使用浏览器 viewport 模拟、Vite fixture、React 状态注入、API 造数或数据库写入。
+
+- 13 个根页面分别保留空白基线和已通过本地 UI 建立数据后的暗色四宽度截图；亮色根页面为 1280。大页面另滚动到下部截图。根页面的 PASS 是 `kind=visual`，只表示导航标记/可见内容/几何断言通过，不能计入功能通过数。
+- 通过 UI 建立 11 条额外投递，加初始记录共 12 条。包括超长中文和不间断英文名称，验证搜索、分页、详情分段、Back 与实际 `popstate` 前进/后退。按真实 POST ID 定位，不假设 ID=1 或记录在第一页。
+- 主要流程包括：添加校验/取消重开、JD 两版保存/历史、日程创建/编辑取消/保存、已完成合成面试与手动复盘、题目手动保存、简历分章/JSON 校验/保存重开/复制对比、知识粘贴导入/四个详情页、手动故事证据绑定/版本历史、两份 Offer 与薪酬算术/比较选项、Pilot 未发送草稿，以及设置中的安全只读/外观路径。
+- 知识 V1 的 `api.py` 不注册 `on_extraction_succeeded` Brief 回调；正文导入是本地处理，仍核对入库响应 `brief_status=not_started`，不调用生成或 rebuild。简历“和 Haru 创建初稿”只建立空结构。所有数据使用 `QA-20261007-<run>` 标识；不访问 example.invalid 来源网址。
+- 自然发生的 Haru 失败保留截图、失败属性与 fallback 尺寸；不会用 stub 替换 Live2D，也不放松 CSP。每次截图检查文档水平溢出和可见控件中心点是否被 Haru 截获。此类几何失败不能覆盖已有截图或改成通过。新增窄窗口真实左右键横滚检查，断言到达两端并确认右侧 Pilot 操作可触达。
+- AI 会话、生成结果、语音/模型下载和备份下载/恢复以 BLOCKED 单列；不存在的 Help/Brief 为 N/A。原始诊断日志不截图、不上传，保留固定分类的 renderer/CSP/资源错误计数，各 case 记录增量。自己的 API 4xx/5xx/非正常传输失败会失败，只有源码明确支持的 GET material-kit 404 缺失记录例外；100 条证据上限不会截断独立错误计数。CSP/Haru/graphics 等受限运行错误记 BLOCKED，不把整体 runtime-health 写成通过。模型正常启动、语音端到端等能力不会因界面可见而被判定通过。
+
+每个 case 记录 `surfaceId/caseId/uiPath/kind/outcome/assertions/screenshots`，每张截图记录实测 viewport、主题、合成记录 ID；顶层记录精确源码/安装包/实际 EXE 摘要。单个界面失败会保存白名单诊断和现场截图，然后继续独立界面；只在没有未决 UI 写请求时使用正常 reload 恢复。写请求传输失败会保留 sticky 未知结果屏障，阻止后续 UI 操作；不会将 requestfailed 当成已确认未写入。未走到的根页面/子界面在收尾列为 NOT RUN，不补造 PASS。
+
+`coverage.json` 的 summary 区分 `visualPasses` 与 `functionalPasses`；存在 FAIL 时最终进程失败，即使后续生命周期检查通过。只有 BLOCKED/NOT RUN 时，运行状态为 `passed-with-coverage-limitations`，coverage 为 `incomplete`。`humanVisualReview=required-not-automated` 明确图片仍需人工检查，不把几何断言等同于“每个功能无问题”。Windows job 上限扩为 60 分钟，独立全量回归路由不变。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 
@@ -54,7 +69,7 @@ getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也
 
 ## 证据与不能声称的结论
 
-成功与失败都尝试上传固定白名单：scope、源验证 JSON、结构化结果 JSON 和有限 UI 截图。不会上传 userData、数据库、配置、真实求职材料、原始应用日志、token、headers、HAR、trace 或 debug websocket URL。异常只报告固定的细分失败阶段、白名单错误类别/代码和辅助命令退出码，不序列化可能含敏感信息的 Playwright/API 错误消息、堆栈或 stderr。
+成功与失败都尝试上传固定白名单：scope、源验证 JSON、结构化结果 JSON、coverage.json、原有 5 张生命周期截图和独立 screens/*.png。截图文件名只允许有限 ASCII 标识，不能用路径穿越扩大白名单。不会上传 userData、数据库、配置、真实求职材料、原始应用日志、token、headers、HAR、trace 或 debug websocket URL。异常只报告固定的细分失败阶段、白名单错误类别/代码和辅助命令退出码，不序列化可能含敏感信息的 Playwright/API 错误消息、堆栈或 stderr。
 
 运行报告保留包装来源、真实进程身份、端口、保护布尔值、合成记录、已通过阶段与失败阶段。附件缺失、超时、取消、跳过或清理后仍有遗留进程都不是通过证据。截图只反映该测试的合成数据。
 
@@ -69,6 +84,8 @@ npm ci --prefix desktop/installed-ui --ignore-scripts
 npm test --prefix desktop/installed-ui
 node --check desktop/installed-ui/smoke.mjs
 node --check desktop/installed-ui/verify-artifact.mjs
+node --check desktop/installed-ui/screen-coverage.mjs
+node --check desktop/installed-ui/coverage-recorder.mjs
 ```
 
 这些命令可在 Linux 检验 pin、错误传播、证据字段、进程归属/监听约束及 YAML 路由。PowerShell、NSIS、CIM 和真实 Electron UI 必须以 Windows run 结果验证，不用 Linux 结果替代。

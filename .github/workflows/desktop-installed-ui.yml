@@ -20,10 +20,10 @@ defaults:
 
 jobs:
   installed-ui:
-    name: Pinned installer, real UI and restart persistence
+    name: Pinned installer, screen coverage and restart persistence
     if: ${{ github.repository == 'offercontext/offerPilot' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' }}
     runs-on: windows-2022
-    timeout-minutes: 25
+    timeout-minutes: 60
     permissions:
       contents: read
       actions: read
@@ -100,6 +100,8 @@ jobs:
             desktop/installed-ui/evidence/scope.txt
             desktop/installed-ui/evidence/source.json
             desktop/installed-ui/evidence/result.json
+            desktop/installed-ui/evidence/coverage.json
+            desktop/installed-ui/evidence/screens/*.png
             desktop/installed-ui/evidence/01-first-launch.png
             desktop/installed-ui/evidence/02-saved-detail.png
             desktop/installed-ui/evidence/03-saved-list.png
