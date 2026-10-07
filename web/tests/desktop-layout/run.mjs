@@ -31,6 +31,7 @@ try {
         const page = await browser.newPage({ viewport: { width, height: 689 }, colorScheme: 'dark' });
         page.setDefaultTimeout(15_000);
         page.setDefaultNavigationTimeout(15_000);
+        let stage = 'load';
         try {
           await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/fixture.html?count=${count}&mascot=${mascot}`);
           const result = page.locator('[data-layout-result]');
@@ -39,6 +40,7 @@ try {
             return state && state !== 'pending';
           });
           assert.equal(await result.getAttribute('data-layout-result'), 'passed', name);
+          stage = 'normal-layout';
           if (mascot === 'normal') {
             await page.waitForFunction(() => ['ready', 'failed'].includes(document.documentElement.dataset.live2dState));
             assert.equal(await page.locator('html').getAttribute('data-live2d-state'), 'ready', `${name}: real Live2D mount`);
@@ -51,6 +53,7 @@ try {
             assert.equal(overlap, false, 'normal character must not obscure table or pagination');
           }
           if (mascot !== 'normal') await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
+          stage = 'filter-list';
           if (count > 10) {
             const search = page.getByPlaceholder('搜索公司、岗位、备注');
             await search.fill(`layout-row-${count}`);
@@ -62,6 +65,7 @@ try {
             if (mascot === 'normal') await page.waitForFunction(() => document.querySelector('[data-pilot-list-character]'));
           }
           if (count) {
+            stage = 'open-detail';
             const visibleRow = page.locator('tr[data-row-key]').first();
             const rowId = await visibleRow.getAttribute('data-row-key');
             assert.ok(rowId, 'current page must expose a real record id');
@@ -75,6 +79,7 @@ try {
             }
             await page.getByRole('button', { name: 'Close', exact: true }).click();
             await page.getByRole('dialog').waitFor({ state: 'hidden' });
+            stage = 'horizontal-scroll';
             const table = page.locator('.ant-table-content');
             const overflow = await table.evaluate(node => node.scrollWidth > node.clientWidth);
             if (overflow) {
@@ -88,10 +93,12 @@ try {
               await page.waitForFunction(() => document.querySelector('.ant-table-content').scrollLeft > 0);
               await page.screenshot({ path: path.join(output, `${name}-scrolled-right.png`), animations: 'disabled' });
             }
+            stage = 'pointer-pilot';
             await page.locator(`tr[data-row-key="${rowId}"]`).getByRole('button', { name: '问 Pilot' }).click();
             await page.getByRole('dialog').waitFor();
             await page.getByRole('button', { name: 'Close', exact: true }).click();
             if (count > 10) {
+              stage = 'pagination';
               await page.getByTitle('2', { exact: true }).click();
               assert.equal(await page.locator('tr[data-row-key]').count(), 2);
               if (mascot === 'normal' && width >= 1280) await page.waitForFunction(() => !document.querySelector('[data-pilot-list-character]'));
@@ -99,18 +106,21 @@ try {
             }
           }
           if (count) {
+            stage = 'keyboard-focus';
             await page.getByPlaceholder('搜索公司、岗位、备注').click();
             let keyboardPilot = false;
             for (let tab = 0; tab < 12; tab++) {
               await page.keyboard.press('Tab');
-              keyboardPilot = await page.evaluate(() => document.activeElement?.textContent?.includes('问 Pilot'));
+              keyboardPilot = await page.evaluate(() => document.activeElement?.tagName === 'BUTTON' && document.activeElement.textContent?.includes('问 Pilot'));
               if (keyboardPilot) break;
             }
             assert.equal(keyboardPilot, true, 'Pilot table action must be keyboard reachable');
+            stage = 'keyboard-pilot';
             await page.keyboard.press('Enter');
             await page.getByRole('dialog').waitFor();
             await page.getByRole('button', { name: 'Close', exact: true }).click();
           }
+          stage = 'fallback-actions';
           if (mascot === 'failure') {
             const trigger = page.getByRole('button', { name: /打开 OfferPilot 领航员（Haru 模型未加载/ });
             await trigger.click();
@@ -123,9 +133,38 @@ try {
           results.push({ name, status: 'passed' });
         } catch (error) {
           await page.screenshot({ path: path.join(output, `${name}-failed.png`), animations: 'disabled' });
-          results.push({ name, status: 'failed', error: String(error) });
+          results.push({ name, status: 'failed', stage, error: String(error) });
         } finally { await page.close(); }
       }
+    }
+  }
+  for (const width of [900, 1008, 1280, 1440]) {
+    for (const theme of ['dark', 'light']) {
+      const name = `${width}x689-header-fallback-${theme}`;
+      const page = await browser.newPage({ viewport: { width, height: 689 } });
+      page.setDefaultTimeout(15_000);
+      try {
+        await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/fixture.html?surface=header&mascot=failure&theme=${theme}`);
+        await page.waitForFunction(() => document.querySelector('[data-layout-result]')?.getAttribute('data-layout-result') === 'passed');
+        await page.screenshot({ path: path.join(output, `${name}.png`), animations: 'disabled' });
+        const bubbleVisible = await page.locator('[data-pilot-mascot-global-dock] aside > [role="status"]').evaluate(node => {
+          const rect = node.getBoundingClientRect();
+          return rect.top >= 0 && rect.bottom <= innerHeight;
+        });
+        assert.equal(bubbleVisible, true, 'global status bubble must remain inside the viewport');
+        for (const label of ['快速打开', '设置', '添加投递']) {
+          await page.locator('.op-topbar').getByRole('button', { name: label, exact: true }).click({ trial: true });
+        }
+        const fallback = page.locator('[data-pilot-mascot-global-dock]').getByRole('button');
+        await fallback.click();
+        await page.getByRole('dialog').waitFor();
+        await page.getByRole('button', { name: 'Close', exact: true }).click();
+        await page.getByRole('dialog').waitFor({ state: 'hidden' });
+        results.push({ name, status: 'passed' });
+      } catch (error) {
+        await page.screenshot({ path: path.join(output, `${name}-failed.png`), animations: 'disabled' });
+        results.push({ name, status: 'failed', error: String(error) });
+      } finally { await page.close(); }
     }
   }
   assert.equal(results.filter(item => item.status === 'failed').length, 0, JSON.stringify(results.filter(item => item.status === 'failed')));

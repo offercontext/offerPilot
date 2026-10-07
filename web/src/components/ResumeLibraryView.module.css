@@ -75,11 +75,15 @@
   border: 1px solid var(--op-border);
   border-radius: 8px;
   padding: 14px;
-  background: #fff;
-  color: var(--op-text);
+  background: var(--op-layout-bg);
+  color: var(--op-ink);
   text-align: left;
   cursor: pointer;
   transition: border-color 150ms var(--op-ease), transform 150ms var(--op-ease);
+}
+.emptyAction:focus-visible {
+  outline: 2px solid var(--op-primary);
+  outline-offset: 2px;
 }
 .emptyAction:hover {
   border-color: var(--op-primary);

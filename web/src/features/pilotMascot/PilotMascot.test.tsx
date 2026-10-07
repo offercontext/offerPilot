@@ -250,6 +250,67 @@ describe('PilotMascot', () => {
     }
   });
 
+  it('keeps a failed model in the global header outside the list, below modal overlays', async () => {
+    const header = document.createElement('div');
+    header.setAttribute('data-pilot-mascot-global-dock', '');
+    document.body.append(header);
+    try {
+      const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
+      const props = await renderMascot({ runtime: broken });
+      const mascot = header.querySelector<HTMLElement>('aside')!;
+      expect(mascot.style.position).toBe('relative');
+      expect(mascot.style.zIndex).toBe('1');
+      expect(mascot.dataset.globalFallback).toBe('true');
+      expect(mascot.style.height).toBe('48px');
+      act(() => header.querySelector('button')!.click());
+      expect(props.onTogglePilot).toHaveBeenCalledOnce();
+      const list = document.createElement('div');
+      list.setAttribute('data-pilot-mascot-fallback-dock', '');
+      await act(async () => { document.body.append(list); });
+      expect(list.querySelector('aside')).not.toBeNull();
+      expect(header.querySelector('aside')).toBeNull();
+      await act(async () => { list.remove(); });
+      expect(header.querySelector('aside')).not.toBeNull();
+      await act(async () => { root.render(<PilotMascot {...props} runtime={runtime()} />); });
+      expect(header.querySelector('aside')).toBeNull();
+      expect(container.querySelector<HTMLElement>('aside')?.style.width).toBe('238px');
+      expect(container.querySelector('canvas')?.isConnected).toBe(true);
+    } finally {
+      await act(async () => { header.remove(); });
+    }
+  });
+
+  it('observes the header actions so a wrapped global dock reports its new anchor', async () => {
+    const header = document.createElement('header');
+    const actions = document.createElement('div');
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-global-dock', '');
+    actions.append(dock); header.append(actions); document.body.append(header);
+    const observed: Element[] = [];
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { callbacks.push(callback); }
+      observe(element: Element) { observed.push(element); }
+      disconnect() {}
+    });
+    let left = 500;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'BUTTON'
+        ? { left, top: 18, right: left + 156, bottom: 66, width: 156, height: 48, x: left, y: 18, toJSON: () => ({}) }
+        : { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
+    });
+    try {
+      const onAnchorRectChange = vi.fn();
+      await renderMascot({ runtime: { mount: vi.fn().mockRejectedValue(new Error('model failed')) }, onAnchorRectChange });
+      expect(observed).toContain(actions); expect(observed).toContain(header);
+      left = 320;
+      act(() => callbacks.forEach((callback) => callback()));
+      expect(onAnchorRectChange).toHaveBeenLastCalledWith({ left: 320, top: 18, right: 476, bottom: 66 });
+    } finally {
+      await act(async () => { header.remove(); });
+    }
+  });
+
   it('docks the failed entrance when the list appears and restores it when the list leaves', async () => {
     const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
     await renderMascot({ runtime: broken });

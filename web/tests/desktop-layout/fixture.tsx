@@ -10,12 +10,14 @@ import { live2dPilotMascotRuntime } from '../../src/features/pilotMascot/live2dR
 import Sidebar from '../../src/layout/Sidebar';
 import TopBar from '../../src/layout/TopBar';
 import { ThemeProvider } from '../../src/theme/ThemeContext';
-import { darkTheme } from '../../src/theme/antdTheme';
+import { darkTheme, lightTheme } from '../../src/theme/antdTheme';
 import type { Application } from '../../src/types/application';
 import '../../src/theme/tokens.css';
 
-localStorage.setItem('op-theme', 'dark');
 const params = new URLSearchParams(location.search);
+const themeChoice = params.get('theme') === 'light' ? 'light' : 'dark';
+localStorage.setItem('op-theme', themeChoice);
+const globalHeader = params.get('surface') === 'header';
 const count = Number(params.get('count') ?? 1);
 const mode = params.get('mascot') ?? 'failure';
 const brokenRuntime: PilotMascotRuntime = { mount: async () => { throw new Error('Simulated model failure'); } };
@@ -51,7 +53,7 @@ function Fixture() {
     const check = () => {
       const table = document.querySelector('.ant-table-content');
       const mascot = document.querySelector<HTMLElement>('aside[aria-label="Haru 助手"]');
-      if (!table || (mode === 'failure' && (mascot?.dataset.loadFailed !== 'true' || mascot.parentElement?.getAttribute('data-pilot-mascot-fallback-dock') === null))) {
+      if ((!globalHeader && !table) || (mode === 'failure' && (mascot?.dataset.loadFailed !== 'true' || !mascot.parentElement?.hasAttribute(globalHeader ? 'data-pilot-mascot-global-dock' : 'data-pilot-mascot-fallback-dock')))) {
         frame = requestAnimationFrame(check); return;
       }
       const errors: string[] = [];
@@ -59,13 +61,13 @@ function Fixture() {
       const rows = [...document.querySelectorAll('.ant-table-tbody tr[data-row-key]')];
       if (first && first.getBoundingClientRect().width < 240) errors.push('primary column collapsed');
       if (rows.some(row => row.getBoundingClientRect().height > 100)) errors.push('text expanded row height');
-      if (table.clientWidth < 982 && table.scrollWidth <= table.clientWidth) errors.push('horizontal scroll unavailable');
+      if (table && table.clientWidth < 982 && table.scrollWidth <= table.clientWidth) errors.push('horizontal scroll unavailable');
       if (document.documentElement.scrollWidth > window.innerWidth) errors.push('page overflow');
       if (mode === 'failure' && mascot) {
         const r = mascot.getBoundingClientRect();
-        const safe = document.querySelector('[data-pilot-mascot-safe-area]')!.getBoundingClientRect();
+        const safe = document.querySelector('[data-pilot-mascot-safe-area]')?.getBoundingClientRect();
         if (r.width !== 156 || r.height !== 48) errors.push('fallback retains invisible hit area');
-        if (r.left < safe.right && r.right > safe.left && r.top < safe.bottom && r.bottom > safe.top) errors.push('fallback overlaps table or pagination');
+        if (safe && r.left < safe.right && r.right > safe.left && r.top < safe.bottom && r.bottom > safe.top) errors.push('fallback overlaps table or pagination');
       }
       if (mode === 'hidden' && mascot) errors.push('hidden mascot remains interactive');
       setChecks(errors.length ? errors.join('; ') : 'passed');
@@ -73,23 +75,23 @@ function Fixture() {
     frame = requestAnimationFrame(() => { frame = requestAnimationFrame(check); });
     return () => cancelAnimationFrame(frame);
   }, []);
-  return <ConfigProvider locale={zhCN} theme={darkTheme}><ThemeProvider>
+  return <ConfigProvider locale={zhCN} theme={themeChoice === 'dark' ? darkTheme : lightTheme}><ThemeProvider>
     <Layout className="op-app-shell" style={{ minHeight: '100dvh', background: 'var(--op-layout-bg)' }} hasSider>
       <Sidebar view="applications-list" onChange={() => {}} reminderCount={1} />
       <Layout className="op-app-main" style={{ background: 'var(--op-layout-bg)', minWidth: 0, width: '100%' }}>
         <TopBar onSearch={() => {}} onOpenSettings={() => {}} primaryAction={{ label: '添加投递', onClick: () => {} }} />
         <Layout.Content className="op-app-content" style={{ padding: '0 24px 24px' }}>
           <Tabs activeKey="list" items={[{ key: 'board', label: '看板' }, { key: 'list', label: '列表' }]} />
-          <ApplicationListView applications={records} events={[]} onOpenDetail={setDetail} onAskPilot={() => setPilot(true)} />
+          {globalHeader ? <p>Global header layout fixture; production header and fallback components.</p> : <ApplicationListView applications={records} events={[]} onOpenDetail={setDetail} onAskPilot={() => setPilot(true)} />}
           <output data-layout-result={checks} aria-label="布局回归结果" style={{ fontSize: 11, color: 'var(--op-muted)' }}>{checks}</output>
         </Layout.Content>
       </Layout>
     </Layout>
-    {!hidden && <PilotMascot activity="idle" panelOpen={pilot} onHide={() => setHidden(true)} onTogglePilot={() => setPilot(!pilot)} runtime={mode === 'failure' ? brokenRuntime : observedRuntime} />}
+    {!hidden && <PilotMascot activity={globalHeader ? "thinking" : "idle"} panelOpen={pilot} onHide={() => setHidden(true)} onTogglePilot={() => setPilot(!pilot)} runtime={mode === 'failure' ? brokenRuntime : observedRuntime} />}
     <Modal title="投递详情" open={Boolean(detail)} onCancel={() => setDetail(undefined)} footer={null}><p>{detail?.company_name}</p><p>{detail?.position_name}</p></Modal>
     <Modal title="Pilot" open={pilot} onCancel={() => setPilot(false)} footer={null}>Pilot 入口可用</Modal>
   </ThemeProvider></ConfigProvider>;
 }
 // Set theme before the first paint; this fixture has its own origin-only storage.
-document.documentElement.dataset.theme = 'dark';
+document.documentElement.dataset.theme = themeChoice;
 createRoot(document.getElementById('root')!).render(<Fixture />);

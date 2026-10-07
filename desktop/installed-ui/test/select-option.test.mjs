@@ -15,7 +15,8 @@ function fixture({target=11, duplicate=false, absent=false, wrongSelected=false}
   };
   const page={locator(selector){assert.equal(selector,'.ant-select-dropdown:not(.ant-select-dropdown-hidden)');return popup;},
     getByRole(){throw new Error('zero-size accessibility mirror must not be clicked');}};
-  const input={async click(){open=true;},async press(key){assert.equal(key,'ArrowDown');active++;arrows++;},
+  const input={async click(){throw new Error('transparent input must not be the pointer target');},
+    locator(selector){assert.match(selector,/xpath=ancestor/);return {locator(selector){assert.equal(selector,'.ant-select-selector');return {async click(){open=true;}};}};},async press(key){assert.equal(key,'ArrowDown');active++;arrows++;},
     async evaluate(){return wrongSelected?'unexpected':'target label';}};
   return {page,input,counts:()=>({clicks,arrows})};
 }

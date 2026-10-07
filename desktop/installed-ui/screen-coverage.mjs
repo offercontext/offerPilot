@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { ROOTS, WIDTHS } from './coverage-model.mjs';
 import { selectVisibleOption as select } from './select-option.mjs';
+import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
 
 const root = (view) => ROOTS.find((item) => item.view === view);
 const exact = (name) => ({ name, exact: true });
-const btn = (scope, name) => scope.getByRole('button', exact(name));
 const dialog = (page, name) => page.getByRole('dialog', exact(name));
 const region = (page, name) => page.getByRole('region', exact(name));
 const prefix = `QA-20261007-${process.env.GITHUB_RUN_ID || 'local'}`;
@@ -23,15 +23,19 @@ async function ready(page) {
 async function command(page, name) {
   const exit = btn(page, '退出沉浸模式，返回原页面');
   if (await exit.isVisible()) await exit.click();
-  await page.getByRole('button', { name: /^快速打开/ }).click();
+  markUiStep(page, 'palette-open', 'quick-open');
+  await quickOpenButton(page).click();
   const input = page.getByRole('combobox').and(page.getByPlaceholder('快速打开页面、投递或助手…', { exact: true }));
+  markUiStep(page, 'palette-query', 'quick-open');
   await input.fill(name);
   const option = page.getByRole('listbox', exact('命令结果')).getByRole('option').filter({ has: page.getByText(name, { exact: true }) });
   assert.equal(await option.count(), 1, 'command must resolve unambiguously');
+  markUiStep(page, 'palette-select', 'quick-open');
   await option.click();
   await input.waitFor({ state: 'hidden' });
 }
 async function navigate(page, view) {
+  markUiStep(page, 'navigation');
   const item = root(view);
   const exit = btn(page, '退出沉浸模式，返回原页面');
   if (await exit.isVisible()) await exit.click();
@@ -61,7 +65,7 @@ async function navigate(page, view) {
   if (markers[view]) await markers[view]().waitFor();
   if (view === 'dashboard') assert.ok(await page.getByText('从第一条投递开始建立求职节奏', { exact: true }).isVisible()
     || await region(page, '未来 7 天日程').isVisible(), 'dashboard ready state required');
-  if (view === 'board') assert.ok(await page.getByText('准备投递', { exact: true }).count() > 0, 'board lane required');
+  if (view === 'board') assert.ok(await page.getByText('待投递', { exact: true }).count() > 0, 'board lane required');
 }
 async function theme(page, value) {
   const exit = btn(page, '退出沉浸模式，返回原页面');
@@ -71,27 +75,31 @@ async function theme(page, value) {
 }
 async function closeDialog(page, title) {
   const surface = dialog(page, title);
-  const cancel = surface.getByRole('button', { name: /^(取消|Cancel)$/ });
+  markUiStep(page, 'dialog-dismiss');
+  const cancel = btn(surface, '取消').or(btn(surface, 'Cancel'));
   if (await cancel.count() === 1) await cancel.click();
-  else await surface.getByRole('button', { name: /^(关闭|Close)$/ }).click();
+  else await btn(surface, '关闭').or(btn(surface, 'Close')).click();
   await surface.waitFor({ state: 'hidden' });
 }
 async function responseFromUI(page, route, method, action) {
   const origin = new URL(page.url()).origin;
+  markUiStep(page, 'response-wait');
   const [response] = await Promise.all([page.waitForResponse((response) => {
     const url = new URL(response.url());
     return url.origin === origin && route.test(url.pathname) && response.request().method() === method;
-  }), action()]);
+  }), (async () => { markUiStep(page, 'ui-submit'); await action(); markUiStep(page, 'response-wait'); })()]);
+  markUiStep(page, 'response-validate');
   assert.ok(response.status() >= 200 && response.status() < 300, 'visible UI write failed');
   return response.json(); // Caller keeps only validated synthetic IDs, never raw response.
 }
 async function captureWidths(qa, page, name, extra = {}) {
-  for (const width of WIDTHS) {
-    await qa.size(width, 689);
-    await ready(page);
-    await qa.capture(`${name}-${width}x689`, extra);
-  }
-  await qa.size(1280);
+  try {
+    for (const width of WIDTHS) {
+      await qa.size(width, 689);
+      await ready(page);
+      await qa.capture(`${name}-${width}x689`, extra);
+    }
+  } finally { if (qa.canProceed()) await qa.size(1280); }
 }
 async function openApplication(page, record) {
   await navigate(page, 'applications-list');
@@ -102,14 +110,17 @@ async function openApplication(page, record) {
   await row.click();
   await page.getByRole('heading', { level: 3, name: `${record.company_name} · ${record.position_name}`, exact: true }).waitFor();
 }
-async function createApplication(page, data) {
+async function createApplication(page, data, qa) {
   await command(page, '添加投递');
   const form = dialog(page, '添加投递');
+  markUiStep(page, 'form-fill', 'application');
   await form.getByLabel('公司', { exact: true }).fill(data.company_name);
   await form.getByLabel('岗位', { exact: true }).fill(data.position_name);
   await form.getByLabel('备注', { exact: true }).fill(data.notes);
+  if (qa) await qa.capture('application-created-draft');
   await btn(form, '核对并检查重复').click();
   await form.getByText('未发现符合规则的重复记录', { exact: true }).waitFor();
+  if (qa) await qa.capture('application-created-review');
   const value = await responseFromUI(page, /^\/api\/applications$/, 'POST', () => btn(form, '确认保存').click());
   assert.ok(Number.isSafeInteger(value.id) && value.id > 0);
   for (const [key, expected] of Object.entries(data)) assert.equal(value[key], expected);
@@ -163,7 +174,8 @@ export async function extendedFlows(qa, page, initialRecord) {
 
   await qa.run('S01', 'command-palette', ['快速打开'], async () => {
     await navigate(page, 'dashboard');
-    await page.getByRole('button', { name: /^快速打开/ }).click();
+    markUiStep(page, 'palette-open', 'quick-open');
+    await quickOpenButton(page).click();
     const input = page.getByPlaceholder('快速打开页面、投递或助手…', { exact: true });
     assert.equal(await input.inputValue(), '');
     await qa.capture('command-all');
@@ -172,7 +184,8 @@ export async function extendedFlows(qa, page, initialRecord) {
     await qa.capture('command-no-match');
     await page.keyboard.press('Escape');
     await input.waitFor({ state: 'hidden' });
-    await page.getByRole('button', { name: /^快速打开/ }).click();
+    markUiStep(page, 'palette-open', 'quick-open');
+    await quickOpenButton(page).click();
     assert.equal(await input.inputValue(), '');
     await input.fill('打开投递列表');
     await input.press('ArrowDown');
@@ -206,20 +219,23 @@ export async function extendedFlows(qa, page, initialRecord) {
     qa.observed('required validation; cancel and reopen reset draft; cancelled company absent from list');
   });
 
-  await qa.run('R05', 'long-application-create-and-pagination', ['快速打开', '添加投递', '投递', '列表'], async () => {
-    await navigate(page, 'dashboard');
-    for (let index = 0; index < 11; index++) {
-      const saved = await createApplication(page, applicationData(index));
+  for (let index = 0; index < 11; index++) {
+    await qa.run('S02', `application-create-${index + 1}`, ['快速打开', '添加投递', '确认保存'], async () => {
+      await navigate(page, 'dashboard');
+      const saved = await createApplication(page, applicationData(index), qa);
       apps.push(saved); qa.fixture('application', saved.id);
-      if (index === 0) {
-        await navigate(page, 'applications-list');
-        const list = region(page, '投递列表');
-        await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(saved.company_name);
-        await list.locator(`tr[data-row-key="${saved.id}"]`).waitFor();
-        await captureWidths(qa, page, 'list-one-long-chinese-row', { expectedFilteredRows: 1 });
-        qa.observed('UI-created long Chinese application persisted with POST identity and visible row');
-      }
-    }
+      qa.observed('synthetic application created through duplicate review; exact POST identity and detail heading verified');
+    });
+  }
+  if (apps.length === 11) await qa.run('R05', 'long-application-create-and-pagination', ['投递', '列表'], async () => {
+    const chinese = apps.find((item) => item.company_name === longChinese);
+    assert.ok(chinese);
+    await navigate(page, 'applications-list');
+    const filtered = region(page, '投递列表');
+    await filtered.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(chinese.company_name);
+    await filtered.locator(`tr[data-row-key="${chinese.id}"]`).waitFor();
+    await captureWidths(qa, page, 'list-one-long-chinese-row', { expectedFilteredRows: 1 });
+    qa.observed('UI-created long Chinese application persisted with POST identity and visible row');
     await navigate(page, 'applications-list');
     const list = region(page, '投递列表');
     await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill('');
@@ -237,7 +253,9 @@ export async function extendedFlows(qa, page, initialRecord) {
     await ready(page);
     assert.deepEqual(await list.locator('tr[data-row-key]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-row-key'))), firstIds);
     await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(longEnglish);
-    const english = list.locator(`tr[data-row-key="${apps[1].id}"]`);
+    const englishRecord = apps.find((item) => item.company_name === longEnglish);
+    assert.ok(englishRecord);
+    const english = list.locator(`tr[data-row-key="${englishRecord.id}"]`);
     await english.waitFor();
     const box = await english.boundingBox(); assert.ok(box && box.height <= 100, 'long row must remain readable and bounded');
     await qa.capture('list-long-unbroken-english');
@@ -245,7 +263,9 @@ export async function extendedFlows(qa, page, initialRecord) {
     qa.observed('twelve real records; next/previous page changes row IDs; English search and bounded row height');
   });
 
-  const primary = apps[0] || initialRecord;
+  else await qa.disposition('R05', 'long-application-create-and-pagination', 'BLOCKED', 'all-eleven-additional-UI-applications-not-established');
+
+  const primary = apps.find((item) => item.company_name === longChinese) || apps[0] || initialRecord;
   await qa.run('R05', 'installed-table-horizontal-keyboard', ['投递', '列表', '横向滚动'], async () => {
     await navigate(page, 'applications-list');
     const list = region(page, '投递列表');
@@ -264,7 +284,7 @@ export async function extendedFlows(qa, page, initialRecord) {
     for (let i = 0; i < 8; i++) await table.press('ArrowRight');
     assert.ok(await content.evaluate((element) => element.scrollLeft) >= range - 1);
     await qa.capture('installed-list-scrolled-right-keyboard');
-    const pilot = list.locator(`tr[data-row-key="${primary.id}"]`).getByRole('button', exact('问 Pilot'));
+    const pilot = btn(list.locator(`tr[data-row-key="${primary.id}"]`), '问 Pilot');
     await pilot.click({ trial: true });
     for (let i = 0; i < 8; i++) await table.press('ArrowLeft');
     assert.equal(await content.evaluate((element) => element.scrollLeft), 0);
@@ -291,9 +311,9 @@ export async function extendedFlows(qa, page, initialRecord) {
     assert.equal(runtime.classifications?.['unexpected-page-error'] || 0, 0, 'unexpected renderer page error');
     assert.equal(runtime.ownCriticalFailureCount, 0, 'own-origin server/resource/transport failure, including events beyond evidence cap');
     await qa.capture('runtime-health-final-screen');
-    if (Object.values(runtime.classifications).some((count) => count > 0)) qa.blocked('CSP-Haru-graphics-or-console-error-observed-see-safe-classifications');
+    if (Object.entries(runtime.classifications).some(([key, count]) => key !== 'expected-resource-console' && count > 0)) qa.blocked('CSP-Haru-graphics-or-console-error-observed-see-safe-classifications');
     qa.observed('no unexpected renderer page errors or own-origin server/asset failures recorded');
-  });
+  }, 'diagnostic');
   await qa.finish();
   if (qa.canProceed()) await navigate(page, 'applications-list');
 }
@@ -347,7 +367,11 @@ async function applicationDetailFlows(qa, page, record) {
       await qa.capture(`jd-editor-v${version}`);
       await responseFromUI(page, new RegExp(`^/api/applications/${record.id}/job-description/versions$`), 'POST', () => btn(form, '保存岗位资料').click());
       await form.waitFor({ state: 'hidden' });
-      await page.getByText(`${jd}\n版本 ${version}`, { exact: true }).waitFor();
+      markUiStep(page, 'readback', 'application-jd');
+      const currentJd = page.getByRole('tabpanel', exact('准备')).locator('#application-jd-text');
+      await currentJd.waitFor();
+      await page.waitForFunction((expected) => document.querySelector('#application-jd-text')?.innerText.replace(/\s+/gu, ' ').trim() === expected, `${jd} 版本 ${version}`);
+      assert.equal((await currentJd.innerText()).replace(/\s+/gu, ' ').trim(), `${jd} 版本 ${version}`);
     }
     await btn(page, '查看历史').click();
     await dialog(page, '岗位资料历史').waitFor();
@@ -520,7 +544,7 @@ async function resumeFlows(qa, page) {
   let saved;
   await qa.run('S14', 'resume-upload-cancel', ['素材库', '简历', '上传现有简历'], async () => {
     await navigate(page, 'resumes');
-    await page.locator('[aria-label="创建基础简历入口"]').getByRole('button', exact('上传现有简历')).click();
+    await btn(page.locator('[aria-label="创建基础简历入口"]'), '上传现有简历').click();
     const form = dialog(page, '上传简历');
     assert.equal(await btn(form, '上传').isDisabled(), true);
     await captureWidths(qa, page, 'resume-upload-empty');
@@ -531,7 +555,7 @@ async function resumeFlows(qa, page) {
   await qa.run('S15', 'resume-editor-create-save-reopen', ['素材库', '简历', '和 Haru 创建初稿'], async () => {
     await navigate(page, 'resumes');
     // Source creates BLANK_RESUME_CONTENT locally; no model call behind this button.
-    saved = await responseFromUI(page, /^\/api\/resumes$/, 'POST', () => page.locator('[aria-label="创建基础简历入口"]').getByRole('button', exact('和 Haru 创建初稿')).click());
+    saved = await responseFromUI(page, /^\/api\/resumes$/, 'POST', () => btn(page.locator('[aria-label="创建基础简历入口"]'), '和 Haru 创建初稿').click());
     qa.fixture('resume', saved.id);
     const editor = region(page, '编辑简历');
     await editor.waitFor();
@@ -620,7 +644,7 @@ async function interviewFlows(qa, page) {
   await qa.run('S09', 'quick-and-review-practice-readiness', ['面试', '面试练习', '开始面试练习'], async () => {
     await navigate(page, 'interview');
     await page.getByRole('tab', exact('面试练习')).click();
-    await btn(page, '开始面试练习').click();
+    await btn(page.getByTestId('free-practice-workspace'), '开始面试练习').click();
     const surface = page.getByTestId('interview-practice-surface');
     await surface.waitFor();
     const quick = page.getByTestId('interview-readiness-center');
@@ -737,7 +761,7 @@ async function offerFlows(qa, page, applications) {
       const name = index === 0 ? '录入第一份 Offer' : '录入另一份 Offer';
       await btn(page, name).click();
       const form = dialog(page, '录入 Offer');
-      const save = form.getByRole('button', { name: /^(确定|OK)$/ });
+      const save = btn(form, '确定').or(btn(form, 'OK'));
       await save.click();
       await form.getByText('请选择所属投递', { exact: true }).waitFor();
       await qa.capture(`offer-${index + 1}-validation`);
@@ -756,7 +780,7 @@ async function offerFlows(qa, page, applications) {
       await ready(page);
       await qa.capture(`offer-${index + 1}-saved`);
     }
-    const comparison = page.getByRole('button', { name: /^开始比较/ });
+    const comparison = btn(page, /^开始比较（已选 \d+）$/u);
     assert.equal(await comparison.isDisabled(), true);
     qa.observed('two Offers created by UI with exact application binding and salary input; compare disabled before selection');
   });
@@ -769,7 +793,7 @@ async function offerFlows(qa, page, applications) {
     if (await back.isVisible()) await back.click();
     await navigate(page, 'offers');
     for (const { application } of offers) await page.getByRole('checkbox', exact(`选择 Offer：${application.company_name}｜${application.position_name}`)).check();
-    await page.getByRole('button', { name: /^开始比较/ }).click();
+    await btn(page, /^开始比较（已选 \d+）$/u).click();
     await region(page, 'Offer 横向对比').waitFor();
   };
   await qa.run('S21', 'offer-comparison-math-and-differences', ['Offer', '选择两份', '开始比较'], async () => {
@@ -804,7 +828,7 @@ async function offerFlows(qa, page, applications) {
   });
   await qa.run('S23', 'offer-negotiation-preflight-only', ['Offer', '准备谈薪'], async () => {
     await openCompare();
-    await page.getByTestId(`offer-comparison-header-${offers[0].id}`).getByRole('button', exact('准备谈薪')).click();
+    await btn(page.getByTestId(`offer-comparison-header-${offers[0].id}`), '准备谈薪').click();
     const form = region(page, '谈薪准备');
     await form.waitFor();
     await form.getByLabel('本次沟通目标', { exact: true }).fill('合成演练：确认薪酬构成');

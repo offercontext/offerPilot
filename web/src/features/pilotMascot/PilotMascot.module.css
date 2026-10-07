@@ -164,6 +164,7 @@
 
 .loadFailed .contextMenu { right: 0; bottom: 56px; }
 .loadFailed .bubble { top: auto; bottom: 56px; right: 0; }
+.mascot[data-global-fallback='true'] .bubble { top: 56px; bottom: auto; }
 
 .fallback {
   display: flex;

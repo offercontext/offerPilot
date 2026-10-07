@@ -2,15 +2,15 @@
   position: relative;
   min-height: 12rem;
   scroll-margin-block-start: 24px;
-  color: var(--text-primary, #171717);
+  color: var(--op-ink);
 }
 
 .owner {
   position: relative;
-  border: 1px solid var(--border-subtle, #dedede);
+  border: 1px solid var(--op-border);
   border-radius: 12px;
   padding: 1rem;
-  background: var(--surface-raised, #fff);
+  background: var(--op-surface);
 }
 
 .opening {
@@ -30,7 +30,16 @@
   position: absolute;
   top: .75rem;
   right: .75rem;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 1px solid var(--op-border);
+  border-radius: 8px;
+  color: var(--op-ink);
+  background: var(--op-layout-bg);
+  cursor: pointer;
 }
+
+.close:focus-visible { outline: 2px solid var(--op-primary); outline-offset: 2px; }
 
 .content { margin-top: 1rem; }
 

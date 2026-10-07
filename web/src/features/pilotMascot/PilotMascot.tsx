@@ -109,6 +109,7 @@ export default function PilotMascot({
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [fallbackDock, setFallbackDock] = useState<HTMLElement | null>(null);
+  const [globalFallbackDock, setGlobalFallbackDock] = useState<HTMLElement | null>(null);
   const [localPosition, setLocalPosition] = useState<PilotMascotPosition>(() => {
     const key = placement === 'interview-studio' ? 'interview_studio' : 'normal';
     return readPilotMascotPositions()[key];
@@ -277,11 +278,16 @@ export default function PilotMascot({
     if (!anchor || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => reportAnchorRect());
     observer.observe(anchor);
+    if (anchor.parentElement) observer.observe(anchor.parentElement);
+    if (anchor.parentElement?.parentElement) observer.observe(anchor.parentElement.parentElement);
+    if (fallbackDock?.parentElement) observer.observe(fallbackDock.parentElement);
+    if (globalFallbackDock?.parentElement) observer.observe(globalFallbackDock.parentElement);
+    if (globalFallbackDock?.parentElement?.parentElement) observer.observe(globalFallbackDock.parentElement.parentElement, { box: 'border-box' });
     return () => observer.disconnect();
-  }, [fallbackDock, loadFailed, frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
+  }, [compact, fallbackDock, globalFallbackDock, loadFailed, frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
 
   useEffect(() => {
-    if (!fallbackDock) return;
+    if (!fallbackDock && !(loadFailed && globalFallbackDock)) return;
     const update = () => {
       if (loadFailed) reportAnchorRect();
       else setSafeAreaRevision((revision) => revision + 1);
@@ -293,7 +299,7 @@ export default function PilotMascot({
       document.removeEventListener('scroll', update, true);
       observer?.disconnect();
     };
-  }, [fallbackDock, loadFailed, reportAnchorRect]);
+  }, [fallbackDock, globalFallbackDock, loadFailed, reportAnchorRect]);
 
   useEffect(() => {
     if (!studioPlacement || typeof document === 'undefined' || typeof ResizeObserver === 'undefined') return;
@@ -379,21 +385,26 @@ export default function PilotMascot({
   useLayoutEffect(() => {
     if (studioPlacement) {
       setFallbackDock(null);
+      setGlobalFallbackDock(null);
       return;
     }
-    const updateDock = () => setFallbackDock(document.querySelector<HTMLElement>('[data-pilot-mascot-fallback-dock]'));
+    const updateDock = () => {
+      setFallbackDock(document.querySelector<HTMLElement>('[data-pilot-mascot-fallback-dock]'));
+      setGlobalFallbackDock(document.querySelector<HTMLElement>('[data-pilot-mascot-global-dock]'));
+    };
     updateDock();
     const observer = new MutationObserver(updateDock);
     observer.observe(document.body, { childList: true, subtree: true });
     return () => observer.disconnect();
   }, [studioPlacement]);
-  const dockedFallback = loadFailed ? fallbackDock : null;
+  const dockedFallback = loadFailed ? fallbackDock ?? globalFallbackDock : null;
   const mascot = (
     <aside
       className={`${styles.mascot} ${panelOpen ? styles.compact : ''} ${loadFailed ? styles.loadFailed : ''} ${
         placement === 'pilot-page' ? styles.pilotPage : ''
       } ${studioPlacement ? styles.interviewStudio : styles.normalLayout} ${dragRef.current?.moved ? styles.dragging : ''}`}
       data-load-failed={loadFailed ? 'true' : undefined}
+      data-global-fallback={loadFailed && !fallbackDock && globalFallbackDock ? 'true' : undefined}
       data-pilot-list-character={needsListGutter ? 'true' : undefined}
       data-activity={activity}
       data-notification={notification?.status}
@@ -401,7 +412,7 @@ export default function PilotMascot({
       data-interview-studio-companion={studioPlacement ? 'true' : undefined}
       aria-label="Haru 助手"
       style={dockedFallback
-        ? { position: 'relative', width: frameWidth, height: frameHeight, inset: 'auto' }
+        ? { position: 'relative', width: frameWidth, height: frameHeight, inset: 'auto', zIndex: 1 }
         : { width: frameWidth, height: frameHeight, left: `${frameLeft}px`, top: `${frameTop}px`, right: 'auto', bottom: 'auto' }}
     >
       {notification || (!panelOpen && activity !== 'idle') ? (

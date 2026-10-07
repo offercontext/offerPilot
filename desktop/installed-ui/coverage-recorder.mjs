@@ -1,44 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { safeFailure } from './diagnostics.mjs';
-import { checkGeometry, safeShotName, summarizeCoverage, classifyRuntimeMessage, publicRequestFailure, SUBVIEWS, ROOT_CASES } from './coverage-model.mjs';
-
-export function observeRuntime(page) {
-  const counts = {};
-  const requests = [];
-  let ownCriticalFailureCount = 0;
-  let requestFailureCount = 0;
-  let uncertainMutationOutcome = false;
-  const inflightWrites = new Set();
-  const add = (name) => { counts[name] = (counts[name] || 0) + 1; };
-  page.on('pageerror', (error) => add(classifyRuntimeMessage(error.message, 'pageerror')));
-  page.on('console', (message) => { if (message.type() === 'error') add(classifyRuntimeMessage(message.text())); });
-  page.on('request', (request) => { if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method())) inflightWrites.add(request); });
-  page.on('requestfinished', (request) => inflightWrites.delete(request));
-  page.on('requestfailed', (request) => {
-    if (inflightWrites.has(request)) uncertainMutationOutcome = true;
-    inflightWrites.delete(request);
-    const safe = publicRequestFailure(request.url(), new URL(page.url()).origin, null);
-    if (safe) {
-      const expectedCancellation = request.failure?.()?.errorText === 'net::ERR_ABORTED';
-      requestFailureCount++;
-      if (!expectedCancellation) ownCriticalFailureCount++;
-      if (requests.length < 100) requests.push({ ...safe, expectedCancellation });
-    }
-  });
-  page.on('response', (response) => {
-    if (response.status() < 400) return;
-    const safe = publicRequestFailure(response.url(), new URL(page.url()).origin, response.status(), response.request?.().method() || 'GET');
-    if (safe) {
-      requestFailureCount++;
-      if (safe.status >= 500 || safe.category === 'own-asset' || (safe.category === 'own-api' && !safe.expectedAbsent)) ownCriticalFailureCount++;
-      if (requests.length < 100) requests.push(safe);
-    }
-  });
-  return { snapshot: () => ({ classifications: { ...counts }, ownRequestFailures: [...requests],
-    ownCriticalFailureCount, requestFailureCount, uncertainMutationOutcome, bounded: requestFailureCount > requests.length }),
-    hasPendingWrite: () => inflightWrites.size > 0 || uncertainMutationOutcome };
-}
+import { observeRuntime } from './runtime-observer.mjs';
+export { observeRuntime };
+import { bindUiSteps, markUiStep, safeUiFailure } from './ui-locators.mjs';
+import { readSurfaceIdentity } from './surface-identity.mjs';
+import { checkGeometry, safeShotName, summarizeCoverage, SUBVIEWS, ROOT_CASES } from './coverage-model.mjs';
 
 export async function createCoverage({ app, page, evidence, pin, installedExeSha256, runtime, setStage }) {
   const dir = path.join(evidence, 'screens');
@@ -50,15 +17,19 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
     syntheticProfileOnly: true, aiInvocationsAuthorized: false, browserFixturesUsed: false, expectedRootCases: ROOT_CASES.length,
     cases: [], screens: [], fixtures: [], summary: null, runtime: null };
   let active;
+  bindUiSteps(page, (value) => { if (active) active.lastStep = value; });
   let sequence = 0;
   let width = 1280;
   let height = 900;
   const save = async () => {
-    report.summary = summarizeCoverage(report.cases);
+    report.summary = { ...summarizeCoverage(report.cases),
+      confirmedTargetScreens: report.screens.filter((item) => item.targetSurfaceConfirmed).length,
+      unconfirmedTargetScreens: report.screens.filter((item) => !item.targetSurfaceConfirmed).length };
     report.runtime = runtime.snapshot();
     await fs.writeFile(path.join(evidence, 'coverage.json'), `${JSON.stringify(report, null, 2)}\n`);
   };
   const size = async (requested, requestedHeight = 900) => {
+    markUiStep(page, 'viewport-set');
     const window = await app.browserWindow(page);
     await window.evaluate((win, value) => win.setContentSize(value.width, value.height), { width: requested, height: requestedHeight });
     await page.waitForFunction((value) => window.innerWidth === value.width && window.innerHeight === value.height, { width: requested, height: requestedHeight });
@@ -66,6 +37,7 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
     height = requestedHeight;
   };
   const capture = async (label, extra = {}) => {
+    markUiStep(page, 'screenshot-capture');
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
     await page.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
     const measured = await page.evaluate(() => {
@@ -86,19 +58,30 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
         documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
         theme: document.documentElement.dataset.theme || 'unknown', haruCoveredControls };
     });
-    const item = { filename: `screens/${filename}`, caseId: active?.caseId || null,
+    const identity = await readSurfaceIdentity(page, active?.surfaceId);
+    if (identity.targetSurfaceConfirmed && active) active.targetSurfaceConfirmed = true;
+    const item = { ...identity, filename: `screens/${filename}`, caseId: active?.caseId || null,
       ...measured, fixtureIds: report.fixtures.map(({ kind, id }) => ({ kind, id })), ...extra };
     report.screens.push(item);
     active?.screenshots.push(item.filename);
     await save(); // Geometry failures keep their screenshot.
-    checkGeometry(measured, width);
+    markUiStep(page, 'geometry-check');
+    // Preserve visible product defects without letting them prevent independent
+    // synthetic fixture creation. The case remains irrevocably FAIL at completion.
+    const issues = [];
+    if (measured.documentWidth > measured.width + 1) issues.push('horizontal-overflow');
+    if (measured.haruCoveredControls > 0) issues.push('haru-occlusion');
+    item.geometryIssues = issues;
+    if (issues.length && active) active.visualFailures.push({ screenshot: item.filename, issues });
+    else if (issues.length) { const error = new Error('screen geometry failed'); error.code = 'UI_VISUAL_FAILURE'; throw error; }
+    checkGeometry({ ...measured, documentWidth: measured.width }, width);
     if (measured.height !== height) throw new Error('native content height changed before capture');
-    if (measured.haruCoveredControls > 0) throw new Error('Haru intercepts visible product controls');
+    await save();
     return measured;
   };
   const run = async (surfaceId, caseId, uiPath, action, kind = 'interaction') => {
     active = { surfaceId, caseId, uiPath, kind, outcome: 'NOT RUN', assertions: [], screenshots: [],
-      reason: 'started-not-completed' };
+      reason: 'started-not-completed', targetSurfaceConfirmed: false, visualFailures: [], lastStep: null };
     report.cases.push(active);
     setStage(`coverage-${caseId}`);
     await save();
@@ -113,23 +96,27 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
       await action();
       if (!active.screenshots.length) await capture(caseId);
       if (!active.assertions.length) throw new Error('case has no explicit assertions');
+      if (active.kind !== 'diagnostic' && !active.targetSurfaceConfirmed) throw new Error('target surface was never verified in a screenshot');
+      if (active.visualFailures.length) { const error = new Error('screen geometry failed'); error.code = 'UI_VISUAL_FAILURE'; throw error; }
       const runtimeAfter = runtime.snapshot();
       active.runtimeDelta = Object.fromEntries(Object.entries(runtimeAfter.classifications)
         .map(([key, count]) => [key, count - (runtimeBefore.classifications[key] || 0)]).filter(([, count]) => count > 0));
       if ((runtimeAfter.ownCriticalFailureCount || 0) > (runtimeBefore.ownCriticalFailureCount || 0)) throw new Error('required own-origin request failed in this case');
       if (active.runtimeDelta['unexpected-page-error']) throw new Error('unexpected renderer error in this case');
-      if (Object.keys(active.runtimeDelta).length && active.outcome !== 'BLOCKED') {
+      if (Object.keys(active.runtimeDelta).some((key) => key !== 'expected-resource-console') && active.outcome !== 'BLOCKED') {
         active.outcome = 'BLOCKED';
         active.reason = 'runtime-error-observed-during-case-see-safe-classifications';
       }
       if (active.outcome !== 'BLOCKED') { active.outcome = 'PASS'; delete active.reason; }
     } catch (error) {
       active.outcome = 'FAIL';
-      active.failure = safeFailure(error);
+      active.failure = { ...safeFailure(error), uiIssue: safeUiFailure(error) };
+      active.failedStep = active.lastStep;
       active.reason = 'assertion-or-ui-action-failed';
       try { await capture(`${caseId}-failure`); } catch { /* Failed capture is not a pass. */ }
       if (!runtime.hasPendingWrite()) {
         try {
+          markUiStep(page, 'recovery-reload');
           await page.reload({ waitUntil: 'domcontentloaded' });
           active.recovery = 'ordinary-reload-no-write-pending';
         } catch { active.recovery = 'failed'; }

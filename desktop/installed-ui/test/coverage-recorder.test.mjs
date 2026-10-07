@@ -13,7 +13,7 @@ async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrong
   let reloads=0; let width=1280; let height=900;
   const sizes=[];
   const page={
-    async evaluate() { return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered}; },
+    async evaluate(_callback,args) { if(args?.rules)return {observedView:'applications-list',visibleSurfaces:[args.targetId],targetSurfaceConfirmed:true}; return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered}; },
     async screenshot({path}) { await fs.writeFile(path,'UNIT TEST ONLY, NOT A PRODUCT SCREENSHOT'); },
     async reload() { reloads++; },
     async waitForFunction(callback,value) { assert.equal(width,value.width); assert.equal(height,value.height); },
@@ -178,4 +178,14 @@ test('per-screen runtime deltas mark CSP boundary BLOCKED and critical failures 
   const pageerror=await fixture(t);
   await pageerror.qa.run('R01','page-error',['今日'],async()=>{pageerror.runtimeError('unexpected-page-error');pageerror.qa.observed('root shell renders');});
   assert.equal(pageerror.qa.report.cases[0].outcome,'FAIL');
+});
+
+test('a geometry defect stays FAIL while independent normal UI work can finish',async(t)=>{
+ const {qa}=await fixture(t,{covered:1});let continued=false;
+ await qa.run('S02','visible-defect',['添加投递'],async()=>{
+  await qa.capture('before-normal-save');continued=true;qa.observed('ordinary save finished without force');
+ });
+ assert.equal(continued,true);assert.equal(qa.report.cases[0].outcome,'FAIL');
+ assert.equal(qa.report.cases[0].failure.uiIssue,'visual-assertion-failed');
+ assert.ok(qa.report.cases[0].visualFailures.some(({issues})=>issues.includes('haru-occlusion')));
 });

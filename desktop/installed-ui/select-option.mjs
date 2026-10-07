@@ -1,14 +1,19 @@
 import assert from 'node:assert/strict';
+import { markUiStep } from './ui-locators.mjs';
 
 // rc-select virtualizes role=option into a zero-size accessibility mirror. Click the
 // actual rendered option instead, using real keyboard input to bring distant rows in.
 export async function selectVisibleOption(page, input, label, maxMoves = 48) {
   assert.ok(typeof label === 'string' || label instanceof RegExp);
-  await input.click();
+  markUiStep(page, 'selection-open');
+  const root = input.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
+  // rc-select's transparent readonly input is not the visible pointer target.
+  await root.locator('.ant-select-selector').click();
   const popup = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
   await popup.waitFor({ state: 'visible' });
   assert.equal(await popup.count(), 1, 'one active Select popup required');
   const option = popup.locator('.ant-select-item-option').and(popup.getByTitle(label, { exact: typeof label === 'string' }));
+  markUiStep(page, 'selection-search');
   let found = false;
   for (let moves = 0; moves <= maxMoves; moves++) {
     const count = await option.count();
@@ -17,6 +22,7 @@ export async function selectVisibleOption(page, input, label, maxMoves = 48) {
     if (moves < maxMoves) await input.press('ArrowDown');
   }
   assert.equal(found, true, 'requested option did not become visible through keyboard navigation');
+  markUiStep(page, 'selection-confirm');
   await option.click();
   await popup.waitFor({ state: 'hidden' });
   const selected = await input.evaluate((element) => element.closest('.ant-select')?.querySelector('.ant-select-selection-item')?.getAttribute('title'));

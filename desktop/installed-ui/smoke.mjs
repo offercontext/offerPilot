@@ -13,6 +13,7 @@ import { observeDevToolsDisabled } from './devtools-probe.mjs';
 import { verifyApplicationDetail } from './detail-ui.mjs';
 import { createCoverage, observeRuntime } from './coverage-recorder.mjs';
 import { rootSweep, extendedFlows } from './screen-coverage.mjs';
+import { reloadOnceWithObserver } from './startup-diagnostics.mjs';
 import { PIN, SYNTHETIC, validateRequest, publicApplication, sameWindowsPath,
   selectOwnedProcesses, validateListeners, validateSecurity } from './contract.mjs';
 
@@ -281,6 +282,7 @@ try {
   await screenshot(first.page, '01-first-launch');
   coverage = await createCoverage({ app: first.app, page: first.page, evidence, pin: PIN,
     installedExeSha256: exeHashBefore, runtime: first.runtime, setStage: (value) => { stage = value; } });
+  await reloadOnceWithObserver(coverage, first.page, first.runtime);
   await rootSweep(coverage, first.page, 'empty-before-fixtures');
   stage = 'onboarding-create-application';
   await first.page.locator('button[data-onboarding-action="create_first_application"]').click();

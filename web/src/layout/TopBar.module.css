@@ -70,3 +70,5 @@
     transition: none;
   }
 }
+
+.fallbackDock:empty { display: none; }

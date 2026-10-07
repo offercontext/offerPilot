@@ -63,6 +63,20 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 `coverage.json` 的 summary 区分 `visualPasses` 与 `functionalPasses`；存在 FAIL 时最终进程失败，即使后续生命周期检查通过。只有 BLOCKED/NOT RUN 时，运行状态为 `passed-with-coverage-limitations`，coverage 为 `incomplete`。`humanVisualReview=required-not-automated` 明确图片仍需人工检查，不把几何断言等同于“每个功能无问题”。根页面常规截图使用900px内容高度；关键子界面、长列表与横滚回归额外使用689px真实窗口内容高度，并记录实测尺寸。截图先结束有限CSS过渡再读几何，避免把切换动画当最终布局。Windows job 上限扩为 60 分钟，独立全量回归路由不变。
 
+### 首轮真实安装证据后的 helper 修正
+
+首轮安装 run `37634679481` 的 `coverage.json` 记录 202 张图，93 PASS / 55 FAIL / 23 BLOCKED / 3 NOT RUN。这里的根页面 PASS 仍仅表示自动导航/几何检查，不能解释成全部功能通过。该次完整安装、原始投递保存、退出重启及安全检查已完成；额外表单受到 helper 定位错误影响，只有初始投递 ID 建立成功。
+
+基于真实截图与当前 DOM，修正以下 helper 问题，不修改产品或来源 pin：
+
+- Ant Design 图标会增加 accessible name 前缀，两字按钮可能渲染为“取 消 / 创 建 / 加 入”。改为真实 owner 范围内的严格可见文字或明确 aria 名称；重复按钮仍失败，不用 first/force 或隐藏角色。快速练习使用内容区入口，Select 点击实际可见 selector，JD 回读限定正文并等待新版本。
+- 看板使用实际“待投递”标签。每条额外合成投递独立创建，避免某张图的视觉问题阻断所有后置 Offer/简历依赖；每次截图的遮挡/水平溢出锁存为该 case 的 FAIL，普通可达控件仍继续验收，后续正常截图不能清除此失败。
+- 每张图附实际根 view、可见的固定 surface ID 与目标是否确认。导航失败后停在参考资料的图片不能计成 Pilot 工作区，停在面试的图片不能计成 Offer 表单。summary 区分确认目标的截图与未抵达目标的现场图。
+- `lastStep/failedStep` 只接受固定操作/控件枚举，错误仅保留固定类别。observer 在单次正常 startup reload 前确认已挂载、无未决写入，观察自然 Haru mount；该阶段属于启动诊断，不能算作普通未调试启动或实际 AI 功能通过。
+- 预期 GET material-kit 404 的 console 仅在精确浏览器资源错误签名、空 JS 参数、精确同源 location URL、实际 GET404 response 一次性相互对应时记 `expected-resource-console`。其余 console、CSP、资源或 API 错误保留原规则；URL 和消息仅在有界内存关联队列中使用，不进入证据。
+
+首轮真实 Haru 遮挡与暗色简历卡对比度问题是产品缺陷，不通过修改 helper 改绿；修复后的真实 Windows run 仍是最终执行依据。
+
 ### Electron 44.5.1 的 DevTools 观测限制
 
 固定版本的 [`SaveLastPreferences()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/web_contents_preferences.cc#L362-L383) 不返回 `devTools` 键，因此不能把 `getLastWebPreferences().devTools === undefined` 当成产品打开了 DevTools，也不能把 undefined 默认为 false。原 helper 对该 getter 的 false 断言会造成假失败。
