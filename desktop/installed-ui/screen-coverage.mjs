@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { ROOTS, WIDTHS } from './coverage-model.mjs';
 import { selectVisibleOption as select } from './select-option.mjs';
 import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
+import { waitForInputValue, selectSegment } from './ui-state.mjs';
 
 const root = (view) => ROOTS.find((item) => item.view === view);
 const exact = (name) => ({ name, exact: true });
@@ -177,7 +178,8 @@ export async function extendedFlows(qa, page, initialRecord) {
     markUiStep(page, 'palette-open', 'quick-open');
     await quickOpenButton(page).click();
     const input = page.getByPlaceholder('快速打开页面、投递或助手…', { exact: true });
-    assert.equal(await input.inputValue(), '');
+    await waitForInputValue(input, '', { control: 'quick-open' });
+    await input.click({ trial: true });
     await qa.capture('command-all');
     await input.fill('QA-no-such-command');
     assert.equal(await page.getByRole('listbox', exact('命令结果')).getByRole('option').count(), 0);
@@ -186,7 +188,8 @@ export async function extendedFlows(qa, page, initialRecord) {
     await input.waitFor({ state: 'hidden' });
     markUiStep(page, 'palette-open', 'quick-open');
     await quickOpenButton(page).click();
-    assert.equal(await input.inputValue(), '');
+    await waitForInputValue(input, '', { control: 'quick-open' });
+    await input.click({ trial: true });
     await input.fill('打开投递列表');
     await input.press('ArrowDown');
     await input.press('ArrowUp');
@@ -423,7 +426,7 @@ async function applicationDetailFlows(qa, page, record) {
     await region(page, '日期详情').getByText(`${prefix}-面试准备事项`, { exact: true }).waitFor();
     await btn(region(page, '日期详情'), '调整时间').click();
     form = page.getByTestId('schedule-event-form');
-    assert.equal(await form.getByLabel('备注', { exact: true }).inputValue(), `${prefix}-面试准备事项`);
+    await waitForInputValue(form.getByLabel('备注', { exact: true }), `${prefix}-面试准备事项`, { control: 'schedule' });
     await form.getByLabel('备注', { exact: true }).fill(`${prefix}-面试准备事项已编辑`);
     await responseFromUI(page, new RegExp(`^/api/application-events/${event.id}$`), 'PUT', () => btn(form, '保存').click());
     await form.waitFor({ state: 'hidden' });
@@ -525,12 +528,13 @@ async function questionFlows(qa, page) {
   });
   await qa.run('R07', 'question-review-and-ai-guard', ['面试', '刷题'], async () => {
     await navigate(page, 'questions');
-    await page.getByRole('radio', exact('今日复习')).check();
+    await selectSegment(page, '今日复习');
     await region(page, '今日复习模式').waitFor();
     await qa.capture('questions-today-review');
     const reveal = region(page, '今日复习模式').getByRole('button', { name: /^显示答案/ });
     if (await reveal.isVisible()) { await reveal.click(); await qa.capture('questions-answer-revealed'); }
-    await page.getByRole('radio', exact('题库')).check();
+    await selectSegment(page, '题库');
+    await region(page, '题库模式').waitFor();
     await btn(region(page, '题库模式'), 'AI 生成题目').click();
     await region(page, 'AI 生成题目').waitFor();
     await qa.capture('questions-ai-preflight-only');
@@ -660,9 +664,11 @@ async function interviewFlows(qa, page) {
       qa.observed('explicit saved resume chosen; filled quick-practice start becomes enabled without starting');
     }
     await captureWidths(qa, page, 'quick-practice-filled-preflight');
-    await surface.getByRole('radio', exact('复盘重点练习')).check();
+    await selectSegment(surface, '复盘重点练习');
+    await page.getByTestId('review-focus-practice').waitFor();
     await qa.capture('review-focused-practice-prerequisites');
-    await surface.getByRole('radio', exact('快速模拟')).check();
+    await selectSegment(surface, '快速模拟');
+    await page.getByTestId('quick-interview-practice').waitFor();
     qa.observed('missing prerequisite disables start; synthetic position/JD draft; review-focused selector and return; no AI start');
   });
   await qa.run('S12', 'voice-growth-empty-return', ['面试', '已完成', '表达成长'], async () => {
@@ -743,8 +749,12 @@ async function storyFlows(qa, page) {
     const story = await responseFromUI(page, /^\/api\/interview-stories$/, 'POST', () => btn(form, '确认手动保存故事版本').click());
     qa.fixture('interview-story', story.id);
     await form.waitFor({ state: 'hidden' });
-    await page.getByRole('textbox', exact('搜索面试故事')).fill(`${prefix} 本地验收经历`);
-    await btn(page, '查看版本').click();
+    markUiStep(page, 'readback', 'story');
+    const library = region(page, '面试故事库');
+    await library.waitFor();
+    await library.getByRole('searchbox', exact('搜索面试故事')).fill(`${prefix} 本地验收经历`);
+    await library.getByText(`${prefix} 本地验收经历`, { exact: true }).waitFor();
+    await btn(library, '查看版本').click();
     await region(page, '故事版本历史').waitFor();
     await qa.capture('story-version-readback');
     await btn(page, '关闭历史').click();
@@ -849,22 +859,39 @@ async function pilotSettingsFlows(qa, page, record) {
     await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(record.company_name);
     const row = list.locator(`tr[data-row-key="${record.id}"]`);
     await row.waitFor(); await btn(row, '问 Pilot').click();
-    await btn(page, '上下文面板').waitFor();
-    await page.locator('[aria-label="本次请求上下文"]').filter({ hasText: record.company_name }).waitFor();
-    await qa.capture('pilot-contextual-surface');
+    const haru = dialog(page, 'Haru 轻量对话');
+    await haru.waitFor();
+    const context = `${record.company_name} · ${record.position_name}`;
+    await haru.locator('[aria-label="当前上下文"]').getByText(context, { exact: true }).waitFor();
+    await qa.capture('haru-row-context');
+    await btn(haru, '展开到 Pilot 工作区').click();
+    await haru.waitFor({ state: 'hidden' });
+    await btn(page, '退出沉浸模式，返回原页面').waitFor();
+    const contextLabel = page.getByText('当前上下文', { exact: true }).filter({ visible: true });
+    await contextLabel.waitFor();
+    assert.equal(await contextLabel.count(), 1, 'one visible retained conversation-context badge required');
+    await contextLabel.locator('..').getByText(context, { exact: true }).waitFor();
+    await qa.capture('pilot-retained-row-context');
     await btn(page, '上下文面板').click();
     await qa.capture('pilot-context-panel');
-    await btn(page, '打开 Pilot tab').click();
-    await btn(page, '退出沉浸模式，返回原页面').waitFor();
     await captureWidths(qa, page, 'pilot-full-workspace');
-    const composer = page.locator('textarea').filter({ visible: true });
-    assert.equal(await composer.count(), 1);
-    await composer.fill(`${prefix} 仅为未发送草稿`);
-    await qa.capture('pilot-unsent-draft');
-    await composer.fill('');
+    const composer = page.getByPlaceholder('问问领航员，或输入 / 唤起能力', { exact: true });
+    await composer.waitFor();
+    if (await composer.isDisabled()) {
+      await page.getByText('先配置 API key 后即可对话', { exact: true }).waitFor();
+      assert.equal(await btn(page, '发送').isDisabled(), true);
+      await qa.capture('pilot-no-key-composer-guard');
+      qa.observed('actual no-key composer and send guard verified; no credential change or AI request');
+      await qa.disposition('S24', 'pilot-message-send', 'BLOCKED', 'fresh profile has no API key; provider messaging is not authorized');
+    } else {
+      await composer.fill(`${prefix} 仅为未发送草稿`);
+      await qa.capture('pilot-unsent-draft');
+      await composer.fill('');
+      qa.observed('editable composer accepted and cleared an unsent synthetic draft');
+    }
     await btn(page, '退出沉浸模式，返回原页面').click();
     await region(page, '投递列表').waitFor();
-    qa.observed('row-owned contextual Pilot; context panel; full workspace expansion; unsent draft clear; return to list');
+    qa.observed('actual row-owned Haru context; retained full Pilot context; context panel; composer guard or unsent draft; return to list');
   });
   await qa.run('S25', 'haru-runtime-and-context-menu', ['Haru 助手'], async () => {
     await navigate(page, 'applications-list');
@@ -936,12 +963,14 @@ async function pilotSettingsFlows(qa, page, record) {
     }
     qa.observed('data/backup, Haru and voice sections visible without restricted operations');
   }, 'visual');
-  await qa.run('R01', 'native-browser-history-back-forward', ['今日', '投递', 'Back', 'Forward'], async () => {
+  await qa.run('R05', 'native-browser-history-back-forward', ['今日', '投递', 'Back', 'Forward'], async () => {
     await navigate(page, 'dashboard'); await navigate(page, 'applications-list');
     await page.goBack();
     await page.waitForURL((url) => url.searchParams.get('view') === 'board');
     await page.goBack();
     await page.waitForURL((url) => url.searchParams.get('view') === 'dashboard');
+    await region(page, '未来 7 天日程').waitFor();
+    await qa.capture('history-back-dashboard');
     await page.goForward();
     await page.waitForURL((url) => url.searchParams.get('view') === 'board');
     await page.goForward();

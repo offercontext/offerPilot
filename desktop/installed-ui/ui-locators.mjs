@@ -7,6 +7,7 @@ export const UI_STEPS = Object.freeze(['navigation', 'palette-open', 'palette-qu
   'selection-search', 'selection-confirm', 'viewport-set', 'screenshot-capture',
   'geometry-check', 'runtime-check', 'recovery-reload', 'startup-reload']);
 export const UI_CONTROLS = Object.freeze(['unspecified', 'quick-open', 'button-pattern',
+  '今日复习', '题库', '复盘重点练习', '快速模拟', '展开到 Pilot 工作区', '发送',
   'application', 'application-jd', 'schedule', 'question', 'resume', 'knowledge', 'story', 'offer', 'pilot',
   '取消', 'Cancel', '关闭', 'Close', '确定', 'OK', '创建', '保存', '上传', '加入',
   '返回上一层', '退出沉浸模式，返回原页面', '切换明暗模式', '核对并检查重复', '确认保存',

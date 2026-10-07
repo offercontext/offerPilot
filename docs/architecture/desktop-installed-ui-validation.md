@@ -1,17 +1,17 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-07 扩展逐屏脚本已加入；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。真实安装 UI 尚待执行，不能把组件渲染的 36 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+状态：限定分支上的实验验证辅助工具。2026-10-07 扩展逐屏脚本已加入；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。该新包真实安装 UI 尚待执行，不能把组件渲染的 76 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
 
 ## 固定输入与独立路由
 
-- 源提交：`d853bd2eb117929e73530bb5036256801278b235`。
-- 构建 run：[37630142396](https://github.com/offercontext/offerPilot/actions/runs/37630142396)。完整回归归属独立 run [37626960710](https://github.com/offercontext/offerPilot/actions/runs/37626960710)；本流程不重跑、不取消、不替代它。
-- Artifact：`11487515170`，名称 `offerpilot-windows-ui-retry-d853bd2eb117929e73530bb5036256801278b235-16a8f2f7eb12350288caf15af29593cfdb6f583e`。
-- Artifact 元数据摘要：`sha256:bcdcd7447bed7f0be11e51030c8cfc6aa8eba79eebdb3ae4f9fe5a4a6fc4ae53`。
+- 源提交：`1fba1914158d42a6bbcfdc1b6219251e01e93647`。
+- 构建 run：[37644955316](https://github.com/offercontext/offerPilot/actions/runs/37644955316)。完整回归归属同一构建 run 的独立 job [37644955316](https://github.com/offercontext/offerPilot/actions/runs/37644955316)；本流程不重跑、不取消、不替代它。
+- Artifact：`11494492935`，名称 `offerpilot-windows-experimental-validation-1fba1914158d42a6bbcfdc1b6219251e01e93647`。
+- Artifact 元数据摘要：`sha256:9d44b7d1b5f65301366afc009b26f8b4f6f1d3491ca59206f898080719ecf10d`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`09edde023a586cffb7212afe13337d37e9e02e8a9fb8647188ab90984a8bd004`。
+- 安装包 SHA256：`c838e13b48ee19eed1c5994b61e994b243a449ef4fc4359948e3bbafe0f52c90`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `d853bd2eb117929e73530bb5036256801278b235`，构建激活提交为 `16a8f2f7eb12350288caf15af29593cfdb6f583e`，构建工作流为 `desktop-layout-retry.yml`，构建 run 为 `37630142396`，独立完整回归 run 为 `37626960710`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `1fba1914158d42a6bbcfdc1b6219251e01e93647`，构建激活提交为 `1fba1914158d42a6bbcfdc1b6219251e01e93647`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37644955316`，独立完整回归 run 为 `37644955316`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 
@@ -67,7 +67,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 首轮安装 run `37634679481` 的 `coverage.json` 记录 202 张图，93 PASS / 55 FAIL / 23 BLOCKED / 3 NOT RUN。这里的根页面 PASS 仍仅表示自动导航/几何检查，不能解释成全部功能通过。该次完整安装、原始投递保存、退出重启及安全检查已完成；额外表单受到 helper 定位错误影响，只有初始投递 ID 建立成功。
 
-基于真实截图与当前 DOM，修正以下 helper 问题，不修改产品或来源 pin：
+基于旧包真实截图与当前 DOM，修正以下 helper 问题；本轮来源 pin 已更新到上述修复产品，旧包截图不作为新产品最终验收：
 
 - Ant Design 图标会增加 accessible name 前缀，两字按钮可能渲染为“取 消 / 创 建 / 加 入”。改为真实 owner 范围内的严格可见文字或明确 aria 名称；重复按钮仍失败，不用 first/force 或隐藏角色。快速练习使用内容区入口，Select 点击实际可见 selector，JD 回读限定正文并等待新版本。
 - 看板使用实际“待投递”标签。每条额外合成投递独立创建，避免某张图的视觉问题阻断所有后置 Offer/简历依赖；每次截图的遮挡/水平溢出锁存为该 case 的 FAIL，普通可达控件仍继续验收，后续正常截图不能清除此失败。
@@ -76,6 +76,12 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 - 预期 GET material-kit 404 的 console 仅在精确浏览器资源错误签名、空 JS 参数、精确同源 location URL、实际 GET404 response 一次性相互对应时记 `expected-resource-console`。其余 console、CSP、资源或 API 错误保留原规则；URL 和消息仅在有界内存关联队列中使用，不进入证据。
 
 首轮真实 Haru 遮挡与暗色简历卡对比度问题是产品缺陷，不通过修改 helper 改绿；修复后的真实 Windows run 仍是最终执行依据。
+
+### 第二轮旧包复验与最终产品验收边界
+
+旧包 run `37641876533` 已建立全部合成实体，162 PASS / 17 FAIL / 7 BLOCKED / 1 NOT RUN，339张图。13根页面的130个目标均实际抵达；其中10个旧Haru遮挡仍为FAIL。其余7项helper错误修正为：等待受控值回填、点击可见Segmented label再核对radio、限定故事searchbox、按真实Haru入口展开Pilot、history结束列表按R05验证。不会将旧包执行改写为通过。
+
+本轮固定的新产品含全局降级入口、暗色容器、Haru上下文标签、快速准备控件包含和确认框修复。76项组件渲染已通过，但仍需要此新包的完整安装逐屏运行及人工图像复核。无provider配置时真实发送保持BLOCKED；原始诊断、真实AI/音频与受禁下载不伪造成功。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 

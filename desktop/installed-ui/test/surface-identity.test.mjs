@@ -25,3 +25,9 @@ test('surface identity publishes only fixed IDs and allowed root names',async()=
  assert.doesNotMatch(JSON.stringify(result),/personal-secret|token-secret|never-output|http/);
  assert.equal(new Set(SURFACE_RULES.map(({id})=>id)).size,44);
 });
+
+test('S24 identifies actual lightweight Haru without pretending full Pilot controls exist',async()=>{
+ const result=await identity('S24',{view:'applications-list',dialogs:[element('Haru 轻量对话')]});
+ assert.equal(result.targetSurfaceConfirmed,true);assert.ok(result.visibleSurfaces.includes('S24'));
+ assert.equal(result.visibleSurfaces.includes('R12'),false);
+});

@@ -36,7 +36,7 @@ export const SURFACE_RULES = Object.freeze([
   ['S21',null,'section[aria-label="Offer 横向对比"]'],
   ['S22',null,null,['调整对比项']],
   ['S23',null,'section[aria-label="谈薪准备"]'],
-  ['S24',null,'button[aria-label="上下文面板"]'],
+  ['S24',null,'button[aria-label="上下文面板"]',['Haru 轻量对话']],
   ['S25',null,'aside[aria-label="Haru 助手"]'],
   ['S26',null,'section[aria-label="AI 设置"]'],
   ['S27',null,null,['确认个人偏好']],
