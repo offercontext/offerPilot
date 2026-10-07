@@ -182,6 +182,8 @@ describe('HaruChatWindow', () => {
     ));
     expect(host!.querySelector('[role="dialog"]')?.textContent).toContain('先准备项目案例。');
     expect(host!.textContent).toContain('星河科技 · 前端工程师 · 1 个附件');
+    expect(host!.querySelector('[aria-label="当前上下文"] b')?.getAttribute('title'))
+      .toBe('星河科技 · 前端工程师 · 1 个附件');
     expect(host!.textContent).toContain('这一步会修改「星河科技 · 前端工程师」的内容');
     expect(host!.textContent).toContain('查看修改内容');
 

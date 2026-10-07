@@ -2,7 +2,7 @@
   display: grid;
   gap: 16px;
   padding: 4px;
-  color: var(--op-text);
+  color: var(--op-ink);
   container-type: inline-size;
   container-name: negotiation-workspace;
 }
@@ -58,7 +58,7 @@
 .workflowSteps li {
   padding: 6px 8px;
   border-radius: 999px;
-  background: var(--op-surface-muted);
+  background: var(--surface-sunken);
   color: var(--op-muted-strong);
   font-size: 12px;
   text-align: center;
@@ -139,7 +139,7 @@
   padding: 12px 14px;
   border-left: 3px solid var(--op-primary, #635bff);
   border-radius: 8px;
-  background: var(--op-surface-muted);
+  background: var(--surface-sunken);
   color: var(--op-muted-strong);
   font-size: 13px;
   line-height: 1.6;
@@ -153,7 +153,7 @@
   padding: 12px;
   border: 1px solid var(--op-border);
   border-radius: 12px;
-  background: var(--op-surface-muted);
+  background: var(--surface-sunken);
 }
 
 .factsSection dt {

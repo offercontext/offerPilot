@@ -1,4 +1,4 @@
 {
   "extends": "../../tsconfig.json",
-  "include": ["../../src", "./fixture.tsx"]
+  "include": ["../../src", "./fixture.tsx", "./task-panels.tsx"]
 }

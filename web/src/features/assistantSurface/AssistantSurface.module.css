@@ -168,12 +168,18 @@
 }
 
 .context b {
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
   font-weight: 600;
+}
+
+.context > span {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .contextChange {

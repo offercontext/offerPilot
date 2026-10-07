@@ -229,7 +229,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
       <div className={styles.contextStack}>
         <div className={styles.context} aria-label="当前上下文">
           <span>当前上下文</span>
-          <b>{contextLabel}{attachmentSuffix}</b>
+          <b title={`${contextLabel}${attachmentSuffix}`}>{contextLabel}{attachmentSuffix}</b>
         </div>
 
         {controller.contextChangeNotice ? (
