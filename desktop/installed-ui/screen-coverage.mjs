@@ -21,6 +21,25 @@ async function ready(page) {
   await page.waitForFunction(() => ![...document.querySelectorAll('.ant-spin-spinning')].some((element) => element.getClientRects().length > 0));
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
+async function settleDialog(surface) {
+  await surface.waitFor({ state: 'visible' });
+  // Bounding boxes alone report visible during Ant Design's opacity-zero entry.
+  await surface.evaluate(async node => {
+    const animations = [];
+    for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+      animations.push(...ancestor.getAnimations());
+    }
+    await Promise.all(animations.filter(a => a.effect?.getTiming().iterations !== Infinity)
+      .map(a => a.finished.catch(() => {})));
+  });
+  assert.equal(await surface.evaluate(node => {
+    for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
+      const style = getComputedStyle(ancestor);
+      if (Number(style.opacity) < 0.95 || style.visibility !== 'visible') return false;
+    }
+    return node.getBoundingClientRect().width > 0;
+  }), true, 'dialog content must be fully painted before screenshot');
+}
 async function command(page, name) {
   const exit = btn(page, '退出沉浸模式，返回原页面');
   if (await exit.isVisible()) await exit.click();
@@ -367,6 +386,7 @@ async function applicationDetailFlows(qa, page, record) {
       const form = dialog(page, '投递岗位资料');
       await form.getByPlaceholder('粘贴岗位描述', { exact: true }).fill(`${jd}\n版本 ${version}`);
       await form.getByPlaceholder('来源 URL（仅展示，不会访问）', { exact: true }).fill('https://example.invalid/qa-local-only');
+      await settleDialog(form);
       await qa.capture(`jd-editor-v${version}`);
       await responseFromUI(page, new RegExp(`^/api/applications/${record.id}/job-description/versions$`), 'POST', () => btn(form, '保存岗位资料').click());
       await form.waitFor({ state: 'hidden' });
@@ -377,7 +397,7 @@ async function applicationDetailFlows(qa, page, record) {
       assert.equal((await currentJd.innerText()).replace(/\s+/gu, ' ').trim(), `${jd} 版本 ${version}`);
     }
     await btn(page, '查看历史').click();
-    await dialog(page, '岗位资料历史').waitFor();
+    await settleDialog(dialog(page, '岗位资料历史'));
     await qa.capture('jd-history-two-versions');
     await closeDialog(page, '岗位资料历史');
     qa.observed('two UI-created JD versions; current text readback; visible history; no source URL visit');
@@ -663,7 +683,16 @@ async function interviewFlows(qa, page) {
       assert.equal(await quick.getByRole('button', { name: /^进入快速练习/ }).isDisabled(), false);
       qa.observed('explicit saved resume chosen; filled quick-practice start becomes enabled without starting');
     }
-    await captureWidths(qa, page, 'quick-practice-filled-preflight');
+    for (const width of WIDTHS) {
+      await qa.size(width);
+      await quick.getByPlaceholder('例如：后端工程师', { exact: true }).scrollIntoViewIfNeeded();
+      await qa.capture(`quick-practice-filled-preflight-${width}`);
+      const start = quick.getByRole('button', { name: /^进入快速练习/ });
+      await start.scrollIntoViewIfNeeded();
+      await start.click({ trial: true });
+      await qa.capture(`quick-practice-filled-controls-${width}`);
+    }
+    await qa.size(1280);
     await selectSegment(surface, '复盘重点练习');
     await page.getByTestId('review-focus-practice').waitFor();
     await qa.capture('review-focused-practice-prerequisites');
@@ -833,7 +862,10 @@ async function offerFlows(qa, page, applications) {
     await btn(settings, '恢复全部明细').click(); assert.equal(await check.isChecked(), true);
     await region(page, '自定义比较维度').waitFor();
     await qa.capture('offer-custom-dimensions');
-    await closeDialog(page, '调整对比项');
+    const close = settings.locator('.ant-drawer-close');
+    assert.equal(await close.count(), 1, 'exact visible drawer close required');
+    await close.click();
+    await settings.waitFor({ state: 'hidden' });
     qa.observed('display field toggle and restore; custom-dimension controls visible; no invented persisted dimension');
   });
   await qa.run('S23', 'offer-negotiation-preflight-only', ['Offer', '准备谈薪'], async () => {
@@ -872,8 +904,10 @@ async function pilotSettingsFlows(qa, page, record) {
     assert.equal(await contextLabel.count(), 1, 'one visible retained conversation-context badge required');
     await contextLabel.locator('..').getByText(context, { exact: true }).waitFor();
     await qa.capture('pilot-retained-row-context');
+    await qa.size(900);
     await btn(page, '上下文面板').click();
     await qa.capture('pilot-context-panel');
+    await btn(page, '上下文面板').click();
     await captureWidths(qa, page, 'pilot-full-workspace');
     const composer = page.getByPlaceholder('问问领航员，或输入 / 唤起能力', { exact: true });
     await composer.waitFor();
@@ -897,14 +931,33 @@ async function pilotSettingsFlows(qa, page, record) {
     await navigate(page, 'applications-list');
     const mascot = page.getByRole('complementary', exact('Haru 助手'));
     await mascot.waitFor();
+    await page.waitForFunction(() => { const node = document.querySelector('[aria-label="Haru 助手"]'); return node?.getAttribute('data-runtime-ready') === 'true' || node?.getAttribute('data-load-failed') === 'true'; }, undefined, { timeout: 30000 });
     const failed = await mascot.getAttribute('data-load-failed') === 'true';
     const box = await mascot.boundingBox();
     assert.ok(box);
     if (failed) {
       assert.ok(box.width <= 157 && box.height <= 49, 'natural Haru fallback footprint must be a small dock');
-      await qa.disposition('S25', 'haru-live2d-runtime', 'BLOCKED', 'genuine installed runtime failure observed; fallback usability is a separate interaction check');
+      await qa.disposition('S25', 'haru-live2d-runtime', 'FAIL', `installed runtime failure: ${await mascot.getAttribute('data-load-failure-reason') || 'unknown'}`);
     }
-    await qa.capture(failed ? 'haru-natural-runtime-failure' : 'haru-normal-runtime', { haruRuntime: failed ? 'failed-naturally' : 'visible-no-failure-flag', haruBounds: box });
+    await qa.capture(failed ? 'haru-natural-runtime-failure' : 'haru-normal-runtime', { haruRuntime: failed ? 'failed-naturally' : 'model-mounted', haruBounds: box });
+    if (!failed) {
+      const pixels = await mascot.locator('canvas').evaluate(async canvas => {
+        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+        if (!gl) return { sampled: false, variedPixels: false };
+        for (let attempt = 0; attempt < 30; attempt++) {
+          await new Promise(resolve => requestAnimationFrame(resolve));
+          const bytes = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
+          gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
+          const colors = new Set();
+          for (let i = 0; i < bytes.length; i += 16) if (bytes[i + 3] > 0) colors.add(`${bytes[i]},${bytes[i + 1]},${bytes[i + 2]}`);
+          if (colors.size > 8) return { sampled: true, variedPixels: true };
+        }
+        return { sampled: true, variedPixels: false };
+      });
+      assert.equal(pixels.variedPixels, true, 'mounted Haru must render nonempty varied pixels without weakening CSP');
+      qa.observed('runtime resolved and existing WebGL framebuffer contains varied rendered pixels');
+      await qa.capture('haru-rendered-varied-pixels', { haruRuntime: 'model-mounted-and-pixels-verified' });
+    }
     await mascot.getByRole('button').click({ button: 'right' });
     await page.getByRole('menuitem', exact('恢复默认大小')).waitFor();
     await qa.capture('haru-context-menu');
@@ -927,6 +980,7 @@ async function pilotSettingsFlows(qa, page, record) {
     await select(page, page.getByRole('combobox', exact('Haru 角色大小')), '100%');
     await select(page, page.getByRole('combobox', exact('Haru 动画级别')), '完整');
     await btn(page, '重置 Haru 位置').click();
+    await page.waitForFunction(() => document.querySelector('[aria-label="Haru 助手"]')?.getAttribute('data-runtime-ready') === 'true', undefined, { timeout: 30000 });
     if (!wasVisible) await visible.click();
     await theme(page, 'light'); await qa.capture('settings-light-theme'); await theme(page, 'dark');
     qa.observed('hide removes live hitbox; restore; size/animation selections; original fresh-profile appearance restored');

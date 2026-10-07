@@ -1,3 +1,4 @@
+import { measureScreenGeometry } from './screen-geometry.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { safeFailure } from './diagnostics.mjs';
@@ -40,24 +41,7 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
     markUiStep(page, 'screenshot-capture');
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
     await page.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
-    const measured = await page.evaluate(() => {
-      const controls = [...document.querySelectorAll('button, input, textarea, select, [role="button"]')];
-      let haruCoveredControls = 0;
-      for (const element of controls) {
-        if (element.closest('[aria-label="Haru 助手"], [aria-hidden="true"], [inert]') || element.disabled || !element.getClientRects().length) continue;
-        const style = getComputedStyle(element);
-        if (style.visibility !== 'visible' || style.opacity === '0') continue;
-        const rect = element.getBoundingClientRect();
-        const x = rect.left + rect.width / 2; const y = rect.top + rect.height / 2;
-        if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) continue;
-        const top = document.elementFromPoint(x, y);
-        // An explicitly opened context menu is expected to overlay the page.
-        if (top?.closest('[aria-label="Haru 助手"]') && !top.closest('[role="menu"]')) haruCoveredControls++;
-      }
-      return { width: window.innerWidth, height: window.innerHeight,
-        documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
-        theme: document.documentElement.dataset.theme || 'unknown', haruCoveredControls };
-    });
+    const measured = await page.evaluate(measureScreenGeometry);
     const identity = await readSurfaceIdentity(page, active?.surfaceId);
     if (identity.targetSurfaceConfirmed && active) active.targetSurfaceConfirmed = true;
     const item = { ...identity, filename: `screens/${filename}`, caseId: active?.caseId || null,

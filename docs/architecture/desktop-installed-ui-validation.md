@@ -4,14 +4,14 @@
 
 ## 固定输入与独立路由
 
-- 源提交：`1fba1914158d42a6bbcfdc1b6219251e01e93647`。
-- 构建 run：[37644955316](https://github.com/offercontext/offerPilot/actions/runs/37644955316)。完整回归归属同一构建 run 的独立 job [37644955316](https://github.com/offercontext/offerPilot/actions/runs/37644955316)；本流程不重跑、不取消、不替代它。
-- Artifact：`11494492935`，名称 `offerpilot-windows-experimental-validation-1fba1914158d42a6bbcfdc1b6219251e01e93647`。
-- Artifact 元数据摘要：`sha256:9d44b7d1b5f65301366afc009b26f8b4f6f1d3491ca59206f898080719ecf10d`。
+- 源提交：`8640ccb91aae12864d5e4755267a515359936e2d`。
+- 构建 run：[37659960933](https://github.com/offercontext/offerPilot/actions/runs/37659960933)。完整回归归属同一构建 run 的独立 job [37659960933](https://github.com/offercontext/offerPilot/actions/runs/37659960933)；本流程不重跑、不取消、不替代它。
+- Artifact：`11501466060`，名称 `offerpilot-windows-experimental-validation-8640ccb91aae12864d5e4755267a515359936e2d`。
+- Artifact 元数据摘要：`sha256:bc2de8da9d4d55d1206e130632f747288f9d21d9d946ae9a7db0ad8a8659c05a`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`c838e13b48ee19eed1c5994b61e994b243a449ef4fc4359948e3bbafe0f52c90`。
+- 安装包 SHA256：`aae13046b6197308554cc2a7ae1f022ab08dc09604fb21f2d5dd0c247c48e26a`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `1fba1914158d42a6bbcfdc1b6219251e01e93647`，构建激活提交为 `1fba1914158d42a6bbcfdc1b6219251e01e93647`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37644955316`，独立完整回归 run 为 `37644955316`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `8640ccb91aae12864d5e4755267a515359936e2d`，构建激活提交为 `8640ccb91aae12864d5e4755267a515359936e2d`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37659960933`，独立完整回归 run 为 `37659960933`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 
