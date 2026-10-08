@@ -71,7 +71,7 @@
 | [13 上下文诊断](13-context-manifest.jpg) · [文本](13-context-manifest.txt) | 输入来源状态、9 个工具、9,023 个保守输入单位 |
 | [14 状态与业务](14-state-and-business.jpg) · [文本](14-state-and-business.txt) | Pending 对照、操作提交/拒绝、停止和最终数量 |
 
-完整选取字段见 [evidence.json](evidence.json)。它由只读查询和本地 GET API 生成；没有包含确认令牌、执行租约 owner token、完整模型输入或模型服务商私有内容。图片及文本的校验值见 [checksums.json](checksums.json)。
+完整选取字段见 [evidence.json](evidence.json)。它由只读查询和本地 GET API 生成；没有包含确认令牌、执行租约 owner token、完整模型输入或模型服务商私有内容。图片及文本的校验值见 [checksums.json](checksums.json)：图片按原始字节计算；文本和 JSON 先将 CRLF 换行为 LF，再计算字节数与 SHA-256，避免不同系统检出时的换行差异。
 
 ## 证据缺口与验证边界
 
