@@ -24,7 +24,7 @@
 ```mermaid
 flowchart TD
     client["Pilot / Haru 客户端"] --> transport["HTTP / SSE 传输适配"]
-    transport --> manager["新运行协议：RuntimeExecutionManager"]
+    transport --> manager["新运行协议的执行管理器"]
     manager --> runtime["PilotRuntime：准备、路由、持久化与交付"]
     runtime --> driver["composition：装配依赖与 Agent Driver"]
     driver --> loop["AgentLoopRunner：推进模型与工具循环"]
