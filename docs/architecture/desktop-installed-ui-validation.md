@@ -1,19 +1,22 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-08 已扩展双窗、托盘生命周期与能力边界探针；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。该新包真实安装 UI 尚待执行，不能把组件渲染的 124 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+状态：限定分支上的实验验证辅助工具。2026-10-08 将固定输入切换为普通完整验证 run `37754883783` 产出的安装包；打包 job 已成功，GitHub metadata、本地 ZIP 摘要与安装器 SHA256 已核验。本次更新时完整回归已有分组运行、其余排队，尚无完整终态；不能标为 PASS 或 NOT RUN，也不能以打包成功代替完整 gate 通过。该精确新安装包的安装后 UI 回归仍待执行。
 
-本次固定包使用明确的 experimental package-only 模式：完整 pytest 收集、分组与完整 release gate 未执行，不能用于 release-ready 判断。`fullRegressionRunId` 只定位同源工作流中的跳过状态，不表示通过。旧产品 `2e78e948` 的 run `37728772813` 仍独立执行，其结果不能代替本包完整回归；所有旧分组终态收集后仍需一次普通全量运行。
+最近已完成的实装 [37756115470](https://github.com/offercontext/offerPilot/actions/runs/37756115470) 使用旧固定包 `bbea73303da401088c27999097439d3e7a9d7c9a`（构建 run `37747642914`，安装器 SHA256 `dcc803cd82c2ec7627a4cbd3f3eaafa1f953ad19d4162bbc4237191950941e33`）：178 PASS、0 FAIL、7 BLOCKED、1 NOT RUN、3 N/A；178 PASS 包括 45 项交互、131 项视觉和 2 项诊断。运行结果为 `passed-with-coverage-limitations`，coverage 仍为 `incomplete`，不能称全功能验收完成。
+
+已核对旧包源码至 `16f31e47` 的 `src`、`web`、桌面运行模块、打包入口与资源无产品差异；但新旧 EXE 字节不同，旧包 UI 结果不能自动转移给新包。本次只固定同一完整验证来源的实际安装器并安排同包复验，不重建、不重跑或取消独立完整回归，不修改产品、安全设置或 helper 断言。
 
 ## 固定输入与独立路由
 
-- 源提交：`bbea73303da401088c27999097439d3e7a9d7c9a`。
-- 构建 run：[37747642914](https://github.com/offercontext/offerPilot/actions/runs/37747642914)。完整回归归属同一构建 run 的独立 job（本次明确跳过，NOT RUN） [37747642914](https://github.com/offercontext/offerPilot/actions/runs/37747642914)；本流程不重跑、不取消、不替代它。
-- Artifact：`11537321001`，名称 `offerpilot-windows-experimental-validation-bbea73303da401088c27999097439d3e7a9d7c9a`。
-- Artifact 元数据摘要：`sha256:04d2fab28deced9c3612e2849bfb21ec5205c90a565ceeed51e32aa74bce0ba4`。
+- 源提交：`16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`。
+- 构建 run：[37754883783](https://github.com/offercontext/offerPilot/actions/runs/37754883783)。完整回归归属同一 run 的独立分组与汇总 gate（本次更新时仍在执行/排队，尚无完整终态） [37754883783](https://github.com/offercontext/offerPilot/actions/runs/37754883783)；本流程不重跑、不取消、不替代它。
+- 成功打包 job：[113236876811](https://github.com/offercontext/offerPilot/actions/runs/37754883783/job/113236876811)；其成功只证明打包范围。
+- Artifact：`11540740222`，名称 `offerpilot-windows-experimental-validation-16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`。
+- Artifact 元数据摘要：`sha256:220bdcf1929e0a32c123664d2d268b02f1a2cc0f75de152bc9fed2820a90d3bc`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`dcc803cd82c2ec7627a4cbd3f3eaafa1f953ad19d4162bbc4237191950941e33`。
+- 安装包 SHA256：`2e7b144ef657dcfa6e9408b532b59617c00f5a442081ff47ec18b75753713439`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `bbea73303da401088c27999097439d3e7a9d7c9a`，构建激活提交为 `bbea73303da401088c27999097439d3e7a9d7c9a`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37747642914`，独立完整回归 run 为 `37747642914`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`，构建激活提交为 `16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37754883783`，独立完整回归 run 为 `37754883783`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 
@@ -45,7 +48,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
 6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。DevTools 禁用按下述严格行为探针验证。
 7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
-8. 先在空白 profile 扫描全部 13 个根页面，再从“添加第一条投递”进入表单，输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”；不使用“仍然创建”兜底。之后通过公开 UI 创建额外合成记录，流程和边界见下节。不会配置 provider 或真实凭据。
+8. 先在空白 profile 扫描全部 13 个根页面，再从“添加第一个投递”进入表单，输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”；不使用“仍然创建”兜底。之后通过公开 UI 创建额外合成记录，流程和边界见下节。不会配置 provider 或真实凭据。
 9. 初始投递只保留这次 UI 发起 POST 回执的 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。执行新增逐屏检查后，通过 UI 切换明暗模式，继续原来的关闭重启验收。
 10. 分别关闭主窗与 Haru，验证窗口隐藏且仍由同一主进程/后端持有；执行观察到的真实托盘显示/隐藏/打开回调，再执行实际退出回调。要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
 11. 再次正常退出并核对进程/端口清理与 exe 完整性。任何启动、保护、持久化、正常关闭或清理问题均为失败；失败后的清理不能改成成功。
@@ -58,8 +61,10 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 - 通过 UI 建立 11 条额外投递，加初始记录共 12 条。包括超长中文和不间断英文名称，验证搜索、分页、详情分段、Back 与实际 `popstate` 前进/后退。按真实 POST ID 定位，不假设 ID=1 或记录在第一页。
 - 主要流程包括：添加校验/取消重开、JD 两版保存/历史、日程创建/编辑取消/保存、已完成合成面试与手动复盘、题目手动保存、简历分章/JSON 校验/保存重开/复制对比、知识粘贴导入/四个详情页、手动故事证据绑定/版本历史、两份 Offer 与薪酬算术/比较选项、Pilot 未发送草稿，以及设置中的安全只读/外观路径。
 - 知识 V1 的 `api.py` 不注册 `on_extraction_succeeded` Brief 回调；正文导入是本地处理，仍核对入库响应 `brief_status=not_started`，不调用生成或 rebuild。简历“和 Haru 创建初稿”只建立空结构。所有数据使用 `QA-20261007-<run>` 标识；不访问 example.invalid 来源网址。
-- 自然发生的 Haru 失败保留截图、失败属性与 fallback 尺寸；不会用 stub 替换 Live2D，也不放松 CSP。每次截图检查文档水平溢出和可见控件中心点是否被 Haru 截获。此类几何失败不能覆盖已有截图或改成通过。新增窄窗口真实左右键横滚检查，断言到达两端并确认右侧 Pilot 操作可触达。
-- AI 会话、生成结果、语音/模型下载和备份下载/恢复以 BLOCKED 单列；不存在的 Help/Brief 为 N/A。原始诊断日志不截图、不上传，保留固定分类的 renderer/CSP/资源错误计数，各 case 记录增量。自己的 API 4xx/5xx/非正常传输失败会失败，只有源码明确支持的 GET material-kit 404 缺失记录例外；100 条证据上限不会截断独立错误计数。CSP/Haru/graphics 等受限运行错误记 BLOCKED，不把整体 runtime-health 写成通过。模型正常启动、语音端到端等能力不会因界面可见而被判定通过。
+- 主窗截图检查文档水平溢出；看板必须有六列的生产 `data-kanban-*` 标记，并单独检查列内横向溢出、卡片控件越界。整个看板的正常横滚不当作缺陷，列内溢出不能被全页宽度正常掩盖。
+- 900px 下的第二份 Offer 操作使用真实水平滚轮并核对实际局部位移、右端、完整控件边界和命中；无横向溢出时要求两份卡片完整水平容纳。普通点击进入未发送预检，核对 canonical owner 的投递 ID；关闭后验证所属投递详情、让完整标题正常入视口，再经返回/Offer 导航重选原两份并重开比较，继续金额、差异开关与返回断言。不使用 force、直接写 scrollLeft 或替换页面状态。
+- 简历标题/姓名及题目分类在编辑器重新打开后，以有界精确等待核对 effect 回填的真实值；不会补写期望值或把持续错误当作通过。
+- AI 会话、生成结果、语音/模型下载和备份下载/恢复以 BLOCKED 单列；不存在的 Help/Brief 为 N/A。原始诊断日志不截图、不上传，保留固定分类的 renderer/CSP/资源错误计数，各 case 记录增量。自己的 API 4xx/5xx/非正常传输失败会失败，只有源码明确支持的 GET material-kit 404 缺失记录例外；100 条证据上限不会截断独立错误计数。逐屏 runtime 分类中的 CSP/Haru/graphics 等受限运行错误可记 BLOCKED；下述真实 Haru 视觉门禁失败则保留为 FAIL，不把整体 runtime-health 写成通过。模型正常启动、语音端到端等能力不会因界面可见而被判定通过。
 
 每个 case 记录 `surfaceId/caseId/uiPath/kind/outcome/assertions/screenshots`，每张截图记录实测 viewport、主题、合成记录 ID；顶层记录精确源码/安装包/实际 EXE 摘要。单个界面失败会保存白名单诊断和现场截图，然后继续独立界面；只在没有未决 UI 写请求时使用正常 reload 恢复。写请求传输失败会保留 sticky 未知结果屏障，阻止后续 UI 操作；不会将 requestfailed 当成已确认未写入。未走到的根页面/子界面在收尾列为 NOT RUN，不补造 PASS。
 
@@ -83,13 +88,13 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 旧包 run `37641876533` 已建立全部合成实体，162 PASS / 17 FAIL / 7 BLOCKED / 1 NOT RUN，339张图。13根页面的130个目标均实际抵达；其中10个旧Haru遮挡仍为FAIL。其余7项helper错误修正为：等待受控值回填、点击可见Segmented label再核对radio、限定故事searchbox、按真实Haru入口展开Pilot、history结束列表按R05验证。不会将旧包执行改写为通过。
 
-本轮固定的新产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。124项组件渲染已通过，但仍需要此新包的完整安装逐屏运行及人工图像复核。无provider配置时真实发送保持BLOCKED；真实AI/音频不伪造成功。新增能力探针只验证固定合成 Blob 的取消/保存精确字节，以及权限拒绝边界。
+当前产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。最近旧包的零失败实装结果见本文开头；精确新安装包仍须完整安装逐屏复验及人工图像复核。无 provider 配置时真实发送保持 BLOCKED；真实 AI/音频不伪造成功。能力探针只验证固定合成 Blob 的取消/保存精确字节，以及权限拒绝边界。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 
 固定版本的 [`SaveLastPreferences()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/web_contents_preferences.cc#L362-L383) 不返回 `devTools` 键，因此不能把 `getLastWebPreferences().devTools === undefined` 当成产品打开了 DevTools，也不能把 undefined 默认为 false。原 helper 对该 getter 的 false 断言会造成假失败。
 
-本 helper 保留精确安装 payload/源入口匹配与 `app.isPackaged === true`，并用公开 API 做独立禁用探针：先采样 `isDevToolsOpened()` 和 `devToolsWebContents` 是否存在；注册 `devtools-opened` 监听后尝试 `openDevTools({ mode: 'detach', activate: false })`，固定观察 1 秒，再采样。前后打开状态、前后 contents 存在状态与 opened 事件五项必须全为 false；缺项、出现事件或创建 contents 都失败，不能靠随后关闭变成通过。监听在 finally 移除，失败仍走既有清理。官方固定版本 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_contents.cc#L3201-L3245) 在禁用时直接返回；这不需要修改任何 app 保护设置。
+本 helper 保留精确安装 payload/源入口匹配与 `app.isPackaged === true`，并对主窗与 Haru 各自用公开 API 做独立禁用探针：先采样 `isDevToolsOpened()` 和 `devToolsWebContents` 是否存在；注册 `devtools-opened` 监听后尝试 `openDevTools({ mode: 'detach', activate: false })`，固定观察 1 秒，再采样。前后打开状态、前后 contents 存在状态与 opened 事件五项必须全为 false；缺项、出现事件或创建 contents 都失败，不能靠随后关闭变成通过。监听在 finally 移除，失败仍走既有清理。官方固定版本 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_contents.cc#L3201-L3245) 在禁用时直接返回；这不需要修改任何 app 保护设置。
 
 getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也必须为 false。所有安全观测先保存再断言，错误字段只用固定名称，不能输出原始 preferences。外部网络观测使用独立失败阶段，避免与安全属性混淆。此探针不把临时 CDP 测试启动变成正常无调试启动的证明。
 
@@ -99,7 +104,11 @@ getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也
 
 严格按 origin、URL 和 preload role 选择主窗/Haru，拒绝缺窗、多窗或角色错配。两窗均检查安全选项和 DevTools 禁用；验证持久主窗分区与内存 Haru 分区独立、双向存储隔离、Haru 不能访问业务 API。权限探针遇意外 granted 必须失败。
 
-Haru 正常加载/重载的 canvas、fallback 与错误类别单独记录；五种合成任务状态经生产 preload IPC 同步，只证明状态显示，不声称真实 AI。固定合成 Blob 取消后要求目标文件不存在，保存后要求精确 32 字节。原生保存框的人工指针操作、麦克风真实音频和 Live2D 视觉质量仍须单独验收。
+五种合成任务状态经生产 preload IPC 同步，只证明状态显示，不声称真实 AI。恢复真实 idle 后立即执行视觉门禁，再分别检查展开、原生隐藏/重显、收起及 S24 行上下文中的实际小窗：必须 runtime ready、真实 WebGL context 存在且未丢失、backing 尺寸有效、没有 fallback/越界，并在展开时核对上下文与输入未被遮挡。ready 后等待有 5 秒超时的双 RAF，再读取真实观察值并截图；失败保留当前 Haru 截图后才 teardown。标记或 canvas 元素存在本身不构成 PASS；像素内容、动画及整体视觉质量仍需要人工查看。
+
+固定合成 Blob 取消后要求目标文件不存在，保存后要求精确 32 字节。原生对话框选择由测试自动化；外部浏览器启动的安全 tripwire 只允许零尝试，不证明真实浏览器启动。原生保存框/托盘的人工指针操作、麦克风真实音频仍未验证。
+
+最近旧包的 7 项 BLOCKED 包含真实面试/刷题/谈薪/Pilot AI、复盘后续生成、备份恢复及真实语音/模型下载；1 项 NOT RUN 是刻意不导出的原始诊断日志。3 项 N/A 为已移除的页内 Haru、不能控制独立小窗的页内外观效果，以及本构建不存在的专用 Help/Knowledge Brief。新包报告仍逐项记录这些边界，不把旧计数预填为新结果。
 
 ## 证据与不能声称的结论
 
