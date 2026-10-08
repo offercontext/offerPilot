@@ -50,3 +50,13 @@ test('probe API exceptions remove the listener and remain failures', async () =>
   await assert.rejects(observeDevToolsDisabled(electron));
   assert.equal(contents.listenerCount('devtools-opened'), 0);
 });
+test('two-window probe requires an explicit ID and observes the selected Haru window independently', async () => {
+  const owner = fixture();
+  const haru = fixture(contents => contents.emit('devtools-opened'));
+  const windows = [{ id: 9, webContents: haru.contents }, { id: 4, webContents: owner.contents }];
+  const electron = { BrowserWindow: { getAllWindows: () => windows } };
+  await assert.rejects(observeDevToolsDisabled(electron));
+  await assert.rejects(observeDevToolsDisabled(electron, 55));
+  assert.equal((await observeDevToolsDisabled(electron, 4)).openedEvent, false);
+  assert.equal((await observeDevToolsDisabled(electron, 9)).openedEvent, true);
+});

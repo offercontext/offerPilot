@@ -3,6 +3,7 @@ import { ROOTS, WIDTHS } from './coverage-model.mjs';
 import { selectVisibleOption as select } from './select-option.mjs';
 import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
 import { waitForInputValue, selectSegment } from './ui-state.mjs';
+import { readSurfaceIdentity } from './surface-identity.mjs';
 
 const root = (view) => ROOTS.find((item) => item.view === view);
 const exact = (name) => ({ name, exact: true });
@@ -67,6 +68,7 @@ async function command(page, name) {
 async function navigate(page, view) {
   markUiStep(page, 'navigation');
   const item = root(view);
+  assert.ok(item, 'requested root view is outside the coverage inventory');
   const exit = btn(page, '退出沉浸模式，返回原页面');
   if (await exit.isVisible()) await exit.click();
   if (view === 'pilot') await command(page, '打开 Pilot 工作区');
@@ -74,7 +76,7 @@ async function navigate(page, view) {
     const back = btn(page, '返回上一层');
     if (await back.count() === 1 && await back.isVisible()) await back.click();
     await page.getByRole('navigation', exact('主导航')).getByRole('button', exact(item.module)).click();
-    if (item.tab) await page.getByRole('tab', exact(item.tab)).click();
+    if (item.tab) await page.locator('.op-module-tabs').getByRole('tab', exact(item.tab)).click();
   }
   await page.waitForURL((url) => url.searchParams.get('view') === view || (view === 'dashboard' && !url.searchParams.has('view') && url.pathname === '/'));
   await ready(page);
@@ -82,13 +84,13 @@ async function navigate(page, view) {
   // Return through the visible product control before asserting the root screen.
   if (view === 'interview') {
     const returnToInterview = btn(page, '返回面试');
-    if (await returnToInterview.count() === 1) await returnToInterview.click();
+    if (await returnToInterview.count() === 1 && await returnToInterview.isVisible()) await returnToInterview.click();
     await ready(page);
   }
   if (view === 'pilot') await btn(page, '退出沉浸模式，返回原页面').waitFor();
   else {
     assert.equal(await page.getByRole('navigation', exact('主导航')).getByRole('button', exact(item.module)).getAttribute('aria-current'), 'page');
-    if (item.tab) assert.equal(await page.getByRole('tab', exact(item.tab)).getAttribute('aria-selected'), 'true');
+    if (item.tab) assert.equal(await page.locator('.op-module-tabs').getByRole('tab', exact(item.tab)).getAttribute('aria-selected'), 'true');
   }
   const markers = {
     'applications-list': () => region(page, '投递列表'), calendar: () => region(page, '月历'),
@@ -102,7 +104,8 @@ async function navigate(page, view) {
   if (markers[view]) await markers[view]().waitFor();
   if (view === 'dashboard') assert.ok(await page.getByText('从第一条投递开始建立求职节奏', { exact: true }).isVisible()
     || await region(page, '未来 7 天日程').isVisible(), 'dashboard ready state required');
-  if (view === 'board') assert.ok(await page.getByText('待投递', { exact: true }).count() > 0, 'board lane required');
+  if (view === 'board') await page.getByText('待投递', { exact: true }).filter({ visible: true }).waitFor();
+  assert.equal((await readSurfaceIdentity(page, item.id)).targetSurfaceConfirmed, true, 'visible root landmark must match the selected route');
 }
 async function theme(page, value) {
   const exit = btn(page, '退出沉浸模式，返回原页面');
@@ -940,20 +943,33 @@ async function offerFlows(qa, page, applications) {
   await qa.disposition('S23', 'offer-ai-negotiation-output', 'BLOCKED', 'provider generation and generated history require separate authorization');
 }
 
+async function verifyStandaloneHaruContext(haru, record) {
+  assert.ok(haru, 'the installed desktop Haru window is required for context handoff coverage');
+  await haru.getByRole('main', exact('Haru 桌面小窗')).waitFor();
+  const chat = region(haru, 'Haru 对话');
+  await chat.waitFor();
+  await chat.getByText(`当前上下文：${record.company_name} · ${record.position_name}`, { exact: true }).waitFor();
+}
+
+async function recordDesktopMascotScope(qa) {
+  await qa.disposition('S25', 'haru-in-page-runtime-and-context-menu', 'N/A',
+    'installed desktop has no in-page Haru mascot; standalone runtime and native-window evidence are recorded separately in result.json', ['Haru 桌面小窗']);
+}
+
 async function pilotSettingsFlows(qa, page, record) {
-  await qa.run('S24', 'pilot-context-popup-and-page', ['投递', '列表', '问 Pilot'], async () => {
+  await qa.run('S24', 'pilot-context-desktop-haru-and-page', ['投递', '列表', '问 Pilot'], async () => {
     await navigate(page, 'applications-list');
     const list = region(page, '投递列表');
     await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(record.company_name);
     const row = list.locator(`tr[data-row-key="${record.id}"]`);
     await row.waitFor(); await btn(row, '问 Pilot').click();
-    const haru = dialog(page, 'Haru 轻量对话');
-    await haru.waitFor();
+    // The installed desktop owns a separate Haru BrowserWindow. A main-page
+    // dialog or mascot cannot substitute for this live mirrored context check.
+    await verifyStandaloneHaruContext(qa.haru, record);
+    qa.observed('actual standalone Haru window mirrors the clicked application context');
+    await btn(qa.haru, '打开 OfferPilot 主窗口').click();
+    await command(page, '打开 Pilot 工作区');
     const context = `${record.company_name} · ${record.position_name}`;
-    await haru.locator('[aria-label="当前上下文"]').getByText(context, { exact: true }).waitFor();
-    await qa.capture('haru-row-context');
-    await btn(haru, '展开到 Pilot 工作区').click();
-    await haru.waitFor({ state: 'hidden' });
     await btn(page, '退出沉浸模式，返回原页面').waitFor();
     const contextLabel = page.getByText('当前上下文', { exact: true }).filter({ visible: true });
     await contextLabel.waitFor();
@@ -981,66 +997,44 @@ async function pilotSettingsFlows(qa, page, record) {
     }
     await btn(page, '退出沉浸模式，返回原页面').click();
     await region(page, '投递列表').waitFor();
-    qa.observed('actual row-owned Haru context; retained full Pilot context; context panel; composer guard or unsent draft; return to list');
+    qa.observed('actual standalone row-owned Haru context; retained full Pilot context; context panel; composer guard or unsent draft; return to list');
   });
-  await qa.run('S25', 'haru-runtime-and-context-menu', ['Haru 助手'], async () => {
-    await navigate(page, 'applications-list');
-    const mascot = page.getByRole('complementary', exact('Haru 助手'));
-    await mascot.waitFor();
-    await page.waitForFunction(() => { const node = document.querySelector('[aria-label="Haru 助手"]'); return node?.getAttribute('data-runtime-ready') === 'true' || node?.getAttribute('data-load-failed') === 'true'; }, undefined, { timeout: 30000 });
-    const failed = await mascot.getAttribute('data-load-failed') === 'true';
-    const box = await mascot.boundingBox();
-    assert.ok(box);
-    if (failed) {
-      assert.ok(box.width <= 157 && box.height <= 49, 'natural Haru fallback footprint must be a small dock');
-      await qa.disposition('S25', 'haru-live2d-runtime', 'FAIL', `installed runtime failure: ${await mascot.getAttribute('data-load-failure-reason') || 'unknown'}`);
-    }
-    await qa.capture(failed ? 'haru-natural-runtime-failure' : 'haru-normal-runtime', { haruRuntime: failed ? 'failed-naturally' : 'model-mounted', haruBounds: box });
-    if (!failed) {
-      const pixels = await mascot.locator('canvas').evaluate(async canvas => {
-        const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-        if (!gl) return { sampled: false, variedPixels: false };
-        for (let attempt = 0; attempt < 30; attempt++) {
-          await new Promise(resolve => requestAnimationFrame(resolve));
-          const bytes = new Uint8Array(gl.drawingBufferWidth * gl.drawingBufferHeight * 4);
-          gl.readPixels(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight, gl.RGBA, gl.UNSIGNED_BYTE, bytes);
-          const colors = new Set();
-          for (let i = 0; i < bytes.length; i += 16) if (bytes[i + 3] > 0) colors.add(`${bytes[i]},${bytes[i + 1]},${bytes[i + 2]}`);
-          if (colors.size > 8) return { sampled: true, variedPixels: true };
-        }
-        return { sampled: true, variedPixels: false };
-      });
-      assert.equal(pixels.variedPixels, true, 'mounted Haru must render nonempty varied pixels without weakening CSP');
-      qa.observed('runtime resolved and existing WebGL framebuffer contains varied rendered pixels');
-      await qa.capture('haru-rendered-varied-pixels', { haruRuntime: 'model-mounted-and-pixels-verified' });
-    }
-    await mascot.getByRole('button').click({ button: 'right' });
-    await page.getByRole('menuitem', exact('恢复默认大小')).waitFor();
-    await qa.capture('haru-context-menu');
-    await page.keyboard.press('Escape');
-    await page.getByRole('menuitem', exact('恢复默认大小')).waitFor({ state: 'hidden' });
-    qa.observed('natural Haru runtime/fallback recorded; real context menu and Escape; no runtime stub or CSP change');
-  });
+  await recordDesktopMascotScope(qa);
   await qa.run('S29', 'settings-haru-appearance-restore', ['设置', 'Haru'], async () => {
     await navigate(page, 'settings');
     const visible = page.getByRole('switch', exact('显示 Haru'));
-    const wasVisible = await visible.getAttribute('aria-checked') === 'true';
-    if (wasVisible) await visible.click();
-    await page.getByRole('complementary', exact('Haru 助手')).waitFor({ state: 'hidden' });
-    await qa.capture('settings-haru-hidden');
-    await visible.click();
-    await page.getByRole('complementary', exact('Haru 助手')).waitFor();
-    await select(page, page.getByRole('combobox', exact('Haru 角色大小')), '80%');
-    await select(page, page.getByRole('combobox', exact('Haru 动画级别')), '关闭');
-    await captureWidths(qa, page, 'settings-haru-small-static');
-    await select(page, page.getByRole('combobox', exact('Haru 角色大小')), '100%');
-    await select(page, page.getByRole('combobox', exact('Haru 动画级别')), '完整');
-    await btn(page, '重置 Haru 位置').click();
-    await page.waitForFunction(() => document.querySelector('[aria-label="Haru 助手"]')?.getAttribute('data-runtime-ready') === 'true', undefined, { timeout: 30000 });
-    if (!wasVisible) await visible.click();
+    const wasVisible = await visible.getAttribute('aria-checked');
+    assert.ok(['true', 'false'].includes(wasVisible), 'Haru appearance switch must expose its checked state');
+    const zoom = page.getByRole('combobox', exact('Haru 角色大小'));
+    const animation = page.getByRole('combobox', exact('Haru 动画级别'));
+    const selectedLabel = (input) => input.evaluate((element) => element.closest('.ant-select')?.querySelector('.ant-select-selection-item')?.getAttribute('title'));
+    const originalZoom = await selectedLabel(zoom);
+    const originalAnimation = await selectedLabel(animation);
+    assert.ok(['80%', '90%', '100%', '110%', '120%', '130%'].includes(originalZoom));
+    assert.ok(['完整', '简洁', '关闭'].includes(originalAnimation));
+    try {
+      await visible.click();
+      assert.equal(await visible.getAttribute('aria-checked'), wasVisible === 'true' ? 'false' : 'true');
+      await qa.capture('settings-haru-preference-toggled');
+      await select(page, zoom, '80%');
+      await select(page, animation, '关闭');
+      await captureWidths(qa, page, 'settings-haru-preference-small-static');
+      // These legacy in-page preferences currently do not configure the desktop
+      // Haru window. Verify only control readback, never infer renderer effects.
+      qa.observed('local appearance controls toggle and read back selected values; standalone Haru effects are not asserted');
+    } finally {
+      if (qa.canProceed()) {
+        await select(page, zoom, originalZoom);
+        await select(page, animation, originalAnimation);
+        if (await visible.getAttribute('aria-checked') !== wasVisible) await visible.click();
+        assert.equal(await visible.getAttribute('aria-checked'), wasVisible);
+      }
+    }
     await theme(page, 'light'); await qa.capture('settings-light-theme'); await theme(page, 'dark');
-    qa.observed('hide removes live hitbox; restore; size/animation selections; original fresh-profile appearance restored');
+    qa.observed('original appearance preference values restored; main-window light/dark controls verified');
   });
+  await qa.disposition('S29', 'settings-in-page-mascot-effects', 'N/A',
+    'installed desktop uses separate Haru window; these in-page appearance preferences do not control standalone runtime', ['设置', 'Haru']);
   await qa.run('S26', 'settings-ai-readonly-and-return', ['设置', '配置 AI'], async () => {
     await navigate(page, 'settings');
     await page.locator('summary').filter({ hasText: /^高级运行信息$/ }).click();
@@ -1091,4 +1085,4 @@ async function pilotSettingsFlows(qa, page, record) {
 }
 
 // Exported for isolated helper preflight; these functions still drive only the public UI.
-export { navigate, createApplication };
+export { navigate, createApplication, verifyStandaloneHaruContext, recordDesktopMascotScope };

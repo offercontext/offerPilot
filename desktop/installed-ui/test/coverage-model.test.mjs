@@ -1,15 +1,53 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { ROOTS, SUBVIEWS, WIDTHS, safeShotName, summarizeCoverage, classifyRuntimeMessage, publicRequestFailure, checkGeometry } from '../coverage-model.mjs';
+import { execFileSync } from 'node:child_process';
+import { ROOTS, ROOT_CASES, ROOT_STATES, SUBVIEWS, WIDTHS, safeShotName, summarizeCoverage, classifyRuntimeMessage, publicRequestFailure, checkGeometry } from '../coverage-model.mjs';
 
-test('coverage inventory matches all 13 actual root views and 31 major subviews', () => {
-  assert.equal(ROOTS.length, 13); assert.equal(new Set(ROOTS.map((item) => item.view)).size, 13);
-  assert.equal(SUBVIEWS.length, 31); assert.equal(new Set(SUBVIEWS.map((item) => item.id)).size, 31);
+test('coverage inventory exactly matches production navigation routes, module labels and visible tabs', () => {
+  const navigationUrl = new URL('../../../web/src/layout/navigation.ts', import.meta.url);
+  const source = fs.readFileSync(navigationUrl, 'utf8');
+  const union = source.match(/export type ViewMode\s*=([\s\S]*?);/);
+  assert.ok(union, 'production ViewMode union is required');
+  const views = [...union[1].matchAll(/'([^']+)'/g)].map(([, view]) => view);
+  // Run the actual typed module in Node's supported strip-only mode. Looking for
+  // view-name substrings cannot catch missing routes or wrong module/tab labels.
+  const script = `import { MODULE_NAV, MODULE_TABS, resolveModuleForView, defaultViewForModule, moduleTabsForView } from ${JSON.stringify(navigationUrl.href)};
+    const views = ${JSON.stringify(views)};
+    console.log(JSON.stringify({ nav: MODULE_NAV, tabs: MODULE_TABS, routes: views.map(view => ({
+      view, module: resolveModuleForView(view), defaultView: defaultViewForModule(resolveModuleForView(view)), tabs: moduleTabsForView(view),
+    })) }));`;
+  const production = JSON.parse(execFileSync(process.execPath,
+    ['--experimental-strip-types', '--input-type=module', '--eval', script], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+  assert.equal(ROOTS.length, 13);
+  assert.equal(new Set(ROOTS.map(({ view }) => view)).size, ROOTS.length);
+  assert.deepEqual(ROOTS.map(({ view }) => view).sort(), [...views].sort());
+  assert.deepEqual(Object.values(production.tabs).flat().map(({ view }) => view).sort(), [...views].sort());
+  for (const item of ROOTS) {
+    const route = production.routes.find(({ view }) => view === item.view);
+    const module = production.nav.find(({ key }) => key === route.module);
+    assert.equal(item.module, module?.label ?? null, `${item.view} must use the production sidebar label`);
+    assert.equal(item.tab, route.tabs.length > 1 ? route.tabs.find(({ view }) => view === item.view)?.label : null,
+      `${item.view} must select an actual visible module tab`);
+    if (module) assert.equal(module.defaultView, route.defaultView, `${item.view} module default must be consistent`);
+    else assert.equal(item.view, 'pilot', 'only the command-palette Pilot root has no sidebar entry');
+  }
+  assert.equal(SUBVIEWS.length, 31); assert.equal(new Set(SUBVIEWS.map(({ id }) => id)).size, 31);
   assert.deepEqual(WIDTHS, [900, 1008, 1280, 1440]);
-  const source = fs.readFileSync(new URL('../../../web/src/layout/navigation.ts', import.meta.url), 'utf8');
-  for (const {view} of ROOTS) assert.ok(source.includes(`'${view}'`), view);
-  assert.equal(ROOTS.find(({view}) => view === 'pilot').module, null, 'Pilot has no fabricated sidebar selector');
+});
+
+test('the complete 130-target root matrix covers both populations, dark widths and light 1280 exactly once', () => {
+  assert.equal(ROOT_CASES.length, 130);
+  assert.equal(new Set(ROOT_CASES.map(({ caseId }) => caseId)).size, 130);
+  for (const root of ROOTS) for (const state of ROOT_STATES) {
+    const targets = ROOT_CASES.filter(item => item.surfaceId === root.id && item.state === state);
+    assert.deepEqual(targets.map(({ theme, width }) => [theme, width]),
+      [...WIDTHS.map(width => ['dark', width]), ['light', 1280]]);
+    for (const target of targets) {
+      assert.equal(target.view, root.view);
+      assert.equal(target.caseId, `${state}-${target.theme}-${target.width}-${root.view}`);
+    }
+  }
 });
 
 test('screenshots alone cannot become functional PASS; incomplete and failures remain visible', () => {

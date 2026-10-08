@@ -45,10 +45,10 @@ jobs:
           New-Item -ItemType Directory -Force $env:UI_EVIDENCE_DIR | Out-Null
           @(
             'EXPERIMENTAL INSTALLED WINDOWS UI EVIDENCE. NOT RELEASE READY.',
-            'Product source commit: c640dcb999b6a233db573d08b63755a638a5c13c.',
-            'Installer build activation commit: c640dcb999b6a233db573d08b63755a638a5c13c.',
-            'Installer build workflow: .github/workflows/desktop-windows.yml; build run: 37665011787.',
-            'Independent full regression: https://github.com/offercontext/offerPilot/actions/runs/37665011787 (not certified by this job).',
+            'Product source commit: 2e78e9489e2c022b979fc2e580870975db2a8cce.',
+            'Installer build activation commit: 2e78e9489e2c022b979fc2e580870975db2a8cce.',
+            'Installer build workflow: .github/workflows/desktop-windows.yml; build run: 37728772813.',
+            'Independent full regression: https://github.com/offercontext/offerPilot/actions/runs/37728772813 (not certified by this job).',
             'No rebuild and no rerun, replacement or cancellation of independent full regression.',
             'Playwright temporarily uses loopback Node inspect/CDP; normal undebugged launch is distinct.',
             'Hosted Windows runners are administrator environments with UAC disabled by the platform.',
@@ -77,7 +77,7 @@ jobs:
       - name: Read original source for packaged entrypoint comparison
         uses: actions/checkout@v4
         with:
-          ref: c640dcb999b6a233db573d08b63755a638a5c13c
+          ref: 2e78e9489e2c022b979fc2e580870975db2a8cce
           path: .installed-ui-source
           persist-credentials: false
       - name: Download only the approved artifact from the fixed build run
@@ -85,8 +85,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: offercontext/offerPilot
-          run-id: 37665011787
-          name: offerpilot-windows-experimental-validation-c640dcb999b6a233db573d08b63755a638a5c13c
+          run-id: 37728772813
+          name: offerpilot-windows-experimental-validation-2e78e9489e2c022b979fc2e580870975db2a8cce
           path: ${{ env.UI_ARTIFACT_DIR }}
       - name: Execute installer, real Electron UI and complete restart checks
         run: |
@@ -96,7 +96,7 @@ jobs:
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installed-ui-evidence-c640dcb9-${{ github.run_id }}-${{ github.run_attempt }}
+          name: windows-installed-ui-evidence-2e78e948-${{ github.run_id }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 14
           path: |

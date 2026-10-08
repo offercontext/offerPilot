@@ -1,9 +1,10 @@
 // This function is also serialized into Electron's main process by app.evaluate.
 // It must remain standalone and use no imported helpers or test-only app hooks.
-export async function observeDevToolsDisabled({ BrowserWindow }) {
+export async function observeDevToolsDisabled({ BrowserWindow }, windowId) {
   const windows = BrowserWindow.getAllWindows();
-  if (windows.length !== 1) throw new Error('one application window required');
-  const contents = windows[0].webContents;
+  const selected = windowId === undefined && windows.length === 1 ? windows[0] : windows.find(win => win.id === windowId);
+  if (!selected) throw new Error('exact identified application window required');
+  const contents = selected.webContents;
   const beforeOpen = contents.isDevToolsOpened();
   const beforeContents = Boolean(contents.devToolsWebContents);
   let openedEvent = false;

@@ -26,8 +26,36 @@ test('surface identity publishes only fixed IDs and allowed root names',async()=
  assert.equal(new Set(SURFACE_RULES.map(({id})=>id)).size,44);
 });
 
-test('S24 identifies actual lightweight Haru without pretending full Pilot controls exist',async()=>{
- const result=await identity('S24',{view:'applications-list',dialogs:[element('Haru 轻量对话')]});
- assert.equal(result.targetSurfaceConfirmed,true);assert.ok(result.visibleSurfaces.includes('S24'));
+test('standalone Haru is identified without fabricating a dashboard or a full Pilot workspace',async()=>{
+ const companion = 'main[aria-label="Haru 桌面小窗"]';
+ const chat = SURFACE_RULES.find(({id})=>id==='S24').selector;
+ const result=await identity('S24',{view:'dashboard',selectors:{[companion]:[element('Haru 桌面小窗')],[chat]:[element('Haru 对话')]}});
+ assert.equal(result.targetSurfaceConfirmed,true);
+ assert.equal(result.observedView,'unknown');
+ assert.deepEqual(result.visibleSurfaces,['S24','S25']);
  assert.equal(result.visibleSurfaces.includes('R12'),false);
+ assert.equal(result.visibleSurfaces.includes('R01'),false);
 });
+
+test('removed in-page Haru and mascot cannot satisfy installed companion coverage',async()=>{
+ const result=await identity('S24',{view:'applications-list',dialogs:[element('Haru 轻量对话')],selectors:{'aside[aria-label="Haru 助手"]':[element('Haru 助手')]}});
+ assert.equal(result.targetSurfaceConfirmed,false);
+ assert.equal(result.visibleSurfaces.includes('S25'),false);
+});
+
+test('empty dashboard identity uses its real first-application button without requiring onboarding',async()=>{
+ const selectors={button:[element('添加第一个投递')]};
+ assert.equal((await identity('R01',{view:'dashboard',selectors})).targetSurfaceConfirmed,true);
+ assert.equal((await identity('R01',{view:'board',selectors})).targetSurfaceConfirmed,false);
+ assert.equal((await identity('R01',{view:'dashboard',selectors:{button:[element('添加第一个投递',false)]}})).targetSurfaceConfirmed,false);
+ assert.equal((await identity('R01',{view:'dashboard',selectors:{button:[element('添加第一个投递 其他')]}})).targetSurfaceConfirmed,false);
+});
+
+for(const rule of SURFACE_RULES.filter(({view})=>view)) {
+ test(`${rule.id} visible landmark is route-specific and rejects hidden/root-mismatched content`,async()=>{
+  const selectors={[rule.selector]:[element('root')],...(rule.id==='R04'?{span:[element('待投递')]}:{})};
+  assert.equal((await identity(rule.id,{view:rule.view,selectors})).targetSurfaceConfirmed,true);
+  assert.equal((await identity(rule.id,{view:rule.view==='pilot'?'dashboard':'pilot',selectors})).targetSurfaceConfirmed,false);
+  assert.equal((await identity(rule.id,{view:rule.view,selectors:{[rule.selector]:[element('root',false)]}})).targetSurfaceConfirmed,false);
+ });
+}

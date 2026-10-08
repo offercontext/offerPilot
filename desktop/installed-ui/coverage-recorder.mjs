@@ -8,7 +8,7 @@ import { bindUiSteps, markUiStep, safeUiFailure } from './ui-locators.mjs';
 import { readSurfaceIdentity } from './surface-identity.mjs';
 import { checkGeometry, safeShotName, summarizeCoverage, SUBVIEWS, ROOT_CASES } from './coverage-model.mjs';
 
-export async function createCoverage({ app, page, evidence, pin, installedExeSha256, runtime, setStage }) {
+export async function createCoverage({ app, page, haru, evidence, pin, installedExeSha256, runtime, setStage }) {
   const dir = path.join(evidence, 'screens');
   await fs.mkdir(dir, { recursive: true });
   const report = { schema: 2, sourceCommit: pin.commit, buildCommit: pin.buildCommit, buildWorkflow: pin.buildWorkflow,
@@ -149,6 +149,6 @@ export async function createCoverage({ app, page, evidence, pin, installedExeSha
     await save();
     return report;
   };
-  return { report, size, capture, run, observed, blocked, disposition, finish, save, runtimeSnapshot: runtime.snapshot, canProceed: () => !runtime.hasPendingWrite(),
+  return { report, haru, size, capture, run, observed, blocked, disposition, finish, save, runtimeSnapshot: runtime.snapshot, canProceed: () => !runtime.hasPendingWrite(),
     fixture: (kind, id) => { if (!Number.isSafeInteger(id) || id <= 0) throw new Error('invalid fixture identity'); report.fixtures.push({ kind, id }); } };
 }

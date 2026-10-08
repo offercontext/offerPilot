@@ -3,7 +3,7 @@ import { ROOTS } from './coverage-model.mjs';
 // Read-only production DOM landmarks. These identifiers contain no record titles,
 // user-entered values, provider settings, or URL query contents.
 export const SURFACE_RULES = Object.freeze([
-  ['R01','dashboard','[data-onboarding-action="create_first_application"], [aria-label="未来 7 天日程"]'],
+  ['R01','dashboard','[aria-label="未来 7 天日程"]',[],['添加第一个投递']],
   ['R02','reminders','input[placeholder="搜索流程行动"]'],
   ['R03','calendar','[aria-label="月历"]'], ['R04','board','[aria-label="主要内容"]'],
   ['R05','applications-list','section[aria-label="投递列表"]'],
@@ -36,13 +36,13 @@ export const SURFACE_RULES = Object.freeze([
   ['S21',null,'section[aria-label="Offer 横向对比"]'],
   ['S22',null,null,['调整对比项']],
   ['S23',null,'section[aria-label="谈薪准备"]'],
-  ['S24',null,'button[aria-label="上下文面板"]',['Haru 轻量对话']],
-  ['S25',null,'aside[aria-label="Haru 助手"]'],
+  ['S24',null,'button[aria-label="上下文面板"], main[aria-label="Haru 桌面小窗"] section[aria-label="Haru 对话"]'],
+  ['S25',null,'main[aria-label="Haru 桌面小窗"]'],
   ['S26',null,'section[aria-label="AI 设置"]'],
   ['S27',null,null,['确认个人偏好']],
   ['S28',null,'#data-backup-settings-title'], ['S29',null,'#pilot-mascot-settings-title'],
   ['S30',null,'#voice-settings-title'], ['S31',null,'[aria-label="运行日志列表"]'],
-].map(([id, view, selector, dialogs=[]])=>Object.freeze({id,view,selector,dialogs})));
+].map(([id, view, selector, dialogs=[], buttons=[]])=>Object.freeze({id,view,selector,dialogs,buttons})));
 
 export async function readSurfaceIdentity(page, targetId) {
   return page.evaluate(({rules,knownViews,targetId})=>{
@@ -50,14 +50,17 @@ export async function readSurfaceIdentity(page, targetId) {
     const label=(node)=>node.getAttribute('aria-label') || (node.getAttribute('aria-labelledby') || '').split(/\s+/)
       .map((id)=>document.getElementById(id)?.textContent || '').join(' ').replace(/\s+/g,' ').trim();
     const dialogs=[...document.querySelectorAll('[role="dialog"]')].filter(visible).map(label);
-    const value=new URL(location.href).searchParams.get('view') || 'dashboard';
+    // The companion renderer is not a workspace root, even when its URL has no view.
+    const standaloneHaru=[...document.querySelectorAll('main[aria-label="Haru 桌面小窗"]')].some(visible);
+    const value=standaloneHaru ? 'desktop-haru' : new URL(location.href).searchParams.get('view') || 'dashboard';
     const observedView=knownViews.includes(value)?value:'unknown';
     const visibleSurfaces=rules.filter((rule)=>{
       if(rule.view && rule.view!==observedView)return false;
       const selectorMatch=Boolean(rule.selector && [...document.querySelectorAll(rule.selector)].some(visible));
       const dialogMatch=rule.dialogs.some((name)=>dialogs.includes(name));
+      const buttonMatch=rule.buttons.some((name)=>[...document.querySelectorAll('button')].some((node)=>visible(node)&&node.textContent.trim()===name));
       if(rule.id==='R04')return selectorMatch && [...document.querySelectorAll('span')].some((node)=>visible(node)&&node.textContent.trim()==='待投递');
-      return selectorMatch || dialogMatch;
+      return selectorMatch || dialogMatch || buttonMatch;
     }).map(({id})=>id);
     return {observedView,visibleSurfaces,targetSurfaceConfirmed:visibleSurfaces.includes(targetId)};
   },{rules:SURFACE_RULES,knownViews:ROOTS.map(({view})=>view),targetId});

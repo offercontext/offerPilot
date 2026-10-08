@@ -10,6 +10,9 @@ import { extractFile } from '@electron/asar';
 import { hash, treeFiles, verifyPayload, normalizeSourceText } from './integrity.mjs';
 import { safeFailure, commandFailure, recordSecurityBeforeValidation } from './diagnostics.mjs';
 import { observeDevToolsDisabled } from './devtools-probe.mjs';
+import { waitForDesktopSurfaces, readDesktopSecurity, validatePartitionIsolation } from './desktop-surfaces.mjs';
+import { installTrayObserver, invokeTrayAction, probeStorageIsolation, probeHaruApiDeny, probeHaruStatusMirror } from './haru-probes.mjs';
+import { probeInstalledCapabilities, readPermissionDecisions, assertDeniedPermissions } from './capability-probes.mjs';
 import { verifyApplicationDetail } from './detail-ui.mjs';
 import { createCoverage, observeRuntime } from './coverage-recorder.mjs';
 import { rootSweep, extendedFlows } from './screen-coverage.mjs';
@@ -25,7 +28,11 @@ const report = { status: 'running', sourceCommit: PIN.commit, buildCommit: PIN.b
   buildRunId: PIN.runId, fullRegressionRunId: PIN.fullRegressionRunId, artifactId: PIN.artifactId,
   scope: 'experimental-installed-UI-with-temporary-loopback-debugging', releaseReady: false,
   ordinaryUserUacSmartScreenValidated: false, normalUndebuggedLaunchValidated: false,
-  fullRegression: 'independent-not-certified', stages: [], launches: [] };
+  fullRegression: 'independent-not-certified',
+  instrumentation: { tray: 'invoke-observed-production-callbacks', nativeTrayPointerValidated: false,
+    nativeDialogChoices: 'automated-cancel-or-synthetic-save-path', nativeDialogPointerValidated: false,
+    downloadPolicy: 'Electron-native-default-no-CDP-download-override', syntheticIpcStatusProbe: true },
+  stages: [], launches: [] };
 let stage = 'environment';
 let current;
 let owned = [];
@@ -98,7 +105,7 @@ async function launch(number) {
   assert.equal((await windows('snapshot')).processes.length, 0, 'no installed processes may predate launch');
   stage = `launch-${number}-electron-start`;
   const app = await _electron.launch({ executablePath: exe, cwd: installDir, env: environment,
-    chromiumSandbox: true, bypassCSP: false, acceptDownloads: false, timeout: 90000 });
+    chromiumSandbox: true, bypassCSP: false, timeout: 90000 });
   current = { app };
   app.context().on('request', (request) => {
     const url = new URL(request.url());
@@ -113,15 +120,23 @@ async function launch(number) {
   const main = early.processes.find((item) => item.pid === identity.pid && sameWindowsPath(item.path, exe));
   assert.ok(main?.created, 'main process must be confirmed by CIM before UI waits');
   owned = [main, ...early.processes.filter((item) => item.parentPid === main.pid && sameWindowsPath(item.path, backend))];
-  stage = `launch-${number}-first-window`;
-  const page = await app.firstWindow({ timeout: 90000 });
-  current.page = page;
-  const runtime = observeRuntime(page);
-  page.setDefaultTimeout(20000);
-  stage = `launch-${number}-navigation-render`;
-  await page.getByRole('navigation', { name: '主导航', exact: true }).waitFor();
   stage = `launch-${number}-saved-origin`;
+  await waitUntil(() => exists(path.join(userData, 'desktop-port.json')), 90000);
   const port = await savedPort();
+  stage = `launch-${number}-identify-two-surfaces`;
+  const surfaces = await waitForDesktopSurfaces(app, `http://127.0.0.1:${port}`);
+  const page = surfaces.owner.page;
+  const haru = surfaces.haru.page;
+  current.page = page;
+  current.haru = haru;
+  const runtime = observeRuntime(page);
+  for (const surface of [page, haru]) surface.setDefaultTimeout(20000);
+  await page.getByRole('navigation', { name: '主导航', exact: true }).waitFor();
+  await haru.getByRole('main', { name: 'Haru 桌面小窗', exact: true }).waitFor();
+  const ids = {};
+  for (const [role, surface] of [['owner', page], ['haru', haru]]) {
+    ids[role] = await (await app.browserWindow(surface)).evaluate(win => win.id);
+  }
   const origin = new URL(page.url());
   assert.equal(origin.protocol, 'http:');
   assert.equal(origin.hostname, '127.0.0.1');
@@ -133,60 +148,99 @@ async function launch(number) {
   stage = `launch-${number}-loopback-listeners`;
   const listeners = validateListeners(snapshot.listeners, processes.main.pid, processes.backend.pid, port);
   stage = `launch-${number}-runtime-security`;
-  const security = await app.evaluate(({ app, BrowserWindow }) => {
-    const windows = BrowserWindow.getAllWindows();
-    if (windows.length !== 1) throw new Error('one application window required');
-    const contents = windows[0].webContents;
-    const prefs = contents.getLastWebPreferences();
-    return { packaged: app.isPackaged, nodeIntegration: prefs.nodeIntegration,
-      contextIsolation: prefs.contextIsolation, sandbox: prefs.sandbox, webSecurity: prefs.webSecurity,
-      devTools: prefs.devTools, devToolsOpened: contents.isDevToolsOpened(),
-      unsafeSwitches: ['no-sandbox', 'disable-web-security', 'disable-site-isolation-trials',
-        'allow-running-insecure-content', 'ignore-certificate-errors'].filter((name) => app.commandLine.hasSwitch(name)) };
-  });
+  const security = await app.evaluate(readDesktopSecurity, ids);
   const info = { number, mainPid: processes.main.pid, backendPid: processes.backend.pid,
     mainCreated: processes.main.created, backendCreated: processes.backend.created,
-    port, realAppData: true, observedExternalRendererRequests: fatalNetwork, ...listeners };
+    port, realAppData: true, surfaceIds: ids, partitionIsolation: security.partitionIsolation,
+    observedExternalRendererRequests: fatalNetwork, ...listeners, haru: {} };
   report.launches.push(info);
-  current = { app, page, info, runtime, debugEndpoints: snapshot.listeners.filter((item) => item.pid === identity.pid).map(({ address, port }) => ({ address, port })) };
+  current = { app, page, haru, ids, info, runtime, debugEndpoints: snapshot.listeners.filter((item) => item.pid === identity.pid).map(({ address, port }) => ({ address, port })) };
   // Persist bounded observations first: a failed assertion must not erase its evidence.
-  await recordSecurityBeforeValidation(info, security, writeReport);
+  await recordSecurityBeforeValidation(info, security.owner, writeReport);
+  await recordSecurityBeforeValidation(info.haru, security.haru, writeReport);
   stage = `launch-${number}-devtools-disabled-probe`;
-  security.devToolsProbe = await app.evaluate(observeDevToolsDisabled);
-  await recordSecurityBeforeValidation(info, security, writeReport);
+  security.owner.devToolsProbe = await app.evaluate(observeDevToolsDisabled, ids.owner);
+  security.haru.devToolsProbe = await app.evaluate(observeDevToolsDisabled, ids.haru);
+  await recordSecurityBeforeValidation(info, security.owner, writeReport);
+  await recordSecurityBeforeValidation(info.haru, security.haru, writeReport);
   stage = `launch-${number}-runtime-security`;
-  validateSecurity(security);
+  validateSecurity(security.owner);
+  validateSecurity(security.haru);
+  validatePartitionIsolation(security.partitionIsolation);
+  info.haru.securityValidation = 'passed';
   info.securityValidation = 'passed';
   stage = `launch-${number}-external-network`;
   info.observedExternalRendererRequests = fatalNetwork;
   await writeReport();
   assert.equal(fatalNetwork, false, 'external renderer request observed');
   await checkpoint(`launch-${number}-identity-and-security`);
+  stage = `launch-${number}-observe-real-tray`;
+  await app.evaluate(installTrayObserver);
+  const pin = haru.getByRole('button', { name: 'Haru 始终置顶', exact: true });
+  const pinned = await pin.getAttribute('aria-pressed');
+  assert.ok(['true', 'false'].includes(pinned));
+  for (const expected of [pinned === 'true' ? 'false' : 'true', pinned]) {
+    await pin.click();
+    await haru.waitForFunction(value => document.querySelector('[aria-label="Haru 始终置顶"]').getAttribute('aria-pressed') === value, expected);
+  }
+  info.trayObservedThroughRealMenuRefresh = true;
+  await checkpoint(`launch-${number}-real-tray-observer`);
   return current;
 }
 async function closeNormally() {
-  const { app, page, info, debugEndpoints } = current;
-  stage = `launch-${info.number}-request-normal-close`;
+  const { app, page, haru, ids, info, debugEndpoints } = current;
   const window = await app.browserWindow(page);
-  // BrowserWindow.close() follows the same close/before-quit path as the window's X button.
-  // Schedule after the protocol reply so disconnect is not mistaken for success/failure.
-  await window.evaluate((window) => { setTimeout(() => window.close(), 0); });
+  const haruWindow = await app.browserWindow(haru);
+  const visible = id => app.evaluate(({ BrowserWindow }, id) => {
+    const win = BrowserWindow.fromId(id);
+    return win && !win.isDestroyed() ? win.isVisible() : null;
+  }, id);
+  stage = `launch-${info.number}-main-close-hides`;
+  await window.evaluate(win => { setTimeout(() => win.close(), 0); });
+  await waitUntil(async () => await visible(ids.owner) === false);
+  assert.equal(page.isClosed(), false, 'main owner must remain alive while hidden');
+  assert.equal(await visible(ids.haru), true);
+  const hiddenSnapshot = await windows('snapshot');
+  for (const item of owned) assert.ok(hiddenSnapshot.processes.some(value => value.pid === item.pid && value.created === item.created), 'hide must preserve owned processes');
+  assert.equal(await endpointOpen({ port: info.port }), true, 'hide must keep the backend available');
+  assert.equal(await page.evaluate(async () => (await fetch('/api/health')).status), 200);
+  assert.equal(await haru.evaluate(async () => (await window.offerpilotDesktop.getState()).connected), true, 'hidden owner must keep status mirror connected');
+  info.mainCloseHidesWithoutStoppingBackend = true;
+  stage = `launch-${info.number}-real-tray-callbacks`;
+  await app.evaluate(invokeTrayAction, 'open');
+  await waitUntil(async () => await visible(ids.owner) === true);
+  await app.evaluate(invokeTrayAction, 'hide');
+  await waitUntil(async () => await visible(ids.haru) === false);
+  await app.evaluate(invokeTrayAction, 'show');
+  await waitUntil(async () => await visible(ids.haru) === true);
+  await haruWindow.evaluate(win => win.close());
+  await waitUntil(async () => await visible(ids.haru) === false);
+  assert.equal(haru.isClosed(), false, 'Haru close must hide, not destroy, its renderer');
+  await app.evaluate(invokeTrayAction, 'click');
+  await waitUntil(async () => await visible(ids.haru) === true);
+  await window.evaluate(win => win.close());
+  await waitUntil(async () => await visible(ids.owner) === false);
+  await app.evaluate(invokeTrayAction, 'double-click');
+  await waitUntil(async () => await visible(ids.owner) === true);
+  info.trayCallbacks = ['open', 'hide', 'show', 'click', 'double-click'];
+  info.haruCloseHidesAndReopensSameWindow = true;
+  stage = `launch-${info.number}-request-tray-exit`;
+  await app.evaluate(invokeTrayAction, 'quit');
   stage = `launch-${info.number}-process-exit`;
   await waitUntil(async () => (await windows('snapshot')).processes.length === 0, 45000);
   stage = `launch-${info.number}-port-release`;
   await waitUntil(async () => !(await endpointOpen({ port: info.port })) &&
-    (await Promise.all(debugEndpoints.map(endpointOpen))).every((value) => !value), 15000);
+    (await Promise.all(debugEndpoints.map(endpointOpen))).every(value => !value), 15000);
   assert.equal(await savedPort(), info.port);
-  stage = `launch-${info.number}-external-network-after-close`;
   info.observedExternalRendererRequests = fatalNetwork;
   await writeReport();
   assert.equal(fatalNetwork, false);
-  info.normalClose = true;
+  info.trueExitViaProductionTrayCallback = true;
   info.mainBackendAndRendererExited = true;
   info.backendAndDebugPortsClosed = true;
   current = undefined;
   owned = [];
-  await checkpoint(`launch-${info.number}-normal-close-and-port-release`);
+  await checkpoint(`launch-${info.number}-tray-exit-and-port-release`);
 }
 async function openList(page, record, shot) {
   stage = `${shot}-list-navigation`;
@@ -258,10 +312,12 @@ try {
   stage = 'installed-payload-byte-hashes';
   const checkedPayloadFiles = await verifyPayload(installDir, payload);
   stage = 'packaged-source-text';
-  for (const name of ['main.cjs', 'lifecycle.cjs']) {
+  for (const name of ['main.cjs', 'lifecycle.cjs', 'capabilities.cjs', 'haru.cjs', 'haru-protocol.cjs', 'preload.cjs']) {
     assert.equal(normalizeSourceText(extractFile(path.join(installDir, 'resources', 'app.asar'), name)),
       normalizeSourceText(await fs.readFile(path.join(source, 'desktop', name))), 'packaged desktop source differs from pin');
   }
+  assert.deepEqual(extractFile(path.join(installDir, 'resources', 'app.asar'), 'assets/haru-tray.png'),
+    await fs.readFile(path.join(source, 'desktop/assets/haru-tray.png')), 'packaged tray asset differs from pin');
   assert.equal(await hash(path.join(installDir, 'resources', 'LICENSE')), await hash(path.join(source, 'LICENSE')));
   stage = 'packaged-version-identity';
   const packageJson = JSON.parse(extractFile(path.join(installDir, 'resources', 'app.asar'), 'package.json').toString());
@@ -274,18 +330,60 @@ try {
   assert.equal(fuses[FuseV1Options.EnableNodeCliInspectArguments], FuseState.ENABLE, 'existing inspect fuse must permit testing without modification');
   assert.equal(await hash(exe), exeHashBefore);
   await checkpoint('installed-resource-integrity', { checkedPayloadFiles, installedExeSha256: exeHashBefore,
-    sourceMainAndLifecycleMatch: 'CRLF-normalized-text', nodeCliInspectFuseAlreadyEnabled: true, fuseReadOnly: true });
+    sourceDesktopModulesMatch: 'six-CRLF-normalized-modules', haruTrayAssetMatch: true, nodeCliInspectFuseAlreadyEnabled: true, fuseReadOnly: true });
 
   stage = 'first-launch-ui';
   const first = await launch(1);
+  const haruCapture = async (name, page) => {
+    await fs.mkdir(path.join(evidence, 'screens'), { recursive: true });
+    await page.screenshot({ path: path.join(evidence, 'screens', `haru-${name}.png`), timeout: 15000 });
+  };
+  stage = 'haru-observed-startup-reload';
+  const haruRuntime = observeRuntime(first.haru);
+  await first.haru.reload({ waitUntil: 'domcontentloaded' });
+  await first.haru.getByRole('main', { name: 'Haru 桌面小窗', exact: true }).waitFor();
+  await first.haru.waitForLoadState('networkidle');
+  report.haruRuntime = { observation: haruRuntime.snapshot(), visual: await first.haru.evaluate(() => ({
+    canvasPresent: Boolean(document.querySelector('.desktop-haru-portrait canvas')),
+    fallbackVisible: Boolean(document.querySelector('.desktop-haru-portrait span')),
+  })), screenshot: 'screens/haru-observed-startup.png',
+    realAiTaskExecutionProven: false, live2dAnimationOrGpuQuality: 'requires-human-review' };
+  await haruCapture('observed-startup', first.haru);
+  await writeReport();
+  assert.equal(report.haruRuntime.observation.ownCriticalFailureCount, 0, 'required Haru resource failed');
+  assert.equal(report.haruRuntime.observation.classifications['unexpected-page-error'] || 0, 0);
+  assert.equal(report.haruRuntime.visual.canvasPresent, true);
+  report.haruRuntime.hasLimitations = report.haruRuntime.visual.fallbackVisible ||
+    Object.keys(report.haruRuntime.observation.classifications).some(key => key !== 'expected-resource-console');
+  await checkpoint(stage);
+  stage = 'haru-permission-deny';
+  report.haruPermissions = await first.haru.evaluate(readPermissionDecisions);
+  assertDeniedPermissions(report.haruPermissions);
+  await checkpoint(stage);
+  stage = 'haru-partition-storage-probes';
+  report.haruStorage = await probeStorageIsolation(first.page, first.haru);
+  await checkpoint(stage);
+  stage = 'haru-direct-api-deny';
+  report.haruApi = await probeHaruApiDeny(first.page, first.haru);
+  await checkpoint(stage);
+  stage = 'haru-synthetic-status-mirror';
+  report.haruStatus = await probeHaruStatusMirror(first.page, first.haru, haruCapture);
+  await haruCapture('real-restored-status', first.haru);
+  await checkpoint(stage);
+  stage = 'desktop-capability-probes';
+  report.capabilities = await probeInstalledCapabilities({ app: first.app, page: first.page,
+    directory: path.join(scratch, 'synthetic-downloads'), setStage: value => { stage = `desktop-capability-${value}`; } });
+  await checkpoint(stage);
   stage = 'first-ui-screenshot';
   await screenshot(first.page, '01-first-launch');
-  coverage = await createCoverage({ app: first.app, page: first.page, evidence, pin: PIN,
+  coverage = await createCoverage({ app: first.app, page: first.page, haru: first.haru, evidence, pin: PIN,
     installedExeSha256: exeHashBefore, runtime: first.runtime, setStage: (value) => { stage = value; } });
   await reloadOnceWithObserver(coverage, first.page, first.runtime);
   await rootSweep(coverage, first.page, 'empty-before-fixtures');
   stage = 'onboarding-create-application';
-  await first.page.locator('button[data-onboarding-action="create_first_application"]').click();
+  await first.page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: '今日', exact: true }).click();
+  await first.page.getByRole('tab', { name: '概览', exact: true }).click();
+  await first.page.getByRole('button', { name: '添加第一个投递', exact: true }).click();
   const form = first.page.getByRole('dialog', { name: '添加投递', exact: true });
   await form.waitFor();
   stage = 'fill-synthetic-form';
@@ -355,7 +453,8 @@ try {
   await checkpoint(stage, { executableUnchanged: true, observedExternalRendererRequests: false });
   stage = 'expanded-screen-coverage';
   assert.equal(coverage.report.summary.counts.FAIL, 0, 'installed screen assertions failed; lifecycle results remain independent');
-  report.status = coverage.report.summary.status === 'incomplete' ? 'passed-with-coverage-limitations' : 'passed';
+  report.status = coverage.report.summary.status === 'incomplete' || report.haruRuntime.hasLimitations
+    ? 'passed-with-coverage-limitations' : 'passed';
 } catch (error) {
   // Keep failures failed, including launch/close/cleanup/security/persistence failures.
   // Playwright errors may embed process logs and websocket endpoints: do not serialize them.

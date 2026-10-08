@@ -35,12 +35,14 @@ test('segmented ambiguity or unchanged selection cannot become pass',async()=>{
   for(const count of [0,2])await assert.rejects(selectSegment({getByRole:()=>({count:async()=>count})},'题库',{timeoutMs:0}));
   await assert.rejects(selectSegment({getByRole:()=>({count:async()=>1,locator:()=>({click:async()=>{}}),isChecked:async()=>false})},'题库',{timeoutMs:0}));
 });
-test('evidence-backed story role, final history identity and Haru expansion remain explicit',()=>{
+test('evidence-backed story role, final history identity and desktop Haru handoff remain explicit',()=>{
   const flow=fs.readFileSync(new URL('../screen-coverage.mjs',import.meta.url),'utf8');
   assert.match(flow,/library\.getByRole\('searchbox', exact\('搜索面试故事'\)\)/);
   assert.match(flow,/qa\.run\('R05', 'native-browser-history-back-forward'/);
-  assert.match(flow,/dialog\(page, 'Haru 轻量对话'\)/);
-  assert.match(flow,/btn\(haru, '展开到 Pilot 工作区'\)\.click/);
+  assert.match(flow,/verifyStandaloneHaruContext\(qa\.haru, record\)/);
+  assert.match(flow,/btn\(qa\.haru, '打开 OfferPilot 主窗口'\)\.click/);
+  assert.match(flow,/command\(page, '打开 Pilot 工作区'\)/);
+  assert.doesNotMatch(flow,/dialog\(page, 'Haru 轻量对话'\)|btn\(haru, '展开到 Pilot 工作区'\)/);
   assert.match(flow,/先配置 API key 后即可对话/);
   assert.match(flow,/btn\(page, '发送'\)\.isDisabled/);
   assert.doesNotMatch(flow,/getByRole\('radio',[^\n]+\.check\(/);

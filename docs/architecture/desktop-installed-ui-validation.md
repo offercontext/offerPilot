@@ -1,21 +1,21 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-07 扩展逐屏脚本已加入；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。该新包真实安装 UI 尚待执行，不能把组件渲染的 76 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+状态：限定分支上的实验验证辅助工具。2026-10-08 已扩展双窗、托盘生命周期与能力边界探针；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。该新包真实安装 UI 尚待执行，不能把组件渲染的 108 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
 
 ## 固定输入与独立路由
 
-- 源提交：`c640dcb999b6a233db573d08b63755a638a5c13c`。
-- 构建 run：[37665011787](https://github.com/offercontext/offerPilot/actions/runs/37665011787)。完整回归归属同一构建 run 的独立 job [37665011787](https://github.com/offercontext/offerPilot/actions/runs/37665011787)；本流程不重跑、不取消、不替代它。
-- Artifact：`11503541685`，名称 `offerpilot-windows-experimental-validation-c640dcb999b6a233db573d08b63755a638a5c13c`。
-- Artifact 元数据摘要：`sha256:5cf265344e65fb8f13ac59db57ad72580d95d185e7866bfc58d415825f3a24c3`。
+- 源提交：`2e78e9489e2c022b979fc2e580870975db2a8cce`。
+- 构建 run：[37728772813](https://github.com/offercontext/offerPilot/actions/runs/37728772813)。完整回归归属同一构建 run 的独立 job [37728772813](https://github.com/offercontext/offerPilot/actions/runs/37728772813)；本流程不重跑、不取消、不替代它。
+- Artifact：`11529527005`，名称 `offerpilot-windows-experimental-validation-2e78e9489e2c022b979fc2e580870975db2a8cce`。
+- Artifact 元数据摘要：`sha256:1c583341820b6a9158de5bb9dea3a90c943f2cfb2e4fe9a6cbe7d35967c1c058`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`9acc6bbeafcc7548666cb51acf5945aa4889235706e26c7e414cc6369444992b`。
+- 安装包 SHA256：`2d5b5cfe13a8bfa549ab1390c6c561080e4d1baa8e7d58136185c97cd4d1e2ff`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `c640dcb999b6a233db573d08b63755a638a5c13c`，构建激活提交为 `c640dcb999b6a233db573d08b63755a638a5c13c`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37665011787`，独立完整回归 run 为 `37665011787`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `2e78e9489e2c022b979fc2e580870975db2a8cce`，构建激活提交为 `2e78e9489e2c022b979fc2e580870975db2a8cce`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37728772813`，独立完整回归 run 为 `37728772813`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 
-`source.json`、`result.json` 与 `coverage.json` 分别标注产品 SHA、构建 SHA/工作流/run 和 full-gate run；来源代码 checkout 及已安装 main/lifecycle 对比始终使用产品 `commit`，不是 helper 激活提交。安装包哈希、payload 字节校验、摘要与成功打包 job 检查不变。完整回归 metadata 仅校验来源归属，仍记 `not-certified-by-this-job`，不能从打包成功或本次 UI 通过推导 full-gate 通过。
+`source.json`、`result.json` 与 `coverage.json` 分别标注产品 SHA、构建 SHA/工作流/run 和 full-gate run；来源代码 checkout 及已安装六个桌面模块/托盘资源对比始终使用产品 `commit`，不是 helper 激活提交。安装包哈希、payload 字节校验、摘要与成功打包 job 检查不变。完整回归 metadata 仅校验来源归属，仍记 `not-certified-by-this-job`，不能从打包成功或本次 UI 通过推导 full-gate 通过。
 
 `desktop/installed-ui/contract.mjs` 固定以上值。执行要求 `desktop/installed-ui/request.json` 的全部键和值精确匹配，不接受 URL、任意 run、输入参数或额外键；缺少请求文件直接失败。只读 job token 分别验证构建 run 与独立完整回归 run 的仓库、分支、head SHA、workflow 路径，再验证安装包 job 已成功，以及 artifact ID、名称、摘要、未过期状态与构建归属。完整回归是否通过不能从安装包 job 推导。
 
@@ -39,13 +39,13 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 1. 要求真实 Windows。真实 `%APPDATA%\OfferPilot Desktop` 在安装和首启前必须不存在；如果存在就失败，绝不删除或替换。应用主动设置 userData，因此既不伪造 APPDATA，也不用 `--user-data-dir`。
 2. 核对安装包 SHA256；用 runner 已有 7-Zip 只读提取 NSIS 内嵌 `app-64.7z`。这份 payload 从已核对的安装包派生，不是假设旧 artifact 含有 manifest。
 3. 使用 NSIS `/S /currentuser /D=<全新目录>` 安装，`/D` 最后且不加引号；目标位于 RUNNER_TEMP，路径包含中文和空格。要求安装退出码 0 且没有自动启动。
-4. 检查实际安装的 exe、app.asar、冻结后端与 `_internal`、前端 assets、LICENSE；逐文件 SHA256 对比解包 payload。app.asar 的 main/lifecycle 另与固定源提交对比，源码文本仅将 CRLF 规范化为 LF；二进制 payload 对比始终严格逐字节。记录安装 exe 摘要、资源数量和版本核对结果。
+4. 检查实际安装的 exe、app.asar、冻结后端与 `_internal`、前端 assets、LICENSE；逐文件 SHA256 对比解包 payload。app.asar 的 main、lifecycle、capabilities、haru、haru-protocol、preload 六个模块及托盘资源另与固定源提交对比，源码文本仅将 CRLF 规范化为 LF；二进制 payload 对比始终严格逐字节。记录安装 exe 摘要、资源数量和版本核对结果。
 5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
 6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。DevTools 禁用按下述严格行为探针验证。
 7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
 8. 先在空白 profile 扫描全部 13 个根页面，再从“添加第一条投递”进入表单，输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”；不使用“仍然创建”兜底。之后通过公开 UI 创建额外合成记录，流程和边界见下节。不会配置 provider 或真实凭据。
 9. 初始投递只保留这次 UI 发起 POST 回执的 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。执行新增逐屏检查后，通过 UI 切换明暗模式，继续原来的关闭重启验收。
-10. 正常调用窗口关闭路径，要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
+10. 分别关闭主窗与 Haru，验证窗口隐藏且仍由同一主进程/后端持有；执行观察到的真实托盘显示/隐藏/打开回调，再执行实际退出回调。要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
 11. 再次正常退出并核对进程/端口清理与 exe 完整性。任何启动、保护、持久化、正常关闭或清理问题均为失败；失败后的清理不能改成成功。
 
 ### 逐屏与交互覆盖
@@ -81,7 +81,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 旧包 run `37641876533` 已建立全部合成实体，162 PASS / 17 FAIL / 7 BLOCKED / 1 NOT RUN，339张图。13根页面的130个目标均实际抵达；其中10个旧Haru遮挡仍为FAIL。其余7项helper错误修正为：等待受控值回填、点击可见Segmented label再核对radio、限定故事searchbox、按真实Haru入口展开Pilot、history结束列表按R05验证。不会将旧包执行改写为通过。
 
-本轮固定的新产品含全局降级入口、暗色容器、Haru上下文标签、快速准备控件包含和确认框修复。76项组件渲染已通过，但仍需要此新包的完整安装逐屏运行及人工图像复核。无provider配置时真实发送保持BLOCKED；原始诊断、真实AI/音频与受禁下载不伪造成功。
+本轮固定的新产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。108项组件渲染已通过，但仍需要此新包的完整安装逐屏运行及人工图像复核。无provider配置时真实发送保持BLOCKED；真实AI/音频不伪造成功。新增能力探针只验证固定合成 Blob 的取消/保存精确字节，以及权限拒绝边界。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 
@@ -91,7 +91,13 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也必须为 false。所有安全观测先保存再断言，错误字段只用固定名称，不能输出原始 preferences。外部网络观测使用独立失败阶段，避免与安全属性混淆。此探针不把临时 CDP 测试启动变成正常无调试启动的证明。
 
-正常关闭通过 `BrowserWindow.close()` 走窗口关闭与 app 的 before-quit 路径，不以强杀作为成功退出。失败才允许清理已由 CIM 证实身份的本次测试进程，清理前重新核对路径、父子关系及创建时间，防止 PID 复用。不会删除测试 profile；runner 生命周期负责最终环境销毁。
+`BrowserWindow.close()` 只证明主窗或 Haru 隐藏，不能当作退出。辅助工具观察生产托盘已安装的菜单回调，调用实际退出回调并走 app 的 before-quit 路径，不以强杀作为成功退出；原生指针点击托盘未验证。失败才允许清理已由 CIM 证实身份的本次测试进程，清理前重新核对路径、父子关系及创建时间，防止 PID 复用。不会删除测试 profile；runner 生命周期负责最终环境销毁。
+
+### 双窗与能力探针边界
+
+严格按 origin、URL 和 preload role 选择主窗/Haru，拒绝缺窗、多窗或角色错配。两窗均检查安全选项和 DevTools 禁用；验证持久主窗分区与内存 Haru 分区独立、双向存储隔离、Haru 不能访问业务 API。权限探针遇意外 granted 必须失败。
+
+Haru 正常加载/重载的 canvas、fallback 与错误类别单独记录；五种合成任务状态经生产 preload IPC 同步，只证明状态显示，不声称真实 AI。固定合成 Blob 取消后要求目标文件不存在，保存后要求精确 32 字节。原生保存框的人工指针操作、麦克风真实音频和 Live2D 视觉质量仍须单独验收。
 
 ## 证据与不能声称的结论
 
