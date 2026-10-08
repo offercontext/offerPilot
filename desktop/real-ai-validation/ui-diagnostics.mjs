@@ -14,6 +14,18 @@ export const MIRROR_DIAGNOSTIC_FIELDS = Object.freeze(['observerInstalled', 'own
   'ownerConnected', 'haruConnected', 'ownerIdleNow', 'haruIdleNow', 'ownerRunningPositiveSeen', 'haruRunningPositiveSeen',
   'ownerRunningNullSeen', 'haruRunningNullSeen', 'ownerRunningDomSeen', 'haruRunningDomSeen',
   'sameRunningConversation', 'currentConversationMatches', 'invalidObservation', 'observationReadFailed']);
+export const CONTINUATION_CODES = Object.freeze(['MOCK_CONTINUATION_PROVEN', 'NOT_ELIGIBLE',
+  'MOCK_BOUNDARY_REQUIRED', 'LEDGER_UNSAFE', 'MIRROR_UNPROVEN', 'TERMINAL_UNPROVEN',
+  'DOM_MISMATCH', 'READ_FAILED', 'DEADLINE', 'LEDGER_CHANGED']);
+export const STREAM_DIAGNOSTIC_FIELDS = Object.freeze(['installed', 'originalTargetConnected', 'originalTargetCurrent',
+  'currentPilotUnique', 'targetReplacementObserved', 'stopPresentNow', 'readFailed']);
+export const STREAM_DIAGNOSTIC_COUNTS = Object.freeze(['originalGrowthCount', 'originalGrowthWithStopCount',
+  'currentGrowthCount', 'currentGrowthWithStopCount']);
+export function sanitizeStreamDiagnostic(value) {
+  return { ...Object.fromEntries(STREAM_DIAGNOSTIC_FIELDS.map(key => [key, value?.[key] === true])),
+    ...Object.fromEntries(STREAM_DIAGNOSTIC_COUNTS.map(key => [key,
+      Number.isSafeInteger(value?.[key]) && value[key] >= 0 && value[key] <= 255 ? value[key] : 0])) };
+}
 export function sanitizeMirrorDiagnostic(value) {
   return Object.fromEntries(MIRROR_DIAGNOSTIC_FIELDS.map(key => [key, value?.[key] === true]));
 }
@@ -21,22 +33,24 @@ export function sanitizeUiDiagnostic(value) {
   return { stage: UI_STAGES.includes(value?.stage) ? value.stage : 'UNSPECIFIED',
     targetProbed: value?.targetProbed === true, targetFound: value?.targetFound === true,
     targetUnique: value?.targetUnique === true, targetVisible: value?.targetVisible === true,
-    ...(value?.mirror === undefined ? {} : { mirror: sanitizeMirrorDiagnostic(value.mirror) }) };
+    ...(value?.mirror === undefined ? {} : { mirror: sanitizeMirrorDiagnostic(value.mirror) }),
+    ...(value?.stream === undefined ? {} : { stream: sanitizeStreamDiagnostic(value.stream) }) };
 }
 export function createUiDiagnostic() {
-  let stage = 'UNSPECIFIED', locator, mirror;
+  let stage = 'UNSPECIFIED', locator, mirror, stream;
   return {
-    mark(next, nextLocator) { if (next === 'CASE_START') mirror = undefined; stage = UI_STAGES.includes(next) ? next : 'UNSPECIFIED'; locator = nextLocator; },
+    mark(next, nextLocator) { if (next === 'CASE_START') { mirror = undefined; stream = undefined; } stage = UI_STAGES.includes(next) ? next : 'UNSPECIFIED'; locator = nextLocator; },
     target(next) { locator = next; },
     mirror(value) { mirror = sanitizeMirrorDiagnostic(value); },
+    stream(value) { stream = sanitizeStreamDiagnostic(value); },
     async snapshot() {
-      const result = sanitizeUiDiagnostic({ stage, mirror });
+      const result = sanitizeUiDiagnostic({ stage, mirror, stream });
       if (!locator || typeof locator.count !== 'function') return result;
       let timer;
       try {
         const probe = (async () => {
           const count = await locator.count();
-          const observed = sanitizeUiDiagnostic({ stage, mirror, targetProbed: true,
+          const observed = sanitizeUiDiagnostic({ stage, mirror, stream, targetProbed: true,
             targetFound: Number.isSafeInteger(count) && count > 0, targetUnique: count === 1 });
           if (count === 1) observed.targetVisible = await locator.isVisible();
           return sanitizeUiDiagnostic(observed);

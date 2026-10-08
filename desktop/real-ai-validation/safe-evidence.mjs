@@ -1,10 +1,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { SCREEN_IDS, SKIP_CODES, GUARD_REASONS } from './mock-screenshots.mjs';
-import { sanitizeUiDiagnostic } from './ui-diagnostics.mjs';
+import { sanitizeUiDiagnostic, CONTINUATION_CODES } from './ui-diagnostics.mjs';
 import { CASES, PIN, demand, EVIDENCE_CODES } from './contract.mjs';
-const CHECKS = new Set('settingsSavedThroughUi connectionTestClicked connectionSucceeded incrementalAssistantRendering haruRunningAndIdleMirrored haruVisibleAssistantMatchesSnapshot hitlVisible rejectedThroughUi syntheticWriteAbsent haruPendingAndIdleMirrored stopClickedWhileRunning stopAcknowledged haruRunningAndStoppedMirrored sourceAndResumeSelected disclosureAccepted generatedProposalVisible classificationPreviewVisible cancelledThroughUi sourceUnchanged inputReviewedThroughUi generatedDraftVisible finalSaveNotSubmitted providerRequestObserved providerRequestSettled oneProviderRequestVerified productDisconnectObserved providerDisconnectObserved ownerRunningTransitionObserved haruRunningTransitionObserved positiveRunningConversationMatched finalRunningConversationMatched mirrorObserverCleanupFailed streamObserverCleanupFailed'.split(' '));
-export function safeResults(results) {
+const CHECKS = new Set('settingsSavedThroughUi connectionTestClicked connectionSucceeded incrementalAssistantRendering haruRunningAndIdleMirrored haruVisibleAssistantMatchesSnapshot hitlVisible rejectedThroughUi syntheticWriteAbsent haruPendingAndIdleMirrored stopClickedWhileRunning stopAcknowledged haruRunningAndStoppedMirrored sourceAndResumeSelected disclosureAccepted generatedProposalVisible classificationPreviewVisible cancelledThroughUi sourceUnchanged inputReviewedThroughUi generatedDraftVisible finalSaveNotSubmitted providerRequestObserved providerRequestSettled oneProviderRequestVerified productDisconnectObserved providerDisconnectObserved ownerRunningTransitionObserved haruRunningTransitionObserved positiveRunningConversationMatched finalRunningConversationMatched brokerCleanupFailed mirrorObserverCleanupFailed streamObserverCleanupFailed'.split(' '));
+export function safeResults(results, isMock = false) {
   demand(Array.isArray(results) && results.length === CASES.length, 'SCENARIO_EVIDENCE_INVALID');
   return results.map((row, index) => {
     demand(row.id === CASES[index] && ['PASS', 'FAIL', 'BLOCKED'].includes(row.status) &&
@@ -13,7 +13,23 @@ export function safeResults(results) {
       demand(CHECKS.has(key) && typeof value === 'boolean', 'SCENARIO_EVIDENCE_INVALID');
       return [key, value];
     }));
-    return { id: row.id, status: row.status, code: row.code, checks, diagnostic: sanitizeUiDiagnostic(row.diagnostic) };
+    let continuation;
+    if (row.continuation !== undefined) {
+      const value = row.continuation;
+      demand(isMock === true && row.id === 'pilot-stream' && row.status === 'FAIL'
+        && row.code === 'STREAM_NOT_OBSERVED' && row.diagnostic?.stage === 'PILOT_STREAM_READBACK'
+        && ['PROVEN', 'BLOCKED'].includes(value?.status) && CONTINUATION_CODES.includes(value.code), 'SCENARIO_EVIDENCE_INVALID');
+      continuation = { status: value.status, code: value.code };
+      for (const key of ['eligible', 'ledgerSafe', 'mirrorProven', 'domEqual', 'noNewRequests', 'cleanupPassed', 'continued']) {
+        demand(typeof value[key] === 'boolean', 'SCENARIO_EVIDENCE_INVALID'); continuation[key] = value[key];
+      }
+      demand(!continuation.continued || (continuation.status === 'PROVEN'
+        && continuation.code === 'MOCK_CONTINUATION_PROVEN'
+        && ['eligible', 'ledgerSafe', 'mirrorProven', 'domEqual', 'noNewRequests', 'cleanupPassed']
+          .every(key => continuation[key])), 'SCENARIO_EVIDENCE_INVALID');
+    }
+    return { id: row.id, status: row.status, code: row.code, checks, diagnostic: sanitizeUiDiagnostic(row.diagnostic),
+      ...(continuation === undefined ? {} : { continuation }) };
   });
 }
 // No arbitrary strings, error messages, provider response bodies or nested objects can cross this boundary.
@@ -85,7 +101,7 @@ export async function saveEvidence(directory, report, ledger, secrets = []) {
     temporaryLoopbackDebugging: true, normalUndebuggedLaunchValidated: false, ordinaryUserUacSmartScreenValidated: false,
     route: isMock ? 'real-installed-ui-via-loopback-broker-to-synthetic-mock-transport' : 'real-installed-ui-via-loopback-budget-broker-to-real-provider',
     screenshotsCaptured: screenshotEvidence.captured.length > 0, screenshotEvidence, rawLogsCaptured: false, status: report.status,
-    code: report.code, cleanupCode: report.cleanupCode || 'CLEANUP_PENDING', scenarios: safeResults(report.scenarios), cleanupPassed: report.cleanupPassed === true };
+    code: report.code, cleanupCode: report.cleanupCode || 'CLEANUP_PENDING', scenarios: safeResults(report.scenarios, isMock), cleanupPassed: report.cleanupPassed === true };
   demand(['PASS', 'FAIL', 'BLOCKED'].includes(safe.status) && EVIDENCE_CODES.has(safe.code), 'REPORT_INVALID');
   demand(['CLEANUP_PASSED', 'CLEANUP_PENDING', 'BROKER_CLEANUP_FAILED', 'LEDGER_UNAVAILABLE', 'LEDGER_PERSISTENCE_FAILED', 'PROFILE_CLEANUP_FAILED', 'EVIDENCE_WRITE_BLOCKED'].includes(safe.cleanupCode), 'REPORT_INVALID');
   demand(safe.status !== 'PASS' || (safe.cleanupPassed && safe.cleanupCode === 'CLEANUP_PASSED' &&

@@ -50,7 +50,9 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
     // A scalar cancellation watermark also rejects an install RPC that reaches
     // this renderer after cleanup. It has no timer and retains no case content.
     window[cancelledKey] = Math.max(window[cancelledKey] ?? 0, sequence);
-    if (existing?.token === token && existing.sequence === sequence) { existing.dispose(); delete window[key]; }
+    if (existing?.token === token && existing.sequence === sequence) {
+      const cleaned = existing.dispose(); delete window[key]; if (!cleaned) bad();
+    }
     return true;
   }
   if (operation === 'read') {
@@ -61,7 +63,7 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
   if (operation !== 'install' || existing || sequence <= (window[cancelledKey] ?? 0) || Date.now() >= deadline) bad();
   const bridge = window.offerpilotDesktop;
   if (bridge?.role !== role || typeof bridge.getState !== 'function' || (role === 'haru' && typeof bridge.onState !== 'function')) bad();
-  let disposed = false, faulted = false, baselineReady = false;
+  let disposed = false, faulted = false, baselineReady = false, cleanupFailed = false;
   let eventRevision = 0, baselineGeneration = null, positiveId = null, pendingRead;
   let pollTimer, expiryTimer, readTimer, baselineTimer, mutationObserver, off, releaseRead, releaseBaseline;
   let connected = false, currentTaskState = 'unavailable', loading = false, hasPending = false;
@@ -82,13 +84,13 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
   };
   const stopResources = () => {
     clearInterval(pollTimer); clearTimeout(expiryTimer); clearTimeout(readTimer); clearTimeout(baselineTimer);
-    mutationObserver?.disconnect();
-    try { off?.(); } catch { faulted = true; }
+    try { mutationObserver?.disconnect(); } catch { cleanupFailed = true; faulted = true; }
+    try { off?.(); } catch { cleanupFailed = true; faulted = true; }
     off = undefined;
     releaseRead?.(); releaseRead = undefined;
     releaseBaseline?.(); releaseBaseline = undefined;
   };
-  const dispose = () => { if (!disposed) { disposed = true; stopResources(); } };
+  const dispose = () => { if (!disposed) { disposed = true; stopResources(); } return !cleanupFailed; };
   const fault = () => { faulted = true; stopResources(); };
   const sampleDom = () => {
     if (disposed || faulted || document.visibilityState !== 'visible'
@@ -108,6 +110,9 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
       || typeof snapshot.hasPending !== 'boolean') { fault(); return; }
     connected = true; currentTaskState = nextTask; loading = snapshot.loading; hasPending = snapshot.hasPending;
     conversationId = nextId;
+    // This case requested plain text only. Any approval state makes later idle
+    // insufficient proof that no write/approval occurred during the case.
+    if (caseId === 'pilot-stream' && (nextTask === 'waiting_confirmation' || hasPending)) { fault(); return; }
     if (nextTask === 'failed' || (nextTask === 'running' && (!loading || hasPending))
       || (nextTask === 'idle' && (loading || hasPending))) { fault(); return; }
     if (!baselineReady) {
@@ -213,9 +218,11 @@ async function removeRecord(record) {
   // Clean only the original record and token, never the current replacement.
   if (active.get(record.page) === record) active.delete(record.page);
   if (active.get(record.haru) === record) active.delete(record.haru);
-  await Promise.all([['owner', record.page], ['haru', record.haru]].map(([role, surface]) =>
-    bounded(() => surface.evaluate(rendererObservation, { operation: 'remove', role,
-      caseId: record.caseId, token: record.token, sequence: record.sequence }))));
+  await Promise.all([['owner', record.page], ['haru', record.haru]].map(async ([role, surface]) => {
+    const removed = await bounded(() => surface.evaluate(rendererObservation, { operation: 'remove', role,
+      caseId: record.caseId, token: record.token, sequence: record.sequence }));
+    if (removed !== true) fail();
+  }));
 }
 export async function removeMirrorObservation(page, haru) {
   const records = [...new Set([active.get(page), active.get(haru)].filter(Boolean))];

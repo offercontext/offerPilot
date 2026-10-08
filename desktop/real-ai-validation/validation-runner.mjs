@@ -12,9 +12,11 @@ import { syntheticApi } from './synthetic-api.mjs';
 import { prepareSyntheticProfile, runUiScenarios } from './ui-scenarios.mjs';
 import { refreshSyntheticProfile } from './seed-refresh.mjs';
 
-export async function executeValidation({ mode, brokerFactory, providerKey, screenshotFactory } = {}) {
+export async function executeValidation({ mode, brokerFactory, providerKey, screenshotFactory, mockContinuation } = {}) {
   demand(['live', 'mock'].includes(mode) && typeof brokerFactory === 'function' &&
-    (mode !== 'live' || screenshotFactory === undefined), 'INVALID_HARNESS');
+    (mockContinuation === undefined || typeof mockContinuation === 'function') &&
+    (mode !== 'live' || screenshotFactory === undefined) &&
+    (mode !== 'live' || mockContinuation === undefined), 'INVALID_HARNESS');
 const blocked = code => CASES.map(id => ({ id, status: 'BLOCKED', code, checks: {} }));
 const report = { mode, status: 'BLOCKED', code: 'NOT_STARTED', scenarios: blocked('NOT_STARTED'), cleanupPassed: false };
 let app, broker, timer, screenshotEvidence, ledger = {}, failure, cleanupFailure;
@@ -102,7 +104,7 @@ try {
     const fixture = await prepareSyntheticProfile(api);
     await refreshSyntheticProfile(page, broker, fixture, started + 600000);
     const result = await runUiScenarios({ page, haru, api, broker: scenarioBroker, fixture,
-      capture, deadlineMs: started + 600000 });
+      capture, mode, mockContinuation, deadlineMs: started + 600000 });
     report.scenarios = CASES.map(id => result.results.find(row => row.id === id));
     demand(!externalRendererRequest, 'UNEXPECTED_RENDERER_NETWORK');
     report.status = result.allPassed ? 'PASS' : 'FAIL';

@@ -205,6 +205,37 @@ test('cleanup is idempotent and pending IPC completion cannot recreate or mutate
   assert.equal(isRunningMirrorProven(await p.read()), false);
 });
 
+test('unsubscribe failure rejects cleanup instead of certifying a leaked listener', async t => {
+  const p = pair(t);
+  const onState = p.haru.context.window.offerpilotDesktop.onState;
+  p.haru.context.window.offerpilotDesktop.onState = callback => {
+    onState(callback); return () => { throw new Error('synthetic cleanup failure'); };
+  };
+  await p.install();
+  await assert.rejects(p.remove(), /HARU_SYNC_FAILED/);
+  assert.equal(p.haru.resources().listeners, 1);
+  assert.equal(p.haru.context.window[KEY], undefined);
+  assert.deepEqual(p.owner.resources(), { timers: 0, listeners: 0, mutations: 0 });
+});
+
+test('mutation disconnect failure rejects cleanup but still releases other resources', async t => {
+  const p = pair(t);
+  p.owner.context.MutationObserver.prototype.disconnect = () => { throw new Error('synthetic cleanup failure'); };
+  await p.install();
+  await assert.rejects(p.remove(), /HARU_SYNC_FAILED/);
+  assert.equal(p.owner.resources().timers, 0);
+  assert.deepEqual(p.haru.resources(), { timers: 0, listeners: 0, mutations: 0 });
+});
+
+test('unverified cleanup acknowledgement is refused', async t => {
+  const p = pair(t); await p.install();
+  const evaluate = p.haru.page.evaluate;
+  p.haru.page.evaluate = async (fn, arg) => {
+    const value = await evaluate(fn, arg); return arg.operation === 'remove' ? null : value;
+  };
+  await assert.rejects(p.remove(), { code: 'HARU_SYNC_FAILED' });
+});
+
 test('getState timeout faults the observer in five seconds and ignores late success', async t => {
   const p = pair(t); await p.install();
   const late = p.owner.deferNextRead();

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { prepareSyntheticProfile, runUiScenarios, safeUiCode, scenarios, assertProviderCase } from '../ui-scenarios.mjs';
+import { prepareSyntheticProfile, runUiScenarios, safeUiCode, scenarios, assertProviderCase, canContinueMockScenario } from '../ui-scenarios.mjs';
 
 // These are local fake-Page contract tests. They do not run an installed EXE,
 // launch Playwright, contact a provider, or establish a real UI pass.
@@ -18,20 +18,23 @@ function fakeSeed(existing = []) {
   };
   return { api, calls };
 }
-function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick = false, budget = false, terminal = 'SETTLED' } = {}) {
+function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick = false, budget = false,
+  terminal = 'SETTLED', streamFailure = false, cleanupFailure, ledgerChanged = false, denyFreshBaseline = false } = {}) {
   const events = [];
   const filled = new Map();
   let active = null;
   const records = [];
   let current = null;
+  let mutated = false;
   const broker = {
+    ...(streamFailure ? { mode: 'MOCK' } : {}),
     origin: 'http://127.0.0.1:49321',
-    prepareCase(caseId) { events.push(`prepare:${caseId}`); current = caseId; return { clientToken: 'local-fixture-token-not-a-provider-key' }; },
-    armCase(caseId) { events.push(`arm:${caseId}`); active = caseId; },
-    cancelCase() { events.push('cancel'); active = null; },
+    prepareCase(caseId) { events.push(`prepare:${caseId}`); current = caseId; return { clientToken: `local-fixture-token-${caseId}-not-a-provider-key` }; },
+    armCase(caseId) { events.push(`arm:${caseId}`); if (streamFailure && caseId === 'pilot-hitl-reject') throw new Error('end synthetic integration test'); active = caseId; },
+    cancelCase() { events.push('cancel'); if (current === 'pilot-stream' && cleanupFailure === 'broker') throw new Error('cleanup failed'); active = null; },
     snapshot() { return { model: 'deepseek-flash', budgetMicroCny: 10_000_000, reserveMicroCny: 3_000_000,
       sentRequests: records.length, settledMicroCny: 10, retainedMicroCny: budget ? 9_000_000 : 0,
-      active: false, closed: false, denied: {}, requests: records.map((row) => ({ ...row })) }; },
+      active: false, closed: false, denied: mutated ? { AUTH: 1 } : {}, requests: records.map((row) => ({ ...row })) }; },
   };
   class Locator {
     constructor(path = '') { this.path = path; }
@@ -55,7 +58,7 @@ function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick =
     async fill(value) { filled.set(this.path, value); events.push(`fill:${this.path.split('|').pop()}`); }
     async waitFor() {}
     async click() {
-      if (this.path.includes('header.op-topbar')) throw Object.assign(new Error('private-provider-output must never be recorded'), { name: 'TimeoutError' });
+      if (!streamFailure && this.path.includes('header.op-topbar')) throw Object.assign(new Error('private-provider-output must never be recorded'), { name: 'TimeoutError' });
       if (failClick && this.path.includes('配置 AI')) throw new Error('private-secret-example');
       if (this.path.includes('role:button:保存')) events.push(`save:${current}`);
       if (this.path.includes('role:button:测试连接')) {
@@ -63,9 +66,15 @@ function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick =
         assert.equal(active, current);
         if (forward) records.push({ caseId: current, status: terminal, cap: 64, outboundStarted: true, upstreamResponded: true });
       }
+      if (streamFailure && this.path.endsWith('role:button:发送')) {
+        assert.equal(active, 'pilot-stream');
+        records.push({ caseId: current, status: 'SETTLED', cap: 4096, outboundStarted: true, upstreamResponded: true });
+      }
+      if (streamFailure && this.path.includes('新建对话')) events.push(`new-conversation:${current}`);
     }
   }
   class Page extends Locator {
+    constructor(role) { super(); this.role = role; }
     url() { return 'http://127.0.0.1:41111/?view=settings'; }
     async waitForResponse(predicate) {
       const isTest = events.includes(`save:${current}`);
@@ -79,10 +88,34 @@ function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick =
       assert.equal(predicate(response), true);
       return response;
     }
-    async evaluate(fn) { return true; }
+    async evaluate(fn, arg) {
+      if (!streamFailure) return true;
+      if (arg?.operation) {
+        events.push(`observer-${arg.operation}:${current}:${this.role}`);
+        if (arg.operation === 'remove') {
+          if (cleanupFailure === 'mirror' && current === 'pilot-stream') throw new Error('cleanup failed');
+          return true;
+        }
+        return { role: this.role, caseId: arg.caseId, installed: true,
+          baselineReady: !(denyFreshBaseline && current === 'pilot-hitl-reject'), healthy: true, connected: true,
+          currentTaskState: 'idle', loading: false, hasPending: false,
+          bridgeRunningObserved: true, domRunningObserved: true, runningWithNullObserved: false,
+          conversationId: 73, runningConversationId: 73, identityChanged: false,
+          generationChanged: false, readTimedOut: false, expired: false };
+      }
+      const source = fn.toString();
+      if (source.includes('__offerpilotBoundedUiObserver?.updates')) return false;
+      if (source.includes('__offerpilotBoundedUiObserver?.summary')) return { installed: true };
+      if (source.includes('__offerpilotBoundedUiObserver?.observer.disconnect')) {
+        events.push('stream-cleanup');
+        if (cleanupFailure === 'stream') throw new Error('cleanup failed');
+        if (ledgerChanged) mutated = true;
+      }
+      return true;
+    }
   }
-  const page = new Page();
-  return { page, haru: new Page(), api: async () => { throw new Error('unexpected direct API'); }, broker, fixture,
+  const page = new Page('owner');
+  return { page, haru: new Page('haru'), api: async () => { throw new Error('unexpected direct API'); }, broker, fixture,
     capture: async (screenId, _page, caseId) => { events.push(`capture:${screenId}:${caseId || screenId}`); }, events };
 }
 
@@ -327,4 +360,90 @@ test('stream observer cleanup is bounded to five seconds', async t => {
   const rejected = assert.rejects(pending, { code: 'UI_ACTION_FAILED' });
   t.mock.timers.tick(5000);
   await rejected;
+});
+
+test('only the reviewed MOCK proof and unchanged cleanup ledger permit the next case', () => {
+  const args = { mode: 'mock', result: { id: 'pilot-stream', status: 'FAIL', code: 'STREAM_NOT_OBSERVED',
+    diagnostic: { stage: 'PILOT_STREAM_READBACK' } }, proof: { status: 'PROVEN', code: 'MOCK_CONTINUATION_PROVEN',
+    eligible: true, ledgerSafe: true, mirrorProven: true, domEqual: true, noNewRequests: true },
+    cleanupPassed: true, ledgerBefore: { sentRequests: 2, active: false }, ledgerAfter: { sentRequests: 2, active: false } };
+  assert.equal(canContinueMockScenario(args), true);
+  for (const change of [{ mode: 'live' }, { mode: undefined }, { cleanupPassed: false }, { proof: undefined },
+    { ledgerBefore: undefined }, { ledgerAfter: { sentRequests: 3, active: false } },
+    { ledgerAfter: { sentRequests: 2, active: true } }])
+    assert.equal(canContinueMockScenario({ ...args, ...change }), false);
+  for (const key of ['eligible', 'ledgerSafe', 'mirrorProven', 'domEqual', 'noNewRequests'])
+    assert.equal(canContinueMockScenario({ ...args, proof: { ...args.proof, [key]: false } }), false);
+  for (const change of [{ id: 'pilot-cancel' }, { code: 'CANCEL_NOT_OBSERVED' }, { code: 'HITL_NOT_OBSERVED' },
+    { code: 'HARU_SYNC_FAILED' }, { status: 'PASS' }, { status: 'BLOCKED' }, { diagnostic: { stage: 'PILOT_RUNNING' } }])
+    assert.equal(canContinueMockScenario({ ...args, result: { ...args.result, ...change } }), false);
+});
+
+test('LIVE and an unmarked broker reject continuation before any UI or provider preparation', async () => {
+  for (const mode of ['live', 'mock']) {
+    const fake = fakeHarness(); let called = false;
+    const result = await runUiScenarios({ ...fake, mode, mockContinuation: async () => { called = true; } });
+    assert.ok(result.results.every(row => row.status === 'BLOCKED' && row.code === 'INVALID_HARNESS'));
+    assert.equal(called, false); assert.equal(fake.events.length, 0);
+  }
+});
+
+// This fake-Page test exercises the real case loop, cleanup and accounting.
+// The independently tested terminal gate is injected as a fixed local proof;
+// neither these synthetic pages nor the proof certify Windows E2E coverage.
+async function runContinuedLoop(t, options = {}, accepted = true) {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 1000 });
+  const fake = fakeHarness({ streamFailure: true, ...options });
+  let done = false, failure;
+  const pending = runUiScenarios({ ...fake, mode: 'mock', mockContinuation: async args => {
+    fake.events.push('prove-terminal');
+    assert.equal(args.previousCount, 1); assert.equal(args.result.status, 'FAIL');
+    return { status: accepted ? 'PROVEN' : 'BLOCKED', code: accepted ? 'MOCK_CONTINUATION_PROVEN' : 'MIRROR_UNPROVEN',
+      eligible: true, ledgerSafe: true, mirrorProven: accepted, domEqual: accepted, noNewRequests: accepted };
+  } });
+  pending.then(() => { done = true; }, error => { done = true; failure = error; });
+  for (let n = 0; !done && n < 2000; n += 1) {
+    for (let i = 0; i < 40; i += 1) await Promise.resolve();
+    t.mock.timers.tick(100);
+  }
+  assert.equal(done, true, 'bounded synthetic integration loop');
+  if (failure) throw failure;
+  return { result: await pending, events: fake.events };
+}
+
+test('settled failed stream continues only after cleanup, next token and fresh two-window baseline', async t => {
+  const { result, events } = await runContinuedLoop(t);
+  assert.equal(result.results[0].status, 'PASS');
+  assert.equal(result.results[1].status, 'FAIL'); assert.equal(result.results[1].code, 'STREAM_NOT_OBSERVED');
+  assert.equal(result.results[1].continuation.continued, true); assert.equal(result.allPassed, false);
+  for (const event of ['observer-remove:pilot-stream:owner', 'observer-remove:pilot-stream:haru', 'stream-cleanup'])
+    assert.ok(events.indexOf(event) < events.indexOf('prepare:pilot-hitl-reject'));
+  assert.ok(events.indexOf('prepare:pilot-hitl-reject') < events.indexOf('new-conversation:pilot-hitl-reject'));
+  for (const role of ['owner', 'haru'])
+    assert.ok(events.indexOf(`observer-install:pilot-hitl-reject:${role}`) < events.indexOf('arm:pilot-hitl-reject'));
+  assert.equal(result.results[2].status, 'FAIL', 'deliberate stop at next independent arm');
+  assert.ok(result.results.slice(3).every(row => row.status === 'BLOCKED'));
+});
+
+for (const options of [{ cleanupFailure: 'broker' }, { cleanupFailure: 'mirror' }, { cleanupFailure: 'stream' },
+  { ledgerChanged: true }]) test(`post-proof boundary ${JSON.stringify(options)} prevents all later preparation`, async t => {
+  const { result, events } = await runContinuedLoop(t, options);
+  assert.equal(result.results[1].status, 'FAIL'); assert.equal(result.results[1].code, 'STREAM_NOT_OBSERVED');
+  assert.equal(result.results[1].continuation.continued, false);
+  assert.ok(result.results.slice(2).every(row => row.status === 'BLOCKED'));
+  assert.equal(events.includes('prepare:pilot-hitl-reject'), false);
+});
+
+test('failed terminal proof cannot clear the fail-closed barrier', async t => {
+  const { result, events } = await runContinuedLoop(t, {}, false);
+  assert.equal(result.results[1].continuation.continued, false);
+  assert.equal(events.includes('prepare:pilot-hitl-reject'), false);
+});
+
+test('failed fresh-session baseline cannot arm the next request after diagnostic continuation', async t => {
+  const { result, events } = await runContinuedLoop(t, { denyFreshBaseline: true });
+  assert.equal(result.results[1].continuation.continued, true);
+  assert.equal(result.results[2].code, 'HARU_SYNC_FAILED');
+  assert.equal(events.includes('arm:pilot-hitl-reject'), false);
+  assert.ok(result.results.slice(3).every(row => row.status === 'BLOCKED'));
 });

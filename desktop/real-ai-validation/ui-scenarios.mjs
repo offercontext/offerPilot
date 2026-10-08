@@ -1,7 +1,7 @@
 // Real installed-renderer actions only. No provider calls, secrets, raw response
 // logs, traces, exports, controller replacement, or synthetic Haru publication.
 import { randomUUID } from 'node:crypto';
-import { createUiDiagnostic } from './ui-diagnostics.mjs';
+import { createUiDiagnostic, sanitizeStreamDiagnostic } from './ui-diagnostics.mjs';
 import { installMirrorObservation, readMirrorObservation, removeMirrorObservation, isRunningMirrorProven } from './mirror-observer.mjs';
 
 export const scenarios = Object.freeze([
@@ -82,7 +82,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function operationContext(deadline) {
   const diagnostic = createUiDiagnostic();
   return {
-    mark: diagnostic.mark, target: diagnostic.target, mirror: diagnostic.mirror, diagnostic: diagnostic.snapshot,
+    mark: diagnostic.mark, target: diagnostic.target, mirror: diagnostic.mirror, stream: diagnostic.stream, diagnostic: diagnostic.snapshot,
     timeout(cap = 15_000) { const left = deadline - Date.now(); if (left <= 0) fail('SUITE_DEADLINE'); return Math.max(1, Math.min(left, cap)); },
     async click(locator, diagnosticLocator = locator) { diagnostic.target(diagnosticLocator); await locator.click({ timeout: this.timeout() }); },
     async fill(locator, value) { diagnostic.target(locator); await locator.fill(value, { timeout: this.timeout() }); },
@@ -313,28 +313,70 @@ async function expandHaru(haru, ctx) {
   if (await expand.isVisible()) await ctx.click(expand);
   await ctx.visible(haru.getByRole('region', exact('Haru 对话')));
 }
-async function installStreamObservation(page) {
+export async function installStreamObservation(page) {
   await page.evaluate(() => {
     if (window.__offerpilotBoundedUiObserver) throw new Error('observer-exists');
     const target = document.querySelector('[data-onboarding-target="pilot"]');
     if (!target) throw new Error('pilot-missing');
-    const state = { updates: 0, length: 0, observer: null };
+    const state = { updates: 0, growth: 0, length: 0, observer: null, diagnosticObserver: null };
+    let currentLength = 0, currentGrowth = 0, currentGrowthWithStop = 0, replaced = false;
+    const increment = value => Math.min(255, value + 1);
+    const read = node => {
+      const nodes = node?.querySelectorAll('[class*="bubbleAssistant"]') ?? [];
+      return { length: nodes.length ? (nodes[nodes.length - 1].textContent || '').trim().length : 0,
+        stop: Boolean(node?.querySelector('[aria-label="停止当前回复"]')) };
+    };
     const observe = () => {
-      const nodes = target.querySelectorAll('[class*="bubbleAssistant"]');
-      const length = nodes.length ? (nodes[nodes.length - 1].textContent || '').trim().length : 0;
-      const stop = target.querySelector('[aria-label="停止当前回复"]');
+      const { length, stop } = read(target);
+      if (length > state.length) state.growth = increment(state.growth);
       if (length > state.length && stop) state.updates += 1;
       state.length = length;
     };
+    const current = () => {
+      const nodes = document.querySelectorAll('[data-onboarding-target="pilot"]');
+      const node = nodes.length === 1 ? nodes[0] : null;
+      if (node && node !== target) replaced = true;
+      return { node, unique: nodes.length === 1, ...read(node) };
+    };
+    const observeCurrent = () => {
+      const value = current();
+      if (value.length > currentLength) {
+        currentGrowth = increment(currentGrowth);
+        if (value.stop) currentGrowthWithStop = increment(currentGrowthWithStop);
+      }
+      currentLength = value.length;
+    };
+    state.summary = () => {
+      const value = current();
+      return { installed: true, originalTargetConnected: target.isConnected === true,
+        originalTargetCurrent: value.node === target, currentPilotUnique: value.unique,
+        targetReplacementObserved: replaced, stopPresentNow: value.stop, readFailed: false,
+        originalGrowthCount: state.growth, originalGrowthWithStopCount: Math.min(255, state.updates),
+        currentGrowthCount: currentGrowth, currentGrowthWithStopCount: currentGrowthWithStop };
+    };
     state.observer = new MutationObserver(observe);
     state.observer.observe(target, { childList: true, subtree: true, characterData: true });
+    // Diagnostic-only second observer. It never feeds the >=2 pass assertion,
+    // so a replaced container or Stop timing cannot silently broaden coverage.
+    state.diagnosticObserver = new MutationObserver(observeCurrent);
+    state.diagnosticObserver.observe(document.documentElement, { childList: true, subtree: true, characterData: true });
     window.__offerpilotBoundedUiObserver = state;
   });
+}
+export async function readStreamDiagnostic(page) {
+  let timer;
+  try {
+    return sanitizeStreamDiagnostic(await Promise.race([
+      page.evaluate(() => window.__offerpilotBoundedUiObserver?.summary?.() ?? { installed: false }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('STREAM_READ_FAILED')), 5000); }),
+    ]));
+  } catch { return sanitizeStreamDiagnostic({ readFailed: true }); }
+  finally { clearTimeout(timer); }
 }
 export async function removeStreamObservation(page) {
   let timer;
   try {
-    await Promise.race([page.evaluate(() => { window.__offerpilotBoundedUiObserver?.observer.disconnect(); delete window.__offerpilotBoundedUiObserver; }),
+    await Promise.race([page.evaluate(() => { window.__offerpilotBoundedUiObserver?.observer.disconnect(); window.__offerpilotBoundedUiObserver?.diagnosticObserver?.disconnect(); delete window.__offerpilotBoundedUiObserver; }),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new UiFailure('UI_ACTION_FAILED')), 5000); })]);
   } catch { fail('UI_ACTION_FAILED'); }
   finally { clearTimeout(timer); }
@@ -372,13 +414,13 @@ const PROMPTS = Object.freeze({
   'pilot-cancel': '这是虚构软件验收。不要调用任何工具或读取资料，请连续写二十段关于软件测试边界条件的说明，每段约六十字。',
   'pilot-hitl-reject': '这是虚构隔离验收。请直接调用 create_application 工具，新建公司“合成待拒绝公司”、岗位“合成待拒绝岗位”的投递，status为applied，notes为空；不要先查询其他记录。只提出这一次写入，等待我确认。',
 });
-async function runPilot({ page, haru, api, broker, fixture, capture, current, ctx }) {
+async function runPilot({ page, haru, api, broker, fixture, capture, current, ctx, freshSessionRequired }) {
   await openPilot(page, ctx);
   await expandHaru(haru, ctx);
   ctx.mark('PILOT_COMPOSE');
   await ctx.fill(composer(page), PROMPTS[current.id]);
   if (current.id === 'pilot-stream') await installStreamObservation(page);
-  if (['pilot-stream', 'pilot-cancel'].includes(current.id)) {
+  if (['pilot-stream', 'pilot-cancel'].includes(current.id) || freshSessionRequired) {
     ctx.mark('PILOT_OBSERVER_INSTALL');
     try { await installMirrorObservation(page, haru, current.id); }
     catch { ctx.mirror({ invalidObservation: true, observationReadFailed: true }); fail('HARU_SYNC_FAILED'); }
@@ -594,12 +636,22 @@ export function assertProviderCase(snapshot, caseId, previousCount) {
     caseId === 'pilot-cancel' ? 'CANCEL_NOT_OBSERVED' : 'PROVIDER_BUDGET_BLOCKED');
 }
 
-export async function runUiScenarios({ page, haru, api, broker, fixture, capture, deadlineMs = Date.now() + 600_000 } = {}) {
+export function canContinueMockScenario({ mode, result, proof, cleanupPassed, ledgerBefore, ledgerAfter }) {
+  return mode === 'mock' && cleanupPassed === true && result?.id === 'pilot-stream'
+    && result.status === 'FAIL' && result.code === 'STREAM_NOT_OBSERVED'
+    && result.diagnostic?.stage === 'PILOT_STREAM_READBACK'
+    && proof?.status === 'PROVEN' && proof.code === 'MOCK_CONTINUATION_PROVEN'
+    && ['eligible', 'ledgerSafe', 'mirrorProven', 'domEqual', 'noNewRequests'].every(key => proof[key] === true)
+    && ledgerBefore !== undefined && JSON.stringify(ledgerBefore) === JSON.stringify(ledgerAfter);
+}
+export async function runUiScenarios({ page, haru, api, broker, fixture, capture, mode = 'live', mockContinuation, deadlineMs = Date.now() + 600_000 } = {}) {
   const results = [];
+  const continuedSettledFailures = new Set();
   let blocked = null;
   const valid = page && haru && typeof api === 'function' && broker && typeof broker.prepareCase === 'function'
     && typeof broker.armCase === 'function' && typeof broker.cancelCase === 'function'
-    && typeof broker.snapshot === 'function' && fixture && Number.isFinite(deadlineMs);
+    && typeof broker.snapshot === 'function' && fixture && Number.isFinite(deadlineMs)
+    && (mockContinuation === undefined || (mode === 'mock' && broker.mode === 'MOCK' && typeof mockContinuation === 'function'));
   if (!valid) blocked = 'INVALID_HARNESS';
   const deadline = Math.min(deadlineMs, Date.now() + 600_000);
   const ctx = operationContext(deadline);
@@ -608,11 +660,19 @@ export async function runUiScenarios({ page, haru, api, broker, fixture, capture
     if (Date.now() >= deadline) { blocked = 'SUITE_DEADLINE'; results.push({ id: current.id, status: 'BLOCKED', code: blocked, checks: {} }); continue; }
     ctx.mark('CASE_START');
     let requestCountBefore = 0;
+    let continuationProof, continuationLedger;
+    let caseCleanupPassed = true;
+    // The immediate next Pilot case cannot inherit the completed stream's
+    // positive ID. Prove both real windows reached a fresh idle/null baseline
+    // after New Conversation, before arming or sending the new-token request.
+    const freshSessionRequired = mode === 'mock' && current.id === 'pilot-hitl-reject'
+      && continuedSettledFailures.has('pilot-stream');
     try {
       const initialLedger = broker.snapshot();
+      const accounted = results.filter(row => row.status === 'PASS' || continuedSettledFailures.has(row.id));
       check(Array.isArray(initialLedger.requests) && initialLedger.sentRequests === initialLedger.requests.length
-        && initialLedger.sentRequests <= 8 && initialLedger.sentRequests === results.filter((row) => row.status === 'PASS').length
-        && initialLedger.requests.every((row) => results.some((done) => done.id === row.caseId && done.status === 'PASS'))
+        && initialLedger.sentRequests <= 8 && initialLedger.sentRequests === accounted.length
+        && initialLedger.requests.every((row) => accounted.some((done) => done.id === row.caseId))
         && new Set(initialLedger.requests.map((row) => row.caseId)).size === initialLedger.requests.length, 'UNEXPECTED_PROVIDER_REQUESTS');
       check(!initialLedger.closed && !initialLedger.active
         && initialLedger.settledMicroCny + initialLedger.retainedMicroCny + initialLedger.reserveMicroCny <= initialLedger.budgetMicroCny, 'PROVIDER_BUDGET_BLOCKED');
@@ -620,7 +680,7 @@ export async function runUiScenarios({ page, haru, api, broker, fixture, capture
       // Broker is the final spending authority. prepare/arm throws on a sealed
       // or insufficient budget; no retry, alternative model, or direct API.
       await configureCase(page, broker, current, ctx);
-      const args = { page, haru, api, broker, fixture, capture, current, ctx };
+      const args = { page, haru, api, broker, fixture, capture, current, ctx, freshSessionRequired };
       const checks = current.id === 'connection' ? await runConnection(args)
         : current.id.startsWith('pilot-') ? await runPilot(args)
           : current.id === 'interview-preparation' ? await runInterview(args)
@@ -634,32 +694,64 @@ export async function runUiScenarios({ page, haru, api, broker, fixture, capture
     } catch (error) {
       const code = safeUiCode(error);
       const isBlocked = ['SUITE_DEADLINE', 'PROVIDER_BUDGET_BLOCKED'].includes(code);
+      if (current.id === 'pilot-stream') {
+        ctx.stream(await readStreamDiagnostic(page));
+        try { ctx.mirror(mirrorDiagnostic(await readMirrorObservation(page, haru), current.id)); }
+        catch { ctx.mirror({ observationReadFailed: true, invalidObservation: true }); }
+      }
       const diagnostic = await ctx.diagnostic();
       if (!isBlocked && current.id !== 'connection' && typeof capture === 'function') {
         for (const [screen, surface] of [['failure-owner', page], ['failure-haru', haru]]) {
           try { await capture(screen, surface, current.id); } catch { /* Never replace the primary failure. */ }
         }
       }
-      results.push({ id: current.id, status: isBlocked ? 'BLOCKED' : 'FAIL', code, checks: {}, diagnostic });
+      const failedResult = { id: current.id, status: isBlocked ? 'BLOCKED' : 'FAIL', code, checks: {}, diagnostic };
+      results.push(failedResult);
       blocked = isBlocked ? code : 'PREVIOUS_SCENARIO_FAILED';
+      if (typeof mockContinuation === 'function' && current.id === 'pilot-stream'
+        && code === 'STREAM_NOT_OBSERVED' && diagnostic.stage === 'PILOT_STREAM_READBACK') {
+        try {
+          continuationProof = await mockContinuation({ page, haru, broker, result: failedResult,
+            previousCount: requestCountBefore, deadlineMs: deadline });
+          continuationLedger = broker.snapshot();
+          failedResult.continuation = { ...continuationProof, cleanupPassed: false, continued: false };
+        } catch { /* Keep the original failure and stop; no fallback approval. */ }
+      }
     } finally {
       try { await broker.cancelCase(); } catch {
+        caseCleanupPassed = false;
         blocked = 'PROVIDER_BUDGET_BLOCKED';
-        results[results.length - 1] = { id: current.id, status: 'BLOCKED', code: blocked, checks: {} };
+        const previous = results.at(-1);
+        results[results.length - 1] = { ...previous, checks: { ...previous.checks, brokerCleanupFailed: true },
+          ...(previous.status === 'PASS' ? { status: 'BLOCKED', code: blocked } : {}) };
       }
-      if (['pilot-stream', 'pilot-cancel'].includes(current.id)) {
+      if (['pilot-stream', 'pilot-cancel'].includes(current.id) || freshSessionRequired) {
         try { await removeMirrorObservation(page, haru); }
         catch {
+          caseCleanupPassed = false;
           blocked = 'PREVIOUS_SCENARIO_FAILED';
           ctx.mark('CASE_CLEANUP');
           recordObserverCleanupFailure(results, current.id, 'mirror', await ctx.diagnostic());
         }
       }
       if (current.id === 'pilot-stream') { try { await removeStreamObservation(page); } catch {
+        caseCleanupPassed = false;
         blocked = 'PREVIOUS_SCENARIO_FAILED';
         ctx.mark('CASE_CLEANUP');
         recordObserverCleanupFailure(results, current.id, 'stream', await ctx.diagnostic());
       } }
+      const failedResult = results.at(-1);
+      if (failedResult?.continuation) {
+        failedResult.continuation.cleanupPassed = caseCleanupPassed;
+        try {
+          if (canContinueMockScenario({ mode, result: failedResult, proof: continuationProof,
+            cleanupPassed: caseCleanupPassed, ledgerBefore: continuationLedger, ledgerAfter: broker.snapshot() })) {
+            failedResult.continuation.continued = true;
+            continuedSettledFailures.add(current.id);
+            blocked = null;
+          }
+        } catch { /* Unreadable ledger is not permission to continue. */ }
+      }
     }
   }
   return { schemaVersion: 1, results, allPassed: results.length === scenarios.length && results.every((item) => item.status === 'PASS') };

@@ -56,6 +56,34 @@ test('result allowlist strips unknown payloads and rejects arbitrary check keys'
   result[0].checks.fakePrivateIdentifier = true;
   assert.throws(() => safeResults(result));
 });
+const continuationRows = () => {
+  const result = rows();
+  result[1] = { id: 'pilot-stream', status: 'FAIL', code: 'STREAM_NOT_OBSERVED', checks: {},
+    diagnostic: { stage: 'PILOT_STREAM_READBACK' }, continuation: { status: 'PROVEN', code: 'MOCK_CONTINUATION_PROVEN',
+      eligible: true, ledgerSafe: true, mirrorProven: true, domEqual: true, noNewRequests: true,
+      cleanupPassed: true, continued: true } };
+  return result;
+};
+test('MOCK continuation is explicit fixed-field FAIL evidence, never LIVE or a PASS override', () => {
+  const result = continuationRows(); result[1].continuation.raw = 'private-terminal-content';
+  const safe = safeResults(result, true);
+  assert.equal(safe[1].status, 'FAIL'); assert.equal(safe[1].continuation.continued, true);
+  assert.doesNotMatch(JSON.stringify(safe), /private-terminal-content|raw/);
+  assert.throws(() => safeResults(result), { safeCode: 'SCENARIO_EVIDENCE_INVALID' });
+  for (const changes of [{ status: 'PASS' }, { id: 'connection' }, { code: 'HARU_SYNC_FAILED' },
+    { diagnostic: { stage: 'PILOT_RUNNING' } }]) {
+    const changed = continuationRows(); Object.assign(changed[1], changes);
+    assert.throws(() => safeResults(changed, true), { safeCode: 'SCENARIO_EVIDENCE_INVALID' });
+  }
+  for (const key of ['eligible', 'ledgerSafe', 'mirrorProven', 'domEqual', 'noNewRequests', 'cleanupPassed']) {
+    const changed = continuationRows(); changed[1].continuation[key] = false;
+    assert.throws(() => safeResults(changed, true), { safeCode: 'SCENARIO_EVIDENCE_INVALID' });
+  }
+  for (const changes of [{ status: 'PRIVATE' }, { code: 'PRIVATE' }, { cleanupPassed: 'true' }]) {
+    const changed = continuationRows(); Object.assign(changed[1].continuation, changes);
+    assert.throws(() => safeResults(changed, true), { safeCode: 'SCENARIO_EVIDENCE_INVALID' });
+  }
+});
 test('numeric ledger does not serialize arbitrary fields or credential-shaped strings', () => {
   const reasons = 'AUTH ROUTE CLOSED DEADLINE UNARMED BUSY CASE BUDGET COUNT BODY MODEL PARAMETER CANCELLED DISCONNECT TIMEOUT LEDGER UPSTREAM REDIRECT PROTOCOL USAGE SETTLED EXPIRED UPSTREAM_DISCONNECT'.split(' ');
   const snapshot = { model: 'deepseek-flash', budgetMicroCny: 10000000, reserveMicroCny: 3000000, sentRequests: 1, settledMicroCny: 20,
