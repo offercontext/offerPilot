@@ -19,7 +19,7 @@ export const SURFACE_RULES = Object.freeze([
   ['S02',null,null,['添加投递']],
   ['S03',null,'[role="tablist"][aria-label="投递详情分段"]'],
   ['S04',null,'[role="menu"]'],
-  ['S05',null,null,['投递岗位资料','岗位资料历史']],
+  ['S05',null,'#application-jd-text',['投递岗位资料','岗位资料历史']],
   ['S06',null,'[data-testid="schedule-event-form"]'],
   ['S07',null,'section[aria-label="投递准备"]'],
   ['S08',null,'[data-testid="interview-readiness-center"][data-readiness-mode="real"]'],

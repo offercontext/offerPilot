@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events';
 import { createCoverage, observeRuntime } from '../coverage-recorder.mjs';
 import { PIN } from '../contract.mjs';
 import { markUiStep } from '../ui-locators.mjs';
+import { rootSweep } from '../screen-coverage.mjs';
 
 async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrongHeight=false, columnOverflow=0, clippedControls=0, cardClipped=0, columnCount=6, unownedControls=0, companion=false, mainIdentity=true }={}) {
   const evidence = await fs.mkdtemp(path.join(os.tmpdir(), 'offerpilot-unit-coverage-'));
@@ -223,4 +224,41 @@ test('companion screenshot alone cannot satisfy main target or manufacture funct
   });
   assert.equal(qa.report.cases[0].outcome,'FAIL');
   assert.equal(qa.report.summary.functionalPasses,0);
+});
+
+for (const wrapped of [false, true]) {
+  test(`strict ORT safe-reload failure (${wrapped ? 'wrapped cleanup' : 'direct guard'}) cannot trigger recorder reload or later UI actions`, async t => {
+    const { qa, evidence, reloads } = await fixture(t);
+    await qa.run('S30', 'ort-safe-reload-denied', ['设置', '语音'], async () => {
+      const denied = new Error('open editing dialog blocks ORT reload');
+      throw wrapped ? new AggregateError([denied, new Error('cleanup reload unsafe')], 'ORT probe and cleanup failed') : denied;
+    }, 'interaction', { recoveryReload: false });
+    assert.equal(reloads(), 0);
+    assert.equal(qa.canProceed(), false);
+    assert.equal(qa.blockedReason(), 'previous-case-unsafe-ui-recovery');
+    let nextAction = false;
+    await qa.run('R13', 'later-navigation', ['设置'], async () => { nextAction = true; });
+    assert.equal(nextAction, false);
+    // No page object is needed: the sweep must stop before any navigation.
+    await rootSweep(qa, {}, 'populated-to-supported-extent');
+    assert.ok(qa.report.cases.slice(2).every(item => item.outcome === 'BLOCKED'
+      && item.reason === 'previous-case-unsafe-ui-recovery'));
+    const report = JSON.parse(await fs.readFile(path.join(evidence, 'coverage.json'), 'utf8'));
+    assert.equal(report.uiRecoveryBlocked, true);
+    assert.equal(report.cases[0].outcome, 'FAIL');
+    assert.equal(report.cases[0].recovery, 'disabled-by-case-safety-policy');
+    assert.ok(report.cases[0].screenshots.length > 0);
+    assert.equal(report.cases[1].outcome, 'BLOCKED');
+    assert.equal(report.cases[1].reason, 'previous-case-unsafe-ui-recovery');
+  });
+}
+test('successful strict case does not block later work and ordinary failure still recovers normally', async t => {
+  const { qa, reloads } = await fixture(t);
+  await qa.run('S30', 'ort-safe-pass', ['设置'], async () => { qa.observed('safe initialized result'); }, 'interaction', { recoveryReload: false });
+  assert.equal(qa.report.cases[0].outcome, 'PASS');
+  assert.equal(qa.canProceed(), true);
+  await qa.run('R13', 'ordinary-failure', ['设置'], async () => { throw new Error('ordinary synthetic UI failure'); });
+  assert.equal(reloads(), 1);
+  assert.equal(qa.report.cases[1].recovery, 'ordinary-reload-no-write-pending');
+  assert.equal(qa.canProceed(), true);
 });

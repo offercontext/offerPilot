@@ -5,10 +5,10 @@ export const UI_STEPS = Object.freeze(['navigation', 'palette-open', 'palette-qu
   'button-action', 'button-assertion', 'dialog-dismiss', 'form-fill', 'form-validation',
   'ui-submit', 'response-wait', 'response-validate', 'readback', 'selection-open',
   'selection-search', 'selection-confirm', 'viewport-set', 'screenshot-capture',
-  'geometry-check', 'runtime-check', 'recovery-reload', 'startup-reload', 'root-landmark', 'companion-readback', 'companion-context', 'drawer-close-hit', 'offer-local-scroll', 'offer-local-scroll-verify', 'offer-second-preflight', 'companion-visual', 'offer-return-detail', 'offer-reopen-comparison']);
+  'geometry-check', 'runtime-check', 'recovery-reload', 'startup-reload', 'root-landmark', 'companion-readback', 'companion-context', 'drawer-close-hit', 'offer-local-scroll', 'offer-local-scroll-verify', 'offer-second-preflight', 'companion-visual', 'offer-return-detail', 'offer-reopen-comparison', 'settings-export-profile', 'settings-export-click', 'settings-export-native-terminal', 'settings-export-file-verify', 'clipboard-instrumentation', 'clipboard-0-cancel', 'clipboard-1-allow', 'clipboard-2-cancel', 'installed-ort-owner', 'installed-ort-document-csp', 'installed-ort-initialize']);
 export const UI_CONTROLS = Object.freeze(['unspecified', 'quick-open', 'button-pattern',
   '今日复习', '题库', '复盘重点练习', '快速模拟', '展开到 Pilot 工作区', '发送',
-  'application', 'application-jd', 'schedule', 'question', 'resume', 'knowledge', 'story', 'offer', 'pilot',
+  'application', 'application-jd', 'schedule', 'question', 'resume', 'knowledge', 'story', 'offer', 'pilot', 'settings-export', 'offline-ort',
   '取消', 'Cancel', '关闭', 'Close', '确定', 'OK', '创建', '保存', '上传', '加入',
   '返回上一层', '退出沉浸模式，返回原页面', '切换明暗模式', '核对并检查重复', '确认保存',
   '问 Pilot', '保存岗位资料', '查看历史', '调整时间', '下一个月', '上一个月', '今天', '选择面试并开始复盘', '保存复盘',
@@ -18,7 +18,7 @@ export const UI_CONTROLS = Object.freeze(['unspecified', 'quick-open', 'button-p
   '上传 Markdown / Text', '上传图文资料', '粘贴正文', '开始导入', '编辑标题', '永久删除该资料',
   '新建故事', '手动编写并保存', '确认手动保存故事版本', '查看版本', '关闭历史',
   '录入第一份 Offer', '录入另一份 Offer', '返回 Offer 中心', '调整对比项', '恢复全部明细', '准备谈薪',
-  '上下文面板', '打开 Pilot tab', '重置 Haru 位置', '配置 AI', '返回设置', '添加偏好']);
+  '上下文面板', '打开 Pilot tab', '重置 Haru 位置', '配置 AI', '返回设置', '添加偏好', '导出备份', '导出完整数据']);
 export function bindUiSteps(page, reporter) { reports.set(page, reporter); }
 export function validUiStep(step, control = 'unspecified') {
   assert.ok(UI_STEPS.includes(step), 'unapproved diagnostic step');

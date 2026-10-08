@@ -13,6 +13,9 @@ import { observeDevToolsDisabled } from './devtools-probe.mjs';
 import { waitForDesktopSurfaces, readDesktopSecurity, validatePartitionIsolation } from './desktop-surfaces.mjs';
 import { installTrayObserver, invokeTrayAction, probeStorageIsolation, probeHaruApiDeny, probeHaruStatusMirror } from './haru-probes.mjs';
 import { probeInstalledCapabilities, readPermissionDecisions, assertDeniedPermissions } from './capability-probes.mjs';
+import { probeInstalledClipboard } from './clipboard-probe.mjs';
+import { probeInstalledOfflineOrt } from './offline-ort-probe.mjs';
+import { probeSettingsExport } from './settings-export-probes.mjs';
 import { verifyHaruVisual } from './haru-visual.mjs';
 import { verifyApplicationDetail } from './detail-ui.mjs';
 import { createCoverage, observeRuntime } from './coverage-recorder.mjs';
@@ -437,11 +440,19 @@ try {
   await verifyApplicationDetail(first.page, SYNTHETIC, (step) => { stage = `saved-detail-${step}`; });
   await screenshot(first.page, '02-saved-detail');
   await openList(first.page, record, '03-saved-list');
-  await extendedFlows(coverage, first.page, record);
+  await extendedFlows(coverage, first.page, record, {
+    clipboard: options => probeInstalledClipboard({ app: first.app, page: first.page, ...options }),
+    offlineOrt: options => probeInstalledOfflineOrt({ app: first.app, page: first.page, installDir, ...options }),
+    settingsExport: options => probeSettingsExport({ app: first.app, page: first.page,
+      dataDirectory: path.join(userData, 'data'), temporaryDirectory: scratch,
+      freshProfileConfirmed: report.stages.some(item => item.name === 'fresh-real-profile' && item.freshRealProfile === true),
+      ...options }),
+  });
   report.screenCoverage = coverage.report.summary;
   report.screenCoverageFile = 'coverage.json';
   await writeReport();
   stage = 'coverage-unresolved-write-barrier';
+  assert.equal(coverage.canProceed(), true, 'unsafe UI recovery blocks further navigation and persistence checks');
   assert.equal(first.runtime.hasPendingWrite(), false, 'unresolved UI write blocks further UI mutation/restart steps');
   stage = 'theme-ui-toggle';
   const oldTheme = await first.page.locator('html').getAttribute('data-theme');

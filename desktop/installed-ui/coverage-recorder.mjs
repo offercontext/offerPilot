@@ -18,6 +18,7 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     syntheticProfileOnly: true, aiInvocationsAuthorized: false, browserFixturesUsed: false, expectedRootCases: ROOT_CASES.length,
     cases: [], screens: [], companionScreens: [], fixtures: [], summary: null, runtime: null };
   let active;
+  let unsafeUiRecovery = false;
   bindUiSteps(page, (value) => { if (active) active.lastStep = value; });
   if (haru) bindUiSteps(haru, (value) => { if (active) active.lastStep = value; });
   let sequence = 0;
@@ -106,7 +107,7 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     await save();
     return item;
   };
-  const run = async (surfaceId, caseId, uiPath, action, kind = 'interaction') => {
+  const run = async (surfaceId, caseId, uiPath, action, kind = 'interaction', { recoveryReload = true } = {}) => {
     active = { surfaceId, caseId, uiPath, kind, outcome: 'NOT RUN', assertions: [], screenshots: [], companionScreenshots: [],
       reason: 'started-not-completed', targetSurfaceConfirmed: false, visualFailures: [], lastStep: null };
     report.cases.push(active);
@@ -115,9 +116,9 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     const runtimeBefore = runtime.snapshot();
     active.runtimeBefore = runtimeBefore.classifications;
     try {
-      if (runtime.hasPendingWrite()) {
+      if (unsafeUiRecovery || runtime.hasPendingWrite()) {
         active.outcome = 'BLOCKED';
-        active.reason = 'previous-ui-write-still-pending';
+        active.reason = unsafeUiRecovery ? 'previous-case-unsafe-ui-recovery' : 'previous-ui-write-still-pending';
         return;
       }
       await action();
@@ -144,7 +145,14 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
       if (haru && surfaceId === 'S24') {
         try { await captureHaru(`${caseId}-haru-failure`); } catch { active.companionCaptureFailed = true; }
       }
-      if (!runtime.hasPendingWrite()) {
+      if (!recoveryReload) {
+        // This case owns a stricter safe-reload contract. Never override its
+        // rejection (including wrapped cleanup errors) with generic recovery,
+        // and stop later navigation/persistence against the unknown UI state.
+        unsafeUiRecovery = true;
+        report.uiRecoveryBlocked = true;
+        active.recovery = 'disabled-by-case-safety-policy';
+      } else if (!runtime.hasPendingWrite()) {
         try {
           markUiStep(page, 'recovery-reload');
           await page.reload({ waitUntil: 'domcontentloaded' });
@@ -172,6 +180,7 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     await save();
     return report;
   };
-  return { report, haru, size, capture, captureHaru, run, observed, blocked, disposition, finish, save, runtimeSnapshot: runtime.snapshot, canProceed: () => !runtime.hasPendingWrite(),
+  return { report, haru, size, capture, captureHaru, run, observed, blocked, disposition, finish, save, runtimeSnapshot: runtime.snapshot, canProceed: () => !unsafeUiRecovery && !runtime.hasPendingWrite(),
+    blockedReason: () => unsafeUiRecovery ? 'previous-case-unsafe-ui-recovery' : 'previous-ui-write-still-pending',
     fixture: (kind, id) => { if (!Number.isSafeInteger(id) || id <= 0) throw new Error('invalid fixture identity'); report.fixtures.push({ kind, id }); } };
 }

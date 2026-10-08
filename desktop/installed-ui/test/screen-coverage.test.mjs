@@ -264,3 +264,108 @@ for(const option of ['wrongOwner','wrongDetail','clippedReturnedTitle','reopenFa
   if(option==='reopenFailure')assert.deepEqual(f.diagnostics.at(-1),{step:'offer-reopen-comparison',control:'offer'});
  });
 }
+
+test('Settings exports use each real button for cancel/save, retain per-path screenshot evidence, and require a native probe', async () => {
+  const { settingsExportFlows } = await import('../screen-coverage.mjs');
+  const f = navigationPage();
+  const original = f.page.getByRole;
+  const actions = [];
+  function exportButton(label) {
+    return { page: () => f.page,
+      filter({ hasText } = {}) { return hasText ? exportButton(['导出备份', '导出完整数据'].find(value => hasText.test(value))) : this; },
+      or(other) { assert.equal(other.label, label); return this; }, label,
+      async scrollIntoViewIfNeeded() { actions.push(['scroll', label]); },
+      async click(options) { actions.push([options?.trial ? 'trial' : 'click', label]); assert.ok(!options || options.trial === true); },
+      async waitFor() {},
+    };
+  }
+  f.page.getByRole = (role, options) => role === 'region' && options.name === '数据与备份'
+    ? { page: () => f.page, getByRole: (_role, opts) => exportButton(opts?.name) }
+    : original(role, options);
+  const cases = []; const screens = []; const observed = [];
+  const qa = { run: async (surface, id, uiPath, fn) => { cases.push([surface, id, uiPath]); await fn(); },
+    capture: async (label, extra) => screens.push([label, extra]), observed: text => observed.push(text) };
+  const probes = [];
+  await settingsExportFlows(qa, f.page, async ({ kind, mode, clickButton, setStage }) => {
+    probes.push([kind, mode]);
+    setStage('settings-export-click');
+    await clickButton(kind === 'settings' ? '导出备份' : '导出完整数据');
+    return { kind, mode, transientExportRemoved: true };
+  });
+  assert.deepEqual(probes, [['settings', 'cancel'], ['settings', 'save'], ['workspace', 'cancel'], ['workspace', 'save']]);
+  assert.deepEqual(actions.filter(([action]) => action === 'click'), [['click', '导出备份'], ['click', '导出备份'], ['click', '导出完整数据'], ['click', '导出完整数据']]);
+  assert.equal(cases.length, 2); assert.equal(screens.length, 6); assert.equal(observed.length, 2);
+  assert.equal(screens.filter(([, extra]) => extra?.settingsExport?.transientExportRemoved).length, 4);
+  await assert.rejects(settingsExportFlows(qa, f.page), /real installed Settings export probe required/);
+});
+
+test('Settings export probe failure cannot be replaced by a toast or a PASS assertion', async () => {
+  const { settingsExportFlows } = await import('../screen-coverage.mjs');
+  const f = navigationPage();
+  const original = f.page.getByRole;
+  const button = { page: () => f.page, filter() { return this; }, or() { return this; },
+    scrollIntoViewIfNeeded: async () => {}, click: async () => {}, waitFor: async () => {} };
+  f.page.getByRole = (role, options) => role === 'region' && options.name === '数据与备份'
+    ? { page: () => f.page, getByRole: () => button } : original(role, options);
+  let observed = false;
+  const qa = { run: async (_surface, _id, _path, fn) => fn(), capture: async () => {}, observed: () => { observed = true; } };
+  await assert.rejects(settingsExportFlows(qa, f.page, async () => { throw new Error('native download did not complete'); }), /did not complete/);
+  assert.equal(observed, false);
+});
+
+test('native clipboard integration scopes the real prepared JD copy button and retains each result capture', async () => {
+  const { verifySyntheticClipboard } = await import('../screen-coverage.mjs');
+  const actions = []; const screenshots = [];
+  const copyButton = { waitFor: async () => actions.push('visible'), scrollIntoViewIfNeeded: async () => actions.push('scroll'),
+    click: async options => { assert.deepEqual(options, { trial: true }); actions.push('actionable'); } };
+  const page = { getByRole(role, options) {
+    assert.equal(role, 'tabpanel'); assert.deepEqual(options, { name: '准备', exact: true });
+    return { getByRole(buttonRole, buttonOptions) {
+      assert.equal(buttonRole, 'button'); assert.deepEqual(buttonOptions, { name: '复制来源', exact: true }); return copyButton;
+    } };
+  } };
+  const qa = { capture: async (label, evidence) => screenshots.push([label, evidence]) };
+  await verifySyntheticClipboard(qa, page, async options => {
+    assert.equal(options.copyButton, copyButton);
+    assert.equal(options.expectedText, 'https://example.invalid/qa-local-only');
+    for (const label of ['clipboard-0-cancel', 'clipboard-1-allow', 'clipboard-2-cancel']) {
+      options.setStage(label); await options.capture(label);
+    }
+    return { preExistingClipboardNeverRead: true };
+  });
+  assert.deepEqual(actions, ['visible', 'scroll', 'actionable']);
+  assert.equal(screenshots.length, 4);
+  assert.equal(screenshots.at(-1)[1].clipboard.preExistingClipboardNeverRead, true);
+  await assert.rejects(verifySyntheticClipboard(qa, page), /real installed clipboard probe required/);
+  await assert.rejects(verifySyntheticClipboard(qa, page, async () => { throw new Error('native copy failed'); }), /native copy failed/);
+});
+
+test('offline runtime integration uses non-editing Settings and gates both reloads against pending writes and dialogs', async () => {
+  const { offlineOrtFlow } = await import('../screen-coverage.mjs');
+  async function run(options = {}) {
+    const f = navigationPage(); const original = f.page.getByRole;
+    f.page.url = () => `http://127.0.0.1:8000/?view=${options.wrongRoute ? 'board' : 'settings'}`;
+    f.page.getByRole = (role, value) => role === 'dialog'
+      ? { filter: filter => { assert.deepEqual(filter, { visible: true }); return { count: async () => options.openDialog ? 1 : 0 }; } }
+      : original(role, value);
+    const locator = f.page.locator;
+    f.page.locator = selector => selector === '#voice-settings-title'
+      ? { scrollIntoViewIfNeeded: async () => {}, waitFor: async () => {} } : locator(selector);
+    const screenshots = []; let observed = false; let reloads = 0;
+    const qa = { run: async (_id, _case, _path, action, kind, policy) => { assert.equal(kind, 'interaction'); assert.deepEqual(policy, { recoveryReload: false }); return action(); }, capture: async (label, evidence) => screenshots.push([label, evidence]),
+      canProceed: () => !options.pendingWrite, observed: () => { observed = true; } };
+    await offlineOrtFlow(qa, f.page, async ({ beforeReload, setStage }) => {
+      setStage('installed-ort-owner');
+      await beforeReload('before-probe'); reloads++;
+      setStage('installed-ort-initialize');
+      if (options.initializeFails) throw new Error('WASM failed');
+      await beforeReload('release-probe'); reloads++;
+      return { mainDocumentProductionCspVerified: true, whisperTranscriptionValidated: false };
+    });
+    return { screenshots, observed, reloads };
+  }
+  const passed = await run();
+  assert.equal(passed.reloads, 2); assert.equal(passed.observed, true); assert.equal(passed.screenshots.length, 2);
+  assert.equal(passed.screenshots[1][1].offlineOrt.whisperTranscriptionValidated, false);
+  for (const option of ['pendingWrite', 'wrongRoute', 'openDialog', 'initializeFails']) await assert.rejects(run({ [option]: true }));
+});

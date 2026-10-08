@@ -5,6 +5,7 @@ import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
 import { waitForInputValue, selectSegment } from './ui-state.mjs';
 import { readSurfaceIdentity } from './surface-identity.mjs';
 import { verifyHaruVisual } from './haru-visual.mjs';
+import { SETTINGS_EXPORTS } from './settings-export-probes.mjs';
 import { measureControlHit, measureScrollableAncestors, waitForHorizontalWheel } from './control-hit.mjs';
 
 const root = (view) => ROOTS.find((item) => item.view === view);
@@ -190,7 +191,7 @@ async function createApplication(page, data, qa) {
 
 export async function rootSweep(qa, page, state) {
   if (!qa.canProceed()) {
-    for (const item of ROOTS) await qa.disposition(item.id, `${state}-${item.view}`, 'BLOCKED', 'previous-ui-write-still-pending');
+    for (const item of ROOTS) await qa.disposition(item.id, `${state}-${item.view}`, 'BLOCKED', qa.blockedReason?.() || 'previous-ui-write-still-pending');
     return;
   }
   for (const mode of ['dark', 'light']) {
@@ -225,7 +226,7 @@ export async function rootSweep(qa, page, state) {
   }
 }
 
-export async function extendedFlows(qa, page, initialRecord) {
+export async function extendedFlows(qa, page, initialRecord, { settingsExport, clipboard, offlineOrt } = {}) {
   const apps = [];
   qa.fixture('application', initialRecord.id);
   await theme(page, 'dark');
@@ -353,7 +354,7 @@ export async function extendedFlows(qa, page, initialRecord) {
     await qa.size(1280);
     qa.observed('real keyboard horizontal scroll reaches both ends; scroll hint visible; right-hand Pilot target actionable');
   });
-  await applicationDetailFlows(qa, page, primary);
+  await applicationDetailFlows(qa, page, primary, clipboard);
   await questionFlows(qa, page);
   await resumeFlows(qa, page);
   await interviewFlows(qa, page);
@@ -361,11 +362,13 @@ export async function extendedFlows(qa, page, initialRecord) {
   await storyFlows(qa, page);
   await offerFlows(qa, page, apps.length >= 2 ? apps.slice(0, 2) : [initialRecord]);
   await pilotSettingsFlows(qa, page, primary);
+  await settingsExportFlows(qa, page, settingsExport);
+  await offlineOrtFlow(qa, page, offlineOrt);
   await rootSweep(qa, page, 'populated-to-supported-extent');
   await qa.disposition('S10', 'ai-interview-studio', 'BLOCKED', 'real session, generated questions and feedback require unapproved AI; no hidden-state injection', ['面试', '面试练习']);
-  await qa.disposition('S28', 'backup-download-restore', 'BLOCKED', 'desktop download policy remains intact; no backup restore or user-data deletion attempted', ['设置', '数据与备份']);
-  await qa.disposition('S30', 'live-voice-and-model-download', 'BLOCKED', 'microphone and model download not authorized; visible settings only', ['设置', '语音']);
-  await qa.disposition('S31', 'raw-diagnostic-log-content', 'NOT RUN', 'no raw logs exported or captured; bounded runtime classifications are recorded separately', ['设置', '查看运行日志与诊断']);
+  await qa.disposition('S28', 'backup-restore-unavailable', 'N/A', 'this product build provides export only; no backup restore UI, API or CLI exists; no profile restore attempted', ['设置', '数据与备份']);
+  await qa.disposition('S30', 'live-voice-and-model-download', 'BLOCKED', 'microphone, model download and speech inference not authorized; installed ORT initialization is recorded separately', ['设置', '语音']);
+  await qa.disposition('S31', 'raw-diagnostic-log-content', 'NOT RUN', 'raw diagnostic log UI not opened or captured; transient synthetic full-backup bytes are removed after validation; only bounded runtime classifications are retained', ['设置', '查看运行日志与诊断']);
   await qa.disposition('N01', 'help-and-knowledge-brief', 'N/A', 'no dedicated Help page or enabled Knowledge Brief in this build');
   await qa.run('RUNTIME', 'runtime-health', ['renderer diagnostics'], async () => {
     const runtime = qa.runtimeSnapshot();
@@ -379,7 +382,7 @@ export async function extendedFlows(qa, page, initialRecord) {
   if (qa.canProceed()) await navigate(page, 'applications-list');
 }
 
-async function applicationDetailFlows(qa, page, record) {
+async function applicationDetailFlows(qa, page, record, clipboard) {
   await qa.run('S03', 'application-detail-tabs-back', ['投递', '列表', '投递详情'], async () => {
     await openApplication(page, record);
     const tabs = page.getByRole('tablist', exact('投递详情分段'));
@@ -440,6 +443,12 @@ async function applicationDetailFlows(qa, page, record) {
     await qa.capture('jd-history-two-versions');
     await closeDialog(page, '岗位资料历史');
     qa.observed('two UI-created JD versions; current text readback; visible history; no source URL visit');
+  });
+  await qa.run('S05', 'jd-source-native-clipboard', ['投递详情', '准备', '复制来源'], async () => {
+    await openApplication(page, record);
+    await page.getByRole('tablist', exact('投递详情分段')).getByRole('tab', exact('准备')).click();
+    await verifySyntheticClipboard(qa, page, clipboard);
+    qa.observed('real JD copy uses three fresh native confirmations: cancel, allow, cancel; synthetic baseline is written before clipboard readback; no pre-existing clipboard content read');
   });
   await qa.run('S07', 'application-material-entry', ['投递详情', '准备', '继续准备'], async () => {
     await openApplication(page, record);
@@ -1211,3 +1220,59 @@ async function pilotSettingsFlows(qa, page, record) {
 
 // Exported for isolated helper preflight; these functions still drive only the public UI.
 export { navigate, createApplication, verifyStandaloneHaruContext, recordDesktopMascotScope, closeComparisonSettings, verifyNarrowOfferAction, verifyReopenedResume };
+
+export async function settingsExportFlows(qa, page, probe) {
+  for (const [kind, spec] of Object.entries(SETTINGS_EXPORTS)) {
+    await qa.run('S28', `settings-${kind}-export-save-cancel`, ['设置', '数据与备份', spec.label], async () => {
+      assert.equal(typeof probe, 'function', 'real installed Settings export probe required');
+      await navigate(page, 'settings');
+      const section = page.getByRole('region', exact('数据与备份'));
+      const button = btn(section, spec.label);
+      await button.scrollIntoViewIfNeeded();
+      await button.click({ trial: true });
+      await qa.capture(`settings-${kind}-export-before`);
+      for (const mode of ['cancel', 'save']) {
+        const exportEvidence = await probe({ kind, mode,
+          clickButton: async label => { assert.equal(label, spec.label); await button.click(); },
+          setStage: step => markUiStep(page, step, 'settings-export'),
+        });
+        await button.waitFor({ state: 'visible' });
+        await button.click({ trial: true });
+        await qa.capture(`settings-${kind}-export-${mode}`, { settingsExport: exportEvidence });
+      }
+      qa.observed('real Settings button GET and owner Blob; native cancel leaves no file; completed save matches the actual response after product JSON serialization or unchanged ZIP bytes; credential-free structure; transient files removed; native dialog choices automated, pointer interaction untested');
+    });
+  }
+}
+
+export async function verifySyntheticClipboard(qa, page, probe) {
+  assert.equal(typeof probe, 'function', 'real installed clipboard probe required');
+  const preparation = page.getByRole('tabpanel', exact('准备'));
+  const copyButton = preparation.getByRole('button', exact('复制来源'));
+  await copyButton.waitFor({ state: 'visible' });
+  await copyButton.scrollIntoViewIfNeeded();
+  await copyButton.click({ trial: true });
+  const clipboardEvidence = await probe({ copyButton, expectedText: 'https://example.invalid/qa-local-only',
+    capture: label => qa.capture(label), setStage: step => markUiStep(page, step, 'application-jd') });
+  await qa.capture('jd-source-clipboard-final', { clipboard: clipboardEvidence });
+}
+
+export async function offlineOrtFlow(qa, page, probe) {
+  await qa.run('S30', 'installed-offline-ort-initialization', ['设置', '语音', '本地已安装 ORT runtime'], async () => {
+    assert.equal(typeof probe, 'function', 'real installed offline ORT probe required');
+    await navigate(page, 'settings');
+    const heading = page.locator('#voice-settings-title');
+    await heading.scrollIntoViewIfNeeded();
+    await qa.capture('installed-offline-ort-before');
+    const beforeReload = async () => {
+      assert.equal(qa.canProceed(), true, 'unresolved write blocks ORT reload');
+      assert.equal(new URL(page.url()).searchParams.get('view'), 'settings', 'ORT reload requires the non-editing Settings surface');
+      assert.equal(await page.getByRole('dialog').filter({ visible: true }).count(), 0, 'open editing dialog blocks ORT reload');
+    };
+    const offlineOrt = await probe({ beforeReload, setStage: step => markUiStep(page, step, 'offline-ort') });
+    await heading.waitFor({ state: 'visible' });
+    await heading.scrollIntoViewIfNeeded();
+    await qa.capture('installed-offline-ort-ready', { offlineOrt });
+    qa.observed('installed self-hosted ORT module/WASM compiled and initialized under production CSP; no model, inference session, microphone, or Whisper transcription; renderer released by safe reload');
+  }, 'interaction', { recoveryReload: false });
+}

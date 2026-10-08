@@ -36,7 +36,14 @@ export function nativeCapabilityInstrumentation({ dialog, shell }, args) {
       state.downloads.push(record);
       try {
         const urls = item.getURLChain();
-        record.chainMatched = urls.length === 1 && urls[0] === active.url;
+        // Settings generates its own one-use Blob after the real GET response.
+        // Keep the original exact-URL probe unchanged; only these two fixed UI
+        // exports may use the bounded owner-Blob alternative.
+        const settingsBlob = active.urlPolicy === 'owner-settings-export-blob'
+          && ['offerpilot-settings-backup-v1.json', 'offerpilot-backup.zip'].includes(active.filename)
+          && urls.length === 1 && new URL(urls[0]).protocol === 'blob:'
+          && new URL(urls[0]).origin === state.origin;
+        record.chainMatched = urls.length === 1 && (urls[0] === active.url || settingsBlob);
         record.initiatorMatched = new URL(item.getInitiatorOrigin()).origin === state.origin;
         record.filenameMatched = item.getFilename() === active.filename;
       } catch { fail('download-metadata-unavailable'); }
@@ -126,18 +133,20 @@ export function nativeCapabilityInstrumentation({ dialog, shell }, args) {
     state.active = args.active;
     return { armed: true };
   }
-  if (args.operation === 'snapshot') {
-    return { downloads: state.downloads, dialogs: state.dialogs, messages: state.messages,
-      navigations: state.navigations, failures: state.failures, externalLaunchAttempts: state.externalLaunchAttempts,
-      ownerURLUnchanged: !state.contents.isDestroyed() && state.contents.getURL() === args.ownerURL };
-  }
+  const snapshot = () => ({ downloads: state.downloads, dialogs: state.dialogs, messages: state.messages,
+    navigations: state.navigations, failures: state.failures, externalLaunchAttempts: state.externalLaunchAttempts,
+    ownerURLUnchanged: !state.contents.isDestroyed() && state.contents.getURL() === args.ownerURL });
+  if (args.operation === 'snapshot') return snapshot();
   if (args.operation === 'restore') {
     const failures = [];
     const attempt = (fn) => { try { fn(); } catch { failures.push('instrumentation-restore-failed'); } };
     attempt(() => state.session.removeListener('will-download', state.beforeDownload));
     attempt(() => state.session.removeListener('will-download', state.afterDownload));
     attempt(() => state.contents.removeListener('will-navigate', state.onNavigate));
-    for (const [item, { onDone }] of state.items) attempt(() => item.removeListener('done', onDone));
+    for (const [item, { onDone }] of state.items) {
+      if (args.cancelPending === true) attempt(() => item.cancel());
+      attempt(() => item.removeListener('done', onDone));
+    }
     attempt(() => { dialog.showSaveDialogSync = state.originalSave; });
     attempt(() => { dialog.showMessageBox = state.originalMessage; });
     attempt(() => { shell.openExternal = state.originalExternal; });
@@ -145,9 +154,10 @@ export function nativeCapabilityInstrumentation({ dialog, shell }, args) {
       || shell.openExternal !== state.originalExternal) {
       failures.push('instrumentation-restore-failed');
     }
+    const finalSnapshot = args.captureFinalSnapshot === true ? snapshot() : undefined;
     delete globalThis[key];
     if (failures.length) throw new Error('capability instrumentation could not be fully restored');
-    return { restored: true };
+    return { restored: true, ...(finalSnapshot ? { snapshot: finalSnapshot } : {}) };
   }
   throw new Error('unknown capability instrumentation operation');
 }
@@ -194,7 +204,7 @@ function startRendererDownload({ url, filename }) {
   try { anchor.click(); } finally { anchor.remove(); }
 }
 
-function assertNativeDownload(record, mode, byteLength) {
+export function assertNativeDownload(record, mode, byteLength) {
   assert.ok(record, `${mode}: native will-download event missing`);
   for (const key of ['sameOwner', 'mainFrame', 'chainMatched', 'initiatorMatched', 'filenameMatched']) {
     assert.equal(record[key], true, `${mode}: ${key}`);

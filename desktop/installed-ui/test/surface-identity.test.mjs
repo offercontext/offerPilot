@@ -59,3 +59,9 @@ for(const rule of SURFACE_RULES.filter(({view})=>view)) {
   assert.equal((await identity(rule.id,{view:rule.view,selectors:{[rule.selector]:[element('root',false)]}})).targetSurfaceConfirmed,false);
  });
 }
+
+test('JD source clipboard surface uses the real visible JD landmark as well as editor/history dialogs', () => {
+  const jd = SURFACE_RULES.find(rule => rule.id === 'S05');
+  assert.equal(jd.selector, '#application-jd-text');
+  assert.deepEqual(jd.dialogs, ['投递岗位资料', '岗位资料历史']);
+});
