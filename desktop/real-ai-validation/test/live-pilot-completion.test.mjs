@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { readPinnedSource } from './pinned-source.mjs';
 import { Ledger } from '../broker-core.cjs';
 import { PIN, CASES } from '../contract.mjs';
 import { safeResults, saveEvidence } from '../safe-evidence.mjs';
@@ -315,7 +315,7 @@ test('artifact cannot relabel MOCK or omit a LIVE proof check', async t => {
   assert.doesNotMatch(JSON.stringify(safeResults(rows)), /PRIVATE_|26e756|turn-synthetic|digest/);
 });
 test('PIN locks complete unpaginated history, terminal identity envelope and compact algorithm', async () => {
-  const source = path => execFileSync('git', ['show', `${PIN.commit}:${path}`], { encoding: 'utf8' });
+  const source = readPinnedSource;
   const api = source('src/offerpilot/api.py');
   const history = api.slice(api.indexOf('    @app.get("/api/chat/conversations")'), api.indexOf('    @app.get("/api/chat/conversations/{conversation_id}")'));
   assert.match(history, /def list_conversations\(include_archived: bool = False\) -> list\[dict\[str, Any\]\]:/);

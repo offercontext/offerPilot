@@ -236,6 +236,11 @@ test('both MOCK and live workflows bind source and download to the single review
   for (const job of [workflow.jobs.offline, workflow.jobs['real-ai']]) {
     const source = job.steps.filter(step => step.uses?.startsWith('actions/checkout@') && step.with?.path === '.ai-product-source');
     assert.equal(source.length, 1); assert.equal(source[0].with.ref, PIN.commit);
+    assert.equal(job.env.AI_PRODUCT_SOURCE, '${{ github.workspace }}/.ai-product-source');
+    const safety = job.steps.findIndex(step => step.run?.includes('npm.cmd test --prefix desktop/real-ai-validation'));
+    assert.ok(safety >= 0 && job.steps.indexOf(source[0]) < safety, 'PIN checkout must precede every safety test');
+    assert.equal(source[0].if, undefined); assert.equal(source[0]['continue-on-error'], undefined);
+    assert.equal(source[0].with['persist-credentials'], false);
     const download = job.steps.filter(step => step.uses?.startsWith('actions/download-artifact@'));
     assert.equal(download.length, 1); assert.equal(download[0].with.repository, PIN.repository);
     assert.equal(download[0].with['run-id'], PIN.runId); assert.equal(download[0].with.name, PIN.artifactName);

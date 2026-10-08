@@ -64,17 +64,17 @@ jobs:
         run: |
           if (-not $env:RUNNER_TEMP) { throw 'Hosted runner temporary directory unavailable' }
           "AI_ARTIFACT_DIR=$(Join-Path $env:RUNNER_TEMP 'offerpilot-fixed-ai-mock-artifact')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 590291ce4e33407eb4f13f092298e7398aed394c
+          path: .ai-product-source
+          persist-credentials: false
       - name: Install locked test helpers and run offline safety tests
         run: |
           npm.cmd ci --prefix desktop/real-ai-validation --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'MOCK helper installation failed' }
           npm.cmd test --prefix desktop/real-ai-validation
           if ($LASTEXITCODE -ne 0) { throw 'Offline safety tests failed' }
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: 590291ce4e33407eb4f13f092298e7398aed394c
-          path: .ai-product-source
-          persist-credentials: false
       - name: Download the identical fixed installer for MOCK UI validation
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -192,17 +192,17 @@ jobs:
         run: |
           node desktop/real-ai-validation/preflight.mjs --approval
           if ($LASTEXITCODE -ne 0) { throw 'Manual approval or session history is unverified' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 590291ce4e33407eb4f13f092298e7398aed394c
+          path: .ai-product-source
+          persist-credentials: false
       - name: Install only pinned helpers; no install scripts or caches
         run: |
           npm.cmd ci --prefix desktop/real-ai-validation --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw 'Isolated helper installation failed' }
           npm.cmd test --prefix desktop/real-ai-validation
           if ($LASTEXITCODE -ne 0) { throw 'Offline safety tests failed' }
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-        with:
-          ref: 590291ce4e33407eb4f13f092298e7398aed394c
-          path: .ai-product-source
-          persist-credentials: false
       - name: Download fixed installer; never rebuild or choose latest
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
