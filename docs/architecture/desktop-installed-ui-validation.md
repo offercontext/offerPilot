@@ -1,17 +1,19 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-08 已扩展双窗、托盘生命周期与能力边界探针；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。该新包真实安装 UI 尚待执行，不能把组件渲染的 108 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+状态：限定分支上的实验验证辅助工具。2026-10-08 已扩展双窗、托盘生命周期与能力边界探针；下列新 pin 已由成功构建的 metadata、本地 ZIP 摘要/CRC 与安装器 SHA256 核验。该新包真实安装 UI 尚待执行，不能把组件渲染的 124 项通过视为全界面验收。实现与 Linux 辅助单测不等于 Windows 执行通过；最终结论必须查看实际 UI run 的步骤和证据。此工作不改变应用源码、桌面安全配置、构建脚本或原完整回归结果。
+
+本次固定包使用明确的 experimental package-only 模式：完整 pytest 收集、分组与完整 release gate 未执行，不能用于 release-ready 判断。`fullRegressionRunId` 只定位同源工作流中的跳过状态，不表示通过。旧产品 `2e78e948` 的 run `37728772813` 仍独立执行，其结果不能代替本包完整回归；所有旧分组终态收集后仍需一次普通全量运行。
 
 ## 固定输入与独立路由
 
-- 源提交：`2e78e9489e2c022b979fc2e580870975db2a8cce`。
-- 构建 run：[37728772813](https://github.com/offercontext/offerPilot/actions/runs/37728772813)。完整回归归属同一构建 run 的独立 job [37728772813](https://github.com/offercontext/offerPilot/actions/runs/37728772813)；本流程不重跑、不取消、不替代它。
-- Artifact：`11529527005`，名称 `offerpilot-windows-experimental-validation-2e78e9489e2c022b979fc2e580870975db2a8cce`。
-- Artifact 元数据摘要：`sha256:1c583341820b6a9158de5bb9dea3a90c943f2cfb2e4fe9a6cbe7d35967c1c058`。
+- 源提交：`f4bec3d882b152b79295e058e5c83fad779ee0fb`。
+- 构建 run：[37742562603](https://github.com/offercontext/offerPilot/actions/runs/37742562603)。完整回归归属同一构建 run 的独立 job（本次明确跳过，NOT RUN） [37742562603](https://github.com/offercontext/offerPilot/actions/runs/37742562603)；本流程不重跑、不取消、不替代它。
+- Artifact：`11534993326`，名称 `offerpilot-windows-experimental-validation-f4bec3d882b152b79295e058e5c83fad779ee0fb`。
+- Artifact 元数据摘要：`sha256:4c21fa69380e8617252db04cb1b9df84b7bf4fc0bddf5fdbe2ea8e96a8c2d3e9`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`2d5b5cfe13a8bfa549ab1390c6c561080e4d1baa8e7d58136185c97cd4d1e2ff`。
+- 安装包 SHA256：`3eada39a58c424fea52605b29315aa47535708e81dd0d1ba1f83a4097662a3de`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `2e78e9489e2c022b979fc2e580870975db2a8cce`，构建激活提交为 `2e78e9489e2c022b979fc2e580870975db2a8cce`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37728772813`，独立完整回归 run 为 `37728772813`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `f4bec3d882b152b79295e058e5c83fad779ee0fb`，构建激活提交为 `f4bec3d882b152b79295e058e5c83fad779ee0fb`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37742562603`，独立完整回归 run 为 `37742562603`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 
@@ -81,7 +83,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 旧包 run `37641876533` 已建立全部合成实体，162 PASS / 17 FAIL / 7 BLOCKED / 1 NOT RUN，339张图。13根页面的130个目标均实际抵达；其中10个旧Haru遮挡仍为FAIL。其余7项helper错误修正为：等待受控值回填、点击可见Segmented label再核对radio、限定故事searchbox、按真实Haru入口展开Pilot、history结束列表按R05验证。不会将旧包执行改写为通过。
 
-本轮固定的新产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。108项组件渲染已通过，但仍需要此新包的完整安装逐屏运行及人工图像复核。无provider配置时真实发送保持BLOCKED；真实AI/音频不伪造成功。新增能力探针只验证固定合成 Blob 的取消/保存精确字节，以及权限拒绝边界。
+本轮固定的新产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。124项组件渲染已通过，但仍需要此新包的完整安装逐屏运行及人工图像复核。无provider配置时真实发送保持BLOCKED；真实AI/音频不伪造成功。新增能力探针只验证固定合成 Blob 的取消/保存精确字节，以及权限拒绝边界。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 

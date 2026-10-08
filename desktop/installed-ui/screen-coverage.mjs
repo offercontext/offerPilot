@@ -4,6 +4,7 @@ import { selectVisibleOption as select } from './select-option.mjs';
 import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
 import { waitForInputValue, selectSegment } from './ui-state.mjs';
 import { readSurfaceIdentity } from './surface-identity.mjs';
+import { measureControlHit, measureScrollableAncestors } from './control-hit.mjs';
 
 const root = (view) => ROOTS.find((item) => item.view === view);
 const exact = (name) => ({ name, exact: true });
@@ -101,10 +102,15 @@ async function navigate(page, view) {
     settings: () => page.getByRole('heading', { name: '设置', exact: true, level: 2 }),
     interview: () => page.getByRole('tab', exact('即将进行')),
   };
+  markUiStep(page, 'root-landmark');
   if (markers[view]) await markers[view]().waitFor();
   if (view === 'dashboard') assert.ok(await page.getByText('从第一条投递开始建立求职节奏', { exact: true }).isVisible()
     || await region(page, '未来 7 天日程').isVisible(), 'dashboard ready state required');
-  if (view === 'board') await page.getByText('待投递', { exact: true }).filter({ visible: true }).waitFor();
+  if (view === 'board') {
+    const pendingColumn = page.locator('[data-kanban-column="pending"] > :first-child').getByText('待投递', { exact: true }).filter({ visible: true });
+    await pendingColumn.waitFor();
+    assert.equal(await pendingColumn.count(), 1, 'exactly one pending column header required; card status labels are not root markers');
+  }
   assert.equal((await readSurfaceIdentity(page, item.id)).targetSurfaceConfirmed, true, 'visible root landmark must match the selected route');
 }
 async function theme(page, value) {
@@ -898,6 +904,7 @@ async function offerFlows(qa, page, applications) {
     assert.deepEqual(await comparison.locator('tr[data-field="first-year"] td').allTextContents(), ['27.0 万元', '26.4 万元']);
     assert.ok(await comparison.locator('[data-missing="true"]').count() > 0, 'missing optional facts remain marked missing');
     await captureWidths(qa, page, 'offer-comparison-full');
+    await verifyNarrowOfferAction(qa, page, offers[1]);
     await theme(page, 'light'); await qa.capture('offer-comparison-light'); await theme(page, 'dark');
     await comparison.getByRole('switch', exact('只看差异')).click();
     assert.equal(await comparison.getByRole('switch', exact('只看差异')).getAttribute('aria-checked'), 'true');
@@ -917,10 +924,7 @@ async function offerFlows(qa, page, applications) {
     await btn(settings, '恢复全部明细').click(); assert.equal(await check.isChecked(), true);
     await region(page, '自定义比较维度').waitFor();
     await qa.capture('offer-custom-dimensions');
-    const close = settings.locator('.ant-drawer-close');
-    assert.equal(await close.count(), 1, 'exact visible drawer close required');
-    await close.click();
-    await settings.waitFor({ state: 'hidden' });
+    await closeComparisonSettings(qa, page, settings);
     qa.observed('display field toggle and restore; custom-dimension controls visible; no invented persisted dimension');
   });
   await qa.run('S23', 'offer-negotiation-preflight-only', ['Offer', '准备谈薪'], async () => {
@@ -943,11 +947,57 @@ async function offerFlows(qa, page, applications) {
   await qa.disposition('S23', 'offer-ai-negotiation-output', 'BLOCKED', 'provider generation and generated history require separate authorization');
 }
 
+async function verifyNarrowOfferAction(qa, page, offer) {
+  await qa.size(900, 689);
+  try {
+    const target = btn(page.getByTestId(`offer-comparison-header-${offer.id}`), '准备谈薪');
+    await target.scrollIntoViewIfNeeded();
+    const controlHit = await target.evaluate(measureControlHit);
+    const localScroll = await target.evaluate(measureScrollableAncestors);
+    // Save the right-scrolled screen before asserting, preserving any defect.
+    await qa.capture('offer-second-card-action-right-900x689', { controlHit, localScroll });
+    assert.equal(localScroll.width, 900);
+    assert.ok(localScroll.documentWidth <= localScroll.width + 1, 'Offer content must not overflow the document');
+    assert.equal(localScroll.controlFullyWithinViewport, true, 'whole second-card control must be visible');
+    assert.equal(localScroll.controlFullyWithinScrollableBounds, true, 'scrolling ancestors must not clip the second-card control');
+    assert.ok(localScroll.scrollers.some(value => !value.documentScroller && value.scrollLeft > 0), 'right-side control must be reached through real local horizontal scrolling');
+    assert.equal(controlHit.receiver, 'target', 'second Offer action must receive ordinary pointer input');
+    await target.click({ trial: true });
+    await target.click();
+    const form = region(page, '谈薪准备');
+    await form.getByRole('heading', { level: 2, name: `为 ${offer.application.company_name} 准备谈薪`, exact: true }).waitFor();
+    await qa.capture('offer-second-card-negotiation-open-900x689');
+    await btn(form, '关闭').click();
+    await form.waitFor({ state: 'hidden' });
+    await region(page, 'Offer 横向对比').waitFor();
+    qa.observed('second Offer action reached by local horizontal scroll at 900px; pointer hit and exact Offer heading verified; unsent preflight closed back to comparison');
+  } catch (error) {
+    // Preserve the actual narrow failing state before restoring the main size.
+    try { await qa.capture('offer-second-card-action-failure-900x689'); } catch { /* Original failure remains authoritative. */ }
+    throw error;
+  } finally { if (qa.canProceed()) await qa.size(1280); }
+}
+
+async function closeComparisonSettings(qa, page, settings) {
+  markUiStep(page, 'drawer-close-hit', 'offer');
+  const close = settings.getByRole('button', { name: /^(关闭|Close)$/, exact: true });
+  assert.equal(await close.count(), 1, 'exactly one visible semantic drawer close button required');
+  await close.scrollIntoViewIfNeeded();
+  const controlHit = await close.evaluate(measureControlHit);
+  await qa.capture('offer-comparison-close-hit', { controlHit });
+  markUiStep(page, 'dialog-dismiss', '关闭');
+  // No force, Escape fallback or DOM-dispatched click: retain genuine hit failures.
+  await close.click();
+  await settings.waitFor({ state: 'hidden' });
+}
+
 async function verifyStandaloneHaruContext(haru, record) {
   assert.ok(haru, 'the installed desktop Haru window is required for context handoff coverage');
+  markUiStep(haru, 'companion-readback', 'pilot');
   await haru.getByRole('main', exact('Haru 桌面小窗')).waitFor();
   const chat = region(haru, 'Haru 对话');
   await chat.waitFor();
+  markUiStep(haru, 'companion-context', 'pilot');
   await chat.getByText(`当前上下文：${record.company_name} · ${record.position_name}`, { exact: true }).waitFor();
 }
 
@@ -966,6 +1016,7 @@ async function pilotSettingsFlows(qa, page, record) {
     // The installed desktop owns a separate Haru BrowserWindow. A main-page
     // dialog or mascot cannot substitute for this live mirrored context check.
     await verifyStandaloneHaruContext(qa.haru, record);
+    await qa.captureHaru('pilot-row-context-standalone-haru');
     qa.observed('actual standalone Haru window mirrors the clicked application context');
     await btn(qa.haru, '打开 OfferPilot 主窗口').click();
     await command(page, '打开 Pilot 工作区');
@@ -1085,4 +1136,4 @@ async function pilotSettingsFlows(qa, page, record) {
 }
 
 // Exported for isolated helper preflight; these functions still drive only the public UI.
-export { navigate, createApplication, verifyStandaloneHaruContext, recordDesktopMascotScope };
+export { navigate, createApplication, verifyStandaloneHaruContext, recordDesktopMascotScope, closeComparisonSettings, verifyNarrowOfferAction };

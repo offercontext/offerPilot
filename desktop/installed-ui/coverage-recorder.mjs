@@ -16,9 +16,10 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     installerSha256: pin.installerSha256, installedExeSha256, execution: 'real-installed-electron-native-content-size',
     screenshotAnimationPolicy: 'CSS finite transitions fast-forwarded and infinite CSS animations temporarily cancelled by Playwright; not an animation-quality test',
     syntheticProfileOnly: true, aiInvocationsAuthorized: false, browserFixturesUsed: false, expectedRootCases: ROOT_CASES.length,
-    cases: [], screens: [], fixtures: [], summary: null, runtime: null };
+    cases: [], screens: [], companionScreens: [], fixtures: [], summary: null, runtime: null };
   let active;
   bindUiSteps(page, (value) => { if (active) active.lastStep = value; });
+  if (haru) bindUiSteps(haru, (value) => { if (active) active.lastStep = value; });
   let sequence = 0;
   let width = 1280;
   let height = 900;
@@ -78,6 +79,11 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     const issues = [];
     if (measured.documentWidth > measured.width + 1) issues.push('horizontal-overflow');
     if (measured.haruCoveredControls > 0) issues.push('haru-occlusion');
+    if (measured.kanbanColumnHorizontalOverflow > 0) issues.push('kanban-column-horizontal-overflow');
+    if (measured.kanbanControlsOutsideColumn > 0) issues.push('kanban-control-clipped');
+    if (measured.kanbanControlsOutsideCard > 0) issues.push('kanban-control-outside-card');
+    if (measured.kanbanUnownedControls > 0) issues.push('kanban-card-marker-missing');
+    if (active?.surfaceId === 'R04' && measured.kanbanColumnCount !== 6) issues.push('kanban-columns-missing-or-unexpected');
     item.geometryIssues = issues;
     if (issues.length && active) active.visualFailures.push({ screenshot: item.filename, issues });
     else if (issues.length) { const error = new Error('screen geometry failed'); error.code = 'UI_VISUAL_FAILURE'; throw error; }
@@ -86,8 +92,22 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     await save();
     return measured;
   };
+  const captureHaru = async (label) => {
+    if (!haru) throw new Error('actual companion renderer required for screenshot');
+    const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
+    await haru.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
+    const measured = await haru.evaluate(measureScreenGeometry);
+    const identity = await readSurfaceIdentity(haru, 'S24');
+    const item = { ...identity, ...measured, filename: `screens/${filename}`, caseId: active?.caseId || null,
+      surface: 'standalone-haru', kind: 'companion-diagnostic', confirmsMainSurface: false };
+    report.companionScreens.push(item);
+    active?.companionScreenshots.push(item.filename);
+    // A companion image never satisfies the main-page target/viewport PASS gate.
+    await save();
+    return item;
+  };
   const run = async (surfaceId, caseId, uiPath, action, kind = 'interaction') => {
-    active = { surfaceId, caseId, uiPath, kind, outcome: 'NOT RUN', assertions: [], screenshots: [],
+    active = { surfaceId, caseId, uiPath, kind, outcome: 'NOT RUN', assertions: [], screenshots: [], companionScreenshots: [],
       reason: 'started-not-completed', targetSurfaceConfirmed: false, visualFailures: [], lastStep: null };
     report.cases.push(active);
     setStage(`coverage-${caseId}`);
@@ -121,6 +141,9 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
       active.failedStep = active.lastStep;
       active.reason = 'assertion-or-ui-action-failed';
       try { await capture(`${caseId}-failure`); } catch { /* Failed capture is not a pass. */ }
+      if (haru && surfaceId === 'S24') {
+        try { await captureHaru(`${caseId}-haru-failure`); } catch { active.companionCaptureFailed = true; }
+      }
       if (!runtime.hasPendingWrite()) {
         try {
           markUiStep(page, 'recovery-reload');
@@ -149,6 +172,6 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     await save();
     return report;
   };
-  return { report, haru, size, capture, run, observed, blocked, disposition, finish, save, runtimeSnapshot: runtime.snapshot, canProceed: () => !runtime.hasPendingWrite(),
+  return { report, haru, size, capture, captureHaru, run, observed, blocked, disposition, finish, save, runtimeSnapshot: runtime.snapshot, canProceed: () => !runtime.hasPendingWrite(),
     fixture: (kind, id) => { if (!Number.isSafeInteger(id) || id <= 0) throw new Error('invalid fixture identity'); report.fixtures.push({ kind, id }); } };
 }

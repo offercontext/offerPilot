@@ -6,14 +6,15 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createCoverage, observeRuntime } from '../coverage-recorder.mjs';
 import { PIN } from '../contract.mjs';
+import { markUiStep } from '../ui-locators.mjs';
 
-async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrongHeight=false }={}) {
+async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrongHeight=false, columnOverflow=0, clippedControls=0, cardClipped=0, columnCount=6, unownedControls=0, companion=false, mainIdentity=true }={}) {
   const evidence = await fs.mkdtemp(path.join(os.tmpdir(), 'offerpilot-unit-coverage-'));
   t.after(() => fs.rm(evidence,{recursive:true,force:true}));
   let reloads=0; let width=1280; let height=900;
   const sizes=[];
   const page={
-    async evaluate(_callback,args) { if(args?.rules)return {observedView:'applications-list',visibleSurfaces:[args.targetId],targetSurfaceConfirmed:true}; return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered}; },
+    async evaluate(_callback,args) { if(args?.rules)return {observedView:'applications-list',visibleSurfaces:mainIdentity?[args.targetId]:['R05'],targetSurfaceConfirmed:mainIdentity}; return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered,kanbanColumnCount:columnCount,kanbanColumnHorizontalOverflow:columnOverflow,kanbanControlsOutsideColumn:clippedControls,kanbanControlsOutsideCard:cardClipped,kanbanUnownedControls:unownedControls}; },
     async screenshot({path}) { await fs.writeFile(path,'UNIT TEST ONLY, NOT A PRODUCT SCREENSHOT'); },
     async reload() { reloads++; },
     async waitForFunction(callback,value,options) { if (value === undefined) { assert.equal(options.timeout,5000); assert.equal(options.polling,'raf'); return; } assert.equal(width,value.width); assert.equal(height,value.height); },
@@ -21,8 +22,9 @@ async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrong
   const app={async browserWindow() { return { async evaluate(callback,value) { callback({setContentSize(w,h){ sizes.push([w,h]); width=w; height=h; }},value); } }; }};
   let calls = 0; let critical = 0; const classifications = {};
   const runtime={snapshot:()=>({classifications:{...classifications},ownRequestFailures:[],ownCriticalFailureCount:critical}),hasPendingWrite:()=>pendingWrite && ++calls > 1};
-  const qa=await createCoverage({app,page,evidence,pin:PIN,installedExeSha256:'unit-fixture-hash',runtime,setStage(){}});
-  return {qa,evidence,sizes,reloads:()=>reloads, runtimeError:(name)=>{ classifications[name]=(classifications[name]||0)+1; }, criticalFailure:()=>{critical++;}};
+  const haru = companion ? { ...page, async evaluate(_callback,args) { return args?.rules ? {observedView:'unknown',visibleSurfaces:['S24','S25'],targetSurfaceConfirmed:true} : {width:260,height:340,documentWidth:260,theme:'dark',haruCoveredControls:0}; } } : undefined;
+  const qa=await createCoverage({app,page,haru,evidence,pin:PIN,installedExeSha256:'unit-fixture-hash',runtime,setStage(){}});
+  return {qa,haru,evidence,sizes,reloads:()=>reloads, runtimeError:(name)=>{ classifications[name]=(classifications[name]||0)+1; }, criticalFailure:()=>{critical++;}};
 }
 
 test('recorder writes pin, native measured size, explicit assertion and screenshot before passing',async(t)=>{
@@ -188,4 +190,37 @@ test('a geometry defect stays FAIL while independent normal UI work can finish',
  assert.equal(continued,true);assert.equal(qa.report.cases[0].outcome,'FAIL');
  assert.equal(qa.report.cases[0].failure.uiIssue,'visual-assertion-failed');
  assert.ok(qa.report.cases[0].visualFailures.some(({issues})=>issues.includes('haru-occlusion')));
+});
+
+for (const options of [{columnOverflow:1}, {clippedControls:1}, {cardClipped:1}, {columnCount:0}, {columnCount:5}, {unownedControls:1}]) {
+  test(`board-local geometry cannot pass with correct global viewport: ${JSON.stringify(options)}`, async t => {
+    const { qa } = await fixture(t, options);
+    await qa.run('R04','board-local',['投递','看板'],async()=>{qa.observed('root selected');await qa.capture('board-local');});
+    assert.equal(qa.report.cases[0].outcome,'FAIL');
+    assert.ok(qa.report.cases[0].visualFailures.length>0);
+    assert.equal(qa.report.screens[0].documentWidth,1280);
+  });
+}
+test('Haru failure records actual companion image and exact context step before reload',async t=>{
+  const {qa,haru,evidence}=await fixture(t,{companion:true});
+  await qa.run('S24','companion-context',['问 Pilot'],async()=>{
+    markUiStep(haru,'companion-context','pilot');throw new Error('synthetic wrong context');
+  });
+  const row=qa.report.cases[0];
+  assert.equal(row.outcome,'FAIL');
+  assert.deepEqual(row.failedStep,{step:'companion-context',control:'pilot'});
+  assert.equal(row.companionScreenshots.length,1);
+  const shot=qa.report.companionScreens[0];
+  assert.equal(shot.width,260);assert.equal(shot.height,340);assert.equal(shot.confirmsMainSurface,false);
+  assert.equal(shot.kind,'companion-diagnostic');
+  assert.ok(await fs.readFile(path.join(evidence,shot.filename),'utf8'));
+});
+test('companion screenshot alone cannot satisfy main target or manufacture functional PASS',async t=>{
+  const {qa}=await fixture(t,{companion:true,mainIdentity:false});
+  await qa.run('S24','companion-only',['问 Pilot'],async()=>{
+    qa.observed('companion only');await qa.captureHaru('companion-only');
+    // No thrown test error: only the actual main-target gate may reject this.
+  });
+  assert.equal(qa.report.cases[0].outcome,'FAIL');
+  assert.equal(qa.report.summary.functionalPasses,0);
 });

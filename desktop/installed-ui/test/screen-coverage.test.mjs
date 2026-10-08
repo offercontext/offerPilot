@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { ROOTS } from '../coverage-model.mjs';
-import { navigate, verifyStandaloneHaruContext, recordDesktopMascotScope } from '../screen-coverage.mjs';
+import { navigate, verifyStandaloneHaruContext, recordDesktopMascotScope, closeComparisonSettings, verifyNarrowOfferAction } from '../screen-coverage.mjs';
 
-function navigationPage({ missingIdentity = false, hiddenInterviewBack = false } = {}) {
+function navigationPage({ missingIdentity = false, hiddenInterviewBack = false, populatedBoard = false, missingBoardHeader = false } = {}) {
   let view = 'dashboard';
   const actions = [];
   const page = {
@@ -34,13 +34,19 @@ function navigationPage({ missingIdentity = false, hiddenInterviewBack = false }
         return this;
       },
       async fill(name) { assert.equal(name, '打开 Pilot 工作区'); },
-      async count() { return value.name === '返回上一层' ? 0 : 1; },
+      async count() {
+        if (value.name === '待投递') return value.scope?.selector === '[data-kanban-column="pending"] > :first-child' ? (missingBoardHeader ? 0 : 1) : (populatedBoard ? 13 : 1);
+        return value.name === '返回上一层' ? 0 : 1;
+      },
       async isVisible() {
         if (value.name === '退出沉浸模式，返回原页面') return view === 'pilot';
         if (value.name === '返回面试') return !hiddenInterviewBack;
         return true;
       },
-      async waitFor() { actions.push(['wait', value.name ?? value.selector]); },
+      async waitFor() {
+        if (value.name === '待投递' && (missingBoardHeader || (populatedBoard && value.scope?.selector !== '[data-kanban-column="pending"] > :first-child'))) throw new Error('pending marker absent or ambiguous');
+        actions.push(['wait', value.name ?? value.selector]);
+      },
       async click() {
         if (value.command) { view = 'pilot'; actions.push(['command', value.command]); return; }
         if (value.role === 'button' && value.scope?.name === '主导航') {
@@ -132,4 +138,68 @@ test('removed in-page mascot coverage is explicitly N/A and cannot create a runt
   assert.equal(rows[0][0], 'S25');
   assert.equal(rows[0][2], 'N/A');
   assert.match(rows[0][3], /standalone runtime.*recorded separately in result.json/);
+});
+
+test('populated board with twelve matching card statuses selects only the pending column header', async () => {
+  await navigate(navigationPage({populatedBoard:true}).page,'board');
+  await assert.rejects(navigate(navigationPage({populatedBoard:true,missingBoardHeader:true}).page,'board'), /absent or ambiguous/);
+});
+function drawerFixture({ count = 1, blocked = false } = {}) {
+  const steps=[];
+  const hit={receiver:blocked?'other-dialog-element':'target',visible:true,inViewport:true};
+  const close={count:async()=>count,scrollIntoViewIfNeeded:async()=>steps.push('scroll'),evaluate:async()=>hit,
+    click:async options=>{assert.equal(options,undefined);steps.push('click');if(blocked)throw new Error('other element intercepts pointer events');}};
+  const settings={getByRole:(role,options)=>{assert.equal(role,'button');assert.ok(options.name.test('关闭'));assert.ok(options.name.test('Close'));assert.equal(options.name.test('关闭全部'),false);return close;},
+    waitFor:async options=>{assert.deepEqual(options,{state:'hidden'});steps.push('hidden');}};
+  const qa={capture:async(label,value)=>{assert.equal(label,'offer-comparison-close-hit');assert.equal(value.controlHit,hit);steps.push('screenshot');}};
+  return {qa,settings,steps};
+}
+test('drawer close uses the exact semantic button, records hit evidence, and requires ordinary click plus dismissal',async()=>{
+  const f=drawerFixture();await closeComparisonSettings(f.qa,{},f.settings);
+  assert.deepEqual(f.steps,['scroll','screenshot','click','hidden']);
+});
+test('ambiguous or blocked drawer close cannot fall back to Escape, force, or a false success',async()=>{
+  const ambiguous=drawerFixture({count:2});await assert.rejects(closeComparisonSettings(ambiguous.qa,{},ambiguous.settings));assert.deepEqual(ambiguous.steps,[]);
+  const blocked=drawerFixture({blocked:true});await assert.rejects(closeComparisonSettings(blocked.qa,{},blocked.settings),/intercepts pointer/);
+  assert.deepEqual(blocked.steps,['scroll','screenshot','click']);
+});
+
+function narrowOfferFixture({overflow=false,unscrolled=false,clipped=false,ancestorClipped=false,blocked=false,trialFailure=false}={}) {
+  const steps=[];const sizes=[];const shots=[];
+  const localScroll={width:900,documentWidth:overflow?1100:900,controlFullyWithinViewport:!clipped,controlFullyWithinScrollableBounds:!ancestorClipped,
+    scrollers:unscrolled?[]:[{documentScroller:false,scrollLeft:240,clientWidth:650,scrollWidth:950}]};
+  const hit={receiver:blocked?'other-element':'target'};
+  const page={getByTestId:id=>{assert.equal(id,'offer-comparison-header-7');return scope('target');},
+    getByRole:(role,options)=>{assert.equal(role,'region');return options.name==='谈薪准备'?form:{waitFor:async()=>steps.push('comparison')};}};
+  function control(kind) {return {page:()=>page,filter(){return this;},or(){return this;},
+    scrollIntoViewIfNeeded:async()=>steps.push('scroll'),
+    evaluate:async fn=>fn.name==='measureControlHit'?hit:localScroll,
+    click:async options=>{assert.equal(options?.force,undefined);steps.push(options?.trial?'trial':kind==='target'?'open':'close');if(options?.trial&&trialFailure)throw new Error('actual trial rejected');}};}
+  function scope(kind){return {page:()=>page,getByRole:()=>control(kind)};}
+  const form={...scope('close'),getByRole:(role,options)=>{
+    if(role==='heading'){assert.equal(options.level,2);assert.equal(options.name,'为 Synthetic Second Offer 准备谈薪');return{waitFor:async()=>steps.push('exact-offer')};}
+    return control('close');
+  },waitFor:async options=>{assert.equal(options.state,'hidden');steps.push('closed');}};
+  const qa={size:async(...args)=>sizes.push(args),capture:async(name,extra)=>shots.push({name,extra}),canProceed:()=>true,observed:()=>steps.push('observed')};
+  return{qa,page,steps,sizes,shots};
+}
+const secondOffer={id:7,application:{company_name:'Synthetic Second Offer'}};
+test('second Offer action is reached by genuine local scroll, ordinary pointer, exact preflight, and cancel',async()=>{
+ const f=narrowOfferFixture();await verifyNarrowOfferAction(f.qa,f.page,secondOffer);
+ assert.deepEqual(f.sizes,[[900,689],[1280]]);
+ assert.deepEqual(f.steps,['scroll','trial','open','exact-offer','close','closed','comparison','observed']);
+ assert.equal(f.shots[0].extra.localScroll.scrollers[0].scrollLeft,240);
+ assert.equal(f.shots[0].name,'offer-second-card-action-right-900x689');
+});
+for(const option of ['overflow','unscrolled','clipped','ancestorClipped','blocked']){
+ test(`second Offer ${option} cannot be accepted as locally reachable`,async()=>{
+  const f=narrowOfferFixture({[option]:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer));
+  assert.deepEqual(f.steps,['scroll']);assert.equal(f.shots.length,2);assert.deepEqual(f.sizes,[[900,689],[1280]]);
+ });
+}
+
+test('real trial rejection preserves the narrow failure image before any resize',async()=>{
+ const f=narrowOfferFixture({trialFailure:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer),/actual trial rejected/);
+ assert.deepEqual(f.steps,['scroll','trial']);assert.equal(f.shots.length,2);
+ assert.equal(f.shots[1].name,'offer-second-card-action-failure-900x689');assert.deepEqual(f.sizes,[[900,689],[1280]]);
 });

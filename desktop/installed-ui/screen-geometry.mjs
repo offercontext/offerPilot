@@ -22,7 +22,32 @@ export function measureScreenGeometry() {
         // An explicitly opened context menu is expected to overlay the page.
         if (top?.closest('[aria-label="Haru 助手"]') && !top.closest('[role="menu"]')) haruCoveredControls++;
       }
+      const columns = [...document.querySelectorAll('[data-kanban-board] [data-kanban-column] > [data-kanban-column-body]')]
+        .filter(node => node.getClientRects().length && getComputedStyle(node).visibility === 'visible');
+      let kanbanColumnHorizontalOverflow = 0;
+      let kanbanControlsOutsideColumn = 0;
+      let kanbanControlsOutsideCard = 0;
+      let kanbanUnownedControls = 0;
+      for (const column of columns) {
+        // Whole-board horizontal scrolling is intentional. A column's own
+        // horizontal scrollbar or clipped card control is a separate defect.
+        if (column.scrollWidth > column.clientWidth + 1) kanbanColumnHorizontalOverflow++;
+        const rect = column.getBoundingClientRect();
+        const left = rect.left + column.clientLeft;
+        const right = left + column.clientWidth;
+        for (const control of column.querySelectorAll('button, .ant-select-selector, [role="img"][aria-label="delete"]')) {
+          if (!control.getClientRects().length || getComputedStyle(control).visibility !== 'visible') continue;
+          const box = control.getBoundingClientRect();
+          if (box.left < left - 1 || box.right > right + 1) kanbanControlsOutsideColumn++;
+          const card = control.closest('[data-kanban-card]');
+          if (card) {
+            const cardBox = card.getBoundingClientRect();
+            if (box.left < cardBox.left - 1 || box.right > cardBox.right + 1) kanbanControlsOutsideCard++;
+          } else kanbanUnownedControls++;
+        }
+      }
       return { width: window.innerWidth, height: window.innerHeight,
         documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
-        theme: document.documentElement.dataset.theme || 'unknown', haruCoveredControls };
+        theme: document.documentElement.dataset.theme || 'unknown', haruCoveredControls,
+        kanbanColumnCount: columns.length, kanbanColumnHorizontalOverflow, kanbanControlsOutsideColumn, kanbanControlsOutsideCard, kanbanUnownedControls };
     }
