@@ -165,14 +165,23 @@ test('ambiguous or blocked drawer close cannot fall back to Escape, force, or a 
   assert.deepEqual(blocked.steps,['scroll','screenshot','click']);
 });
 
-function narrowOfferFixture({overflow=false,unscrolled=false,clipped=false,ancestorClipped=false,blocked=false,trialFailure=false,noOverflow=false,cardsClipped=false,initialRight=false}={}) {
+function narrowOfferFixture({overflow=false,unscrolled=false,clipped=false,ancestorClipped=false,blocked=false,trialFailure=false,noOverflow=false,cardsClipped=false,initialRight=false,wrongOwner=false,wrongDetail=false,reopenFailure=false,clippedReturnedTitle=false}={}) {
   const steps=[];const sizes=[];const shots=[];const diagnostics=[];
-  let scrollLeft=initialRight?95:0;
+  let scrollLeft=initialRight?95:0;let mode='comparison';
   const localScroll={width:900,documentWidth:overflow?1100:900,controlFullyWithinViewport:!clipped,controlFullyWithinScrollableBounds:!ancestorClipped,
     cardCount:2,allCardsHorizontallyVisible:!cardsClipped,scrollers:[]};
   const hit={receiver:blocked?'other-element':'target'};
-  const page={mouse:{wheel:async(dx,dy)=>{assert.equal(dy,0);steps.push(dx>0?'wheel-right':'wheel-left');if(!unscrolled)scrollLeft=dx>0?95:0;}},getByTestId:id=>{assert.equal(id,'offer-comparison-header-7');return scope('target');},
-    getByRole:(role,options)=>{assert.equal(role,'region');return options.name==='谈薪准备'?form:{waitFor:async()=>steps.push('comparison')};}};
+  const page={waitForFunction:async()=>{},evaluate:async()=>{},mouse:{wheel:async(dx,dy)=>{assert.equal(dy,0);steps.push(dx>0?'wheel-right':'wheel-left');if(!unscrolled)scrollLeft=dx>0?95:0;}},getByTestId:id=>{assert.equal(id,'offer-comparison-header-7');return scope('target');},
+    locator:selector=>{assert.ok(selector.startsWith('[data-core-task-key'));return owner;},
+    getByRole:(role,options)=>{
+      if(role==='heading'){assert.equal(options.level,3);assert.equal(options.name,'Synthetic Second Offer · Engineer');return{waitFor:async()=>{assert.equal(mode,'detail');if(wrongDetail)throw new Error('wrong returned application detail');steps.push('detail-heading');},
+       scrollIntoViewIfNeeded:async()=>steps.push('reveal-detail-heading'),
+       evaluate:async fn=>fn.name==='measureControlHit'?{receiver:'target'}:{width:900,documentWidth:900,controlFullyWithinViewport:!clippedReturnedTitle,controlFullyWithinScrollableBounds:!clippedReturnedTitle}};}
+      if(role==='tablist'){assert.equal(options.name,'投递详情分段');return{waitFor:async()=>{assert.equal(mode,'detail');steps.push('detail-tabs');}};}
+      assert.equal(role,'region');return options.name==='谈薪准备'?form:{waitFor:async()=>{assert.equal(mode,'comparison','comparison is not mounted after canonical owner close');steps.push('comparison');}};
+    }};
+  const owner={filter(){return this;},count:async()=>1,getAttribute:async name=>{assert.equal(name,'data-core-task-key');return `application.offer_review:applicationId=${wrongOwner?999:12}`;},
+    waitFor:async options=>{assert.equal(options.state,'hidden');assert.equal(mode,'detail');steps.push('owner-closed');}};
   function control(kind) {return {page:()=>page,filter(){return this;},or(){return this;},
     scrollIntoViewIfNeeded:async()=>steps.push('scroll'),hover:async()=>steps.push('hover'),
     evaluate:async(fn,args)=>{
@@ -183,55 +192,75 @@ function narrowOfferFixture({overflow=false,unscrolled=false,clipped=false,ances
       }
       return{...localScroll,scrollers:noOverflow?[]:[{depth:8,documentScroller:false,scrollLeft,clientWidth:669,scrollWidth:764}]};
     },
-    click:async options=>{assert.equal(options?.force,undefined);steps.push(options?.trial?'trial':kind==='target'?'open':'close');if(options?.trial&&trialFailure)throw new Error('actual trial rejected');}};}
+    click:async options=>{assert.equal(options?.force,undefined);steps.push(options?.trial?'trial':kind==='target'?'open':'close');if(options?.trial&&trialFailure)throw new Error('actual trial rejected');if(!options?.trial)mode=kind==='target'?'preflight':'detail';}};}
   function scope(kind){return {page:()=>page,getByRole:()=>control(kind)};}
   const form={...scope('close'),getByRole:(role,options)=>{
     if(role==='heading'){assert.equal(options.level,2);assert.equal(options.name,'为 Synthetic Second Offer 准备谈薪');return{waitFor:async()=>steps.push('exact-offer')};}
     return control('close');
-  },waitFor:async options=>{assert.equal(options.state,'hidden');steps.push('closed');}};
+  },waitFor:async options=>{assert.equal(options.state,'hidden');assert.equal(mode,'detail');steps.push('closed');}};
   bindUiSteps(page,value=>diagnostics.push(value));
   const qa={size:async(...args)=>{sizes.push(args);markUiStep(page,'viewport-set');},capture:async(name,extra)=>shots.push({name,extra}),canProceed:()=>true,observed:()=>steps.push('observed')};
-  return{qa,page,steps,sizes,shots,diagnostics};
+  const reopenComparison=async()=>{assert.equal(mode,'detail','must verify canonical detail before reopening');steps.push('back-to-board','navigate-offers','reselect-two');if(reopenFailure)throw new Error('comparison reopen failed');steps.push('reopen-comparison');mode='comparison';};
+  return{qa,page,steps,sizes,shots,diagnostics,reopenComparison};
 }
-const secondOffer={id:7,application:{company_name:'Synthetic Second Offer'}};
+const secondOffer={id:7,application:{id:12,company_name:'Synthetic Second Offer',position_name:'Engineer'}};
 test('second Offer action is reached by genuine local scroll, ordinary pointer, exact preflight, and cancel',async()=>{
- const f=narrowOfferFixture();await verifyNarrowOfferAction(f.qa,f.page,secondOffer);
+ const f=narrowOfferFixture();await verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison);
  assert.deepEqual(f.sizes,[[900,689],[1280]]);
- assert.deepEqual(f.steps,['scroll','hover','wheel-right','trial','open','exact-offer','close','closed','comparison','observed']);
+ assert.deepEqual(f.steps,['scroll','hover','wheel-right','trial','open','exact-offer','close','closed','owner-closed','detail-heading','detail-tabs','reveal-detail-heading','back-to-board','navigate-offers','reselect-two','reopen-comparison','comparison','observed']);
  assert.equal(f.shots[0].extra.localScroll.scrollers[0].scrollLeft,95);
  assert.equal(f.shots[0].name,'offer-second-card-action-right-900x689');
 });
 for(const option of ['overflow','clipped','ancestorClipped','blocked']){
  test(`second Offer ${option} cannot be accepted as locally reachable`,async()=>{
-  const f=narrowOfferFixture({[option]:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer));
+  const f=narrowOfferFixture({[option]:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison));
   assert.deepEqual(f.steps,['scroll','hover','wheel-right']);assert.equal(f.shots.length,2);assert.deepEqual(f.sizes,[[900,689],[1280]]);
  });
 }
 
 test('real trial rejection preserves the narrow failure image before any resize',async()=>{
- const f=narrowOfferFixture({trialFailure:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer),/actual trial rejected/);
+ const f=narrowOfferFixture({trialFailure:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison),/actual trial rejected/);
  assert.deepEqual(f.steps,['scroll','hover','wheel-right','trial']);assert.equal(f.shots.length,2);
  assert.equal(f.shots[1].name,'offer-second-card-action-failure-900x689');assert.deepEqual(f.sizes,[[900,689],[1280]]);
 });
 
 test('already-visible second button needs a real wheel after scrollIntoView leaves scrollLeft at zero',async()=>{
- const f=narrowOfferFixture();await verifyNarrowOfferAction(f.qa,f.page,secondOffer);
+ const f=narrowOfferFixture();await verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison);
  assert.deepEqual(f.shots[0].extra.scrollProbe,{mode:'real-horizontal-wheel',movements:[{depth:8,before:0,after:95,clientWidth:669,scrollWidth:764,direction:1}]});
  assert.ok(f.steps.indexOf('wheel-right')>f.steps.indexOf('hover'));
 });
 test('no horizontal overflow passes only with both full card widths visible, without fabricated wheel evidence',async()=>{
- const f=narrowOfferFixture({noOverflow:true});await verifyNarrowOfferAction(f.qa,f.page,secondOffer);
+ const f=narrowOfferFixture({noOverflow:true});await verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison);
  assert.deepEqual(f.shots[0].extra.scrollProbe,{mode:'no-horizontal-overflow',movements:[]});
  assert.equal(f.steps.some(value=>value.startsWith('wheel')),false);
- const clipped=narrowOfferFixture({noOverflow:true,cardsClipped:true});await assert.rejects(verifyNarrowOfferAction(clipped.qa,clipped.page,secondOffer),/both cards/);
+ const clipped=narrowOfferFixture({noOverflow:true,cardsClipped:true});await assert.rejects(verifyNarrowOfferAction(clipped.qa,clipped.page,secondOffer,clipped.reopenComparison),/both cards/);
 });
 test('a no-op real wheel fails and retains the scroll phase after failure capture and viewport restoration',async()=>{
- const f=narrowOfferFixture({unscrolled:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer),/real wheel must move/);
+ const f=narrowOfferFixture({unscrolled:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison),/real wheel must move/);
  assert.deepEqual(f.steps,['scroll','hover','wheel-right']);assert.equal(f.shots[0].name,'offer-second-card-action-failure-900x689');
  assert.deepEqual(f.diagnostics.at(-1),{step:'offer-local-scroll',control:'offer'});
 });
 test('an already right-scrolled pane exercises left then right real wheels rather than accepting a no-op',async()=>{
- const f=narrowOfferFixture({initialRight:true});await verifyNarrowOfferAction(f.qa,f.page,secondOffer);
+ const f=narrowOfferFixture({initialRight:true});await verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison);
  assert.deepEqual(f.steps.slice(0,4),['scroll','hover','wheel-left','wheel-right']);
  assert.deepEqual(f.shots[0].extra.scrollProbe.movements.map(value=>[value.before,value.after,value.direction]),[[95,0,-1],[0,95,1]]);
 });
+
+test('canonical negotiation close returns to the exact owning detail and comparison must be explicitly reopened',async()=>{
+ const f=narrowOfferFixture();await verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison);
+ const returned=f.shots.find(shot=>shot.name==='offer-second-preflight-returned-detail-900x689');
+ assert.equal(returned.extra.applicationId,12);assert.equal(returned.extra.offerId,7);assert.equal(returned.extra.headingVisibility.controlFullyWithinViewport,true);
+ assert.ok(f.steps.indexOf('detail-tabs')<f.steps.indexOf('navigate-offers'));
+ assert.ok(f.steps.indexOf('reselect-two')<f.steps.indexOf('comparison'));
+});
+test('missing real comparison reopen path is rejected before any UI action',async()=>{
+ const f=narrowOfferFixture();await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer),/reopen path/);assert.deepEqual(f.steps,[]);assert.deepEqual(f.sizes,[]);
+});
+for(const option of ['wrongOwner','wrongDetail','clippedReturnedTitle','reopenFailure']){
+ test(`canonical ${option} remains a failure rather than assuming comparison persists`,async()=>{
+  const f=narrowOfferFixture({[option]:true});await assert.rejects(verifyNarrowOfferAction(f.qa,f.page,secondOffer,f.reopenComparison));
+  assert.equal(f.steps.includes('observed'),false);assert.equal(f.steps.includes('comparison'),false);
+  assert.equal(f.shots.at(-1).name,'offer-second-card-action-failure-900x689');
+  if(option==='reopenFailure')assert.deepEqual(f.diagnostics.at(-1),{step:'offer-reopen-comparison',control:'offer'});
+ });
+}

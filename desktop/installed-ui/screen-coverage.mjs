@@ -896,6 +896,8 @@ async function offerFlows(qa, page, applications) {
     for (const { application } of offers) await page.getByRole('checkbox', exact(`选择 Offer：${application.company_name}｜${application.position_name}`)).check();
     await btn(page, /^开始比较（已选 \d+）$/u).click();
     await region(page, 'Offer 横向对比').waitFor();
+    for (const offer of offers) await page.getByTestId(`offer-comparison-header-${offer.id}`).waitFor();
+    assert.equal(await region(page, 'Offer 横向对比').locator('article[data-testid^="offer-comparison-header-"]').count(), 2);
   };
   await qa.run('S21', 'offer-comparison-math-and-differences', ['Offer', '选择两份', '开始比较'], async () => {
     await openCompare();
@@ -905,7 +907,9 @@ async function offerFlows(qa, page, applications) {
     assert.deepEqual(await comparison.locator('tr[data-field="first-year"] td').allTextContents(), ['27.0 万元', '26.4 万元']);
     assert.ok(await comparison.locator('[data-missing="true"]').count() > 0, 'missing optional facts remain marked missing');
     await captureWidths(qa, page, 'offer-comparison-full');
-    await verifyNarrowOfferAction(qa, page, offers[1]);
+    await verifyNarrowOfferAction(qa, page, offers[1], openCompare);
+    assert.deepEqual(await comparison.locator('tr[data-field="annual"] td').allTextContents(), ['26.0 万元', '26.4 万元']);
+    assert.deepEqual(await comparison.locator('tr[data-field="first-year"] td').allTextContents(), ['27.0 万元', '26.4 万元']);
     await theme(page, 'light'); await qa.capture('offer-comparison-light'); await theme(page, 'dark');
     await comparison.getByRole('switch', exact('只看差异')).click();
     assert.equal(await comparison.getByRole('switch', exact('只看差异')).getAttribute('aria-checked'), 'true');
@@ -948,7 +952,9 @@ async function offerFlows(qa, page, applications) {
   await qa.disposition('S23', 'offer-ai-negotiation-output', 'BLOCKED', 'provider generation and generated history require separate authorization');
 }
 
-async function verifyNarrowOfferAction(qa, page, offer) {
+async function verifyNarrowOfferAction(qa, page, offer, reopenComparison) {
+  assert.equal(typeof reopenComparison, 'function', 'normal UI comparison reopen path is required');
+  assert.ok(Number.isSafeInteger(offer.application.id) && offer.application.id > 0, 'positive canonical application ID required');
   await qa.size(900, 689);
   let phase = 'offer-local-scroll';
   let failed = false;
@@ -999,12 +1005,33 @@ async function verifyNarrowOfferAction(qa, page, offer) {
     await target.click();
     const form = region(page, '谈薪准备');
     await form.getByRole('heading', { level: 2, name: `为 ${offer.application.company_name} 准备谈薪`, exact: true }).waitFor();
+    const owner = page.locator('[data-core-task-key]').filter({ has: form });
+    assert.equal(await owner.count(), 1, 'one canonical negotiation owner required');
+    assert.equal(await owner.getAttribute('data-core-task-key'), `application.offer_review:applicationId=${offer.application.id}`);
     await qa.capture('offer-second-card-negotiation-open-900x689');
     step('dialog-dismiss');
     await btn(form, '关闭').click();
     await form.waitFor({ state: 'hidden' });
+    step('offer-return-detail');
+    await page.locator(`[data-core-task-key="application.offer_review:applicationId=${offer.application.id}"]`).waitFor({ state: 'hidden' });
+    const heading = page.getByRole('heading', { level: 3, name: `${offer.application.company_name} · ${offer.application.position_name}`, exact: true });
+    await heading.waitFor();
+    await page.getByRole('tablist', exact('投递详情分段')).waitFor();
+    await heading.scrollIntoViewIfNeeded();
+    await ready(page);
+    const headingVisibility = await heading.evaluate(measureScrollableAncestors);
+    const headingHit = await heading.evaluate(measureControlHit);
+    await qa.capture('offer-second-preflight-returned-detail-900x689', { applicationId: offer.application.id, offerId: offer.id, headingVisibility, headingHit });
+    assert.ok(headingVisibility.documentWidth <= headingVisibility.width + 1, 'returned detail must not overflow the document');
+    assert.equal(headingVisibility.controlFullyWithinViewport, true, 'complete returned title must enter the viewport');
+    assert.equal(headingVisibility.controlFullyWithinScrollableBounds, true, 'returned title must not remain clipped by its scroll pane');
+    assert.equal(headingHit.receiver, 'target', 'returned title must not remain covered by another element');
+    // AppShell hands negotiation to the application owner and closes the old
+    // comparison. Reopen through its normal Back/Offer/select controls.
+    step('offer-reopen-comparison');
+    await reopenComparison();
     await region(page, 'Offer 横向对比').waitFor();
-    qa.observed('second Offer action reached at 900px by verified real horizontal wheel or both fully contained cards; pointer hit and exact Offer heading verified; unsent preflight closed back to comparison');
+    qa.observed('second Offer scroll and pointer verified; canonical application ID and returned detail verified; unsent preflight closed and original comparison reopened through public UI');
   } catch (error) {
     failed = true;
     // Preserve the actual narrow failing state before restoring the main size.

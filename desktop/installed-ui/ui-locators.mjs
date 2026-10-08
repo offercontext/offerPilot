@@ -5,7 +5,7 @@ export const UI_STEPS = Object.freeze(['navigation', 'palette-open', 'palette-qu
   'button-action', 'button-assertion', 'dialog-dismiss', 'form-fill', 'form-validation',
   'ui-submit', 'response-wait', 'response-validate', 'readback', 'selection-open',
   'selection-search', 'selection-confirm', 'viewport-set', 'screenshot-capture',
-  'geometry-check', 'runtime-check', 'recovery-reload', 'startup-reload', 'root-landmark', 'companion-readback', 'companion-context', 'drawer-close-hit', 'offer-local-scroll', 'offer-local-scroll-verify', 'offer-second-preflight', 'companion-visual']);
+  'geometry-check', 'runtime-check', 'recovery-reload', 'startup-reload', 'root-landmark', 'companion-readback', 'companion-context', 'drawer-close-hit', 'offer-local-scroll', 'offer-local-scroll-verify', 'offer-second-preflight', 'companion-visual', 'offer-return-detail', 'offer-reopen-comparison']);
 export const UI_CONTROLS = Object.freeze(['unspecified', 'quick-open', 'button-pattern',
   '今日复习', '题库', '复盘重点练习', '快速模拟', '展开到 Pilot 工作区', '发送',
   'application', 'application-jd', 'schedule', 'question', 'resume', 'knowledge', 'story', 'offer', 'pilot',
