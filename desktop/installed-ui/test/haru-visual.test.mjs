@@ -56,11 +56,33 @@ test('suspended animation frames reject on a host-side deadline and still retain
  await assert.rejects(verifyHaruVisual(page,async()=>{captures++;}),/bounded frame wait expired/);
  assert.equal(captures,1);
 });
-test('smoke failure captures the actual Haru window before app teardown even when a transition prerequisite fails',async()=>{
- const fs=await import('node:fs/promises');const source=await fs.readFile(new URL('../smoke.mjs',import.meta.url),'utf8');
+function assertHaruCaptureBeforeTeardown(rawSource) {
+ // Git may check out JavaScript with CRLF on Windows. Normalize only newline
+ // encoding; keep the awaited capture and teardown ordering requirements intact.
+ const source=rawSource.replace(/\r\n/g,'\n');
  const start=source.indexOf('} catch (error) {\n  // Keep failures failed');
+ const screenshot=source.indexOf('await current.haru.screenshot(',start);
  const capture=source.indexOf("report.haruFailureScreenshot = 'screens/haru-failure.png'",start);
  const close=source.indexOf('current.app.close()',start);
- assert.ok(start>0 && capture>start && close>capture);
- assert.match(source.slice(start,close),/current\.haru\.screenshot\([^]*timeout: 15000/);
+ assert.ok(start>0 && screenshot>start && capture>screenshot && close>capture);
+ assert.match(source.slice(screenshot,close),/current\.haru\.screenshot\([^]*timeout: 15000/);
+}
+test('smoke failure captures the actual Haru window before app teardown even when a transition prerequisite fails',async()=>{
+ const fs=await import('node:fs/promises');
+ assertHaruCaptureBeforeTeardown(await fs.readFile(new URL('../smoke.mjs',import.meta.url),'utf8'));
 });
+for (const [name,newline] of [['LF','\n'],['CRLF','\r\n']]) {
+ test(`Haru capture ordering accepts ${name} source and rejects early teardown or missing capture`,async()=>{
+  const fs=await import('node:fs/promises');
+  const source=(await fs.readFile(new URL('../smoke.mjs',import.meta.url),'utf8')).replace(/\r\n/g,'\n');
+  const encode=value=>value.replace(/\n/g,newline);
+  assertHaruCaptureBeforeTeardown(encode(source));
+  const early=source.replace('  if (current?.haru && !current.haru.isClosed()) {',
+    '  await current.app.close();\n  if (current?.haru && !current.haru.isClosed()) {');
+  assert.notEqual(early,source,'negative fixture must insert an early teardown');
+  assert.throws(()=>assertHaruCaptureBeforeTeardown(encode(early)));
+  const missing=source.replace(/      await current\.haru\.screenshot\([^\n]+\);\n/,'');
+  assert.notEqual(missing,source,'negative fixture must remove the actual screenshot call');
+  assert.throws(()=>assertHaruCaptureBeforeTeardown(encode(missing)));
+ });
+}
