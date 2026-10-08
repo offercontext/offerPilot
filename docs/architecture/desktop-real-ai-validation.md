@@ -2,22 +2,24 @@
 
 ## 状态与边界
 
-本工具是待人工启用的独立验收器，不能据此声称真实 AI、Windows UI 或完整发布门禁已通过。当前目标为修复运行恢复状态、静态模块 MIME 并包含手动更新入口的新构建 `c040a5d2`；验收 runner 不改动或重建该安装包/EXE，普通 helper 发布不会注入 AI secret。新包的 Windows MOCK 尚待实跑，完整 gate 是独立门禁且在 repin 时仍运行；旧 `16f31e47` 的局部结果不得沿用为新包通过证明。真实 AI 仍未获执行就绪证明。
+本工具的当前目标是 `590291ce` PACKAGE-ONLY 安装器，仅用于免费预验 DB trigger 原子初始化、运行恢复增量投影和真实 Stop HTTP 取消。`fullRegressionRunId: null` 明确表示完整门禁未运行；manifest/shards/full-release 全部 SKIPPED，汇总 FAILURE 不能洗成通过。新包非 AI 与 Windows MOCK 尚待实跑，runner 不修改或重建该 EXE，普通 helper 发布不注入 AI secret。live preflight、prepare 和执行 runner 各自拒绝该空来源，人工审批或 MOCK 成功不能放行当前包。
+
+最终普通 full-gate 新提交产生新安装器后，必须固定那份 EXE 再做免费非 AI 与全 MOCK，唯一 live 也固定最终同一份；本次预验、旧 `c040a5d2` / `16f31e47` 的局部结果均不能当作未来安装器认证。
 
 固定对象见 `desktop/real-ai-validation/product.json`：
 
-- 产品/构建提交：`c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`
-- 构建 run：`37806395272`；artifact：`11564445795`
-- artifact digest：`sha256:8751616fea7f065f635b493af8c2b3cd6d57e58b47ab9a2741ca541e39913572`
-- installer SHA-256：`9e33c18f5c83d01bd23ebed01e22d5952a72787fef48cefec8dd875686e46ea7`
+- 产品/构建提交：`590291ce4e33407eb4f13f092298e7398aed394c`
+- 构建 run：`37828103435`；artifact：`11573930091`；完整回归来源：`null`（PACKAGE-ONLY）
+- artifact digest：`sha256:ad5c3f7e2858f1b1c5339a2e95af16d7c0785b268382d170cd2b9ef7efd6debd`
+- installer SHA-256：`abaa504cef5a51ba7f3b4f1dddc1d24f889f350231a4dcb5b523e4f91b76f316`
 
-最后一项是安装器哈希，不是安装后的主程序哈希。安装器 `178098542` 字节；artifact ZIP `177777169` 字节。安装后逐文件比对固定安装器内 payload，另记录主程序哈希供启动前复查。来源比较统一使用共享 manifest 的原 6 个桌面模块和新增 6 个 updater 模块；broker snapshot 的产品提交、build run、artifact 与安装器哈希必须全部与 PIN 一致，任何旧/新混配拒绝写成有效证据。完整回归是独立门禁；本任务不认证、不重跑、不取消它。Playwright 使用现有 inspect fuse 和临时 loopback CDP；不修改 fuse。GitHub hosted Windows 是管理员/UAC受平台管理环境，不证明普通用户 UAC/SmartScreen、无开发工具的正常启动体验。
+最后一项是安装器哈希，不是安装后的主程序哈希。安装器 `178105893` 字节；artifact ZIP `177784764` 字节。安装后逐文件比对固定安装器内 payload，另记录主程序哈希供启动前复查。来源比较统一使用共享 manifest 的原 6 个桌面模块和新增 6 个 updater 模块；broker snapshot 的产品提交、build run、artifact 与安装器哈希必须全部与 PIN 一致，任何旧/新混配拒绝写成有效证据。完整回归是独立门禁；当前包无完整回归来源，本任务不认证、不重跑、不取消任何既有完整门禁。Playwright 使用现有 inspect fuse 和临时 loopback CDP；不修改 fuse。GitHub hosted Windows 是管理员/UAC受平台管理环境，不证明普通用户 UAC/SmartScreen、无开发工具的正常启动体验。
 
 ## 真实流量与费用边界
 
 真实安装版 UI → 本机 loopback 预算代理 → 固定 `https://api.deepseek.com/chat/completions`，模型只允许 `deepseek-flash`。这是经代理的真实 provider 验证，不是直连。正常 HTTPS/TLS 校验保持开启；不修改防火墙、证书、OS 安全或产品代码。
 
-换固定产品包不会重置 session、历史闩锁、累计预算或价格期限。旧包只运行过 MOCK，未调用真实 provider；新包仍需同一审阅 helper SHA 的新 Windows MOCK 成功，随后才可由用户配置并人工批准唯一 live。
+换固定产品包不会重置 session、历史闩锁、累计预算或价格期限。已运行的 Windows helper 仅有 MOCK，没有 live provider 验证；该范围不包括较早未加离线 guard 的 Python 测试尝试，其实际出站与费用仍无法确认，不能被后续通过记录消除。当前 package-only 包的 live 始终拒绝；最终普通 full-gate 安装器仍须同一审阅 helper SHA 的新 Windows MOCK 成功，再满足既有人工配置与审批条件。
 
 整轮 session `offerpilot-fixed-exe-real-ai-20261008` 总上限为 **10 CNY、8 次 HTTP 出站请求、600 秒、0 自动重试**。并非每个 workflow run 各有 10 元。七个场景分别最多一请求；取消场景最后执行。broker 先以保守峰值费用为每请求预留 3 元，再发送。可信 usage 才安全结算；缺失/矛盾 usage、协议或账本异常封闭 session，未知费用保留预留额。余额不足后续场景 BLOCKED。
 
@@ -143,6 +145,6 @@ node web/node_modules/vitest/vitest.mjs run --config desktop/real-ai-validation/
 
 [第四轮旧包 MOCK run 37794298028](https://github.com/offercontext/offerPilot/actions/runs/37794298028) 保留为失败证据：连接 PASS；stream 的观察器健康，但只记录到 running/null 和最终 idle/正 ID，未记录正 ID running 组合；两笔合成请求正常结束、清理通过，paid jobs 均跳过。其两张终态图片不能补作运行中证据。
 
-真实 controller/execution/Haru hooks 复现了持续 running 的恢复分支误报 idle，产品修复已进入 `c040a5d2`：将本地订阅状态与当前 durable execution 活动分开，精确终态结清并拒绝同 generation 旧 running 回退；保留 GET 恢复、停止、HITL 和跨会话隔离。短请求 accepted/terminal 同批次也可能合法省略中间 render，两种情况不混为一谈。此次仅 repin 到实际新包，没有放宽 UI 断言、伪造运行状态、拉长 MOCK 速度或增加模型请求。
+真实 controller/execution/Haru hooks 复现了持续 running 的恢复分支误报 idle，产品修复已进入 `590291ce`：将本地订阅状态与当前 durable execution 活动分开，精确终态结清并拒绝同 generation 旧 running 回退；保留 GET 恢复、停止、HITL 和跨会话隔离。短请求 accepted/terminal 同批次也可能合法省略中间 render，两种情况不混为一谈。此次仅 repin 到实际新包，没有放宽 UI 断言、伪造运行状态、拉长 MOCK 速度或增加模型请求。
 
 新包原 Haru 桥和窗口安全属性保持不变，新增更新桥仅在 owner 暴露。当前发布策略为 `null`，未配置正式签名更新源；验收不会调用 check/download/install，启动不会自动加载 updater 的外网 adapter。CJS 源检查覆盖完整 12 模块，其他文件仍由安装 payload 整树校验。repo/module 字节审查、fake tests 和完整 gate 身份核验都不代替新包的 Windows MOCK，也不证明完整 gate 已成功。

@@ -99,11 +99,17 @@ test('numeric ledger does not serialize arbitrary fields or credential-shaped st
     const mixed = { ...snapshot, provenance: { ...snapshot.provenance, [field]: other } };
     assert.throws(() => numericLedger(mixed), { safeCode: 'LEDGER_SHAPE_INVALID' }, `mixed product provenance: ${field}`);
   }
-  const previousProduct = { productCommit: '16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4', buildRunId: '37754883783',
-    artifactId: '11540740222', installerSha256: '2e7b144ef657dcfa6e9408b532b59617c00f5a442081ff47ec18b75753713439' };
-  assert.notEqual(PIN.commit, previousProduct.productCommit);
-  assert.throws(() => numericLedger({ ...snapshot, provenance: { ...snapshot.provenance, ...previousProduct } }),
-    { safeCode: 'LEDGER_SHAPE_INVALID' }, 'the old package ledger cannot be relabelled as the new product');
+  const previousProducts = [
+    { productCommit: '16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4', buildRunId: '37754883783',
+      artifactId: '11540740222', installerSha256: '2e7b144ef657dcfa6e9408b532b59617c00f5a442081ff47ec18b75753713439' },
+    { productCommit: 'c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0', buildRunId: '37806395272',
+      artifactId: '11564445795', installerSha256: '9e33c18f5c83d01bd23ebed01e22d5952a72787fef48cefec8dd875686e46ea7' },
+  ];
+  for (const previousProduct of previousProducts) {
+    assert.notEqual(PIN.commit, previousProduct.productCommit);
+    assert.throws(() => numericLedger({ ...snapshot, provenance: { ...snapshot.provenance, ...previousProduct } }),
+      { safeCode: 'LEDGER_SHAPE_INVALID' }, 'the old package ledger cannot be relabelled as the new product');
+  }
   snapshot.requests[0].status = 'KEY_WAS_FAKE'; assert.throws(() => numericLedger(snapshot));
 });
 test('unavailable ledger means entire remaining budget unavailable', () => {
@@ -116,6 +122,10 @@ test('evidence writer never outputs supplied credential', async () => {
     assert.deepEqual(await fs.readdir(directory), []);
     await saveEvidence(directory, { status: 'BLOCKED', code: 'NOT_STARTED', scenarios: rows() }, {}, ['fake-key-never-output']);
     assert.deepEqual((await fs.readdir(directory)).sort(), ['ledger.json', 'result.json']);
+    const report = JSON.parse(await fs.readFile(path.join(directory, 'result.json'), 'utf8'));
+    assert.equal(report.fullRegressionRunId, PIN.fullRegressionRunId);
+    assert.equal(report.fullRegression, PIN.fullRegressionRunId === null ? 'not-run-package-only' : 'independent-not-certified');
+    assert.equal(report.independentFullGateCertified, false);
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });
 test('GitHub metadata transport is GET only, fixed origin and fails closed without raw errors', async () => {
@@ -149,9 +159,10 @@ test('ledger write failure cannot replace the existing result with PASS', async 
   try {
     await fs.writeFile(path.join(directory, 'result.json'), '{"status":"BLOCKED"}');
     await fs.mkdir(path.join(directory, 'ledger.json'));
-    await assert.rejects(saveEvidence(directory, { status: 'PASS', code: 'ALL_UI_CASES_PASSED',
+    await assert.rejects(saveEvidence(directory, { mode: 'mock', status: 'PASS', code: 'ALL_UI_CASES_PASSED',
       scenarios: CASES.map(id => ({ id, status: 'PASS', code: 'PASSED', checks: {} })),
-      cleanupPassed: true, cleanupCode: 'CLEANUP_PASSED' }, ledger));
+      cleanupPassed: true, cleanupCode: 'CLEANUP_PASSED' }, ledger),
+    error => error.safeCode === undefined && typeof error.code === 'string');
     assert.equal(JSON.parse(await fs.readFile(path.join(directory, 'result.json'), 'utf8')).status, 'BLOCKED');
   } finally { await fs.rm(directory, { recursive: true, force: true }); }
 });

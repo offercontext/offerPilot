@@ -368,6 +368,44 @@ async function advanceVisualDeadline(t, pending) {
   return pending;
 }
 
+function boundOfferPage() {
+  const page = fakePage('offer-negotiation');
+  page.document.selectors.delete('nav[aria-label="主导航"] [aria-current="page"][aria-label="Offer"]');
+  const nav = page.document.add('nav[aria-label="主导航"] [aria-current="page"][aria-label="投递"]');
+  page.document.selectors.set('nav[aria-label="主导航"] [aria-current="page"]', [nav]);
+  const owner = page.document.add('[data-core-task-owner]', new Node({ attributes: {
+    'data-core-task-owner': 'application-offer-review', 'data-core-task-key': 'application.offer_review:applicationId=1',
+  } }));
+  owner.add('[data-testid="offer-negotiation-drawer"]', page.surface);
+  return page;
+}
+
+test('bound Offer board captures only after the unchanged natural visibility and stability checks', async t => {
+  const { screenshots } = await setup(t); const page = boundOfferPage();
+  assert.equal((await screenshots.capture('offer-negotiation', page, { stage: 'offer-negotiation' })).status, 'captured');
+  assert.deepEqual(page.calls.filter(call => call.method === 'evaluate').map(call => call.visual), [false, 'stable', 'instant']);
+  assert.equal(page.calls.filter(call => call.method === 'scroll').length, 1);
+  assert.deepEqual(page.calls.find(call => call.method === 'screenshot').options,
+    { type: 'png', animations: 'allow', fullPage: false, timeout: 15000 });
+});
+
+test('bound Offer board still refuses clipped results and credentials appearing between stability frames', async t => {
+  const { directory, screenshots } = await setup(t);
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'] });
+  const clipped = boundOfferPage(); const draft = clipped.surface.querySelector('[aria-label="谈薪准备草稿"]');
+  draft.rect = { ...draft.rect, top: 1000, bottom: 1100 };
+  assert.equal((await advanceVisualDeadline(t, screenshots.capture('offer-negotiation', clipped, { stage: 'offer-negotiation' }))).code,
+    'SCREEN_VISUAL_UNSETTLED');
+  t.mock.timers.reset();
+  assert.equal(countCaptures(clipped), 0);
+  const credential = boundOfferPage();
+  credential.setOnFrame(frame => { if (frame === 1) credential.document.add('input[type="password"]'); });
+  assert.equal((await screenshots.capture('offer-negotiation', credential, { stage: 'offer-negotiation' })).code, 'SCREEN_GUARD_REJECTED');
+  assert.equal(screenshots.snapshot().skipped[0].reason, 'CREDENTIAL_SURFACE');
+  assert.equal(countCaptures(credential), 0);
+  await absent(directory);
+});
+
 test('Pilot waits for its naturally finishing ancestor blur and opacity without changing animations', async t => {
   const { screenshots } = await setup(t);
   const page = fakePage(); const bubble = page.surface.querySelector('[class*="bubbleAssistant"]');

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { PIN, SYNTHETIC, validateRequest, validateMetadata, validateReviewedPin, publicApplication,
   selectOwnedProcesses, validateListeners, validateSecurity } from '../contract.mjs';
 const clone = (value) => structuredClone(value);
-function metadata(pin = PIN) {
+const fullPin = Object.freeze({ ...PIN, fullRegressionRunId: PIN.runId });
+function metadata(pin = fullPin) {
   const repo = { id: 123, full_name: pin.repository };
   const run = { id: pin.runId, head_sha: pin.buildCommit, head_branch: pin.branch,
     path: pin.buildWorkflow, event: 'push', repository: repo, head_repository: repo,
@@ -25,7 +26,7 @@ test('request rejects missing values, any different pin and arbitrary input keys
   assert.throws(() => validateRequest({ ...PIN, url: 'https://example.com/installer.exe' }));
 });
 test('source verification accepts pending full regression without claiming its pass', () => {
-  assert.equal(validateMetadata(...metadata()).fullRegression, 'not-certified-by-this-job');
+  assert.equal(validateMetadata(...metadata(),fullPin).fullRegression, 'not-certified-by-this-job');
 });
 test('artifact/run/job mismatch and incomplete listings fail closed', () => {
   for (const mutate of [
@@ -40,7 +41,7 @@ test('artifact/run/job mismatch and incomplete listings fail closed', () => {
     (x) => { x[4].id++; }, (x) => { x[4].head_sha = 'bad'; },
     (x) => { x[4].head_branch = 'master'; }, (x) => { x[4].path = '.github/workflows/desktop-layout-retry.yml'; },
     (x) => { x[4].repository.full_name = 'fork/repo'; },
-  ]) { const values = metadata(); mutate(values); assert.throws(() => validateMetadata(...values)); }
+  ]) { const values = metadata(); mutate(values); assert.throws(() => validateMetadata(...values,fullPin)); }
 });
 test('UI response evidence contains only the approved synthetic fields', () => {
   assert.deepEqual(publicApplication({ id: 42, ...SYNTHETIC, token: 'must-not-appear', provider: 'must-not-appear' }), { id: 42, ...SYNTHETIC });
@@ -138,4 +139,81 @@ test('full-gate identity validation cannot be mistaken for full-gate success cer
     const values=metadata(retryPin);Object.assign(values[4],state);
     assert.equal(validateMetadata(...values,retryPin).fullRegression,'not-certified-by-this-job');
   }
+});
+
+// Unit-only package fixture: no artifact or API response can change the reviewed runtime PIN.
+const packagePin = Object.freeze({ ...PIN, fullRegressionRunId: null });
+function packageMetadata() {
+  const values = metadata(packagePin);
+  values[0].display_title = 'build: AI [windows-package-only] unit fixture';
+  values[0].head_commit = { id: packagePin.buildCommit, message: values[0].display_title + '\n\nNo full gate certification.' };
+  values[0].run_attempt = 1;
+  values[4] = null;
+  values[3] = { total_count: 4, jobs: [
+    { name: 'Experimental installer and desktop smoke', status: 'completed', conclusion: 'success' },
+    ...['Collect complete pytest manifest', 'Complete pytest shard ${{ matrix.shard }} of 12',
+      'Full release regression (required for release)'].map(name => ({ name, status: 'completed', conclusion: 'skipped' })),
+  ].map(job => ({ ...job, run_id: packagePin.runId, head_sha: packagePin.buildCommit })) };
+  return values;
+}
+test('package-only null pin is explicitly not run, not full-gate identity or certification', () => {
+  validateReviewedPin(packagePin);
+  const result = validateMetadata(...packageMetadata(), packagePin);
+  assert.equal(result.fullRegressionRunId, null);
+  assert.equal(result.buildScope, 'package-only');
+  assert.equal(result.fullRegression, 'not-run-package-only');
+  assert.equal(result.packaging, 'success');
+  assert.equal(result.commit, packagePin.commit);
+  const values = packageMetadata();
+  values[0].display_title = 'BUILD: AI [WINDOWS-PACKAGE-ONLY] exact workflow semantics';
+  values[0].head_commit.message = values[0].display_title;
+  assert.equal(validateMetadata(...values, packagePin).fullRegression, 'not-run-package-only');
+});
+test('ordinary runs, substituted full gate, wrong attempt or absent package-only marker reject null', () => {
+  for (const mutate of [
+    x => { delete x[0].display_title; },
+    x => { delete x[0].head_commit; },
+    x => { x[0].head_commit.id = 'f'.repeat(40); },
+    x => { x[0].head_commit.message = 'test: ordinary run with forged display title'; },
+    x => { x[0].head_commit.message = 'first line\nbuild: AI [windows-package-only] later marker'; },
+    x => { x[0].head_commit.message = 'build: AI [windows-package-only]'; },
+    x => { x[0].display_title = 'test: normal full gate'; },
+    x => { x[0].display_title = 'build: AI [windows-package-only]'; },
+    x => { x[0].display_title = 'prefix build: AI [windows-package-only] unit fixture'; },
+    x => { x[0].run_attempt = 2; },
+    x => { x[0].event = 'workflow_dispatch'; },
+    x => { x[0].head_sha = 'f'.repeat(40); },
+    x => { x[4] = metadata(fullPin)[4]; },
+    x => { x[4] = undefined; },
+    x => { x[3].jobs[0].run_id++; },
+    x => { x[3].jobs[0].head_sha = 'f'.repeat(40); },
+  ]) { const values = packageMetadata(); mutate(values); assert.throws(() => validateMetadata(...values, packagePin)); }
+});
+test('every package-only skipped full-gate stage must exist exactly once in the same run and product', () => {
+  for (const index of [1, 2, 3]) {
+    for (const mutate of [
+      x => { x[3].jobs.splice(index, 1); x[3].total_count--; },
+      x => { x[3].jobs.push(clone(x[3].jobs[index])); x[3].total_count++; },
+      x => { x[3].jobs[index].name = 'unrelated stage'; },
+      x => { x[3].jobs[index].status = 'in_progress'; },
+      ...['success', 'failure', 'cancelled', null].map(conclusion => x => { x[3].jobs[index].conclusion = conclusion; }),
+      x => { x[3].jobs[index].run_id++; },
+      x => { x[3].jobs[index].head_sha = 'f'.repeat(40); },
+    ]) { const values = packageMetadata(); mutate(values); assert.throws(() => validateMetadata(...values, packagePin)); }
+  }
+  const values = packageMetadata();
+  values[3].jobs.push({ ...values[3].jobs[2], name: 'Complete pytest shard 1 of 12' }); values[3].total_count++;
+  assert.throws(() => validateMetadata(...values, packagePin));
+});
+test('nullable scope cannot broaden workflow, source/build identity or integer full-gate rules', () => {
+  for (const patch of [
+    { buildWorkflow: '.github/workflows/desktop-layout-retry.yml', buildCommit: 'e'.repeat(40) },
+    { buildWorkflow: '.github/workflows/other.yml' }, { buildCommit: 'e'.repeat(40) },
+    { fullRegressionRunId: undefined }, { fullRegressionRunId: 'null' }, { fullRegressionRunId: 0 },
+    { fullRegressionRunId: packagePin.runId + 1 },
+  ]) assert.throws(() => validateReviewedPin({ ...packagePin, ...patch }));
+  validateReviewedPin(fullPin);
+  const full = validateMetadata(...metadata(fullPin), fullPin);
+  assert.equal(full.fullRegression, 'not-certified-by-this-job');
+  assert.equal(Object.hasOwn(full, 'buildScope'), false, 'integer provenance retains its original evidence shape');
 });

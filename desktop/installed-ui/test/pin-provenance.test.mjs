@@ -25,11 +25,14 @@ test('source checkout is pinned to product commit and artifact download stays pi
   assert.ok(scope.includes(`Product source commit: ${PIN.commit}`));
   assert.ok(scope.includes(`Installer build activation commit: ${PIN.buildCommit}`));
   assert.ok(scope.includes(`Installer build workflow: ${PIN.buildWorkflow}; build run: ${PIN.runId}`));
-  assert.ok(scope.includes(`actions/runs/${PIN.fullRegressionRunId} (not certified by this job)`));
+  assert.ok(scope.includes(PIN.fullRegressionRunId === null ? 'Full regression: NOT RUN (package-only); no full-gate provenance is attached.' :
+    `actions/runs/${PIN.fullRegressionRunId} (not certified by this job)`));
 });
 test('runtime verification fetches independent regression identity but cannot take a caller-supplied pin',()=>{
   const verifier=fs.readFileSync(new URL('../verify-artifact.mjs',import.meta.url),'utf8');
-  assert.match(verifier,/read\(`runs\/\$\{PIN\.fullRegressionRunId\}`\)/);
+  assert.match(verifier,/PIN\.fullRegressionRunId === null \? null : read\(`runs\/\$\{PIN\.fullRegressionRunId\}`\)/);
+  const prepare=fs.readFileSync(new URL('../../real-ai-validation/prepare.mjs',import.meta.url),'utf8');
+  assert.match(prepare,/PIN\.fullRegressionRunId === null \? null : read\(`actions\/runs\/\$\{PIN\.fullRegressionRunId\}`\)/);
   assert.match(verifier,/validateRequest\(JSON\.parse/);
   assert.match(verifier,/validateMetadata\(\.\.\.await Promise\.all/);
   assert.doesNotMatch(verifier,/process\.argv|process\.env\.(?:BUILD_COMMIT|SOURCE_COMMIT|WORKFLOW|RUN_ID|ARTIFACT_URL)/);

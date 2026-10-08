@@ -33,7 +33,7 @@ const report = { status: 'running', sourceCommit: PIN.commit, buildCommit: PIN.b
   buildRunId: PIN.runId, fullRegressionRunId: PIN.fullRegressionRunId, artifactId: PIN.artifactId,
   scope: 'experimental-installed-UI-with-temporary-loopback-debugging', releaseReady: false,
   ordinaryUserUacSmartScreenValidated: false, normalUndebuggedLaunchValidated: false,
-  fullRegression: 'independent-not-certified',
+  fullRegression: PIN.fullRegressionRunId === null ? 'not-run-package-only' : 'independent-not-certified',
   instrumentation: { tray: 'invoke-observed-production-callbacks', nativeTrayPointerValidated: false,
     nativeDialogChoices: 'automated-cancel-or-synthetic-save-path', nativeDialogPointerValidated: false,
     downloadPolicy: 'Electron-native-default-no-CDP-download-override', syntheticIpcStatusProbe: true },

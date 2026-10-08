@@ -8,7 +8,7 @@ import { getCurrentFuseWire, FuseState, FuseV1Options } from '@electron/fuses';
 import { hash, treeFiles, verifyPayload, normalizeSourceText } from '../installed-ui/integrity.mjs';
 import { validateMetadata } from '../installed-ui/contract.mjs';
 import { DESKTOP_SOURCE_FILES } from '../installed-ui/desktop-source-manifest.mjs';
-import { PIN, demand, safeCode, childEnvironment, validateFixedFiles } from './contract.mjs';
+import { PIN, demand, safeCode, childEnvironment, validateFixedFiles, validateLiveProduct } from './contract.mjs';
 import { githubReader } from './github-read.mjs';
 import { preflight } from './preflight.mjs';
 
@@ -30,6 +30,7 @@ export const exists = async (filename, access = fs.access) => {
 };
 export async function prepare({ mode = 'live' } = {}) {
   demand(['live', 'mock'].includes(mode), 'INVALID_HARNESS');
+  if (mode === 'live') validateLiveProduct();
   demand(process.platform === 'win32' && process.env.RUNNER_TEMP && process.env.APPDATA, 'HOSTED_WINDOWS_REQUIRED');
   demand(process.env.RUNNER_ENVIRONMENT === 'github-hosted', 'HOSTED_WINDOWS_REQUIRED');
   demand(!process.env.OFFERPILOT_REAL_AI_KEY, 'SECRET_PRESENT_DURING_PREPARATION');
@@ -45,7 +46,7 @@ export async function prepare({ mode = 'live' } = {}) {
   const sourceEvidence = validateMetadata(...await Promise.all([
     read(`actions/runs/${PIN.runId}`), read(`actions/artifacts/${PIN.artifactId}`),
     read(`actions/runs/${PIN.runId}/artifacts?per_page=100`), read(`actions/runs/${PIN.runId}/jobs?per_page=100`),
-    read(`actions/runs/${PIN.fullRegressionRunId}`),
+    PIN.fullRegressionRunId === null ? null : read(`actions/runs/${PIN.fullRegressionRunId}`),
   ]));
   const root = path.join(process.env.RUNNER_TEMP, mode === 'live' ? 'offerpilot-bounded-ai' : 'offerpilot-bounded-ai-mock');
   demand(!await exists(root), 'SCRATCH_NOT_FRESH');

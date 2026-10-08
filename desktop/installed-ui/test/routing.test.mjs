@@ -146,7 +146,8 @@ test('reviewed source manifest, request, scope and evidence label all bind the s
   assert.ok(script.includes(`Product source commit: ${PIN.commit}.`));
   assert.ok(script.includes(`Installer build activation commit: ${PIN.buildCommit}.`));
   assert.ok(script.includes(`build run: ${PIN.runId}.`));
-  assert.ok(script.includes(`actions/runs/${PIN.fullRegressionRunId} (not certified by this job)`));
+  assert.ok(script.includes(PIN.fullRegressionRunId === null ? 'Full regression: NOT RUN (package-only); no full-gate provenance is attached.' :
+    `actions/runs/${PIN.fullRegressionRunId} (not certified by this job)`));
   const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4');
   assert.equal(upload.with.name, `windows-installed-ui-evidence-${PIN.commit.slice(0, 8)}-` + '${{ github.run_id }}-${{ github.run_attempt }}');
 });

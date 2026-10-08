@@ -53,7 +53,7 @@ test('paid gate requires actual completed successful Windows MOCK job at same re
     [offlineRun(), { total_count: 1, jobs: [{ ...offlineJobs().jobs[0], head_sha: after }] }],
   ]) assert.throws(() => validateOfflineRun(run, jobs, before));
 });
-test('full preflight rejects missing same-helper MOCK and accepts verified one', async () => {
+test('full preflight retains same-helper MOCK gate and denies package-only LIVE', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'offerpilot-preflight-'));
   const eventPath = path.join(dir, 'event.json');
   const event = { before, after, repository: { full_name: PIN.repository }, head_commit: { id: after, message: marker(before) } };
@@ -79,8 +79,23 @@ test('full preflight rejects missing same-helper MOCK and accepts verified one',
     assert.fail(`unexpected read route: ${suffix}`);
   };
   try {
-    assert.equal((await preflight({ env, read, approval: true })).sameHelperOfflineVerified, true);
+    if (PIN.fullRegressionRunId === null) {
+      await assert.rejects(preflight({ env, read, approval: true }), { safeCode: 'FULL_GATE_PROVENANCE_REQUIRED' });
+    } else {
+      assert.equal((await preflight({ env, read, approval: true })).sameHelperOfflineVerified, true);
+    }
     verified = false;
     await assert.rejects(preflight({ env, read }), error => error.safeCode === 'SAME_HELPER_MOCK_RUN_REQUIRED');
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('package-only live preparation and execution each block before host, profile or broker access', async () => {
+  if (PIN.fullRegressionRunId !== null) return;
+  const { prepare } = await import('../prepare.mjs');
+  const { executeValidation } = await import('../validation-runner.mjs');
+  await assert.rejects(prepare({ mode: 'live' }), { safeCode: 'FULL_GATE_PROVENANCE_REQUIRED' });
+  let brokerCalled = false;
+  await assert.rejects(executeValidation({ mode: 'live', brokerFactory: () => { brokerCalled = true; } }),
+    { safeCode: 'FULL_GATE_PROVENANCE_REQUIRED' });
+  assert.equal(brokerCalled, false);
 });

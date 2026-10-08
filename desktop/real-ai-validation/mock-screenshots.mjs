@@ -121,10 +121,23 @@ async function safeScreen({ screenId, stage, tokens, visual = false }) {
         'offer-negotiation': ['Offer', '[data-testid="offer-negotiation-drawer"]'],
       };
       const [nav, selector] = surfaces[stage] || [];
+      let offerTask;
+      if (stage === 'offer-negotiation' && one('nav[aria-label="主导航"] [aria-current="page"][aria-label="投递"]')) {
+        // AppShell.openOfferNegotiation opens the bound application's board
+        // task, not the Offer list. Accept only its unique product task owner,
+        // valid bound identity, and the drawer actually nested inside it.
+        const owners = shown('[data-core-task-owner]');
+        offerTask = owners.length === 1 ? owners[0] : null;
+        const applicationId = /^application\.offer_review:applicationId=([1-9]\d*)$/.exec(offerTask?.getAttribute('data-core-task-key') || '')?.[1];
+        if (!one('nav[aria-label="主导航"] [aria-current="page"]') ||
+          offerTask?.getAttribute('data-core-task-owner') !== 'application-offer-review' ||
+          !applicationId || !Number.isSafeInteger(Number(applicationId)) || !one(selector, offerTask)) return 'BUSINESS_SURFACE';
+      }
       // Interview preparation moves from the interview list into its bound
       // application's board task. Both are fixed product-owned surfaces.
       const navMatches = one(`nav[aria-label="主导航"] [aria-current="page"][aria-label="${nav}"]`)
-        || (stage === 'interview-preparation' && one('nav[aria-label="主导航"] [aria-current="page"][aria-label="投递"]'));
+        || (stage === 'interview-preparation' && one('nav[aria-label="主导航"] [aria-current="page"][aria-label="投递"]'))
+        || Boolean(offerTask);
       if (!nav || !one('nav[aria-label="主导航"]') || !navMatches) return 'BUSINESS_SURFACE';
       if (failure && stage === 'interview-preparation' && !one(selector)) {
         if (one('[data-testid="interview-surface"]') || one('[data-testid="locked-real-preparation"]')) return 'PASSED';

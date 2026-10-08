@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { _electron } from 'playwright-core';
-import { CASES, childEnvironment, demand, safeCode, validateFixedFiles } from './contract.mjs';
+import { CASES, childEnvironment, demand, safeCode, validateFixedFiles, validateLiveProduct } from './contract.mjs';
 import { hash } from '../installed-ui/integrity.mjs';
 import { waitForDesktopSurfaces, readDesktopSecurity } from '../installed-ui/desktop-surfaces.mjs';
 import { selectOwnedProcesses, sameWindowsPath, validateListeners } from '../installed-ui/contract.mjs';
@@ -17,6 +17,7 @@ export async function executeValidation({ mode, brokerFactory, providerKey, scre
     (mockContinuation === undefined || typeof mockContinuation === 'function') &&
     (mode !== 'live' || screenshotFactory === undefined) &&
     (mode !== 'live' || mockContinuation === undefined), 'INVALID_HARNESS');
+  if (mode === 'live') validateLiveProduct();
 const blocked = code => CASES.map(id => ({ id, status: 'BLOCKED', code, checks: {} }));
 const report = { mode, status: 'BLOCKED', code: 'NOT_STARTED', scenarios: blocked('NOT_STARTED'), cleanupPassed: false };
 let app, broker, timer, screenshotEvidence, ledger = {}, failure, cleanupFailure;
@@ -108,7 +109,8 @@ try {
     report.scenarios = CASES.map(id => result.results.find(row => row.id === id));
     demand(!externalRendererRequest, 'UNEXPECTED_RENDERER_NETWORK');
     report.status = result.allPassed ? 'PASS' : 'FAIL';
-    report.code = result.allPassed ? 'ALL_UI_CASES_PASSED' : 'UI_CASES_INCOMPLETE';
+    report.code = result.allPassed ? (report.scenarios.some(row => row.code === 'LIVE_COMPLETION_ONLY')
+      ? 'ALL_UI_CASES_PASSED_WITH_COMPLETION_ONLY' : 'ALL_UI_CASES_PASSED') : 'UI_CASES_INCOMPLETE';
   })(), timeout]);
 } catch (error) {
   failure = safeCode(error); report.status = 'BLOCKED'; report.code = failure;
@@ -127,14 +129,16 @@ try {
   report.cleanupCode = cleanupFailure || 'CLEANUP_PASSED';
   if (failure || cleanupFailure) {
     report.status = 'BLOCKED';
-    report.code = failure || (['NOT_STARTED', 'ALL_UI_CASES_PASSED'].includes(report.code) ? cleanupFailure : report.code);
+    report.code = failure || (['NOT_STARTED', 'ALL_UI_CASES_PASSED', 'ALL_UI_CASES_PASSED_WITH_COMPLETION_ONLY'].includes(report.code) ? cleanupFailure : report.code);
   }
   if (evidence) {
     try { await saveEvidence(evidence, report, ledger, [providerKey]); }
     catch { report.status = 'BLOCKED'; report.code = failure || report.code; report.cleanupCode = 'EVIDENCE_WRITE_BLOCKED'; }
   }
   console.log(mode === 'mock' ? `MOCK installed UI validation: ${report.status}; no real provider evidence.` :
-    report.status === 'PASS' ? 'Bounded real-provider installed UI cases passed; experimental evidence only.' : `Real AI validation blocked or incomplete: ${report.code}`);
+    report.status === 'PASS' ? (report.code === 'ALL_UI_CASES_PASSED_WITH_COMPLETION_ONLY'
+      ? 'Bounded real-provider installed UI cases completed; sustained Pilot streaming NOT proven; experimental evidence only.'
+      : 'Bounded real-provider installed UI cases passed; experimental evidence only.') : `Real AI validation blocked or incomplete: ${report.code}`);
   return { ...report, exitCode: report.status === 'PASS' && report.cleanupPassed ? 0 : 1 };
 }
 

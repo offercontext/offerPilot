@@ -15,7 +15,8 @@ function absent(role) {
     connected: false, currentTaskState: 'unavailable', loading: false, hasPending: false,
     bridgeRunningObserved: false, domRunningObserved: false, runningWithNullObserved: false,
     conversationId: null, runningConversationId: null, identityChanged: false,
-    generationChanged: false, readTimedOut: false, expired: false };
+    generationChanged: false, readTimedOut: false, expired: false,
+    baselineEmpty: false, baselineControlsValid: false, baselineGeneration: null, generation: null, historyClean: false };
 }
 function sanitize(value, role, caseId) {
   const result = absent(role);
@@ -25,6 +26,7 @@ function sanitize(value, role, caseId) {
   result.currentTaskState = TASK_STATES.has(value.currentTaskState) ? value.currentTaskState : 'unavailable';
   result.conversationId = validId(value.conversationId) ? value.conversationId : null;
   result.runningConversationId = validId(value.runningConversationId) ? value.runningConversationId : null;
+  for (const key of ['baselineGeneration', 'generation']) result[key] = Number.isSafeInteger(value[key]) && value[key] >= 0 ? value[key] : null;
   return result;
 }
 async function bounded(action) {
@@ -70,6 +72,7 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
   let bridgeRunningObserved = false, domRunningObserved = false, runningWithNullObserved = false;
   let runningConversationId = null, conversationId = null, identityChanged = false;
   let generationChanged = false, readTimedOut = false, expired = false;
+  let baselineEmpty = false, baselineControlsValid = false, generation = null, historyClean = true;
   const positive = value => Number.isSafeInteger(value) && value > 0;
   const visible = node => Boolean(node && node.getClientRects().length &&
     getComputedStyle(node).display !== 'none' && !['hidden', 'collapse'].includes(getComputedStyle(node).visibility));
@@ -109,7 +112,9 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
       || !(nextId === null || positive(nextId)) || typeof snapshot.loading !== 'boolean'
       || typeof snapshot.hasPending !== 'boolean') { fault(); return; }
     connected = true; currentTaskState = nextTask; loading = snapshot.loading; hasPending = snapshot.hasPending;
-    conversationId = nextId;
+    conversationId = nextId; generation = value.generation;
+    if (hasPending || nextTask === 'waiting_confirmation' || nextTask === 'failed'
+      || Boolean(snapshot.error) || Boolean(snapshot.stopMessage) || snapshot.stopping === true) historyClean = false;
     // This case requested plain text only. Any approval state makes later idle
     // insufficient proof that no write/approval occurred during the case.
     if (caseId === 'pilot-stream' && (nextTask === 'waiting_confirmation' || hasPending)) { fault(); return; }
@@ -121,6 +126,9 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
         try {
           if (document.visibilityState === 'visible' && !domRunning()) {
             baselineReady = true; baselineGeneration = value.generation;
+            baselineEmpty = Array.isArray(snapshot.messages) && snapshot.messages.length === 0;
+            baselineControlsValid = snapshot.stopping === false && snapshot.canStop === false
+              && snapshot.canSend === true && snapshot.error === '' && snapshot.stopMessage === '';
           }
         } catch { fault(); }
       }
@@ -139,7 +147,8 @@ async function rendererObservation({ operation, role, caseId, token, sequence, d
   const summary = () => ({ role, caseId, installed: !disposed, baselineReady,
     healthy: baselineReady && !disposed && !faulted, connected, currentTaskState, loading, hasPending,
     bridgeRunningObserved, domRunningObserved, runningWithNullObserved, conversationId,
-    runningConversationId, identityChanged, generationChanged, readTimedOut, expired });
+    runningConversationId, identityChanged, generationChanged, readTimedOut, expired,
+    baselineEmpty, baselineControlsValid, baselineGeneration, generation, historyClean });
   const refresh = () => {
     if (disposed || faulted) return Promise.resolve();
     if (pendingRead) return pendingRead;

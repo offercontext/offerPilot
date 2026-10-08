@@ -5,16 +5,16 @@ export const PIN = Object.freeze({
   schema: 2,
   repository: 'offercontext/offerPilot',
   branch: 'feat/20261005-windows-desktop-validation',
-  commit: 'c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0',
-  buildCommit: 'c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0',
+  commit: '590291ce4e33407eb4f13f092298e7398aed394c',
+  buildCommit: '590291ce4e33407eb4f13f092298e7398aed394c',
   buildWorkflow: '.github/workflows/desktop-windows.yml',
-  fullRegressionRunId: 37806395272,
-  runId: 37806395272,
-  artifactId: 11564445795,
-  artifactName: 'offerpilot-windows-experimental-validation-c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0',
-  artifactDigest: 'sha256:8751616fea7f065f635b493af8c2b3cd6d57e58b47ab9a2741ca541e39913572',
+  fullRegressionRunId: null,
+  runId: 37828103435,
+  artifactId: 11573930091,
+  artifactName: 'offerpilot-windows-experimental-validation-590291ce4e33407eb4f13f092298e7398aed394c',
+  artifactDigest: 'sha256:ad5c3f7e2858f1b1c5339a2e95af16d7c0785b268382d170cd2b9ef7efd6debd',
   installer: 'OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe',
-  installerSha256: '9e33c18f5c83d01bd23ebed01e22d5952a72787fef48cefec8dd875686e46ea7',
+  installerSha256: 'abaa504cef5a51ba7f3b4f1dddc1d24f889f350231a4dcb5b523e4f91b76f316',
 });
 export const SYNTHETIC = Object.freeze({
   company_name: '桌面验收中文公司',
@@ -34,15 +34,19 @@ export function validateReviewedPin(pin) {
   assert.equal(pin.repository, 'offercontext/offerPilot');
   assert.equal(pin.branch, 'feat/20261005-windows-desktop-validation');
   for (const key of ['commit', 'buildCommit']) assert.match(pin[key], /^[a-f0-9]{40}$/);
-  for (const key of ['runId', 'fullRegressionRunId', 'artifactId']) assert.ok(Number.isSafeInteger(pin[key]) && pin[key] > 0);
+  for (const key of ['runId', 'artifactId']) assert.ok(Number.isSafeInteger(pin[key]) && pin[key] > 0);
+  assert.ok(pin.fullRegressionRunId === null || (Number.isSafeInteger(pin.fullRegressionRunId) && pin.fullRegressionRunId > 0));
   assert.match(pin.artifactDigest, /^sha256:[a-f0-9]{64}$/);
   assert.match(pin.installerSha256, /^[a-f0-9]{64}$/);
   assert.equal(pin.installer, 'OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe');
   assert.ok(['.github/workflows/desktop-windows.yml', '.github/workflows/desktop-layout-retry.yml'].includes(pin.buildWorkflow));
   if (pin.buildWorkflow === '.github/workflows/desktop-windows.yml') {
     assert.equal(pin.buildCommit, pin.commit, 'ordinary build must use its product head');
-    assert.equal(pin.fullRegressionRunId, pin.runId, 'ordinary build keeps the original full-gate provenance');
+    if (pin.fullRegressionRunId !== null) {
+      assert.equal(pin.fullRegressionRunId, pin.runId, 'ordinary build keeps the original full-gate provenance');
+    }
   } else {
+    assert.notEqual(pin.fullRegressionRunId, null, 'package-only applies only to the ordinary product build');
     assert.notEqual(pin.buildCommit, pin.commit, 'retry activation and product source must remain distinct');
     assert.notEqual(pin.fullRegressionRunId, pin.runId, 'retry cannot replace the independent full gate');
   }
@@ -62,9 +66,18 @@ function validateRunIdentity(run, { id, commit, workflow }, pin) {
 export function validateMetadata(run, artifact, artifacts, jobs, fullRegressionRun, reviewedPin = PIN) {
   const pin = validateReviewedPin(reviewedPin);
   validateRunIdentity(run, { id: pin.runId, commit: pin.buildCommit, workflow: pin.buildWorkflow }, pin);
-  validateRunIdentity(fullRegressionRun, { id: pin.fullRegressionRunId, commit: pin.commit,
-    workflow: '.github/workflows/desktop-windows.yml' }, pin);
-  assert.equal(fullRegressionRun.repository.id, run.repository.id);
+  if (pin.fullRegressionRunId === null) {
+    assert.equal(fullRegressionRun, null, 'package-only cannot substitute a different product full gate');
+    assert.equal(run.head_commit?.id, pin.buildCommit, 'package-only activation commit must equal the pinned product');
+    assert.ok(/^build: AI \[windows-package-only\] /i.test(run.head_commit?.message || ''),
+      'package-only requires the exact build commit activation prefix');
+    assert.ok(/^build: AI \[windows-package-only\] /i.test(run.display_title || ''), 'package-only title must agree with activation');
+    assert.equal(run.run_attempt, 1, 'package-only must use the original build attempt');
+  } else {
+    validateRunIdentity(fullRegressionRun, { id: pin.fullRegressionRunId, commit: pin.commit,
+      workflow: '.github/workflows/desktop-windows.yml' }, pin);
+    assert.equal(fullRegressionRun.repository.id, run.repository.id);
+  }
   assert.equal(artifact.id, pin.artifactId);
   assert.equal(artifact.name, pin.artifactName);
   assert.equal(artifact.expired, false);
@@ -84,11 +97,27 @@ export function validateMetadata(run, artifact, artifacts, jobs, fullRegressionR
   assert.equal(packaging.length, 1);
   assert.equal(packaging[0].status, 'completed');
   assert.equal(packaging[0].conclusion, 'success');
+  if (pin.fullRegressionRunId === null) {
+    assert.equal(packaging[0].run_id, pin.runId, 'package-only packaging job must belong to the pinned run');
+    assert.equal(packaging[0].head_sha, pin.buildCommit);
+    for (const name of ['Collect complete pytest manifest', 'Complete pytest shard ${{ matrix.shard }} of 12',
+      'Full release regression (required for release)']) {
+      const selectedJobs = jobs.jobs.filter(job => job.name === name);
+      assert.equal(selectedJobs.length, 1, 'package-only requires every exact skipped full-gate job');
+      assert.equal(selectedJobs[0].run_id, pin.runId, 'package-only skipped gate job must belong to the pinned run');
+      assert.equal(selectedJobs[0].head_sha, pin.buildCommit);
+      assert.equal(selectedJobs[0].status, 'completed');
+      assert.equal(selectedJobs[0].conclusion, 'skipped');
+    }
+    assert.equal(jobs.jobs.filter(job => job.name.startsWith('Complete pytest shard ')).length, 1,
+      'package-only must not contain an expanded or mixed shard matrix');
+  }
   // Full regression remains independent: checking its identity is not certifying its result.
   return { runId: pin.runId, artifactId: pin.artifactId, commit: pin.commit,
     buildCommit: pin.buildCommit, buildWorkflow: pin.buildWorkflow,
     fullRegressionRunId: pin.fullRegressionRunId, digest: pin.artifactDigest,
-    packaging: 'success', fullRegression: 'not-certified-by-this-job' };
+    packaging: 'success', ...(pin.fullRegressionRunId === null ? { buildScope: 'package-only' } : {}),
+    fullRegression: pin.fullRegressionRunId === null ? 'not-run-package-only' : 'not-certified-by-this-job' };
 }
 export function publicApplication(value) {
   assert.ok(Number.isSafeInteger(value?.id) && value.id > 0, 'positive application ID required');

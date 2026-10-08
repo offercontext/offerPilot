@@ -1,28 +1,30 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-08 固定为产品 `c040a5d2`、普通构建 run `37806395272` 的实际安装包。打包 job 已成功；artifact 元数据、本地 ZIP 和安装器 SHA256 已核验。该 run 的完整回归仍在执行，安装后 UI 回归尚未运行，均不能由打包成功推导为通过。
+状态：限定分支上的实验验证辅助工具。2026-10-08 固定为产品 `590291ce`、PACKAGE-ONLY 构建 run `37828103435` 的实际安装包，仅用于免费非 AI / MOCK 预验。打包 job 已成功；artifact 元数据、本地 ZIP/CRC 和安装器/sidecar SHA256 已核验。该 run 的 manifest、pytest shards、完整 release gate 均 SKIPPED，汇总状态按设计 FAILURE，完整门禁未运行。新包安装后 UI 与 MOCK 尚未实跑，不能由打包成功或本地 helper 单测推导通过。
 
-上一固定产品 `16f31e47` 的实装 [37794297987](https://github.com/offercontext/offerPilot/actions/runs/37794297987) 为 115 PASS、1 FAIL、20 BLOCKED、66 NOT RUN、4 N/A。唯一失败位于 ORT 模块导入：真实 MJS 响应为 `text/plain`，HTTP 200、无重定向、响应字节和 SHA 与安装资源一致，WASM 编译及生产 CSP 检查通过；factory、ORT 初始化和 ASR 均未执行成功。旧结果保持失败，不转写为新包证据。
+更早固定产品 `16f31e47` 的实装 [37794297987](https://github.com/offercontext/offerPilot/actions/runs/37794297987) 为 115 PASS、1 FAIL、20 BLOCKED、66 NOT RUN、4 N/A。唯一失败位于 ORT 模块导入：真实 MJS 响应为 `text/plain`，HTTP 200、无重定向、响应字节和 SHA 与安装资源一致，WASM 编译及生产 CSP 检查通过；factory、ORT 初始化和 ASR 均未执行成功。旧结果保持失败，不转写为新包证据。
 
-新产品包含静态 JS/MJS/WASM 的确定 MIME 类型、桌面手动更新入口，以及对话控制器/恢复与 CI 历史读取修复。本 helper 只消费已产出的精确安装器，不重建、不重跑或取消独立完整回归。更新发布策略仍为空，S32 仅验证真实不可更新状态与界面，签名升级端到端仍 BLOCKED。
+新产品保留静态模块 MIME、桌面手动更新入口等修复，并加入 DB trigger 原子初始化、运行恢复增量投影和静默 HTTP 流的真实 Stop 取消。本 helper 只消费已产出的精确安装器，不重建、不重跑或取消独立完整回归。更新发布策略仍为空，S32 仅验证真实不可更新状态与界面，签名升级端到端仍 BLOCKED。
 
 ## 固定输入与独立路由
 
-- 源提交：`c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`。
-- 构建 run：[37806395272](https://github.com/offercontext/offerPilot/actions/runs/37806395272)。完整回归归属同一 run 的独立分组与汇总 gate（本次更新时仍在执行/排队，尚无完整终态） [37806395272](https://github.com/offercontext/offerPilot/actions/runs/37806395272)；本流程不重跑、不取消、不替代它。
-- 成功打包 job：[113411681450](https://github.com/offercontext/offerPilot/actions/runs/37806395272/job/113411681450)；其成功只证明打包范围。
-- Artifact：`11564445795`，名称 `offerpilot-windows-experimental-validation-c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`。
-- Artifact 元数据摘要：`sha256:8751616fea7f065f635b493af8c2b3cd6d57e58b47ab9a2741ca541e39913572`。
+- 源提交：`590291ce4e33407eb4f13f092298e7398aed394c`。
+- 构建 run：[37828103435](https://github.com/offercontext/offerPilot/actions/runs/37828103435)，仅 PACKAGE-ONLY，无完整回归来源，`fullRegressionRunId: null`。旧 `c040a5d2` 的完整回归另行跟进，本流程不重跑、不取消，也不把它作为新产品的门禁证据。
+- 成功打包 job：[113486080181](https://github.com/offercontext/offerPilot/actions/runs/37828103435/job/113486080181)；其成功只证明打包范围。
+- Artifact：`11573930091`，名称 `offerpilot-windows-experimental-validation-590291ce4e33407eb4f13f092298e7398aed394c`。
+- Artifact 元数据摘要：`sha256:ad5c3f7e2858f1b1c5339a2e95af16d7c0785b268382d170cd2b9ef7efd6debd`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`9e33c18f5c83d01bd23ebed01e22d5952a72787fef48cefec8dd875686e46ea7`。
+- 安装包 SHA256：`abaa504cef5a51ba7f3b4f1dddc1d24f889f350231a4dcb5b523e4f91b76f316`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`，构建激活提交为 `c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37806395272`，独立完整回归 run 为 `37806395272`。
+schema 2 区分产品源码 `commit`、安装包构建的 `buildCommit` / `buildWorkflow` / `runId`，以及独立完整回归 `fullRegressionRunId`。当前 source/build 都是 `590291ce4e33407eb4f13f092298e7398aed394c`，构建工作流为 `desktop-windows.yml`，run 为 `37828103435`；完整回归来源明确为空，仅授权免费预验。
 
-普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
+正整数 `fullRegressionRunId` 保留原严格规则：普通构建要求 `buildCommit === commit` 且构建/完整回归 run 相同；限定 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建/完整回归 run 不同。build run 和 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，完整回归 run.head_sha 必须匹配 `commit`。只接受固定仓库/分支、push 和既有两个 workflow 路径，不接受任意 URL、run 或额外键。
 
-`source.json`、`result.json` 与 `coverage.json` 分别标注产品 SHA、构建 SHA/工作流/run 和 full-gate run；来源代码 checkout 及已安装 12 个桌面模块/托盘资源对比始终使用产品 `commit`，不是 helper 激活提交。安装包哈希、payload 字节校验、摘要与成功打包 job 检查不变。完整回归 metadata 仅校验来源归属，仍记 `not-certified-by-this-job`，不能从打包成功或本次 UI 通过推导 full-gate 通过。
+`fullRegressionRunId: null` 只接受普通构建、相同 source/build SHA、原始 attempt 1、GitHub run.head_commit.id 与产品 SHA 一致且 message 首行以明确 package-only 前缀开头，并与 run 标题一致；同 run/同 SHA 的 manifest、未展开 shard 和 full release gate 必须各唯一且全部 completed/skipped，缺失、重复、混入真实 shard 或任一非 skipped 均失败。metadata caller 不请求 `runs/null`，报告写 `not-run-package-only`，不伪装成完整回归身份或通过证明。live preflight、prepare 和执行 runner 各自拒绝空来源；MOCK 通过或人工审批都不能把该预验包放行成 live。
 
-`desktop/installed-ui/contract.mjs` 固定以上值。执行要求 `desktop/installed-ui/request.json` 的全部键和值精确匹配，不接受 URL、任意 run、输入参数或额外键；缺少请求文件直接失败。只读 job token 分别验证构建 run 与独立完整回归 run 的仓库、分支、head SHA、workflow 路径，再验证安装包 job 已成功，以及 artifact ID、名称、摘要、未过期状态与构建归属。完整回归是否通过不能从安装包 job 推导。
+`source.json`、`result.json` 与 `coverage.json` 均记录精确产品、构建、artifact 身份和未运行完整门禁的状态；源码 checkout 及已安装 12 个桌面模块/托盘资源对比始终使用产品 `commit`。安装器哈希、payload 字节比对、artifact 摘要及成功打包 job 检查不变。正整数路径的完整回归 metadata 仍仅核验来源，不认证结果。
+
+最终验收采用普通 full-gate 新提交及其自身安装器，再对那份固定 EXE 运行免费非 AI 与全 MOCK；唯一 live 也只能绑定最终同一份 EXE。本次 `590291ce` 的通过记录不可转移给未来安装器，不引入跨提交源码等价认证。
 
 下载由官方 `actions/download-artifact@v4` 使用固定仓库、run 与名称完成。验证 metadata digest 并不伪装成本地重算 ZIP：下载 action 解压 artifact，执行前另对安装包字节计算硬编码 SHA256，任一不符都不执行。没有应用重建步骤。
 
@@ -35,7 +37,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 两个 workflow 的 push 都只接受精确分支 `feat/20261005-windows-desktop-validation`，并保留可选 dispatch。独立 UI job 额外检查仓库和分支，dispatch 不含参数；默认分支尚无此 workflow 时，不保证 GitHub 手动入口可用。没有自动取消或自动替换已有 run。
 
-原 workflow 仅忽略 `desktop/installed-ui/**`、`.github/workflows/desktop-installed-ui.yml`、本文，以及限定布局重试的 `desktop/layout-retry/**` 和 `.github/workflows/desktop-layout-retry.yml`。它自己的配置、产品源码、桌面 package/锁文件及所有构建路径仍触发原验证。UI workflow 的 push 仅监听上述三个路径；混合产品和 UI 改动会触发两个流程。路由单测覆盖这些情况。
+原 workflow 仅忽略 `desktop/installed-ui/**`、`.github/workflows/desktop-installed-ui.yml`、本文，以及限定布局重试的 `desktop/layout-retry/**` 和 `.github/workflows/desktop-layout-retry.yml`，以及 `desktop/real-ai-validation/**`、`.github/workflows/desktop-real-ai.yml` 与 `docs/architecture/desktop-real-ai-validation.md` 三个窄路径。它自己的配置、产品源码、桌面 package/锁文件及所有构建路径仍触发原验证。UI workflow 的 push 仅监听上述三个路径；混合产品和 UI 改动会触发两个流程。路由单测覆盖这些情况。
 
 ## 执行内容
 

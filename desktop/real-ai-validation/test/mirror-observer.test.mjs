@@ -287,7 +287,8 @@ test('only fixed fields leave the renderer, never prose, errors, args, or bridge
   assert.doesNotMatch(JSON.stringify(observed), /PRIVATE_|messages|args|snapshot|token/);
   const expected = ['role', 'caseId', 'installed', 'baselineReady', 'healthy', 'connected', 'currentTaskState', 'loading', 'hasPending',
     'bridgeRunningObserved', 'domRunningObserved', 'runningWithNullObserved', 'conversationId', 'runningConversationId',
-    'identityChanged', 'generationChanged', 'readTimedOut', 'expired'].sort();
+    'identityChanged', 'generationChanged', 'readTimedOut', 'expired', 'baselineEmpty', 'baselineControlsValid',
+    'baselineGeneration', 'generation', 'historyClean'].sort();
   assert.deepEqual(Object.keys(observed.owner).sort(), expected);
 });
 
@@ -295,7 +296,8 @@ test('case IDs are a fixed whitelist and module contains no product-changing or 
   const p = pair(t);
   await assert.rejects(p.install('PRIVATE_CASE'), { code: 'HARU_SYNC_FAILED' });
   const source = await fs.readFile(new URL('../mirror-observer.mjs', import.meta.url), 'utf8');
-  assert.doesNotMatch(source, /\.publish\(|\.request\(|\.windowAction\(|fetch\(|\.route\(|\.headers\(|\.postData\(|\.messages\b|\.error\b|\.args\b/);
+  assert.match(source, /baselineEmpty = Array.isArray\(snapshot.messages\) && snapshot.messages.length === 0/);
+  assert.doesNotMatch(source, /\.publish\(|\.request\(|\.windowAction\(|fetch\(|\.route\(|\.headers\(|\.postData\(|\.content\b|\.args\b/);
 });
 
 test('inconsistent task/loading fields fail closed rather than preserving a previous pass', async t => {

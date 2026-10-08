@@ -14,6 +14,7 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
   await fs.mkdir(dir, { recursive: true });
   const report = { schema: 2, sourceCommit: pin.commit, buildCommit: pin.buildCommit, buildWorkflow: pin.buildWorkflow,
     buildRunId: pin.runId, fullRegressionRunId: pin.fullRegressionRunId, artifactId: pin.artifactId,
+    fullRegression: pin.fullRegressionRunId === null ? 'not-run-package-only' : 'independent-not-certified',
     installerSha256: pin.installerSha256, installedExeSha256, execution: 'real-installed-electron-native-content-size',
     screenshotAnimationPolicy: 'Main-window finite CSS motion settles naturally within a bounded wait; screenshots preserve animations in both renderers; no animation finishing/cancellation or animation-quality claim',
     syntheticProfileOnly: true, aiInvocationsAuthorized: false, browserFixturesUsed: false, expectedRootCases: ROOT_CASES.length,

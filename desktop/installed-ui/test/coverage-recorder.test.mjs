@@ -37,6 +37,7 @@ test('recorder writes pin, native measured size, explicit assertion and screensh
     qa.observed('visible real record ID verified'); await qa.capture('list-visible');
   });
   const report=JSON.parse(await fs.readFile(path.join(evidence,'coverage.json'),'utf8'));
+  assert.equal(report.fullRegression,PIN.fullRegressionRunId === null ? 'not-run-package-only' : 'independent-not-certified');
   assert.equal(report.sourceCommit,PIN.commit); assert.equal(report.installerSha256,PIN.installerSha256);
   assert.deepEqual(sizes,[[900,900]]); assert.equal(report.cases[0].outcome,'PASS');
   assert.deepEqual(report.screens[0].fixtureIds,[{kind:'application',id:27}]);

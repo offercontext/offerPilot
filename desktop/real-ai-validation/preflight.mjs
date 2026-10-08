@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { ENVIRONMENT, PIN, WORKFLOW, validateFixedFiles, validateTrigger, validateEnvironment,
-  validateReview, validateHistory, validatePriorJobs, validateOfflineRun, safeCode, demand } from './contract.mjs';
+  validateReview, validateLiveProduct, validateHistory, validatePriorJobs, validateOfflineRun, safeCode, demand } from './contract.mjs';
 import { githubReader } from './github-read.mjs';
 export async function preflight({ env = process.env, read = githubReader(env.GH_TOKEN), approval = false } = {}) {
   await validateFixedFiles();
@@ -28,6 +28,8 @@ export async function preflight({ env = process.env, read = githubReader(env.GH_
   }
   demand(offlineVerified, 'SAME_HELPER_MOCK_RUN_REQUIRED');
   if (approval) validateReview(await read(`actions/runs/${env.GITHUB_RUN_ID}/approvals`), protection.environmentId, protection.reviewerId);
+  // A successful MOCK or reviewer approval cannot authorize a package-only live run.
+  validateLiveProduct();
   return { schema: 1, status: 'passed', ...identity, environmentId: protection.environmentId,
     manualReviewVerified: approval, sameHelperOfflineVerified: true, requestBudgetCny: 10 };
 }

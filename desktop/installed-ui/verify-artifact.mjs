@@ -25,10 +25,10 @@ try {
   const result = validateMetadata(...await Promise.all([
     read(`runs/${PIN.runId}`), read(`artifacts/${PIN.artifactId}`),
     read(`runs/${PIN.runId}/artifacts?per_page=100`), read(`runs/${PIN.runId}/jobs?per_page=100`),
-    read(`runs/${PIN.fullRegressionRunId}`),
+    PIN.fullRegressionRunId === null ? null : read(`runs/${PIN.fullRegressionRunId}`),
   ]));
   await fs.writeFile(path.join(evidence, 'source.json'), JSON.stringify({ status: 'passed', ...result }, null, 2) + '\n');
-  console.log('Pinned product/full-gate identity, build activation run and successful packaging artifact verified independently.');
+  console.log('Pinned product, declared regression scope and successful packaging artifact verified; full gate is not certified.');
 } catch (error) {
   // Never print raw API bodies, credentials, transport errors, or arbitrary exception text.
   await fs.writeFile(path.join(evidence, 'source.json'), JSON.stringify({ status: 'failed', stage, ...safeFailure(error) }, null, 2) + '\n');
