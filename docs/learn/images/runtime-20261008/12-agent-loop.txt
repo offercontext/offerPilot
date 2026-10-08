@@ -1,0 +1,26 @@
+OfferPilot real runtime evidence | 2026-10-08 | selected SQLite fields
+Conversation 3: create an interview event after human approval
+Run:     40a686c1-7211-4cf5-96ff-4f4eb368e3a3
+Segment: 9817cb2a-b287-4f93-972a-e37a43ad8a28
+Journal status: waiting_confirmation | recording: degraded
+NOTE: Journal is incomplete; it is not the authoritative write result.
+
+seq  event                        model_step  tool / outcome
+  1  run.started                     -
+  2  segment.started                 -
+  3  route.selected                  -
+  4  context.captured                -
+  5  context.captured                1
+  6  model.requested                 1
+  7  model.completed                 1
+  8  tool.started                    -       list_applications
+  9  tool.completed                  -       list_applications
+ 10  context.captured                2
+ 11  tool.proposed                   -       create_application_event
+ 12  approval.requested              -
+ 13  run.waiting_confirmation        -
+ 14  segment.finished                -       suspended
+
+Read tool_call_id:  call_00_ePIq6BbukIXxBPNbxUvr1114
+Write tool_call_id: call_00_3oBSsi6a22bIAcBKCe8a9589
+Missing journal events cannot prove an executor ran zero times.

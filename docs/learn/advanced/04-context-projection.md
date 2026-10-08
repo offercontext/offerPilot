@@ -101,7 +101,13 @@ flowchart TD
 python -m pytest -q tests/test_context_projector.py::test_projection_mandatory_overflow_fails_before_provider tests/agent_loop/test_runner.py::test_same_model_call_fallback_reuses_one_frozen_provider_surface
 ```
 
-> **诊断图占位 A4｜尚未采集。** 后续选择一条隔离数据请求，展示经过脱敏的输入类别、选中工具、预算与被省略项。只有在对应诊断出口实际可用时才采集；若没有现成界面，使用真实诊断输出并注明形式，不虚构“上下文面板”。不展示完整个人简历、密钥或服务商私有内容。
+### 实际输入清单长什么样
+
+下面是同一次新增面试请求中，第 2 个模型步的真实 `agent_context_snapshots` 选取字段。通过只读 SQL 导出后原样排版；产品没有因此新增一个“上下文面板”。
+
+![实际上下文清单：贡献者状态、九个工具、输入估算与是否截断](../images/runtime-20261008/13-context-manifest.jpg)
+
+这一份快照记录了 4,323 字节消息和 4,700 字节工具定义，合计 9,023 个保守输入单位，`truncated=false`。清单列出 9 个可见工具；`knowledge_context` 等来源为 `disabled`，附件等为 `not_applicable`，不能据此说所有资料都进入了模型。这里没有保存或展示完整提示词、个人简历或凭据，也没有验证超预算截断场景。[文本输出](../images/runtime-20261008/13-context-manifest.txt)与[采集说明](../images/runtime-20261008/README.md)。
 
 ## 练习：同一句用户请求，为什么不是同一份输入
 

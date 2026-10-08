@@ -1,0 +1,32 @@
+OfferPilot real context snapshot | SQLite projection, not a product panel
+Run:      40a686c1-7211-4cf5-96ff-4f4eb368e3a3
+Snapshot: 3f0f4d29-9329-4c03-8b4c-06930dddb237
+model_step=2  estimator=surface_conservative
+budget_policy_version=model-surface-budget-v2
+counts={"canonical_message_bytes":4323,"canonical_tool_bytes":4700,"estimated_input_units":9023}
+truncated=false
+These conservative units are not provider billing tokens.
+
+Contributor                     Status
+static_policy                   ready
+current_scope                   not_applicable
+active_control                  not_applicable
+request_page_context            ready
+request_attachments             not_applicable
+conversation_history            ready
+confirmed_readiness             disabled
+confirmed_memory                not_applicable
+knowledge_context               disabled
+older_conversation_summary      disabled
+current_request                 ready
+
+Tools projected into this model input:
+  list_applications
+  get_application
+  create_application
+  update_application_status
+  list_application_events
+  get_application_event
+  create_application_event
+  update_application_event
+  delete_application_event

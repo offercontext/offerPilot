@@ -1,0 +1,26 @@
+OfferPilot real state / business evidence | selected SQLite fields + GET API
+Isolated fixture: 3 applications; no recruiter messages sent.
+
+Pending before / after page reload: EXACTLY EQUAL
+operation_id=586f9441-6762-4276-9214-99651f1808c9
+tool=create_application_event
+application_events before confirmation: 0
+
+After confirming the same proposal:
+write_operations.status=committed  delivery_status=completed
+turn_id=b7c823a0-d790-4c82-9357-674252e1bab2
+  generation=1 state=waiting_confirmation protocol=pilot-runtime-v1
+  generation=2 state=completed protocol=pilot-runtime-v1
+GET /api/application-events/1:
+  application_id=1  event_type=interview  duration_minutes=60
+  scheduled_at=2026-10-15T07:00:00Z (= 2026-10-15 15:00 UTC+8)
+  calendar shows 15:00-16:00; no manual time correction
+
+Rejected proposal (conversation 2):
+  tool=add_note  status=rejected
+  interview_notes=0
+
+Stopped read-only task (conversation 5):
+  turn_id=82566d59-6af1-43ad-914e-e7e3b94be0d2
+  execution_generation=1  status=stopped
+Final counts: {"applications":3,"application_events":1,"interview_notes":0}

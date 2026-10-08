@@ -130,7 +130,13 @@ python -m pytest -q tests/test_write_operations.py::test_locked_modify_rejects_p
 
 后一项使用会抛错的测试 executor，提交同一操作两次，断言 executor 总共只调用一次，第二次返回结果复用。测试不连接真实模型，也不代表完整 UI 链路已验收。
 
-> **运行截图占位 A3｜尚未采集。** 使用虚构投递，采集同一请求的确认卡、确认后的日历详情，以及脱敏的操作结果核对。若演示修改卡片中的时间，必须同时展示修改前后值和实际保存值。重复执行次数需要测试或运行记录佐证，不能仅靠两张相同界面截图推断。
+### 同一份确认怎样对应到业务记录
+
+真实演示中，刷新前后保留同一操作 `586f9441-6762-4276-9214-99651f1808c9`，工具为 `create_application_event`，日程数量为 0。确认后，该操作账本变为 `committed`，结果交付为 `completed`；同一个 Turn 的第 2 代执行完成。
+
+![真实操作账本、执行代次与日程接口返回值的只读核对输出](../images/runtime-20261008/14-state-and-business.jpg)
+
+接口返回日程 #1、`application_id=1`、`scheduled_at=2026-10-15T07:00:00Z`、60 分钟；[日历截图](../images/runtime-20261008/08-calendar-verified.jpg)显示北京时间 15:00–16:00，与[确认卡](../images/runtime-20261008/05-interview-pending.jpg)一致。没有编辑建议或事后修正时间。本次只点击了一次确认，未做重复提交竞态实验；重复执行防护仍由前述测试提供对应证据。[完整运行说明](../images/runtime-20261008/README.md)。
 
 ## 练习：按钮禁用够不够
 

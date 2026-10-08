@@ -130,7 +130,13 @@ python -m pytest -q tests/agent_loop/test_runner.py::test_write_tool_pauses_befo
 
 第一项断言写 executor 尚未调用而 Pending 已产生；第二项断言两个读取按顺序执行，工具结果保留各自 ID。这检查的是程序控制流，不能据此声称真实模型一定会选择正确工具。
 
-> **运行截图占位 A1｜尚未采集。** 后续在隔离数据中录制“查面试 → 提出新增 → 待确认”，并将界面状态与脱敏的调用记录并排展示。需要标出模型步数和工具调用 ID；聊天截图本身不能证明 executor 调用了几次。本篇流程图已可独立阅读。
+### 从真实运行记录看一次循环
+
+本次请求为云岚数据测试开发岗位新增面试日程。下面的输出来自隔离数据库中的真实 Run / Segment；能看到第 1 个模型步之后，`list_applications` 开始并完成，随后出现第 2 个模型步的上下文快照，最后 `create_application_event` 被提出并等待确认。
+
+![真实 Agent Loop 记录，含模型步、查询工具、写建议及工具调用 ID](../images/runtime-20261008/12-agent-loop.jpg)
+
+这张图是只读查询输出的排版截图，不是产品日志面板。该 Run 的 `recording_status=degraded`，例如第 2 步的模型请求和完成事件没有齐全记录；不能把这 14 行当作完整轨迹，也不能据缺失行断定某个 executor 没执行。可对照[真实确认卡](../images/runtime-20261008/05-interview-pending.jpg)、[原始选取字段](../images/runtime-20261008/evidence.json)及[采集说明](../images/runtime-20261008/README.md)。
 
 ## 练习：给下一轮留下什么
 

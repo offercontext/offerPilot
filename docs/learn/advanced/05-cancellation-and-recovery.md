@@ -115,7 +115,15 @@ python -m pytest -q tests/test_pilot_control.py::test_fence_rejects_a_lease_that
 
 这项测试在事务中修改记录，然后模拟租约到期，断言提交被拒绝且原记录没有被该事务改写。它比“按钮显示已停止”更接近后端要守住的条件。
 
-> **运行截图占位 A5｜尚未采集。** 后续分别采集新运行协议下的断线重连、显式停止两组素材：记录相同 Turn 与 generation，展示重开后的状态和业务结果。服务重启属于第三组独立实验，不能用“关闭浏览器”代替。若最终结果未知，截图中应保留待核对状态。
+### 刷新与停止的两次实际观察
+
+待确认任务的页面刷新保留了相同 Pending 身份和参数；[刷新后的确认卡](../images/runtime-20261008/06-pending-after-refresh.jpg)与数据库对照见[入门第 14 篇](../14-how-a-task-can-resume.md)。确认后，同一 Turn 从第 1 代待确认进入第 2 代完成。
+
+另一条独立的只读任务，在运行中显式停止，画面如下。
+
+![新运行协议下停止只读任务后的实际页面](../images/runtime-20261008/11-after-stop.jpg)
+
+停止结果记录为 Turn `82566d59-6af1-43ad-914e-e7e3b94be0d2`、`execution_generation=1`、`status=stopped`，对应执行使用 `pilot-runtime-v1`。已有日程仍为 1 条。[只读核对输出](../images/runtime-20261008/14-state-and-business.txt)提供具体身份；这些观察不覆盖实际断网、服务重启、租约过期或 Stop 与 Commit 的并发顺序。
 
 ## 练习：旧停止请求到达新代次
 

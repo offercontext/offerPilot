@@ -1,0 +1,120 @@
+[
+  {
+    "file": "01-application-records.jpg",
+    "bytes": 53109,
+    "sha256": "e718612c0acbd883eb664b02af528ae56182d10377f918bebd36c3be26402e35",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "02-query-result.jpg",
+    "bytes": 88422,
+    "sha256": "665c384b06b889d18ee8a95e52234e0d872fa5813e86ad1c0dac386f92f3b3bd",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "03-unexpected-review-proposal.jpg",
+    "bytes": 82080,
+    "sha256": "952da00d5f0e6aebc3d6278ac9a373b4e2dcbb5465a4eaa8124fc1b9caa8cb5c",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "04-wrong-proposal-rejected.jpg",
+    "bytes": 76827,
+    "sha256": "bb77ec60ef666d08eaa1b7cff7be267cce94b4776a88e273482c2ea4f640301c",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "05-interview-pending.jpg",
+    "bytes": 77572,
+    "sha256": "e43b92b648ccf58ac2643abfdc423d12a1bb31645bddd384389880210952fc26",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "06-pending-after-refresh.jpg",
+    "bytes": 77257,
+    "sha256": "083b6c7b6d1b9883bcb417d520dbc5f5e53e29bf8a0f4556c4df76e278b935e1",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "07-event-created.jpg",
+    "bytes": 91944,
+    "sha256": "570b4d4aa1f60ed52aea25986c898121ad1a5cf8d86e4a965f1af89d74876f55",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "08-calendar-verified.jpg",
+    "bytes": 64655,
+    "sha256": "14cb45b94f2aea08380d83257e1ff8c61b0e9413ee1e5d5799390a1f48a56b21",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "09-missing-details-question.jpg",
+    "bytes": 96001,
+    "sha256": "52ee2d8be05a217f59976a817f9e5d828410e3e19213f79d52fcda5aaee589b5",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "10-before-stop.jpg",
+    "bytes": 85830,
+    "sha256": "e4c6c99dd3fa9afb0d8f35fc95574cced51f89c25e99ca2f0d5420ffd65ecb9b",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "11-after-stop.jpg",
+    "bytes": 95707,
+    "sha256": "bb2a8e7b395b693d29bbb71844fe0126bd6f996e674540a2b80bf295ab13919f",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "12-agent-loop.jpg",
+    "bytes": 77536,
+    "sha256": "363579f973bdb23022aad5acb1cd49570897aa566660b69d6121b53565867e7b",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "12-agent-loop.txt",
+    "bytes": 1256,
+    "sha256": "45232a01ebd44d3431e8a44bf335577b74689ab2dd289f8c9cdda24b54264f57"
+  },
+  {
+    "file": "13-context-manifest.jpg",
+    "bytes": 87489,
+    "sha256": "00d7a816428e33f3c66faa4f08f1adc1dfedb361aca3a5756c31ceb362cf7a62",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "13-context-manifest.txt",
+    "bytes": 1223,
+    "sha256": "cc062e0c1a5e374946faee8abcc8fe635cced13c14cd4d2ec1ab8690093443bc"
+  },
+  {
+    "file": "14-state-and-business.jpg",
+    "bytes": 92079,
+    "sha256": "456191d6c19bbb4a4c11cfc6e5e814e49413b882b284a80a9c707a0e100d9ac0",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "file": "14-state-and-business.txt",
+    "bytes": 1114,
+    "sha256": "99608ff48776e63578447ec2287e1111a6a15bccb83aa4f6bd06bf1b3245aa4d"
+  },
+  {
+    "file": "evidence.json",
+    "bytes": 12321,
+    "sha256": "1931d26e4c04d371c3de0de85e771672e84457f3607e3851655a60af3da58877"
+  }
+]
