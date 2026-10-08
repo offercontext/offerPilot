@@ -15,10 +15,13 @@ export const SKIP_CODES = Object.freeze([
   'SCREEN_CAPTURE_FAILED', 'SCREEN_DIRECTORY_UNSAFE', 'SCREEN_WRITE_FAILED',
   'SCREEN_ALREADY_CAPTURED',
 ]);
+export const GUARD_REASONS = Object.freeze(['PASSED', 'DOCUMENT_HIDDEN', 'CREDENTIAL_SURFACE', 'SETTINGS_ACTIVE',
+  'UNINSPECTABLE_CONTENT', 'CREDENTIAL_CONTROL', 'TOKEN_VISIBLE', 'WRONG_ROLE', 'HARU_SURFACE',
+  'PILOT_SURFACE', 'PILOT_COMPOSER', 'BUSINESS_SURFACE', 'RESUME_SURFACE', 'RESULT_MISSING', 'STATE_UNSETTLED', 'GUARD_EXCEPTION']);
 const STAGES = new Set(SCREEN_IDS.filter(id => !id.startsWith('haru-') && !id.startsWith('failure-')));
 const fail = code => { throw Object.assign(new Error(code), { code }); };
 
-// Runs in the renderer, returning ONLY a boolean. Never return DOM, text,
+// Runs in the renderer, returning ONLY a fixed reason enum. Never return DOM, text,
 // values, URLs, bridge snapshots or tokens, including on the failure path.
 async function safeScreen({ screenId, stage, tokens }) {
   try {
@@ -29,12 +32,12 @@ async function safeScreen({ screenId, stage, tokens }) {
     const one = (selector, root = document) => shown(selector, root).length === 1;
     const hasText = (selector, pattern, root = document) => shown(selector, root)
       .some(node => pattern.test(node.textContent || ''));
-    if (!document.body || document.visibilityState !== 'visible') return false;
+    if (!document.body || document.visibilityState !== 'visible') return 'DOCUMENT_HIDDEN';
     // Reject the entire credential surface even if controls are hidden/empty.
-    if (document.querySelector('section[aria-label="AI 设置"], [data-testid="ai-provider-list"], input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"], input[autocomplete="one-time-code"], [data-credential-form]')) return false;
-    if (document.querySelector('nav[aria-label="主导航"] [aria-current="page"][aria-label="设置"]')) return false;
+    if (document.querySelector('section[aria-label="AI 设置"], [data-testid="ai-provider-list"], input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"], input[autocomplete="one-time-code"], [data-credential-form]')) return 'CREDENTIAL_SURFACE';
+    if (document.querySelector('nav[aria-label="主导航"] [aria-current="page"][aria-label="设置"]')) return 'SETTINGS_ACTIVE';
     // Unknown embedded or shadow content cannot be inspected by this guard.
-    if (document.querySelector('iframe, frame, object, embed') || all('*').some(node => node.shadowRoot)) return false;
+    if (document.querySelector('iframe, frame, object, embed') || all('*').some(node => node.shadowRoot)) return 'UNINSPECTABLE_CONTENT';
     const credential = /api[\s_-]*(?:key|token)|secret|credential|password|密钥|凭据|口令|密码/i;
     const controls = all('input, textarea, select, [role="textbox"], [role="combobox"], [contenteditable], form, [role="form"]');
     for (const node of controls) {
@@ -44,27 +47,27 @@ async function safeScreen({ screenId, stage, tokens }) {
       const description = ['id', 'name', 'type', 'autocomplete', 'aria-label', 'placeholder', 'title']
         .map(name => node.getAttribute(name) || '').concat(labels, labelledBy,
           node.tagName === 'FORM' || node.getAttribute('role') === 'form' ? [node.textContent || ''] : []).join(' ');
-      if (credential.test(description)) return false;
+      if (credential.test(description)) return 'CREDENTIAL_CONTROL';
     }
     const texts = [document.body.textContent || '', document.body.innerText || '',
       ...controls.filter(visible).flatMap(node => [typeof node.value === 'string' ? node.value : '',
         node.getAttribute('placeholder') || '', node.getAttribute('title') || '', node.getAttribute('aria-label') || ''])];
     if (texts.some(text => tokens.some(token => text.includes(token)) ||
-      /\b(?:sk-[A-Za-z0-9_-]{10,}|Bearer\s+[A-Za-z0-9_.-]{10,})\b/.test(text))) return false;
+      /\b(?:sk-[A-Za-z0-9_-]{10,}|Bearer\s+[A-Za-z0-9_.-]{10,})\b/.test(text))) return 'TOKEN_VISIBLE';
 
     const bridge = window.offerpilotDesktop;
     const haru = screenId.startsWith('haru-') || screenId === 'failure-haru';
-    if (bridge?.role !== (haru ? 'haru' : 'owner')) return false;
+    if (bridge?.role !== (haru ? 'haru' : 'owner')) return 'WRONG_ROLE';
     const failure = screenId.startsWith('failure-');
     let root;
     if (haru) {
-      if (!one('main[aria-label="Haru 桌面小窗"]') || !one('section[aria-label="Haru 对话"]')) return false;
+      if (!one('main[aria-label="Haru 桌面小窗"]') || !one('section[aria-label="Haru 对话"]')) return 'HARU_SURFACE';
       root = shown('section[aria-label="Haru 对话"]')[0];
     } else if (stage.startsWith('pilot-')) {
       // The fullscreen Pilot intentionally has no sidebar navigation.
-      if (!one('.op-app-main-pilot') || !one('.op-pilot-page-host [data-onboarding-target="pilot"]')) return false;
+      if (!one('.op-app-main-pilot') || !one('.op-pilot-page-host [data-onboarding-target="pilot"]')) return 'PILOT_SURFACE';
       root = shown('.op-pilot-page-host [data-onboarding-target="pilot"]')[0];
-      if (!one('textarea[placeholder="问问领航员，或输入 / 唤起能力"]', root)) return false;
+      if (!one('textarea[placeholder="问问领航员，或输入 / 唤起能力"]', root)) return 'PILOT_COMPOSER';
     } else {
       const surfaces = {
         'interview-preparation': ['面试', 'section[aria-label="面试准备建议"]'],
@@ -72,26 +75,34 @@ async function safeScreen({ screenId, stage, tokens }) {
         'offer-negotiation': ['Offer', '[data-testid="offer-negotiation-drawer"]'],
       };
       const [nav, selector] = surfaces[stage] || [];
-      if (!nav || !one('nav[aria-label="主导航"]') ||
-        !one(`nav[aria-label="主导航"] [aria-current="page"][aria-label="${nav}"]`) || !one(selector)) return false;
+      // Interview preparation moves from the interview list into its bound
+      // application's board task. Both are fixed product-owned surfaces.
+      const navMatches = one(`nav[aria-label="主导航"] [aria-current="page"][aria-label="${nav}"]`)
+        || (stage === 'interview-preparation' && one('nav[aria-label="主导航"] [aria-current="page"][aria-label="投递"]'));
+      if (!nav || !one('nav[aria-label="主导航"]') || !navMatches) return 'BUSINESS_SURFACE';
+      if (failure && stage === 'interview-preparation' && !one(selector)) {
+        if (one('[data-testid="interview-surface"]') || one('[data-testid="locked-real-preparation"]')) return 'PASSED';
+        return 'BUSINESS_SURFACE';
+      }
+      if (!one(selector)) return 'BUSINESS_SURFACE';
       root = shown(selector)[0];
-      if (stage === 'resume-structure' && !/AI 简历分类与核对/.test(root.textContent || '')) return false;
+      if (stage === 'resume-structure' && !/AI 简历分类与核对/.test(root.textContent || '')) return 'RESUME_SURFACE';
     }
     // A controlled failure may show an incomplete result, but must still be on
     // that exact known surface. Settings/connection never qualify as a stage.
-    if (failure) return true;
-    if (stage === 'interview-preparation') return hasText('h3', /^准备方向$/, root) && shown('article', root).length > 0;
-    if (stage === 'resume-structure') return one('section[aria-label="分类候选"]', root) && shown('textarea', root).length > 0;
-    if (stage === 'offer-negotiation') return one('[aria-label="谈薪准备草稿"]', root) && one('[data-testid="offer-negotiation-confirm"]', root);
+    if (failure) return 'PASSED';
+    if (stage === 'interview-preparation') return hasText('h3', /^准备方向$/, root) && shown('article', root).length > 0 ? 'PASSED' : 'RESULT_MISSING';
+    if (stage === 'resume-structure') return one('section[aria-label="分类候选"]', root) && shown('textarea', root).length > 0 ? 'PASSED' : 'RESULT_MISSING';
+    if (stage === 'offer-negotiation') return one('[aria-label="谈薪准备草稿"]', root) && one('[data-testid="offer-negotiation-confirm"]', root) ? 'PASSED' : 'RESULT_MISSING';
     const state = await bridge.getState(); // Existing public, read-only API.
     const snapshot = state?.snapshot;
     if (state?.connected !== true || snapshot?.taskState !== 'idle' || snapshot.loading !== false ||
-      snapshot.hasPending !== false || snapshot.error || snapshot.canStop !== false) return false;
-    if (stage === 'pilot-cancel') return Boolean(snapshot.stopMessage) && hasText('[role="status"]', /停止/, root);
+      snapshot.hasPending !== false || snapshot.error || snapshot.canStop !== false) return 'STATE_UNSETTLED';
+    if (stage === 'pilot-cancel') return Boolean(snapshot.stopMessage) && hasText('[role="status"]', /停止/, root) ? 'PASSED' : 'RESULT_MISSING';
     const messages = haru ? 'article[data-role="assistant"] p' : '[class*="bubbleAssistant"], [data-operation-id]';
-    if (stage === 'pilot-hitl-reject') return hasText(messages, /拒绝|未执行/, root);
-    return hasText(messages, /\S/, root);
-  } catch { return false; }
+    if (stage === 'pilot-hitl-reject') return hasText(messages, /拒绝|未执行|已取消这次操作/, root) ? 'PASSED' : 'RESULT_MISSING';
+    return hasText(messages, /\S/, root) ? 'PASSED' : 'RESULT_MISSING';
+  } catch { return 'GUARD_EXCEPTION'; }
 }
 
 export function createMockScreenshots({ directory, mode } = {}) {
@@ -104,8 +115,8 @@ export function createMockScreenshots({ directory, mode } = {}) {
   const captured = new Set();
   const skipped = new Map();
   let tokenInvalid = false, ownedDirectory, writing = Promise.resolve();
-  const skip = (id, code) => {
-    if (SCREEN_IDS.includes(id) && !captured.has(id)) skipped.set(id, code);
+  const skip = (id, code, reason) => {
+    if (SCREEN_IDS.includes(id) && !captured.has(id)) skipped.set(id, { code, ...(GUARD_REASONS.includes(reason) && reason !== 'PASSED' ? { reason } : {}) });
     return { status: 'skipped', code };
   };
   async function safeDirectory() {
@@ -140,13 +151,14 @@ export function createMockScreenshots({ directory, mode } = {}) {
       if (tokenInvalid || tokens.size === 0) return false;
       let timer;
       try {
-        return (await Promise.race([
+        const reason = await Promise.race([
           page.evaluate(safeScreen, { screenId, stage, tokens: [...tokens] }),
           new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('SCREEN_GUARD_FAILED')), 5000); }),
-        ])) === true;
+        ]);
+        return GUARD_REASONS.includes(reason) ? reason : 'GUARD_EXCEPTION';
       } finally { clearTimeout(timer); }
     };
-    try { if (!await clean()) return skip(screenId, 'SCREEN_GUARD_REJECTED'); }
+    try { const reason = await clean(); if (reason !== 'PASSED') return skip(screenId, 'SCREEN_GUARD_REJECTED', reason); }
     catch { return skip(screenId, 'SCREEN_GUARD_FAILED'); }
     let bytes;
     try {
@@ -157,7 +169,7 @@ export function createMockScreenshots({ directory, mode } = {}) {
     } catch { return skip(screenId, 'SCREEN_CAPTURE_FAILED'); }
     // Drop the in-memory image if navigation, credentials or a broker token
     // appeared while capture was in progress. Nothing has been persisted yet.
-    try { if (!await clean()) return skip(screenId, 'SCREEN_GUARD_REJECTED'); }
+    try { const reason = await clean(); if (reason !== 'PASSED') return skip(screenId, 'SCREEN_GUARD_REJECTED', reason); }
     catch { return skip(screenId, 'SCREEN_GUARD_FAILED'); }
     try { await safeDirectory(); } catch { return skip(screenId, 'SCREEN_DIRECTORY_UNSAFE'); }
     try { await fs.writeFile(path.join(screens, `${screenId}.png`), bytes, { flag: 'wx', mode: 0o600 }); }
@@ -179,7 +191,7 @@ export function createMockScreenshots({ directory, mode } = {}) {
     },
     snapshot() {
       return { captured: SCREEN_IDS.filter(id => captured.has(id)),
-        skipped: SCREEN_IDS.filter(id => skipped.has(id)).map(id => ({ id, code: skipped.get(id) })) };
+        skipped: SCREEN_IDS.filter(id => skipped.has(id)).map(id => ({ id, ...skipped.get(id) })) };
     },
   });
 }

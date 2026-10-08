@@ -11,7 +11,7 @@ import { nativeEffectiveCspObserver } from '../effective-csp-observer.mjs';
 import { auditedArchive, nativeObserverFixture } from './fixtures/effective-csp-fixture.mjs';
 import { discoverInstalledOfflineOrt, installedOfflineOrtURLs, initializeOfflineOrtInRenderer,
   assertOfflineOrtInitialization, assertInstalledResourcesIdentity, probeInstalledOfflineOrt, readOfflineOrtOwner,
-  readOfflineOrtPreloadOwner, safeOfflineOrtRendererDiagnostic } from '../offline-ort-probe.mjs';
+  readOfflineOrtPreloadOwner, safeOfflineOrtRendererDiagnostic, offlineOrtModuleMime } from '../offline-ort-probe.mjs';
 
 const { contentSecurityPolicy: csp } = createRequire(import.meta.url)('../../capabilities.cjs');
 const origin = 'http://127.0.0.1:18420';
@@ -88,6 +88,7 @@ function rendererHarness(options = {}) {
       if (options.importThrows) throw options.importThrows;
       if (options.importError) throw new Error('module blocked by CSP');
       options.onImport?.();
+      if (options.importAfterResponseThrows) throw options.importAfterResponseThrows;
       return { default: options.missingFactory ? undefined : async (config) => {
         calls.factories++;
         calls.options = config;
@@ -310,9 +311,10 @@ async function probeHarness(t, options = {}) {
     if (options.localWrite) page.emit('request', { method: () => 'POST', url: () => `${origin}/api/settings` });
     if (!options.noNativeModule) native.emit('module', options.nativeModule);
     if (!options.noImportResponse) page.emit('response', { url: request.url, request: () => request,
-      status: () => 200, headers: () => ({ 'content-security-policy': options.moduleCsp ? "script-src 'self'" : csp }),
+      status: () => 200, headers: () => ({ 'content-security-policy': options.moduleCsp ? "script-src 'self'" : csp,
+        'content-type': Object.hasOwn(options, 'moduleMime') ? options.moduleMime : 'text/javascript; charset=utf-8' }),
       headerValue: async () => Object.hasOwn(options, 'rawModuleCsp') ? options.rawModuleCsp : csp,
-      body: async () => options.wrongModuleBytes ? Buffer.from('wrong executable module') : mjsBytes });
+      body: options.moduleBody ?? (async () => options.wrongModuleBytes ? Buffer.from('wrong executable module') : mjsBytes) });
   } });
   page.evaluate = async (fn, args) => {
     if (fn === readOfflineOrtPreloadOwner) return Object.hasOwn(options, 'preloadOwnerRole') ? options.preloadOwnerRole : true;
@@ -555,7 +557,7 @@ const diagnosticFields = ['packaged', 'ownerURLMatched', 'twoWindows', 'ownerWin
 function assertSafeDiagnostic(value) {
   assert.deepEqual(Object.keys(value).sort(), ['cleanup', 'effectiveCsp', 'failedCheck', 'observed', 'phase', 'primaryFailure', 'probe', 'reloads', 'renderer', 'schemaVersion']);
   assert.equal(value.probe, 'offline-ort');
-  assert.equal(value.schemaVersion, 4);
+  assert.equal(value.schemaVersion, 5);
   assert.ok(['owner-observation', 'owner-validation', 'owner-resources', 'document-csp', 'initialization'].includes(value.phase));
   const reloadChecks = ['not-started', 'before-reload-gate', 'reload-await', 'response-present', 'response-status',
     'response-url', 'response-redirect', 'provisional-csp-read', 'raw-csp-read', 'browser-csp-match', 'native-csp-arm', 'native-effective-csp', 'page-url', 'complete'];
@@ -591,9 +593,13 @@ function assertSafeDiagnostic(value) {
   assert.deepEqual(Object.keys(value.effectiveCsp).sort(), ['module', 'native', 'responseObserverAuditPassed']);
   assert.equal(typeof value.effectiveCsp.responseObserverAuditPassed, 'boolean');
   const modulePolicy = value.effectiveCsp.module;
-  assert.deepEqual(Object.keys(modulePolicy).sort(), ['browserCspMatched', 'browserCspPresent', 'rawCspMatched', 'rawCspPresent', 'rawCspReadSucceeded', 'rawHeaderError']);
+  assert.deepEqual(Object.keys(modulePolicy).sort(), ['bodyRead', 'browserCspMatched', 'browserCspPresent', 'byteCountMatched', 'mimeType', 'rawCspMatched', 'rawCspPresent', 'rawCspReadSucceeded', 'rawHeaderError', 'redirectAbsent', 'responseObserved', 'sha256Matched', 'status200', 'verificationError']);
   for (const [key, observed] of Object.entries(modulePolicy)) {
-    assert.ok(key === 'rawHeaderError' ? errorCategories.includes(observed) : [null, true, false, 'not-observed'].includes(observed));
+    if (key === 'mimeType') assert.ok(['not-observed', 'missing', 'invalid', 'text/javascript', 'application/javascript',
+      'text/html', 'text/plain', 'application/octet-stream', 'application/json', 'legacy-javascript', 'other'].includes(observed));
+    else if (key === 'bodyRead') assert.ok(['not-started', 'pending', 'completed', 'timed-out', 'failed'].includes(observed));
+    else assert.ok(['rawHeaderError', 'verificationError'].includes(key) ? errorCategories.includes(observed)
+      : [null, true, false, 'not-observed'].includes(observed));
   }
   const native = value.effectiveCsp.native;
   if (native !== null) {
@@ -1278,4 +1284,92 @@ test('diagnostic callback mutation cannot alter renderer success evidence or a r
     }
     f.checkCleanup();
   }
+});
+
+for (const [input, expected] of [
+  [undefined, 'missing'], [null, 'missing'], ['', 'invalid'], [42, 'invalid'], ['x'.repeat(513), 'invalid'],
+  ['text/javascript; charset=utf-8', 'text/javascript'], [' Application/JavaScript ; charset=UTF-8', 'application/javascript'],
+  ['application/x-javascript', 'legacy-javascript'], ['text/javascript1.5', 'legacy-javascript'],
+  ['text/html; charset=utf-8', 'text/html'], ['text/plain', 'text/plain'],
+  ['application/octet-stream', 'application/octet-stream'], ['application/json', 'application/json'],
+  ['private-token/unknown; source=do-not-record', 'other'], [' ; private-token', 'invalid'],
+]) {
+  test(`module MIME observation maps ${expected} to an allowlisted category`, () => {
+    assert.equal(offlineOrtModuleMime(input), expected);
+  });
+}
+for (const mimeType of ['text/plain', 'application/octet-stream', 'text/html', undefined, 'private-token/unknown']) {
+  test(`module import rejection preserves safe MIME ${mimeType === undefined ? 'missing' : offlineOrtModuleMime(mimeType)} evidence`, async t => {
+    const f = await probeHarness(t, { moduleMime: mimeType,
+      importAfterResponseThrows: new TypeError('private-token strict module loading failure') });
+    let latest;
+    await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }),
+      /initialization failed at module-import/);
+    assert.equal(latest.renderer.errorCategory, 'type-error');
+    assert.equal(latest.renderer.observed.moduleImported, null);
+    assert.equal(latest.effectiveCsp.module.responseObserved, true);
+    assert.equal(latest.effectiveCsp.module.status200, true);
+    assert.equal(latest.effectiveCsp.module.redirectAbsent, true);
+    assert.equal(latest.effectiveCsp.module.mimeType, offlineOrtModuleMime(mimeType));
+    assert.equal(latest.effectiveCsp.module.bodyRead, 'completed');
+    assert.equal(latest.effectiveCsp.module.byteCountMatched, true);
+    assert.equal(latest.effectiveCsp.module.sha256Matched, true);
+    assert.equal(latest.effectiveCsp.module.verificationError, null);
+    assert.equal(f.renderer.calls.factories, 0);
+    f.checkCleanup();
+  });
+}
+test('the exact already-observed response completes body verification before failed-import cleanup reload', async t => {
+  let bodyCompleted = false;
+  const f = await probeHarness(t, { moduleBody: async () => {
+    await new Promise(resolve => setTimeout(resolve, 20)); bodyCompleted = true; return mjsBytes;
+  }, importAfterResponseThrows: new TypeError('private-token') });
+  const originalReload = f.page.reload;
+  let reloads = 0;
+  f.page.reload = (...args) => {
+    if (++reloads === 2) assert.equal(bodyCompleted, true, 'cleanup must not discard the response body');
+    return originalReload(...args);
+  };
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }));
+  assert.equal(latest.effectiveCsp.module.bodyRead, 'completed');
+  assert.equal(latest.effectiveCsp.module.sha256Matched, true);
+  f.checkCleanup();
+});
+test('HTML fallback bytes stay a mismatch even when renderer import already failed', async t => {
+  const f = await probeHarness(t, { moduleMime: 'text/html', moduleBody: async () => Buffer.from('<!doctype html>synthetic fallback'),
+    importAfterResponseThrows: new TypeError('private-token') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), /failed at module-import/);
+  assert.equal(latest.effectiveCsp.module.mimeType, 'text/html');
+  assert.equal(latest.effectiveCsp.module.byteCountMatched, false);
+  assert.equal(latest.effectiveCsp.module.sha256Matched, false);
+  assert.equal(latest.effectiveCsp.module.verificationError, 'assertion');
+  assert.equal(latest.renderer.phase, 'module-import');
+  f.checkCleanup();
+});
+for (const [bodyRead, moduleBody, expectedError] of [
+  ['failed', async () => { throw new Error('Protocol error private-token'); }, 'protocol-error'],
+  ['timed-out', () => new Promise(() => {}), 'timeout'],
+]) {
+  test(`already-observed module body ${bodyRead} remains bounded and cannot suppress the renderer rejection`, async t => {
+    const f = await probeHarness(t, { moduleBody, importAfterResponseThrows: new TypeError('private-token') });
+    let latest;
+    await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), /failed at module-import/);
+    assert.equal(latest.effectiveCsp.module.bodyRead, bodyRead);
+    assert.equal(latest.effectiveCsp.module.verificationError, expectedError);
+    assert.equal(latest.effectiveCsp.module.byteCountMatched, null);
+    assert.equal(latest.effectiveCsp.module.sha256Matched, null);
+    assert.equal(latest.renderer.phase, 'module-import');
+    assert.equal(latest.cleanup.nativeObserver.result, 'passed');
+    f.checkCleanup();
+  });
+}
+test('a body timeout also prevents otherwise-successful synthetic initialization from passing', async t => {
+  const f = await probeHarness(t, { moduleBody: () => new Promise(() => {}) });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), /response body timed out/);
+  assert.equal(latest.effectiveCsp.module.bodyRead, 'timed-out');
+  assert.equal(latest.effectiveCsp.module.verificationError, 'timeout');
+  f.checkCleanup();
 });

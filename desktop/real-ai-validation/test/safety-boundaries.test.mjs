@@ -174,3 +174,11 @@ test('screenshot summary cannot disclose arbitrary strings or appear in live evi
   assert.throws(() => safeScreenshotEvidence({ captured: ['../private-key.png'] }, true));
   assert.throws(() => safeScreenshotEvidence({ skipped: [{ id: 'failure-owner', code: 'private-key' }] }, true));
 });
+
+test('screenshot guard reasons are a strict enum and cannot carry DOM or credentials', async () => {
+  const { safeScreenshotEvidence } = await import('../safe-evidence.mjs');
+  const value = reason => ({ skipped: [{ id: 'failure-owner', code: 'SCREEN_GUARD_REJECTED', reason, raw: 'private-key' }] });
+  assert.deepEqual(safeScreenshotEvidence(value('BUSINESS_SURFACE'), true), { captured: [], skipped: [
+    { id: 'failure-owner', code: 'SCREEN_GUARD_REJECTED', reason: 'BUSINESS_SURFACE' }] });
+  for (const reason of ['private-key', 'PASSED', {}, 1]) assert.throws(() => safeScreenshotEvidence(value(reason), true));
+});

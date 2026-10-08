@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { createMockScreenshots, SCREEN_IDS, SKIP_CODES } from '../mock-screenshots.mjs';
+import { createMockScreenshots, SCREEN_IDS, SKIP_CODES, GUARD_REASONS } from '../mock-screenshots.mjs';
 
 // Local fake-Page tests execute the actual renderer guard in a separate VM.
 // They neither launch an EXE nor establish installed Windows UI evidence.
@@ -70,7 +70,7 @@ function fakePage(stage = 'pilot-stream', { haru = false, screenshotError = fals
         args, document, window: { offerpilotDesktop: bridge },
         getComputedStyle: node => ({ visibility: 'visible', display: node.visible ? 'block' : 'none' }),
       });
-      assert.equal(typeof result, 'boolean', 'no renderer data may escape the guard');
+      assert.ok(GUARD_REASONS.includes(result), 'only a fixed enum may escape the guard');
       return result;
     },
     async screenshot(options) {
@@ -276,4 +276,29 @@ test('a stalled public read is bounded and does not take a screenshot', async t 
   assert.deepEqual(await result, { status: 'skipped', code: 'SCREEN_GUARD_FAILED' });
   t.mock.timers.reset();
   assert.equal(countCaptures(page), 0); await absent(directory);
+});
+
+test('fixed guard reason distinguishes known incomplete interview pages; credential rules remain absolute', async t => {
+  const { directory, screenshots } = await setup(t);
+  const unknown = fakePage('interview-preparation');
+  unknown.document.selectors.delete('section[aria-label="面试准备建议"]');
+  assert.equal((await screenshots.capture('failure-owner', unknown, { stage: 'interview-preparation' })).code, 'SCREEN_GUARD_REJECTED');
+  assert.deepEqual(screenshots.snapshot().skipped, [{ id: 'failure-owner', code: 'SCREEN_GUARD_REJECTED', reason: 'BUSINESS_SURFACE' }]);
+  await absent(directory);
+  const list = fakePage('interview-preparation'); list.document.selectors.delete('section[aria-label="面试准备建议"]');
+  list.document.add('[data-testid="interview-surface"]'); list.document.add('input[type="password"]');
+  assert.equal((await screenshots.capture('failure-owner', list, { stage: 'interview-preparation' })).code, 'SCREEN_GUARD_REJECTED');
+  assert.equal(screenshots.snapshot().skipped[0].reason, 'CREDENTIAL_SURFACE'); await absent(directory);
+  list.document.selectors.delete('input[type="password"]');
+  assert.equal((await screenshots.capture('failure-owner', list, { stage: 'interview-preparation' })).status, 'captured');
+});
+test('real interview proposal board and real HITL cancellation wording qualify without loosening credential guards', async t => {
+  const { screenshots } = await setup(t);
+  const interview = fakePage('interview-preparation');
+  interview.document.selectors.delete('nav[aria-label="主导航"] [aria-current="page"][aria-label="面试"]');
+  interview.document.add('nav[aria-label="主导航"] [aria-current="page"][aria-label="投递"]');
+  assert.equal((await screenshots.capture('interview-preparation', interview, { stage: 'interview-preparation' })).status, 'captured');
+  const haru = fakePage('pilot-hitl-reject', { haru: true });
+  haru.surface.querySelector('article[data-role="assistant"] p').text = '已取消这次操作。你可以告诉我接下来想怎么做。';
+  assert.equal((await screenshots.capture('haru-pilot-hitl-reject', haru, { stage: 'pilot-hitl-reject' })).status, 'captured');
 });

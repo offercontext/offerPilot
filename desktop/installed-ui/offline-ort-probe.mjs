@@ -374,6 +374,30 @@ async function rawCspDiagnostic(response, timeoutMs) {
   finally { clearTimeout(timer); }
 }
 
+// Keep arbitrary header values in memory. Only this fixed MIME class is evidence;
+// this does not substitute for the real browser's module-import decision.
+export function offlineOrtModuleMime(value) {
+  if (value === undefined || value === null) return 'missing';
+  if (typeof value !== 'string' || value.length === 0 || value.length > 512) return 'invalid';
+  const essence = value.split(';', 1)[0].trim().toLowerCase();
+  if (['text/javascript', 'application/javascript', 'text/html', 'text/plain',
+    'application/octet-stream', 'application/json'].includes(essence)) return essence;
+  if (['application/ecmascript', 'application/x-ecmascript', 'application/x-javascript',
+    'text/ecmascript', 'text/jscript', 'text/livescript', 'text/x-ecmascript', 'text/x-javascript',
+    'text/javascript1.0', 'text/javascript1.1', 'text/javascript1.2', 'text/javascript1.3',
+    'text/javascript1.4', 'text/javascript1.5'].includes(essence)) return 'legacy-javascript';
+  return essence ? 'other' : 'invalid';
+}
+
+async function boundedImportedBody(response, timeoutMs) {
+  let timer;
+  try {
+    return await Promise.race([response.body(), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('ORT module response body timed out')), Math.min(timeoutMs, 5000));
+    })]);
+  } finally { clearTimeout(timer); }
+}
+
 // Reloads the owner before the probe to verify the active main-document CSP,
 // and afterward to release the isolated ORT heap even on partial failure. The caller
 // must gate EACH reload through beforeReload: no pending write and no unsaved
@@ -401,7 +425,9 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   let responseObserverAuditPassed = false;
   const native = (operation, extra = {}) => app.evaluate(nativeEffectiveCspObserver, { key: nativeKey, operation, ...extra });
   const modulePolicy = { browserCspPresent: null, browserCspMatched: null,
-    rawCspPresent: null, rawCspMatched: null, rawCspReadSucceeded: null, rawHeaderError: null };
+    rawCspPresent: null, rawCspMatched: null, rawCspReadSucceeded: null, rawHeaderError: null,
+    responseObserved: false, status200: null, redirectAbsent: null, mimeType: 'not-observed',
+    bodyRead: 'not-started', byteCountMatched: null, sha256Matched: null, verificationError: null };
   const onRequest = (request) => {
     if (request.method() === 'GET' && Object.values(urls).includes(request.url())) return;
     try {
@@ -421,21 +447,39 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   const onResponse = (response) => {
     if (response.url() !== urls.mjs || response.request().resourceType() !== 'script') return;
     importedResponses++;
+    modulePolicy.responseObserved = true;
     // Convert failures to values immediately to avoid unhandled rejections.
     responseChecks.push((async () => {
-      assert.equal(response.status(), 200, 'installed module import must return HTTP 200');
-      assert.equal(response.request().redirectedFrom(), null, 'ORT module import must not redirect');
-      const effective = response.headers()['content-security-policy'];
+      modulePolicy.status200 = response.status() === 200;
+      assert.equal(modulePolicy.status200, true, 'installed module import must return HTTP 200');
+      modulePolicy.redirectAbsent = response.request().redirectedFrom() === null;
+      assert.equal(modulePolicy.redirectAbsent, true, 'ORT module import must not redirect');
+      const headers = response.headers();
+      modulePolicy.mimeType = offlineOrtModuleMime(headers['content-type']);
+      const effective = headers['content-security-policy'];
       modulePolicy.browserCspPresent = typeof effective === 'string';
       modulePolicy.browserCspMatched = effective === contentSecurityPolicy;
       assert.equal(effective, contentSecurityPolicy, 'module effective production CSP mismatch');
       const raw = await rawCspDiagnostic(response, timeoutMs);
       Object.assign(modulePolicy, { rawCspPresent: raw.present, rawCspMatched: raw.matched,
         rawCspReadSucceeded: raw.succeeded, rawHeaderError: raw.error });
-      const bytes = await response.body();
-      assert.equal(bytes.length, installed.assets.mjs.bytes, 'imported module byte count mismatch');
-      assert.equal(sha256(bytes), installed.assets.mjs.sha256, 'imported module must equal installed bytes');
-    })().then(() => null, (error) => error));
+      modulePolicy.bodyRead = 'pending';
+      let bytes;
+      try {
+        bytes = await boundedImportedBody(response, timeoutMs);
+        modulePolicy.bodyRead = 'completed';
+      } catch (error) {
+        modulePolicy.bodyRead = diagnosticErrorCategory(error) === 'timeout' ? 'timed-out' : 'failed';
+        throw error;
+      }
+      modulePolicy.byteCountMatched = bytes.length === installed.assets.mjs.bytes;
+      modulePolicy.sha256Matched = sha256(bytes) === installed.assets.mjs.sha256;
+      assert.equal(modulePolicy.byteCountMatched, true, 'imported module byte count mismatch');
+      assert.equal(modulePolicy.sha256Matched, true, 'imported module must equal installed bytes');
+    })().then(() => null, (error) => {
+      modulePolicy.verificationError = diagnosticErrorCategory(error);
+      return error;
+    }));
   };
   let result;
   let rendererDiagnostic = null;
@@ -454,7 +498,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   let currentCheck = 'owner-observation';
   const emit = async (failedCheck = primaryFailure?.check ?? null) => {
     try {
-      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 4, phase, observed: { ...observed }, failedCheck,
+      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 5, phase, observed: { ...observed }, failedCheck,
         primaryFailure: primaryFailure && { ...primaryFailure },
         renderer: rendererDiagnostic && structuredClone(rendererDiagnostic),
         effectiveCsp: { responseObserverAuditPassed, native: nativeProof && structuredClone(nativeProof), module: { ...modulePolicy } },
@@ -634,6 +678,10 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     primaryFailure = { check: currentCheck, errorCategory: diagnosticErrorCategory(error) };
     await emit();
   }
+  // A rejected dynamic import can still have a completed HTTP response. Finish
+  // the already-started, bounded read before reload discards that response. This
+  // adds no request and never replaces the original renderer rejection.
+  if (primaryError) await Promise.all(responseChecks);
   const cleanupErrors = [];
   cleanup.observers.result = 'passed';
   if (!observersDetached) {

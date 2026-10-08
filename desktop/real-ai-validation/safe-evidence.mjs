@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { SCREEN_IDS, SKIP_CODES } from './mock-screenshots.mjs';
+import { SCREEN_IDS, SKIP_CODES, GUARD_REASONS } from './mock-screenshots.mjs';
 import { sanitizeUiDiagnostic } from './ui-diagnostics.mjs';
 import { CASES, PIN, demand, EVIDENCE_CODES } from './contract.mjs';
 const CHECKS = new Set('settingsSavedThroughUi connectionTestClicked connectionSucceeded incrementalAssistantRendering haruRunningAndIdleMirrored haruVisibleAssistantMatchesSnapshot hitlVisible rejectedThroughUi syntheticWriteAbsent haruPendingAndIdleMirrored stopClickedWhileRunning stopAcknowledged haruRunningAndStoppedMirrored sourceAndResumeSelected disclosureAccepted generatedProposalVisible classificationPreviewVisible cancelledThroughUi sourceUnchanged inputReviewedThroughUi generatedDraftVisible finalSaveNotSubmitted providerRequestObserved providerRequestSettled oneProviderRequestVerified productDisconnectObserved providerDisconnectObserved ownerRunningTransitionObserved haruRunningTransitionObserved positiveRunningConversationMatched finalRunningConversationMatched mirrorObserverCleanupFailed streamObserverCleanupFailed'.split(' '));
@@ -69,7 +69,8 @@ export function safeScreenshotEvidence(value, isMock) {
   demand(captured.every(id => SCREEN_IDS.includes(id)), 'REPORT_INVALID');
   return { captured: [...captured], skipped: skipped.map(row => {
     demand(SCREEN_IDS.includes(row?.id) && SKIP_CODES.includes(row?.code), 'REPORT_INVALID');
-    return { id: row.id, code: row.code };
+    demand(row.reason === undefined || (row.code === 'SCREEN_GUARD_REJECTED' && GUARD_REASONS.includes(row.reason) && row.reason !== 'PASSED'), 'REPORT_INVALID');
+    return { id: row.id, code: row.code, ...(row.reason === undefined ? {} : { reason: row.reason }) };
   }) };
 }
 export async function saveEvidence(directory, report, ledger, secrets = []) {

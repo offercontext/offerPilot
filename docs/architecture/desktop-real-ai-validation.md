@@ -117,3 +117,21 @@ npm test --prefix desktop/real-ai-validation
 helper 原实现有确定的漏采窗口：发送点击返回后才轮询 running，又依次等待 Haru 标签和主窗 Stop；约六秒的合成 provider 帧序列不能替代实际 UI 状态采样。实际 React/controller/Haru hook 局部验证存在 `idle/null → running/null → running/正ID → idle/同ID`，故不放宽正 ID 要求。修复在发送前以 Haru 公共 `onState` 和两窗 DOM MutationObserver 被动锁存真正的 running/正 ID/可见运行控件，owner 用只读 getState 做关联核对；两次 getState 都来自同一 main-process snapshot，不能单独声称两份独立 UI 证据。只看见 idle、只有 bridge 或只有 DOM、ID改变/超时/失联均不得通过。
 
 正常 stream 可在结束后读取已真实锁存的运行中证据，再独立要求 idle、最终身份一致和 Haru 实际正文；cancel 仍必须当下 Stop 可点、broker 请求仍 active，真实点击后由产品断连。没有修改 MOCK 速度、模型、预算、重试或产品。每场景 finally 注销订阅/观察器，诊断只保留固定布尔，不记录正文或会话 ID；此改动仍须新的 Windows MOCK 实跑确认。
+
+
+[第三轮 Windows MOCK run 37789729958](https://github.com/offercontext/offerPilot/actions/runs/37789729958) 已实跑：connection、Pilot stream、HITL 拒绝均 PASS。stream 真正记录了正 ID running、两窗可见运行控件、终态同 ID idle 与 Haru 正文同步；HITL 经真实 UI 拒绝且无合成写入。三笔 MOCK 请求已结算、无拒绝，清理成功，paid jobs 均跳过。面试场景在 `INTERVIEW_OPEN` 找不到目标而超时，其余仍 BLOCKED，不能称七场景通过。成功截图仍受 guard 限制；唯一图片为拒绝后 Haru 的受控失败图，不能当作 stream 运行态图片。
+
+本地真实 React/Ant + 锁定 Playwright selector engine 回归复现了辅助 seed 的缓存缺口：AppShell 已缓存空 sources，面试索引却含新事件，与 `events=[]` 对账后不渲染 primary 按钮。helper 改为 seed 后、任何配置/arm 前正常 reload 一次，核验该次导航后四个产品 GET（投递/事件/简历/Offer）各仅含本轮 fixture；不调用 query cache、重放业务任务或写入 UI 状态。此诊断是复现的缺陷与本轮证据一致，不宣称已从失败截图直接看到空缓存。
+
+后续完整入口也经审查：面试卡先进入准备检查，必须通过真实简历选择与“开始准备”才显示提案；只读 JD 用 exact textbox accessible name（包装 label 的 text 包含 JD 正文，会使 getByLabel exact 匹配 0）。新增面试子阶段并等待实际 JD 载入。简历分类/取消、Offer 输入审核/生成与 Haru Stop 的真实组件 DOM 契约也已回归。每次供应商保存由产品 setQueryData/invalidateQueries 更新设置缓存，helper 仍逐次重填一次性 token 并核对 PUT 回执；没有为此重复发送测试请求。
+
+MOCK 截图新增严格枚举拒绝原因，不记录 DOM/值/URL；受控面试失败图只额外允许已知面试列表或准备检查页，提案则允许实际路由所在的“投递”页。配置/credential/token 检查仍在所有 surface 判定之前，截图仍需内存捕获前后双检查。拒绝成功文案接受固定产品实际显示的“已取消这次操作”。仍须新 helper SHA 的 Windows MOCK 实跑，不自动激活 live。
+
+真实组件 selector 局部测试（独立于假 Page 单测；不会启动 EXE 或 provider）：
+
+```sh
+npm ci --prefix web --ignore-scripts --no-audit --no-fund
+node web/node_modules/vitest/vitest.mjs run --config desktop/real-ai-validation/test-ui/vitest.config.mjs
+```
+
+该测试使用既有 web 锁定依赖、jsdom 和 helper 的锁定 Playwright selector engine。仅为 jsdom 补足 CSS ID 转义，并使用 rc-util 正常的唯一 React ID 分支；不改变产品文件。它仍不能替代固定安装版 Windows 交互。

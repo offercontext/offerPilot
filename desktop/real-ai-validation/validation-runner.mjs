@@ -10,6 +10,7 @@ import { cleanOwnedFiles } from './cleanup.mjs';
 import { saveEvidence } from './safe-evidence.mjs';
 import { syntheticApi } from './synthetic-api.mjs';
 import { prepareSyntheticProfile, runUiScenarios } from './ui-scenarios.mjs';
+import { refreshSyntheticProfile } from './seed-refresh.mjs';
 
 export async function executeValidation({ mode, brokerFactory, providerKey, screenshotFactory } = {}) {
   demand(['live', 'mock'].includes(mode) && typeof brokerFactory === 'function' &&
@@ -99,6 +100,7 @@ try {
     await haru.getByRole('main', { name: 'Haru 桌面小窗', exact: true }).waitFor();
     const api = syntheticApi(page);
     const fixture = await prepareSyntheticProfile(api);
+    await refreshSyntheticProfile(page, broker, fixture, started + 600000);
     const result = await runUiScenarios({ page, haru, api, broker: scenarioBroker, fixture,
       capture, deadlineMs: started + 600000 });
     report.scenarios = CASES.map(id => result.results.find(row => row.id === id));
