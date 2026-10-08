@@ -13,17 +13,18 @@ export const SKIP_CODES = Object.freeze([
   'SCREEN_ID_INVALID', 'SCREEN_STAGE_INVALID', 'SCREEN_PAGE_INVALID',
   'SCREEN_TOKEN_INVALID', 'SCREEN_GUARD_REJECTED', 'SCREEN_GUARD_FAILED',
   'SCREEN_CAPTURE_FAILED', 'SCREEN_DIRECTORY_UNSAFE', 'SCREEN_WRITE_FAILED',
-  'SCREEN_ALREADY_CAPTURED',
+  'SCREEN_ALREADY_CAPTURED', 'SCREEN_SCROLL_FAILED', 'SCREEN_VISUAL_UNSETTLED',
 ]);
 export const GUARD_REASONS = Object.freeze(['PASSED', 'DOCUMENT_HIDDEN', 'CREDENTIAL_SURFACE', 'SETTINGS_ACTIVE',
   'UNINSPECTABLE_CONTENT', 'CREDENTIAL_CONTROL', 'TOKEN_VISIBLE', 'WRONG_ROLE', 'HARU_SURFACE',
-  'PILOT_SURFACE', 'PILOT_COMPOSER', 'BUSINESS_SURFACE', 'RESUME_SURFACE', 'RESULT_MISSING', 'STATE_UNSETTLED', 'GUARD_EXCEPTION']);
+  'PILOT_SURFACE', 'PILOT_COMPOSER', 'BUSINESS_SURFACE', 'RESUME_SURFACE', 'RESULT_MISSING', 'STATE_UNSETTLED',
+  'RESULT_NOT_VISIBLE', 'VISUAL_UNSETTLED', 'GUARD_EXCEPTION']);
 const STAGES = new Set(SCREEN_IDS.filter(id => !id.startsWith('haru-') && !id.startsWith('failure-')));
 const fail = code => { throw Object.assign(new Error(code), { code }); };
 
 // Runs in the renderer, returning ONLY a fixed reason enum. Never return DOM, text,
 // values, URLs, bridge snapshots or tokens, including on the failure path.
-async function safeScreen({ screenId, stage, tokens }) {
+async function safeScreen({ screenId, stage, tokens, visual = false }) {
   try {
     const visible = node => Boolean(node && node.getClientRects().length &&
       getComputedStyle(node).visibility !== 'hidden' && getComputedStyle(node).display !== 'none');
@@ -32,6 +33,51 @@ async function safeScreen({ screenId, stage, tokens }) {
     const one = (selector, root = document) => shown(selector, root).length === 1;
     const hasText = (selector, pattern, root = document) => shown(selector, root)
       .some(node => pattern.test(node.textContent || ''));
+    const readable = async (nodes, every = false) => {
+      if (!visual) return 'PASSED';
+      const targets = every ? nodes : nodes.slice(-1);
+      // All measurements and text remain inside the renderer. Inspect the
+      // message's ancestors too: opRise animates the row, not its text bubble.
+      const sample = target => {
+        if (!target?.isConnected || !visible(target)) return { reason: 'RESULT_NOT_VISIBLE' };
+        const rect = target.getBoundingClientRect();
+        let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+        let right = Math.min(window.innerWidth, rect.right), bottom = Math.min(window.innerHeight, rect.bottom);
+        const chain = [];
+        for (let node = target; node; node = node.parentElement) {
+          chain.push(node);
+          const style = getComputedStyle(node);
+          if (style.visibility !== 'visible' || style.display === 'none' || Number(style.opacity) < 0.999 ||
+            (style.filter && style.filter !== 'none')) return { reason: 'VISUAL_UNSETTLED' };
+          if (node.getAnimations().some(animation => animation.pending || animation.playState === 'running')) return { reason: 'VISUAL_UNSETTLED' };
+          if (node !== target) {
+            const clip = node.getBoundingClientRect();
+            if (/^(auto|scroll|hidden|clip)$/.test(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right); }
+            if (/^(auto|scroll|hidden|clip)$/.test(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom); }
+          }
+        }
+        if (document.fonts?.status === 'loading' || target.getAnimations({ subtree: true })
+          .some(animation => animation.pending || animation.playState === 'running')) return { reason: 'VISUAL_UNSETTLED' };
+        // A sliver or merely an offscreen generated heading is not evidence.
+        if (rect.width <= 0 || rect.height <= 0 || right - left < Math.min(120, rect.width) ||
+          bottom - top < Math.min(32, rect.height)) return { reason: 'RESULT_NOT_VISIBLE' };
+        return { signature: [target.textContent, target.value, rect.left, rect.top, rect.right, rect.bottom, left, top, right, bottom], chain };
+      };
+      const before = targets.map(sample);
+      if (before.some(value => value.reason)) return before.find(value => value.reason).reason;
+      if (visual === 'stable') {
+        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        // Recheck the entire credential, token, role, stage and result guard
+        // after yielding. A changed surface terminates waiting immediately.
+        const reason = await safeScreen({ screenId, stage, tokens });
+        if (reason !== 'PASSED') return reason;
+        const after = targets.map(sample);
+        if (after.some(value => value.reason)) return after.find(value => value.reason).reason;
+        if (before.some((value, index) => value.signature.some((part, offset) => part !== after[index].signature[offset]) ||
+          value.chain.length !== after[index].chain.length || value.chain.some((node, offset) => node !== after[index].chain[offset]))) return 'VISUAL_UNSETTLED';
+      }
+      return 'PASSED';
+    };
     if (!document.body || document.visibilityState !== 'visible') return 'DOCUMENT_HIDDEN';
     // Reject the entire credential surface even if controls are hidden/empty.
     if (document.querySelector('section[aria-label="AI 设置"], [data-testid="ai-provider-list"], input[type="password"], input[autocomplete="current-password"], input[autocomplete="new-password"], input[autocomplete="one-time-code"], [data-credential-form]')) return 'CREDENTIAL_SURFACE';
@@ -91,17 +137,26 @@ async function safeScreen({ screenId, stage, tokens }) {
     // A controlled failure may show an incomplete result, but must still be on
     // that exact known surface. Settings/connection never qualify as a stage.
     if (failure) return 'PASSED';
-    if (stage === 'interview-preparation') return hasText('h3', /^准备方向$/, root) && shown('article', root).length > 0 ? 'PASSED' : 'RESULT_MISSING';
-    if (stage === 'resume-structure') return one('section[aria-label="分类候选"]', root) && shown('textarea', root).length > 0 ? 'PASSED' : 'RESULT_MISSING';
-    if (stage === 'offer-negotiation') return one('[aria-label="谈薪准备草稿"]', root) && one('[data-testid="offer-negotiation-confirm"]', root) ? 'PASSED' : 'RESULT_MISSING';
+    if (stage === 'interview-preparation') {
+      // Only generated proposal paragraphs qualify. Readiness/history articles
+      // elsewhere in the drawer and an empty article cannot satisfy this.
+      const paragraphs = shown(':scope > section > article > p', root).filter(node => /\S/.test(node.textContent || ''));
+      const generate = shown('[data-testid="interview-preparation-generate"]', root);
+      const close = shown(':scope > div > button', root).filter(node => /^关闭$/.test(node.textContent || ''));
+      return hasText(':scope > section > h3', /^准备方向$/, root) && paragraphs.length > 0 && generate.length === 1 && close.length === 1
+        ? readable([paragraphs.at(-1), generate[0], close[0]], true) : 'RESULT_MISSING';
+    }
+    if (stage === 'resume-structure') return one('section[aria-label="分类候选"]', root) && shown('textarea', root).length > 0 ? readable(shown('textarea', root)) : 'RESULT_MISSING';
+    if (stage === 'offer-negotiation') return one('[aria-label="谈薪准备草稿"]', root) && one('[data-testid="offer-negotiation-confirm"]', root) ? readable(shown('[aria-label="谈薪准备草稿"]', root)) : 'RESULT_MISSING';
     const state = await bridge.getState(); // Existing public, read-only API.
     const snapshot = state?.snapshot;
     if (state?.connected !== true || snapshot?.taskState !== 'idle' || snapshot.loading !== false ||
       snapshot.hasPending !== false || snapshot.error || snapshot.canStop !== false) return 'STATE_UNSETTLED';
-    if (stage === 'pilot-cancel') return Boolean(snapshot.stopMessage) && hasText('[role="status"]', /停止/, root) ? 'PASSED' : 'RESULT_MISSING';
+    if (stage === 'pilot-cancel') return Boolean(snapshot.stopMessage) && hasText('[role="status"]', /停止/, root) ? readable(shown('[role="status"]', root).filter(node => /停止/.test(node.textContent || ''))) : 'RESULT_MISSING';
     const messages = haru ? 'article[data-role="assistant"] p' : '[class*="bubbleAssistant"], [data-operation-id]';
-    if (stage === 'pilot-hitl-reject') return hasText(messages, /拒绝|未执行|已取消这次操作/, root) ? 'PASSED' : 'RESULT_MISSING';
-    return hasText(messages, /\S/, root) ? 'PASSED' : 'RESULT_MISSING';
+    const pattern = stage === 'pilot-hitl-reject' ? /拒绝|未执行|已取消这次操作/ : /\S/;
+    const results = shown(messages, root).filter(node => pattern.test(node.textContent || ''));
+    return results.length > 0 ? readable(results) : 'RESULT_MISSING';
   } catch { return 'GUARD_EXCEPTION'; }
 }
 
@@ -147,19 +202,67 @@ export function createMockScreenshots({ directory, mode } = {}) {
     if (!page || typeof page.evaluate !== 'function' || typeof page.screenshot !== 'function') return skip(screenId, 'SCREEN_PAGE_INVALID');
     if (tokenInvalid || tokens.size === 0) return skip(screenId, 'SCREEN_TOKEN_INVALID');
     if (captured.has(screenId)) return skip(screenId, 'SCREEN_ALREADY_CAPTURED');
-    const clean = async () => {
+    const clean = async (visual = false, timeout = 5000) => {
       if (tokenInvalid || tokens.size === 0) return false;
       let timer;
       try {
         const reason = await Promise.race([
-          page.evaluate(safeScreen, { screenId, stage, tokens: [...tokens] }),
-          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('SCREEN_GUARD_FAILED')), 5000); }),
+          page.evaluate(safeScreen, { screenId, stage, tokens: [...tokens], visual }),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('SCREEN_GUARD_FAILED')), timeout); }),
         ]);
         return GUARD_REASONS.includes(reason) ? reason : 'GUARD_EXCEPTION';
       } finally { clearTimeout(timer); }
     };
     try { const reason = await clean(); if (reason !== 'PASSED') return skip(screenId, 'SCREEN_GUARD_REJECTED', reason); }
     catch { return skip(screenId, 'SCREEN_GUARD_FAILED'); }
+    const failure = screenId.startsWith('failure-');
+    if (!failure) {
+      try {
+        // These are fixed, product-owned result targets. Scrolling is the only
+        // interaction: never change page content, CSS or animation state.
+        let target;
+        if (stage === 'interview-preparation') {
+          target = page.locator('section[aria-label="面试准备建议"] > section > article > p').filter({ hasText: /\S/ });
+        } else if (stage === 'resume-structure') {
+          target = page.locator('[role="dialog"] textarea');
+        } else if (stage === 'offer-negotiation') {
+          target = page.locator('[data-testid="offer-negotiation-drawer"] [aria-label="谈薪准备草稿"]');
+        } else {
+          const haru = screenId.startsWith('haru-');
+          const scope = page.locator(haru ? 'section[aria-label="Haru 对话"]' : '.op-pilot-page-host [data-onboarding-target="pilot"]');
+          target = stage === 'pilot-cancel' ? scope.locator('[role="status"]').filter({ hasText: /停止/ })
+            : scope.locator(haru ? 'article[data-role="assistant"] p' : '[class*="bubbleAssistant"], [data-operation-id]')
+              .filter({ hasText: stage === 'pilot-hitl-reject' ? /拒绝|未执行|已取消这次操作/ : /\S/ });
+        }
+        // Last generated interview paragraph is beside the bottom action row;
+        // unlike the preparation heading, it proves readable result content.
+        await target.last().scrollIntoViewIfNeeded({ timeout: 3000 });
+      } catch { return skip(screenId, 'SCREEN_SCROLL_FAILED'); }
+      if (stage === 'interview-preparation') {
+        try { const reason = await clean(); if (reason !== 'PASSED') return skip(screenId, 'SCREEN_GUARD_REJECTED', reason); }
+        catch { return skip(screenId, 'SCREEN_GUARD_FAILED'); }
+        try {
+          await page.locator('section[aria-label="面试准备建议"]').locator(':scope > div > button')
+            .filter({ hasText: /^关闭$/ }).last().evaluate(node => {
+              // Align the fixed footer to the bottom instead of centering it,
+              // leaving the available viewport for the generated paragraph.
+              node.scrollIntoView({ block: 'end', inline: 'nearest', behavior: 'instant' });
+            }, undefined, { timeout: 3000 });
+        } catch { return skip(screenId, 'SCREEN_SCROLL_FAILED'); }
+        // The visual guard now requires BOTH bottom actions and the last
+        // generated paragraph in the same viewport. If they do not fit, skip.
+      }
+      const deadline = Date.now() + 3000;
+      let reason = 'VISUAL_UNSETTLED';
+      while (Date.now() < deadline) {
+        try { reason = await clean('stable', Math.max(1, deadline - Date.now())); }
+        catch { return skip(screenId, 'SCREEN_GUARD_FAILED'); }
+        if (reason === 'PASSED') break;
+        if (!['VISUAL_UNSETTLED', 'RESULT_NOT_VISIBLE'].includes(reason)) return skip(screenId, 'SCREEN_GUARD_REJECTED', reason);
+        await new Promise(resolve => setTimeout(resolve, Math.min(50, Math.max(1, deadline - Date.now()))));
+      }
+      if (reason !== 'PASSED') return skip(screenId, 'SCREEN_VISUAL_UNSETTLED');
+    }
     let bytes;
     try {
       // Keep natural rendering/animations. No masking, DOM removal, injected
@@ -169,7 +272,7 @@ export function createMockScreenshots({ directory, mode } = {}) {
     } catch { return skip(screenId, 'SCREEN_CAPTURE_FAILED'); }
     // Drop the in-memory image if navigation, credentials or a broker token
     // appeared while capture was in progress. Nothing has been persisted yet.
-    try { const reason = await clean(); if (reason !== 'PASSED') return skip(screenId, 'SCREEN_GUARD_REJECTED', reason); }
+    try { const reason = await clean(failure ? false : 'instant'); if (reason !== 'PASSED') return skip(screenId, 'SCREEN_GUARD_REJECTED', reason); }
     catch { return skip(screenId, 'SCREEN_GUARD_FAILED'); }
     try { await safeDirectory(); } catch { return skip(screenId, 'SCREEN_DIRECTORY_UNSAFE'); }
     try { await fs.writeFile(path.join(screens, `${screenId}.png`), bytes, { flag: 'wx', mode: 0o600 }); }

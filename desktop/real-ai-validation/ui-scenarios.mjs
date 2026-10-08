@@ -84,10 +84,11 @@ function operationContext(deadline) {
   return {
     mark: diagnostic.mark, target: diagnostic.target, mirror: diagnostic.mirror, diagnostic: diagnostic.snapshot,
     timeout(cap = 15_000) { const left = deadline - Date.now(); if (left <= 0) fail('SUITE_DEADLINE'); return Math.max(1, Math.min(left, cap)); },
-    async click(locator) { diagnostic.target(locator); await locator.click({ timeout: this.timeout() }); },
+    async click(locator, diagnosticLocator = locator) { diagnostic.target(diagnosticLocator); await locator.click({ timeout: this.timeout() }); },
     async fill(locator, value) { diagnostic.target(locator); await locator.fill(value, { timeout: this.timeout() }); },
     async visible(locator) { diagnostic.target(locator); await locator.waitFor({ state: 'visible', timeout: this.timeout() }); },
     async hidden(locator) { diagnostic.target(locator); await locator.waitFor({ state: 'hidden', timeout: this.timeout() }); },
+    async detached(locator) { diagnostic.target(locator); await locator.waitFor({ state: 'detached', timeout: this.timeout() }); },
     async until(predicate, cap = 15_000, code = 'UI_TIMEOUT') {
       const end = Date.now() + this.timeout(cap);
       do { if (await predicate()) return; await sleep(Math.min(50, Math.max(1, end - Date.now()))); } while (Date.now() < end);
@@ -95,12 +96,53 @@ function operationContext(deadline) {
     },
   };
 }
-async function leaveTask(page, ctx) {
+export async function leaveTask(page, ctx) {
   ctx.mark('LEAVE_TASK');
-  const taskClose = page.getByRole('button', exact('关闭任务'));
-  if (await taskClose.isVisible()) { await ctx.click(taskClose); await ctx.hidden(taskClose); }
+  // Each business scenario closes its own known task once and waits for the
+  // outer owner to unmount. Never click a remaining/unknown task as navigation
+  // cleanup: it may already be closing or still own an unresolved operation.
+  await ctx.detached(page.locator('[data-core-task-owner]'));
   const exit = page.getByRole('button', exact('退出沉浸模式，返回原页面'));
-  if (await exit.isVisible()) await ctx.click(exit);
+  if (await exit.isVisible()) {
+    ctx.mark('PILOT_EXIT');
+    await ctx.click(exit);
+    await ctx.hidden(exit);
+  }
+}
+export async function closeTaskThroughUi(page, surface, control, ctx, expectedOwner) {
+  ctx.mark('TASK_CLOSE_OWNER');
+  check(['application-interview-prepare', 'application-offer-review'].includes(expectedOwner));
+  const owner = surface.locator('xpath=ancestor::*[@data-core-task-owner][1]');
+  check(await owner.count() === 1 && await page.locator('[data-core-task-owner]').count() === 1);
+  const generation = await owner.getAttribute('data-core-task-generation', { timeout: ctx.timeout() });
+  check(await owner.getAttribute('data-core-task-owner', { timeout: ctx.timeout() }) === expectedOwner);
+  check(typeof generation === 'string' && /^[1-9]\d*$/.test(generation)
+    && Number.isSafeInteger(Number(generation)));
+  const pinnedOwner = page.locator(`[data-core-task-owner="${expectedOwner}"][data-core-task-generation="${generation}"]`);
+  check(await pinnedOwner.count() === 1);
+  // The action locator itself stays generation-bound during Playwright's
+  // actionability auto-wait. A replacement must never inherit this click.
+  const pinnedControl = control.and(pinnedOwner.getByRole('button'));
+  check(await pinnedControl.count() === 1);
+  const physicalControl = await pinnedControl.elementHandle({ timeout: ctx.timeout() });
+  check(physicalControl);
+  try {
+    ctx.mark('TASK_CLOSE_CLICK');
+    // Do not retarget even if a remounted controller reuses owner/generation.
+    // ElementHandle.click fails on detach instead of clicking a replacement.
+    await ctx.click(physicalControl, pinnedControl);
+    await ctx.hidden(surface);
+    ctx.mark('TASK_OWNER_DETACHED');
+    // The child disappears as soon as phase=closing. Its parent remains through
+    // the natural exit animation; hidden child alone cannot certify task closure.
+    await ctx.detached(pinnedOwner);
+    check(await page.locator('[data-core-task-owner]').count() === 0);
+  } finally {
+    let timer;
+    try { await Promise.race([physicalControl.dispose(), new Promise(resolve => { timer = setTimeout(resolve, 1000); })]); }
+    catch { /* Handle release must never replace the primary UI outcome. */ }
+    finally { clearTimeout(timer); }
+  }
 }
 async function navigate(page, name, ctx) {
   await leaveTask(page, ctx);
@@ -471,10 +513,12 @@ async function runInterview({ page, broker, fixture, current, capture, ctx }) {
     await uiResponse(page, `/api/applications/${fixture.applicationId}/interview-preparation-proposals`, 'POST', () => ctx.click(surface.getByTestId('interview-preparation-generate')), ctx, current.timeoutMs);
     check(dialogAccepted, 'UNEXPECTED_DIALOG');
     await ctx.visible(surface.getByRole('heading', exact('准备方向')));
-    check(await surface.locator('article').count() > 0);
+    const articles = surface.locator('article');
+    await ctx.visible(articles.locator('p').first());
+    check(await articles.evaluateAll(nodes => nodes.length > 0
+      && nodes.every(node => Boolean(node.querySelector('p')?.textContent?.trim()))));
     await safeCapture(capture, current.id, page);
-    await ctx.click(button(surface, '关闭'));
-    await ctx.hidden(surface);
+    await closeTaskThroughUi(page, surface, button(surface, '关闭'), ctx, 'application-interview-prepare');
     return { sourceAndResumeSelected: true, disclosureAccepted: true, generatedProposalVisible: true };
   } finally { page.off('dialog', handleDialog); }
 }
@@ -504,7 +548,10 @@ async function runResume({ page, api, broker, fixture, current, capture, ctx }) 
   const unchanged = await api(`/api/resumes/${fixture.resumeId}`, { method: 'GET' });
   check(unchanged.id === fixture.resumeId && unchanged.content_json?.raw_text === RAW_RESUME
     && Object.keys(unchanged.content_json).every((key) => key === 'raw_text'), 'AUXILIARY_READBACK_FAILED');
-  await ctx.click(button(region(page, '编辑简历'), '返回简历库'));
+  const editor = region(page, '编辑简历');
+  ctx.mark('RESUME_RETURN');
+  await ctx.click(button(editor, '返回简历库'));
+  await ctx.detached(editor);
   return { classificationPreviewVisible: true, cancelledThroughUi: true, sourceUnchanged: true };
 }
 async function runOffer({ page, broker, fixture, current, capture, ctx }) {
@@ -529,8 +576,7 @@ async function runOffer({ page, broker, fixture, current, capture, ctx }) {
   await ctx.visible(surface.locator('[aria-label="谈薪准备草稿"]'));
   check(await surface.getByTestId('offer-negotiation-confirm').isVisible());
   await safeCapture(capture, current.id, page);
-  await ctx.click(page.getByRole('button', exact('关闭任务')));
-  await ctx.hidden(surface);
+  await closeTaskThroughUi(page, surface, page.getByRole('button', exact('关闭任务')), ctx, 'application-offer-review');
   return { inputReviewedThroughUi: true, generatedDraftVisible: true, finalSaveNotSubmitted: true };
 }
 

@@ -105,6 +105,7 @@ it('interview proposal native labels, disclosure, output heading and close match
   await click(one('[data-testid="interview-preparation-generate"]', scope));
   expect(confirm).toHaveBeenCalledWith('仅 JD、所选简历和已确认 Knowledge Evidence 会发送给 AI；用户断言仅保存于本次快照，不会发送给 AI，也不作为建议依据。是否继续？');
   one(role('heading', '准备方向'), scope); expect(query('article', scope)).toHaveLength(1);
+  expect(query('article p', scope).map((node: HTMLElement) => node.textContent)).toEqual(['synthetic']);
   await click(one(role('button', '关闭'), scope)); expect(close).toHaveBeenCalledOnce();
 });
 it('resume card exact Edit and real classification modal controls remain uniquely actionable', async () => {
