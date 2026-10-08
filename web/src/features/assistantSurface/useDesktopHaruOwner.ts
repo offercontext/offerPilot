@@ -6,13 +6,22 @@ import { compactMessageText } from './assistantPresentation';
 export function desktopHaruSnapshot(controller: PilotConversationController): Omit<DesktopHaruSnapshot, 'version'> {
   const current = controller.conversations.find(item => item.id === controller.conversationId);
   const context = controller.requestContextSnapshot ?? controller.pinnedContext ?? controller.followingContext;
+  // Match the web Haru label order; a draft only describes a new conversation.
+  const contextLabel =
+    controller.requestContextSnapshot?.entity?.label ||
+    controller.requestContextSnapshot?.label ||
+    (controller.conversationId === undefined ? controller.draftContext?.context_label : undefined) ||
+    current?.context_label ||
+    (current?.context_type === 'application' && current.context_ref ? `投递 #${current.context_ref}` : undefined) ||
+    context?.entity?.label || context?.label ||
+    (controller.conversationId ? '工作台' : '当前页面');
   return {
     conversationId: controller.conversationId ?? null,
     taskState: controller.taskState,
     // Only visible prose crosses this boundary. In particular, do not serialize
     // action cards, tool arguments, active request refs or pending objects.
     messages: (controller.displayTurns ?? controller.turns).slice(-12).map(turn => ({ role: turn.role, content: compactMessageText(turn).slice(0, 12000) })),
-    contextLabel: (current?.context_label || context?.entity?.label || context?.label || '工作台').slice(0, 400),
+    contextLabel: contextLabel.slice(0, 400),
     loading: controller.loading,
     hasPending: Boolean(controller.pending),
     canSend: controller.isActionOwnerReady() && controller.hasKey && !controller.loading && !controller.pending && !controller.activeRequestRef.current && controller.activeConversationSelectionRef.current === null && !controller.activePendingRef.current && controller.executionControl.execution?.state !== 'running',

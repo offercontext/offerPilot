@@ -76,6 +76,7 @@
   flex-direction: column;
   gap: 10px;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -94,6 +95,8 @@
 
 /* Card */
 .card {
+  min-width: 0;
+  flex-shrink: 0;
   background: var(--op-surface);
   border-radius: 14px;
   padding: 13px;
@@ -143,6 +146,7 @@
   text-transform: uppercase;
   letter-spacing: 0.04em;
   margin-bottom: 4px;
+  overflow-wrap: anywhere;
 }
 
 .cardName {
@@ -151,6 +155,7 @@
   color: var(--op-ink);
   margin-bottom: 6px;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .cardDate {
@@ -168,12 +173,29 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .cardFooter {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
+  gap: 4px 8px;
   margin-top: 8px;
+}
+
+.cardStatus {
+  flex: 0 0 90px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.cardActions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 8px;
 }
 
 .cardAttachmentHandle {

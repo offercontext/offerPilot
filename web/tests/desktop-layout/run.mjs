@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { runTaskPanelCases } from './task-panels.mjs';
+import { runKanbanCases } from './kanban.mjs';
 
 // Reuse the already locked, isolated UI helper; no production dependency changes.
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -216,6 +217,7 @@ try {
     }
   }
   await runTaskPanelCases(browser, output, results);
+  await runKanbanCases(browser, output, results);
   assert.equal(results.filter(item => item.status === 'failed').length, 0, JSON.stringify(results.filter(item => item.status === 'failed')));
 } finally {
   await writeFile(path.join(output, 'results.json'), JSON.stringify(results, null, 2));

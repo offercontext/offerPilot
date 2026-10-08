@@ -120,7 +120,7 @@ export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilo
 
   return (
     <>
-      <div className={styles.board}>
+      <div className={styles.board} data-kanban-board>
         {KANBAN_COLUMNS.map((status) => (
           <KanbanColumn
             key={status}

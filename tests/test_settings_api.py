@@ -684,6 +684,71 @@ def test_provider_connection_test_uses_saved_profile(monkeypatch, tmp_path):
     assert captured["api_key"] == "sk-openai"
 
 
+@pytest.mark.parametrize("draft", [False, True], ids=["saved", "draft"])
+@pytest.mark.parametrize("deepseek", [False, True], ids=["openai", "deepseek"])
+@pytest.mark.parametrize("budget,expected_limit", [(32, 32), (4096, 64)])
+@pytest.mark.parametrize("fails", [False, True], ids=["success", "timeout"])
+def test_provider_connection_api_keeps_probe_bounded(
+    monkeypatch, tmp_path, draft, deepseek, budget, expected_limit, fails
+):
+    calls: list[dict[str, object]] = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        if fails:
+            raise TimeoutError("probe timed out")
+        return {"choices": [{"message": {"content": "OK"}}]}
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    provider = AIProviderProfile(
+        id="selected",
+        api_key="sk-probe-test",
+        model="deepseek-flash" if deepseek else "gpt-4o-mini",
+        base_url="https://api.deepseek.com/v1" if deepseek else "https://api.openai.com/v1",
+        context_window=32768,
+        max_output_tokens=budget,
+    )
+    save_config(
+        tmp_path,
+        Config(
+            active_provider_id=provider.id,
+            fallback_provider_ids=["backup"],
+            providers=[
+                provider,
+                AIProviderProfile(
+                    id="backup", api_key="sk-backup-test",
+                    context_window=32768, max_output_tokens=4096,
+                ),
+            ],
+        ),
+    )
+    payload = (
+        {"provider": provider.model_dump(mode="json")}
+        if draft else {"provider_id": provider.id}
+    )
+
+    response = TestClient(create_app(data_dir=tmp_path)).post(
+        "/api/settings/providers/test", json=payload
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is not fails
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["api_key"] == "sk-probe-test"
+    assert call["messages"] == [{"role": "user", "content": "Reply with OK."}]
+    assert call["timeout"] == 15
+    assert call["max_tokens"] == expected_limit
+    assert call["num_retries"] == 0
+    assert "tools" not in call
+    assert "stream" not in call
+    assert "response_format" not in call
+    if deepseek:
+        assert call["extra_body"] == {"thinking": {"type": "disabled"}}
+    else:
+        assert "extra_body" not in call
+
+
 def test_provider_connection_test_rejects_incomplete_budget_without_network(
     monkeypatch, tmp_path
 ):

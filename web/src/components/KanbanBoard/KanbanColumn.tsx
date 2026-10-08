@@ -28,6 +28,7 @@ export default function KanbanColumn({
   return (
     <div
       ref={setNodeRef}
+      data-kanban-column={status}
       className={`${styles.column} ${isOver && activeId !== null ? styles.columnOver : ''}`}
       style={{ '--column-color': color } as React.CSSProperties}
     >
@@ -36,7 +37,7 @@ export default function KanbanColumn({
         <span className={styles.columnLabel}>{label}</span>
         <span className={styles.columnBadge}>{cards.length}</span>
       </div>
-      <div className={styles.columnBody}>
+      <div className={styles.columnBody} data-kanban-column-body>
         {cards.length === 0 ? (
           <div className={styles.emptyColumn}>暂无{label}的投递</div>
         ) : (

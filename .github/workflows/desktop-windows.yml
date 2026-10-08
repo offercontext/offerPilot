@@ -19,7 +19,13 @@ permissions:
 
 # Do not cancel existing runs implicitly; supersession needs explicit approval.
 
+# Package-only is opt-in on push, from the first-line commit prefix including
+# its trailing space. GitHub startsWith is case-insensitive: uppercase/lowercase
+# variants are deliberately accepted. Missing markers and dispatch use full mode.
+# https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#startswith
+# Skipping full regression must never produce a successful validation-status.
 env:
+  WINDOWS_PACKAGE_ONLY: "${{ github.event_name == 'push' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ') }}"
   LITELLM_LOCAL_MODEL_COST_MAP: "True"
   PYTHONUTF8: "1"
   PYTHONUNBUFFERED: "1"
@@ -41,12 +47,19 @@ jobs:
       - name: Record validation scope and run identity
         run: |
           New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          $validationMode = "Full validation (default)"
+          $regressionScope = "Full regression runs independently and is required for release readiness."
+          if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
+            $validationMode = "EXPERIMENTAL PACKAGE-ONLY"
+            $regressionScope = "Full regression: NOT RUN. Manifest, shards and full release gate are intentionally skipped. NOT RELEASE READY."
+          }
           @(
             "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT RELEASE READY.",
             "Commit: $env:GITHUB_SHA",
             "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
-            "Full regression runs independently and is required for release readiness.",
+            "Validation mode: $validationMode",
+            $regressionScope,
             "This job must pass every focused, build and frozen smoke check before uploading an installer.",
             "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
           ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
@@ -134,13 +147,20 @@ jobs:
             $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
             "$hash  $($installer.Name)" | Set-Content -Encoding ascii -LiteralPath "$($installer.FullName).sha256"
           }
+          $validationMode = "Full validation (default)"
+          $regressionScope = "Full release/regression gate: separate job in the same run; NOT certified by this artifact."
+          if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
+            $validationMode = "EXPERIMENTAL PACKAGE-ONLY"
+            $regressionScope = "Full regression: NOT RUN. Manifest, shards and full release gate are intentionally skipped. NOT RELEASE READY."
+          }
           @(
             "EXPERIMENTAL, UNSIGNED WINDOWS VALIDATION BUILD. NOT RELEASE READY.",
             "Commit: $env:GITHUB_SHA",
             "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
             "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, rendered component viewport regressions, frozen and packaged-resource smoke passed.",
-            "Full release/regression gate: separate job in the same run; NOT certified by this artifact.",
+            "Validation mode: $validationMode",
+            $regressionScope,
             "Check 'Full release regression (required for release)' and the final status job for its actual result.",
             "Pending, failed, cancelled, timed-out or skipped full regression is not a pass.",
             "Browser component fixtures do not validate installer execution, desktop CSP or the installed Electron UI.",
@@ -168,6 +188,7 @@ jobs:
 
   pytest-manifest:
     name: Collect complete pytest manifest
+    if: "${{ !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -205,6 +226,7 @@ jobs:
   # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
   pytest-shards:
     name: Complete pytest shard ${{ matrix.shard }} of 12
+    if: "${{ !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     needs: pytest-manifest
     runs-on: windows-2022
     timeout-minutes: 90
@@ -251,7 +273,7 @@ jobs:
 
   full-regression:
     name: Full release regression (required for release)
-    if: ${{ always() }}
+    if: "${{ always() && !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     needs: [pytest-manifest, pytest-shards]
     runs-on: windows-2022
     timeout-minutes: 90
@@ -319,6 +341,10 @@ jobs:
           PACKAGE_RESULT: ${{ needs.validation-package.result }}
           REGRESSION_RESULT: ${{ needs.full-regression.result }}
         run: |
+          $regressionScope = "Full regression is required; see its actual job result above."
+          if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
+            $regressionScope = "Full regression: NOT RUN (EXPERIMENTAL PACKAGE-ONLY). NOT RELEASE READY."
+          }
           $report = @(
             "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT A PRODUCTION RELEASE.",
             "Commit: $env:GITHUB_SHA",
@@ -326,6 +352,7 @@ jobs:
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
             "Validation package job: $env:PACKAGE_RESULT",
             "Required full regression job: $env:REGRESSION_RESULT",
+            $regressionScope,
             "An installer artifact alone does not establish a full regression pass.",
             "Windows installer execution and Electron UI acceptance still require manual evidence."
           )

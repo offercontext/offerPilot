@@ -8,12 +8,54 @@ from __future__ import annotations
 import argparse
 from collections import Counter
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
 import platform
 import subprocess
 import sys
+
+# Reviewed after Windows shard 0 exceeded 90 minutes: 390 chat cases have
+# function-local state and no shared custom fixtures. All shards already import
+# the whole suite, so this exception adds no collection/catalog construction.
+NODE_SPLIT_FILES = frozenset({"tests/test_chat_api.py"})
+
+
+def validate_split_fixture(item, name, definition, scope):
+    if item.nodeid.split("::", 1)[0] not in NODE_SPLIT_FILES:
+        return
+    builtin = definition.func.__module__.startswith("_pytest.")
+    if scope != "function" and (not builtin or name.startswith("_xunit_")):
+        raise ValueError(f"{item.nodeid}: shared fixture {name} forbids node splitting")
+
+
+def validate_split_fixture_scope(item):
+    if item.nodeid.split("::", 1)[0] not in NODE_SPLIT_FILES:
+        return
+    callspec = getattr(item, "callspec", None)
+    overrides = callspec._arg2scope if callspec is not None else {}
+    for name, scope in overrides.items():
+        if getattr(scope, "value", scope) != "function":
+            raise ValueError(f"{item.nodeid}: shared parameter {name} forbids node splitting")
+    # Include dynamically acquired repository fixtures, even if another module
+    # could have populated their cache. Unused third-party plugin fixtures are
+    # outside this reviewed file's closure and must not block collection.
+    # These pytest internals are pinned by uv.lock; absence fails the gate.
+    manager = item.session._fixturemanager
+    for name in manager._arg2fixturedefs:
+        definitions = manager.getfixturedefs(name, item) or ()
+        for definition in definitions:
+            if name not in item._fixtureinfo.name2fixturedefs:
+                source = inspect.getsourcefile(definition.func)
+                try:
+                    relative = Path(source).resolve().relative_to(Path.cwd().resolve()) if source else None
+                except ValueError:
+                    relative = None
+                if relative is None or set(relative.parts) & {".venv", "site-packages", "dist-packages"}:
+                    continue
+            scope = overrides.get(name, definition.scope)
+            validate_split_fixture(item, name, definition, getattr(scope, "value", scope))
 
 
 def digest(value):
@@ -65,22 +107,32 @@ def partition(nodes, count):
         raise ValueError("Empty or duplicate full collection")
     if not 1 <= count <= len(nodes):
         raise ValueError("Shard count must be between one and the test count")
-    # Keep each module's existing fixture lifecycle intact. Largest files first
-    # balances node counts deterministically; it is not a duration prediction.
+    # Preserve module fixture lifecycles except the explicitly reviewed file.
+    # Balance whole files first, then distribute the costly chat cases evenly.
+    # This is deterministic load spreading, not a measured speedup guarantee.
     files = {}
+    split_nodes = []
     for node in sorted(nodes):
+        if node.split("::", 1)[0] in NODE_SPLIT_FILES:
+            split_nodes.append(node)
+            continue
         files.setdefault(node.split("::", 1)[0], []).append(node)
-    if count > len(files):
+    if count > len(files) + len(split_nodes):
         raise ValueError("Shard count exceeds test files; reduce count to preserve fixture scope")
     shards = [[] for _ in range(count)]
     for filename in sorted(files, key=lambda name: (-len(files[name]), name)):
         index = min(range(count), key=lambda i: (len(shards[i]), i))
         shards[index].extend(files[filename])
+    split_counts = [0] * count
+    for node in split_nodes:
+        index = min(range(count), key=lambda i: (split_counts[i], len(shards[i]), i))
+        shards[index].append(node)
+        split_counts[index] += 1
     return [sorted(shard) for shard in shards]
 
 
 def validate_manifest(manifest):
-    if manifest["version"] != 2:
+    if manifest["version"] != 3:
         raise ValueError("Unsupported manifest")
     if manifest["shards"] != partition(manifest["nodes"], len(manifest["shards"])):
         raise ValueError("Manifest partition is incomplete or not deterministic")
@@ -151,12 +203,23 @@ def worker(args):
     nodes, selected, reports, collection_skips = [], [], {}, []
 
     class Evidence:
+        def pytest_fixture_setup(self, fixturedef, request):
+            # getfixturevalue() can acquire fixtures absent from static closure.
+            # Runtime effective scope also covers indirect parametrization.
+            validate_split_fixture(request._pyfuncitem, fixturedef.argname,
+                                   fixturedef, request.scope)
+
         def pytest_collectreport(self, report):
             if report.skipped:
                 collection_skips.append({"node": report.nodeid, "reason": str(report.longrepr)})
 
         @pytest.hookimpl(trylast=True)
         def pytest_collection_modifyitems(self, session, config, items):
+            for item in items:
+                try:
+                    validate_split_fixture_scope(item)
+                except ValueError as exc:
+                    raise pytest.UsageError(str(exc)) from exc
             nodes.extend(item.nodeid for item in items)
             if manifest:
                 if sorted(nodes) != manifest["nodes"]:
@@ -174,6 +237,9 @@ def worker(args):
             reports.setdefault(report.nodeid, []).append({
                 "when": report.when, "outcome": report.outcome, "reason": reason,
                 "xfail": hasattr(report, "wasxfail"),
+                # Diagnostic only: preserve real phase costs for later balancing.
+                # Timing never changes pass/skip/failure or exact-node validation.
+                "duration_seconds": report.duration,
             })
 
     options = ["-q", "--durations=20"]
@@ -184,7 +250,7 @@ def worker(args):
         if code:
             return code
         policy = read(args.allowed_skips) if args.allowed_skips else None
-        manifest = {"version": 2, "identity": identity(), "nodes": sorted(nodes),
+        manifest = {"version": 3, "identity": identity(), "nodes": sorted(nodes),
                     "shards": partition(nodes, args.count), "allowed_skips": policy,
                     "collection_skips": collection_skips}
         validate_manifest(manifest)

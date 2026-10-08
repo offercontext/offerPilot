@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { desktopHaruSnapshot, useDesktopHaruOwner } from './useDesktopHaruOwner';
 import type { DesktopHaruCommand, DesktopHaruSnapshot } from './desktopHaru';
 import type { PilotConversationController } from './usePilotConversationController';
+import type { ChatStartRequest, Conversation } from '@/types/chat';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -15,6 +16,14 @@ const publish = vi.fn();
 const reply = vi.fn();
 const openPending = vi.fn();
 const windowAction = vi.fn().mockResolvedValue(true);
+const applicationDraft: ChatStartRequest = {
+  requestKey: 1, context_type: 'application', context_ref: '8',
+  context_label: '星河科技 · 前端工程师', mode: 'general',
+};
+const activeConversation: Conversation = {
+  id: 7, title: 'Existing chat', context_type: 'application', context_ref: '7',
+  context_label: '原会话公司 · 后端工程师', created_at: '', updated_at: '',
+};
 function Harness() { useDesktopHaruOwner(controller, openPending); return null; }
 function render() { act(() => root.render(<Harness />)); }
 function latest(): DesktopHaruSnapshot { return publish.mock.calls[publish.mock.calls.length - 1][0]; }
@@ -33,6 +42,77 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); delete window.offerpilotDesktop; });
 
 describe('desktop Haru owner', () => {
+  it('publishes an application draft label before a conversation exists without a provider', () => {
+    controller = { ...controller, hasKey: false, draftContext: applicationDraft };
+    render();
+    expect(latest()).toMatchObject({ conversationId: null, contextLabel: applicationDraft.context_label, canSend: false });
+    expect(controller.sendMessage).not.toHaveBeenCalled();
+  });
+  it.each([true, false])('keeps the frozen request label ahead of draft/conversation context (entity: %s)', withEntity => {
+    controller = {
+      ...controller, conversationId: 7, conversations: [activeConversation], draftContext: applicationDraft,
+      requestContextSnapshot: {
+        view: 'applications-list', label: '发送时页面',
+        ...(withEntity ? { entity: { kind: 'application' as const, id: '9', label: '发送时投递' } } : {}),
+      },
+    };
+    expect(desktopHaruSnapshot(controller).contextLabel).toBe(withEntity ? '发送时投递' : '发送时页面');
+    controller = { ...controller, conversationId: undefined };
+    expect(desktopHaruSnapshot(controller).contextLabel).toBe(withEntity ? '发送时投递' : '发送时页面');
+  });
+  it.each([
+    { conversation: activeConversation, expected: activeConversation.context_label },
+    { conversation: { ...activeConversation, context_label: undefined }, expected: '投递 #7' },
+    { conversation: undefined, expected: '同名公司' },
+  ])('does not let a stale draft replace an existing conversation context ($expected)', ({ conversation, expected }) => {
+    controller = { ...controller, conversationId: 7, conversations: conversation ? [conversation] : [], draftContext: applicationDraft };
+    expect(desktopHaruSnapshot(controller).contextLabel).toBe(expected);
+  });
+  it('bounds the draft label and publishes none of its body, action, or attachments', () => {
+    controller = {
+      ...controller,
+      draftContext: {
+        ...applicationDraft, context_label: '投'.repeat(450),
+        composerDraft: 'PRIVATE_COMPOSER', initialMessage: 'PRIVATE_BODY',
+        attachments: [{ kind: 'resume', id: 'PRIVATE_ATTACHMENT_ID', label: 'PRIVATE_ATTACHMENT_LABEL' }],
+        pilot_action: { type: 'application_jd_save', jdText: 'PRIVATE_ACTION' },
+      },
+      pending: { confirmation_token: 'PRIVATE_CREDENTIAL', args: { provider: 'PRIVATE_PROVIDER' } } as never,
+    };
+    render();
+    expect(latest().contextLabel).toBe('投'.repeat(400));
+    expect(JSON.stringify(latest())).not.toContain('PRIVATE_');
+    expect(latest()).not.toHaveProperty('draftContext');
+    expect(latest()).not.toHaveProperty('attachments');
+  });
+  it.each(['requestKey', 'context_ref'] as const)('rejects commands from a previous draft %s even when the label is unchanged', field => {
+    controller = { ...controller, draftContext: applicationDraft };
+    render();
+    const previous = latest();
+    controller = {
+      ...controller,
+      draftContext: { ...applicationDraft, ...(field === 'requestKey' ? { requestKey: 2 } : { context_ref: '9' }) },
+    };
+    render();
+    expect(latest().contextLabel).toBe(previous.contextLabel);
+    expect(latest().version).toBeGreaterThan(previous.version);
+    for (const [index, action] of (['send', 'stop', 'open-pending'] as const).entries()) {
+      command({ id: index + 1, version: previous.version, action, text: 'old draft command' });
+      expect(reply).toHaveBeenLastCalledWith(index + 1, { ok: false, reason: 'stale' });
+    }
+    expect(controller.sendMessage).not.toHaveBeenCalled();
+    expect(controller.stopActiveRequest).not.toHaveBeenCalled();
+    expect(openPending).not.toHaveBeenCalled();
+  });
+  it('rejects a command if the draft changed before its next render', () => {
+    controller = { ...controller, draftContext: applicationDraft };
+    render();
+    const version = latest().version;
+    controller.draftContext = { ...applicationDraft, requestKey: 2 };
+    command({ id: 1, version, action: 'send', text: 'old draft command' });
+    expect(reply).toHaveBeenLastCalledWith(1, { ok: false, reason: 'stale' });
+    expect(controller.sendMessage).not.toHaveBeenCalled();
+  });
   it('whitelists view fields and omits pending credentials/config/provider data', () => {
     controller.pending = { confirmation_token: 'SENSITIVE', args: { secret: 'SENSITIVE' } } as never;
     controller.turns = [{ role: 'assistant', content: 'Visible answer', action: { token: 'SENSITIVE' } as never }];

@@ -69,13 +69,14 @@ export default function KanbanCard({
   return (
     <div
       ref={setNodeRef}
+      data-kanban-card
       className={`${styles.card} ${isDragging ? styles.cardPlaceholder : ''}`}
       {...listeners}
       {...attributes}
     >
       {cardContent}
       <div className={styles.cardFooter}>
-        <span onPointerDown={(e) => e.stopPropagation()}>
+        <span className={styles.cardStatus} onPointerDown={(e) => e.stopPropagation()}>
           <Select
             value={record.status}
             options={STATUS_OPTIONS}
@@ -84,11 +85,11 @@ export default function KanbanCard({
             onDropdownVisibleChange={setSelectOpen}
             size="small"
             popupMatchSelectWidth={false}
-            style={{ minWidth: 90 }}
+            style={{ width: '100%' }}
             onClick={(e) => e.stopPropagation()}
           />
         </span>
-        <span style={{ display: 'flex', alignItems: 'center' }}>
+        <span className={styles.cardActions}>
           {onOpenDetail && (
             <Button
               type="text"
@@ -98,7 +99,7 @@ export default function KanbanCard({
                 onOpenDetail(record);
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              style={{ color: '#0284c7', marginLeft: 4, padding: '0 4px' }}
+              style={{ color: '#0284c7', padding: '0 4px' }}
               title="查看详情"
             >
               <RightOutlined />
@@ -111,7 +112,7 @@ export default function KanbanCard({
             cancelText="取消"
           >
             <DeleteOutlined
-              style={{ color: '#94a3b8', marginLeft: 8, cursor: 'pointer' }}
+              style={{ color: '#94a3b8', cursor: 'pointer' }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             />

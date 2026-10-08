@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -34,7 +35,7 @@ def test_invalid_partition_rejected(nodes, count):
 
 def evidence(tmp_path):
     nodes = ["tests/test_a.py::test_a", "tests/test_b.py::test_b"]
-    manifest = {"version": 2, "identity": {"commit": "abc"}, "nodes": nodes,
+    manifest = {"version": 3, "identity": {"commit": "abc"}, "nodes": nodes,
                 "shards": gate.partition(nodes, 2), "allowed_skips": None}
     results = []
     for index, shard in enumerate(manifest["shards"]):
@@ -153,6 +154,11 @@ def test_skip():
     for index in range(2):
         ran = invoke(tiny_repo, "run", "--index", str(index))
         assert ran.returncode == 0, ran.stdout + ran.stderr
+        evidence = json.loads((tiny_repo / f"evidence/shard-{index}.json").read_text())
+        for phases in evidence["reports"].values():
+            for phase in phases:
+                assert isinstance(phase["duration_seconds"], (int, float))
+                assert phase["duration_seconds"] >= 0
     assert (tiny_repo / "module-setups.txt").read_text().splitlines() == ["setup"]
     result = invoke(tiny_repo, "aggregate")
     assert result.returncode == 0, result.stderr
@@ -237,3 +243,121 @@ def test_partition_preserves_module_fixture_scope_and_handles_large_files():
     assert sorted(map(len, shards)) == [2, 100]
     with pytest.raises(ValueError, match="preserve fixture scope"):
         gate.partition(nodes, 4)
+
+
+def test_reviewed_chat_module_spreads_without_splitting_other_modules():
+    chat = [f"tests/test_chat_api.py::test_case[{i}]" for i in range(390)]
+    other = [f"tests/test_other_{i % 24}.py::test_case_{i}" for i in range(6039)]
+    nodes = chat + other
+    shards = gate.partition(nodes, 12)
+    assert gate.NODE_SPLIT_FILES == {"tests/test_chat_api.py"}
+    assert shards == gate.partition(nodes[::-1], 12)
+    assert sorted(sum(shards, [])) == sorted(nodes)
+    assert len(set(sum(shards, []))) == len(nodes)
+    chat_counts = [sum(node in set(chat) for node in shard) for shard in shards]
+    assert sorted(chat_counts) == [32] * 6 + [33] * 6
+    for filename in {node.split("::")[0] for node in other}:
+        assert sum(any(node.split("::")[0] == filename for node in shard)
+                   for shard in shards) == 1
+
+
+def test_node_split_source_change_requires_a_new_isolation_review():
+    # This is an audit gate, not runtime caching. Review globals, dynamic fixture
+    # acquisition and fixture scopes again before updating either digest.
+    # Normalize only checkout CRLF so the same reviewed source works on Windows.
+    reviewed = {
+        "tests/test_chat_api.py":
+            "ba80c0cf9185b5bfe3c606f1d6adbf0df90a9868c7ac5177640145fb1eb22eff",
+        "tests/conftest.py":
+            "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
+    }
+    for name, expected in reviewed.items():
+        source = (ROOT / name).read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(source).hexdigest() == expected, (
+            f"{name}: review node-split state/fixture isolation before updating the digest"
+        )
+
+
+def test_real_reviewed_split_keeps_function_state_and_exact_execution(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text('''import pytest
+@pytest.mark.parametrize("value", range(4))
+def test_isolated(tmp_path, value):
+    marker = tmp_path / "isolated.txt"
+    assert not marker.exists()
+    marker.write_text(str(value))
+''')
+    assert invoke(tiny_repo, "collect", "--count", "2").returncode == 0
+    manifest = json.loads((tiny_repo / "manifest.json").read_text())
+    assert manifest["version"] == 3
+    assert list(map(len, manifest["shards"])) == [2, 2]
+    for index in range(2):
+        ran = invoke(tiny_repo, "run", "--index", str(index))
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+    summary = invoke(tiny_repo, "aggregate")
+    assert summary.returncode == 0, summary.stderr
+    assert json.loads(summary.stdout)["passed"] == 4
+
+
+@pytest.mark.parametrize("scope", ["module", "class", "package", "session"])
+def test_new_custom_shared_fixture_prevents_reviewed_node_split(tiny_repo, scope):
+    (tiny_repo / "tests/conftest.py").write_text(
+        f"import pytest\n@pytest.fixture(scope={scope!r})\ndef shared(): return 1\n")
+    (tiny_repo / "tests/test_chat_api.py").write_text(
+        "def test_one(shared): assert shared\ndef test_two(shared): assert shared\n")
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "forbids node splitting" in result.stdout + result.stderr
+    assert not (tiny_repo / "manifest.json").exists()
+
+
+def test_xunit_module_setup_prevents_reviewed_node_split(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text(
+        "def setup_module(): pass\ndef test_one(): pass\ndef test_two(): pass\n")
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "forbids node splitting" in result.stdout + result.stderr
+
+
+def test_indirect_parametrization_cannot_broaden_split_fixture_scope(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text('''import pytest
+@pytest.fixture
+def shared(request): return request.param
+@pytest.mark.parametrize("shared", [1, 2], indirect=True, scope="module")
+def test_one(shared): assert shared
+''')
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "shared parameter shared forbids node splitting" in result.stdout + result.stderr
+
+
+def test_direct_shared_parameter_scope_prevents_node_split(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text('''import pytest
+@pytest.mark.parametrize("shared", [1, 2], scope="module")
+def test_one(shared): assert shared
+''')
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "shared parameter shared forbids node splitting" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("scope", ["module", "session"])
+def test_dynamic_or_cached_shared_fixture_prevents_split_manifest(tiny_repo, scope):
+    (tiny_repo / "tests/conftest.py").write_text(
+        f"import pytest\n@pytest.fixture(scope={scope!r})\ndef shared(): return 1\n")
+    (tiny_repo / "tests/test_chat_api.py").write_text(
+        "def test_one(request): assert request.getfixturevalue('shared')\n"
+        "def test_two(request): assert request.getfixturevalue('shared')\n")
+    # An unsplit file could initialize a session fixture before a dynamic chat
+    # request; reject its applicability before any cache can be populated.
+    (tiny_repo / "tests/test_aaa.py").write_text("def test_prime(shared): assert shared\n")
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "shared fixture shared forbids node splitting" in result.stdout + result.stderr
+    assert not (tiny_repo / "manifest.json").exists()
+
+
+def test_previous_whole_file_manifest_cannot_use_new_partition_rule(tmp_path):
+    manifest, _ = evidence(tmp_path)
+    manifest["version"] = 2
+    with pytest.raises(ValueError, match="Unsupported manifest"):
+        gate.validate_manifest(manifest)
