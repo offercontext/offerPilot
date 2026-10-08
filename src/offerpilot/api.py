@@ -6443,7 +6443,14 @@ def create_app(
             if not isinstance(command_id, str) or not isinstance(generation, int) or isinstance(generation, bool):
                 raise ValueError("Invalid interrupt identity")
             result = pilot_controls.interrupt(command_id, turn_id, generation)
-            if result["status"] == "stopped":
+            if result["status"] in {"stopped", "result_unknown"}:
+                # The UI's stable interrupt route also controls detached Runtime
+                # turns. Keep its exact-generation in-memory owner in sync with
+                # the durable receipt before the provider worker unwinds.
+                try:
+                    runtime_manager.interrupt(turn_id, generation=generation)
+                except RuntimeTurnNotFound:
+                    pass
                 turn_control_registry.interrupted(turn_id, result["execution_generation"])
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except TurnControlConflict:

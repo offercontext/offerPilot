@@ -1706,7 +1706,16 @@ def test_real_chat_adapter_uses_projected_surface_and_persists_v3_manifest(
         requests.append(payload)
         return {"choices": [{"message": {"content": "已完成", "tool_calls": []}}]}
 
+    async def acompletion(**payload: object):
+        requests.append(payload)
+
+        async def chunks():
+            yield {"choices": [{"delta": {"content": "已完成"}}]}
+
+        return chunks()
+
     monkeypatch.setattr(ai_client, "completion", completion)
+    monkeypatch.setattr(ai_client, "acompletion", acompletion)
     with TestClient(
         create_app(
             data_dir=tmp_path,

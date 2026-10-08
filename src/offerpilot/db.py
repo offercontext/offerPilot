@@ -1839,6 +1839,10 @@ def _ensure_scoped_tool_authority_schema(engine) -> None:  # type: ignore[no-unt
     )
 
     with engine.begin() as conn:
+        # sqlite3's legacy mode does not BEGIN for DDL. Hold the database write
+        # lock across the entire guard replacement so concurrent initializers
+        # cannot interleave DROP/CREATE, and failures restore the old guard set.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
         conversation_triggers = (
             "trg_conversations_scope_insert",
             "trg_conversations_scope_update",

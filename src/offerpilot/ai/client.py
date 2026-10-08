@@ -3,15 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import time
 import uuid
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-from litellm import completion
+from litellm import acompletion, completion
 
 from offerpilot.ai.types import Assistant, Message, ToolCall
+from offerpilot.ai.provider_stream import interruptible_stream, provider_control
+from offerpilot.ai.control import AgentLoopControlError
 from offerpilot.ai.tool_runtime.contracts import (
     ProviderToolContract,
     materialize_provider_payloads,
@@ -261,6 +264,8 @@ class ConfiguredAIClient:
                 if index > 0:
                     self._emit("INFO", f"AI fallback provider {provider.id} succeeded")
                 return assistant
+            except AgentLoopControlError:
+                raise
             except Exception as exc:
                 last_error = exc
                 if emitted_delta:
@@ -391,31 +396,49 @@ class ConfiguredAIClient:
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
         provider_blocks: dict[str, Any] = {}
-        for chunk in completion(**payload):
-            delta = _first_choice_delta(chunk)
-            piece = _get(delta, "content")
-            if piece:
-                text = str(piece)
-                content_parts.append(text)
-                on_delta(text)
-            reasoning_content = _get(delta, "reasoning_content")
-            if reasoning_content:
-                provider_blocks["reasoning_content"] = str(
-                    provider_blocks.get("reasoning_content") or ""
-                ) + str(reasoning_content)
-            for raw_call in _get(delta, "tool_calls") or []:
-                index = int(_get(raw_call, "index") or 0)
-                current = tool_calls.setdefault(index, {"id": "", "name": "", "args": ""})
-                call_id = _get(raw_call, "id")
-                if call_id:
-                    current["id"] = str(call_id)
-                function = _get(raw_call, "function") or {}
-                name = _get(function, "name")
-                if name:
-                    current["name"] = str(name)
-                arguments = _get(function, "arguments")
-                if arguments:
-                    current["args"] = str(current["args"]) + str(arguments)
+        check_active = provider_control()
+        stream = (interruptible_stream(lambda: acompletion(**payload), check_active)
+                  if check_active is not None else completion(**payload))
+        try:
+            for chunk in stream:
+                delta = _first_choice_delta(chunk)
+                piece = _get(delta, "content")
+                if piece:
+                    text = str(piece)
+                    content_parts.append(text)
+                    on_delta(text)
+                reasoning_content = _get(delta, "reasoning_content")
+                if reasoning_content:
+                    provider_blocks["reasoning_content"] = str(
+                        provider_blocks.get("reasoning_content") or ""
+                    ) + str(reasoning_content)
+                for raw_call in _get(delta, "tool_calls") or []:
+                    index = int(_get(raw_call, "index") or 0)
+                    current = tool_calls.setdefault(index, {"id": "", "name": "", "args": ""})
+                    call_id = _get(raw_call, "id")
+                    if call_id:
+                        current["id"] = str(call_id)
+                    function = _get(raw_call, "function") or {}
+                    name = _get(function, "name")
+                    if name:
+                        current["name"] = str(name)
+                    arguments = _get(function, "arguments")
+                    if arguments:
+                        current["args"] = str(current["args"]) + str(arguments)
+
+        finally:
+            # LiteLLM's synchronous wrapper exposes its SDK stream but has no
+            # close method of its own. Closing that stream releases the HTTP
+            # response on success, callback failure and control cancellation.
+            underlying = getattr(stream, "completion_stream", stream)
+            close = getattr(underlying, "close", None)
+            active_error = sys.exc_info()[0] is not None
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    if not active_error:
+                        raise AgentLoopControlError("provider stream cleanup failed") from None
 
         calls = [
             ToolCall(

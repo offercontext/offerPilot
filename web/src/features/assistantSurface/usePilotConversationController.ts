@@ -37,7 +37,7 @@ import { pageContextKey } from '@/lib/pilotPageContext';
 import { usePilotPresentation } from '@/features/actionPresentation/usePilotPresentation';
 import type { AssistantTaskState } from './assistantSurfaceReducer';
 import { sameExecution, usePilotExecution } from './usePilotExecution';
-import { getRuntimeRequestExecution, observeRuntimeTurn, RuntimeEndedError } from '@/services/pilotRuntime';
+import { getRuntimeRequestExecution, observeRuntimeTurn, RuntimeEndedError, RuntimeSubscriptionError } from '@/services/pilotRuntime';
 
 export type SendMessageOutcome = 'sent' | 'stopped' | 'failed' | 'ignored';
 
@@ -165,6 +165,11 @@ const unavailableActions: PilotConversationActions = {
 
 export function usePilotConversationControllerState(observationEnabled = true) {
   const [turns, setTurns] = useState<UITurn[]>([]);
+  const [recoveredProgress, setRecoveredProgress] = useState<{
+    owner: object; target: PilotExecution; visibleGeneration: number; sequence: number; content: string;
+    priorCanonicalMessages: ReadonlySet<string>;
+  } | null>(null);
+  const [recoveryRetry, setRecoveryRetry] = useState(0);
   const [conversationId, setConversationId] = useState<number>();
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [requestLoading, setLoading] = useState(false);
@@ -190,7 +195,9 @@ export function usePilotConversationControllerState(observationEnabled = true) {
   const [contextChangeNotice, setContextChangeNotice] = useState<ContextChangeNotice | null>(null);
   const [requestContextSnapshot, setRequestContextSnapshot] = useState<PilotPageContext>();
   const [attachments, setAttachments] = useState<PilotContextAttachment[]>([]);
-  const { displayTurns, presentationSnapshot, refreshPresentation, acceptRuntimeSnapshot, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, requestLoading, confirmPhase === 'error');
+  const { displayTurns: canonicalDisplayTurns, presentationSnapshot, refreshPresentation, acceptRuntimeSnapshot, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, requestLoading, confirmPhase === 'error');
+  const renderedBoundaryRef = useRef({ snapshot: presentationSnapshot, failed: presentationFailed });
+  renderedBoundaryRef.current = { snapshot: presentationSnapshot, failed: presentationFailed };
 
   const activeRequestRef = useRef<ActiveConversationRequest | null>(null);
   const streamingAssistantActiveRef = useRef(false);
@@ -274,6 +281,21 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     && executionControl.execution?.conversation_id === conversationId
     && executionControl.execution.state === 'running';
   const loading = requestLoading || (!pending && visibleExecutionRunning);
+  const recoveredVisible = Boolean(recoveredProgress?.content && observationEnabled && !pending
+    && presentationSnapshot?.conversation_id === conversationId && !presentationFailed
+    // An uncertain original subscriber may leave a local prefix behind. Until
+    // an authorized canonical snapshot replaces it, do not add a second reply.
+    && !canonicalDisplayTurns.some(turn => turn.role === 'assistant' && turn.id?.startsWith('transient:'))
+    && !requestLoading && !activeRequestRef.current && activeConversationSelectionRef.current === null
+    && recoveredProgress.target.conversation_id === conversationId && visibleExecutionRunning
+    && sameExecution(recoveredProgress.target, executionControl.execution!)
+    && recoveredProgress.visibleGeneration === visibleRequestGenerationRef.current
+    && !presentationSnapshot?.items.some(item => item.kind === 'assistant_message'
+      && item.turn_id === recoveredProgress.target.turn_id && !recoveredProgress.priorCanonicalMessages.has(item.item_id)));
+  const displayTurns = useMemo(() => recoveredVisible && recoveredProgress
+    ? [...canonicalDisplayTurns, { id: `transient:runtime:${recoveredProgress.target.turn_id}:${recoveredProgress.target.execution_generation}`,
+      role: 'assistant' as const, content: recoveredProgress.content }]
+    : canonicalDisplayTurns, [canonicalDisplayTurns, recoveredVisible, recoveredProgress]);
   const settleRuntimeResponse = useCallback((response: ChatResponse, target: PilotExecution): PilotExecution | null => {
     const state = terminalResponseState(response, target);
     return state && executionControl.settleExecution(target, state) ? { ...target, state } : null;
@@ -508,7 +530,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     return streamChatService(message, activeConversationId, context, {
       ...options, requestId: request.requestId,
       onSnapshot: (page) => acceptRuntimeSnapshot(page, () => activeRequestRef.current === request
-        && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current),
+        && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current).then(() => undefined),
       onAccepted: (identity) => {
         if (activeRequestRef.current !== request || request.controller.signal.aborted) return;
         if (identity.executionGeneration) {
@@ -543,7 +565,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     return streamConfirmActionService(activeConversationId, input, {
       ...options, requestId: request.requestId,
       onSnapshot: (page) => acceptRuntimeSnapshot(page, () => activeRequestRef.current === request
-        && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current),
+        && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current).then(() => undefined),
       onAccepted: (identity) => {
         if (activeRequestRef.current !== request || request.controller.signal.aborted) return;
         if (identity.executionGeneration) {
@@ -595,16 +617,60 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     }
   }, [observationEnabled, stopActiveRequest]);
 
+  const recoveryExecution = executionControl.execution;
   useEffect(() => {
     const target = executionControl.execution;
     if (!observationEnabled || !target || target.protocol !== 'pilot-runtime-v1' || target.state !== 'running'
       || activeRequestRef.current || target.conversation_id !== conversationId) return;
     const subscription = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const owner = {};
+    const visibleGeneration = visibleRequestGenerationRef.current;
+    let sequence = 0;
+    let snapshotBaseline: ReadonlySet<string> | null = null;
+    const current = () => !subscription.signal.aborted && !activeRequestRef.current
+      && activeConversationSelectionRef.current === null && activeConversationIdRef.current === target.conversation_id
+      && visibleRequestGenerationRef.current === visibleGeneration
+      && sameExecution(observedExecutionRef.current, target) && observedExecutionRef.current?.state === 'running';
+    const clear = () => setRecoveredProgress(value => value?.owner === owner ? null : value);
     void observeRuntimeTurn(target, {
       signal: subscription.signal,
-      onSnapshot: (page) => acceptRuntimeSnapshot(page, () => !subscription.signal.aborted
-        && sameExecution(observedExecutionRef.current, target) && !activeRequestRef.current),
+      onSnapshot: async (page) => {
+        const snapshot = await acceptRuntimeSnapshot(page, current);
+        if (!current()) return;
+        const timeline = snapshot?.conversation_id === target.conversation_id ? snapshot.timeline : null;
+        // Hydration also refreshes P2 after the runtime's frozen watermark.
+        // Those newer canonical messages must supersede buffered SSE, never
+        // become part of the segment's earlier baseline.
+        snapshotBaseline = timeline ? new Set(Object.values(timeline.items)
+          .filter(item => !item.deleted && item.payload?.kind === 'assistant_message'
+            && item.turn_id === target.turn_id && item.change_seq <= page.high_watermark)
+          .map(item => item.payload!.item_id)) : null;
+      },
+      onAssistantProgress: (progress) => {
+        if (!current() || progress.conversation_id !== target.conversation_id || progress.turn_id !== target.turn_id
+          || progress.execution_generation !== target.execution_generation || !Number.isSafeInteger(progress.sequence)
+          || progress.sequence < sequence || typeof progress.content !== 'string' || progress.content.length > 1_048_576) return;
+        sequence = progress.sequence;
+        if (!progress.content) { clear(); return; }
+        const rendered = renderedBoundaryRef.current;
+        const renderedBaseline = !rendered.failed && rendered.snapshot?.conversation_id === target.conversation_id
+          ? rendered.snapshot.items.filter(item => item.kind === 'assistant_message' && item.turn_id === target.turn_id).map(item => item.item_id) : null;
+        // An independent P2 read can establish an empty boundary after a failed
+        // initial read. If it already has same-turn prose, its generation is
+        // ambiguous: keep canonical text rather than guessing a replay prefix.
+        // A direct boundary still preserves prior HITL-generation messages and
+        // covers same-batch hydration before React renders the snapshot.
+        if (!snapshotBaseline && (!renderedBaseline || renderedBaseline.length > 0)) return;
+        // A later rendered P2 message may have overtaken buffered deltas. Do
+        // not expand an established boundary to authorize its replay again.
+        const priorCanonicalMessages = snapshotBaseline ?? new Set(renderedBaseline!);
+        setRecoveredProgress(value => value?.owner === owner && value.sequence === progress.sequence && value.content === progress.content
+          ? value : { owner, target, visibleGeneration, sequence: progress.sequence, content: progress.content,
+            priorCanonicalMessages: value?.owner === owner ? value.priorCanonicalMessages : priorCanonicalMessages });
+      },
       onEvent: (event) => {
+        if (!current()) return;
         if (event.event !== 'assistant_delta') void refreshPresentation();
       },
     }).then(response => {
@@ -617,9 +683,21 @@ export function usePilotConversationControllerState(observationEnabled = true) {
       if (terminal) stoppedExecution(terminal);
       // A network failure or result_unknown is not completion proof. Preserve
       // durable busy for exact-identity polling, never start another POST.
+      // A spent GET retry budget must not leave this same-identity lease dead
+      // forever. Retry transport failures only; terminal/auth failures retain
+      // their existing recovery behavior and never enter an automatic loop.
+      if (error instanceof RuntimeSubscriptionError && current()) {
+        retryTimer = setTimeout(() => {
+          if (current()) setRecoveryRetry(value => value + 1);
+        }, 2000);
+      }
     });
-    return () => subscription.abort();
-  }, [observationEnabled, conversationId, executionControl.execution, requestLoading, refreshPresentation, acceptRuntimeSnapshot, stoppedExecution, settleRuntimeResponse, settleRuntimeError]);
+    return () => { subscription.abort(); clearTimeout(retryTimer); clear(); };
+    // Same-identity polling returns fresh objects. It must not repeatedly abort
+    // this GET lease and replay its deltas into a replacement projection.
+  }, [observationEnabled, conversationId, recoveryExecution?.conversation_id, recoveryExecution?.turn_id,
+    recoveryExecution?.execution_generation, recoveryExecution?.state, recoveryExecution?.protocol,
+    requestLoading, recoveryRetry, refreshPresentation, acceptRuntimeSnapshot, stoppedExecution, settleRuntimeResponse, settleRuntimeError]);
 
   useEffect(() => {
     if (!observationEnabled || !requestLoading) return;
@@ -746,7 +824,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     setLastUndo,
     loadingLabel,
     setLoadingLabel,
-    hasStreamingAssistantContent,
+    hasStreamingAssistantContent: hasStreamingAssistantContent || recoveredVisible,
     setHasStreamingAssistantContent,
     composerResetKey,
     setComposerResetKey,
@@ -815,6 +893,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
   }), [
     undoOperation,
     displayTurns,
+    recoveredVisible,
     presentationSnapshot,
     refreshPresentation,
     presentationFailed,
