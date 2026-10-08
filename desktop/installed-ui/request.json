@@ -2,14 +2,14 @@
   "schema": 2,
   "repository": "offercontext/offerPilot",
   "branch": "feat/20261005-windows-desktop-validation",
-  "commit": "f4bec3d882b152b79295e058e5c83fad779ee0fb",
-  "buildCommit": "f4bec3d882b152b79295e058e5c83fad779ee0fb",
+  "commit": "bbea73303da401088c27999097439d3e7a9d7c9a",
+  "buildCommit": "bbea73303da401088c27999097439d3e7a9d7c9a",
   "buildWorkflow": ".github/workflows/desktop-windows.yml",
-  "fullRegressionRunId": 37742562603,
-  "runId": 37742562603,
-  "artifactId": 11534993326,
-  "artifactName": "offerpilot-windows-experimental-validation-f4bec3d882b152b79295e058e5c83fad779ee0fb",
-  "artifactDigest": "sha256:4c21fa69380e8617252db04cb1b9df84b7bf4fc0bddf5fdbe2ea8e96a8c2d3e9",
+  "fullRegressionRunId": 37747642914,
+  "runId": 37747642914,
+  "artifactId": 11537321001,
+  "artifactName": "offerpilot-windows-experimental-validation-bbea73303da401088c27999097439d3e7a9d7c9a",
+  "artifactDigest": "sha256:04d2fab28deced9c3612e2849bfb21ec5205c90a565ceeed51e32aa74bce0ba4",
   "installer": "OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe",
-  "installerSha256": "3eada39a58c424fea52605b29315aa47535708e81dd0d1ba1f83a4097662a3de"
+  "installerSha256": "dcc803cd82c2ec7627a4cbd3f3eaafa1f953ad19d4162bbc4237191950941e33"
 }

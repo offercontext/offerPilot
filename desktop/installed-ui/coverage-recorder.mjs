@@ -92,14 +92,14 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
     await save();
     return measured;
   };
-  const captureHaru = async (label) => {
+  const captureHaru = async (label, visual = null) => {
     if (!haru) throw new Error('actual companion renderer required for screenshot');
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
     await haru.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
     const measured = await haru.evaluate(measureScreenGeometry);
     const identity = await readSurfaceIdentity(haru, 'S24');
     const item = { ...identity, ...measured, filename: `screens/${filename}`, caseId: active?.caseId || null,
-      surface: 'standalone-haru', kind: 'companion-diagnostic', confirmsMainSurface: false };
+      surface: 'standalone-haru', kind: 'companion-diagnostic', confirmsMainSurface: false, visual };
     report.companionScreens.push(item);
     active?.companionScreenshots.push(item.filename);
     // A companion image never satisfies the main-page target/viewport PASS gate.

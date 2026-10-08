@@ -6,14 +6,14 @@
 
 ## 固定输入与独立路由
 
-- 源提交：`f4bec3d882b152b79295e058e5c83fad779ee0fb`。
-- 构建 run：[37742562603](https://github.com/offercontext/offerPilot/actions/runs/37742562603)。完整回归归属同一构建 run 的独立 job（本次明确跳过，NOT RUN） [37742562603](https://github.com/offercontext/offerPilot/actions/runs/37742562603)；本流程不重跑、不取消、不替代它。
-- Artifact：`11534993326`，名称 `offerpilot-windows-experimental-validation-f4bec3d882b152b79295e058e5c83fad779ee0fb`。
-- Artifact 元数据摘要：`sha256:4c21fa69380e8617252db04cb1b9df84b7bf4fc0bddf5fdbe2ea8e96a8c2d3e9`。
+- 源提交：`bbea73303da401088c27999097439d3e7a9d7c9a`。
+- 构建 run：[37747642914](https://github.com/offercontext/offerPilot/actions/runs/37747642914)。完整回归归属同一构建 run 的独立 job（本次明确跳过，NOT RUN） [37747642914](https://github.com/offercontext/offerPilot/actions/runs/37747642914)；本流程不重跑、不取消、不替代它。
+- Artifact：`11537321001`，名称 `offerpilot-windows-experimental-validation-bbea73303da401088c27999097439d3e7a9d7c9a`。
+- Artifact 元数据摘要：`sha256:04d2fab28deced9c3612e2849bfb21ec5205c90a565ceeed51e32aa74bce0ba4`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`3eada39a58c424fea52605b29315aa47535708e81dd0d1ba1f83a4097662a3de`。
+- 安装包 SHA256：`dcc803cd82c2ec7627a4cbd3f3eaafa1f953ad19d4162bbc4237191950941e33`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `f4bec3d882b152b79295e058e5c83fad779ee0fb`，构建激活提交为 `f4bec3d882b152b79295e058e5c83fad779ee0fb`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37742562603`，独立完整回归 run 为 `37742562603`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `bbea73303da401088c27999097439d3e7a9d7c9a`，构建激活提交为 `bbea73303da401088c27999097439d3e7a9d7c9a`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37747642914`，独立完整回归 run 为 `37747642914`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 

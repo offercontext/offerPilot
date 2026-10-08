@@ -41,3 +41,33 @@ test('scroll evidence distinguishes a locally scrolled pane from document overfl
  const overflow=structuredClone(vm.runInNewContext(`(${measureScrollableAncestors.toString()})(node)`,context));
  assert.equal(overflow.documentWidth,1100);assert.equal(overflow.scrollers[1].documentScroller,true);
 });
+
+test('real wheel observer requires movement and the requested edge, never an already-nonzero offset',async()=>{
+ const {waitForHorizontalWheel}=await import('../control-hit.mjs');
+ let time=0;const container={scrollLeft:0,scrollWidth:764,clientWidth:669};const node={parentElement:container};
+ const context={node,args:{depth:1,previous:0,direction:1,timeoutMs:5},performance:{now:()=>time},
+  requestAnimationFrame:callback=>{time++;container.scrollLeft=95;callback();}};
+ const result=structuredClone(await vm.runInNewContext(`(${waitForHorizontalWheel.toString()})(node,args)`,context));
+ assert.equal(result.before,0);assert.equal(result.after,95);assert.equal(result.direction,1);
+ context.args={depth:1,previous:95,direction:1,timeoutMs:2};time=0;
+ await assert.rejects(vm.runInNewContext(`(${waitForHorizontalWheel.toString()})(node,args)`,context),/did not move/);
+ context.args={depth:1,previous:0,direction:1,timeoutMs:2};time=0;
+ context.requestAnimationFrame=callback=>{time++;container.scrollLeft=30;callback();};container.scrollLeft=0;
+ await assert.rejects(vm.runInNewContext(`(${waitForHorizontalWheel.toString()})(node,args)`,context),/requested edge/);
+});
+
+test('no-overflow evidence measures complete horizontal card bounds, including clipping ancestors',async()=>{
+ const {measureScrollableAncestors}=await import('../control-hit.mjs');
+ const pane={parentElement:null,scrollWidth:669,clientWidth:669,clientHeight:604,clientLeft:0,clientTop:0,scrollLeft:0,
+  getBoundingClientRect:()=>({left:216,top:85}),css:{overflowX:'auto',overflowY:'auto'}};
+ let secondRight=880;const workspace={querySelectorAll:()=>cards};
+ const card=(left,right)=>({parentElement:pane,closest:()=>workspace,getClientRects:()=>[{}],getBoundingClientRect:()=>({left,right:right()})});
+ const cards=[card(230,()=>530),card(550,()=>secondRight)];
+ const node={parentElement:pane,closest:()=>cards[1],getBoundingClientRect:()=>({left:635,right:780,top:360,bottom:400})};
+ const context={node,innerWidth:900,innerHeight:689,getComputedStyle:value=>value.css,
+  document:{scrollingElement:{},documentElement:{scrollWidth:900},body:{scrollWidth:900}}};
+ const result=structuredClone(vm.runInNewContext(`(${measureScrollableAncestors.toString()})(node)`,context));
+ assert.equal(result.cardCount,2);assert.equal(result.allCardsHorizontallyVisible,true);assert.deepEqual(result.scrollers,[]);
+ secondRight=899;const clipped=structuredClone(vm.runInNewContext(`(${measureScrollableAncestors.toString()})(node)`,context));
+ assert.equal(clipped.controlFullyWithinViewport,true);assert.equal(clipped.allCardsHorizontallyVisible,false);
+});

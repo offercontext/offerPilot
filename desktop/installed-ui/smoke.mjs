@@ -13,6 +13,7 @@ import { observeDevToolsDisabled } from './devtools-probe.mjs';
 import { waitForDesktopSurfaces, readDesktopSecurity, validatePartitionIsolation } from './desktop-surfaces.mjs';
 import { installTrayObserver, invokeTrayAction, probeStorageIsolation, probeHaruApiDeny, probeHaruStatusMirror } from './haru-probes.mjs';
 import { probeInstalledCapabilities, readPermissionDecisions, assertDeniedPermissions } from './capability-probes.mjs';
+import { verifyHaruVisual } from './haru-visual.mjs';
 import { verifyApplicationDetail } from './detail-ui.mjs';
 import { createCoverage, observeRuntime } from './coverage-recorder.mjs';
 import { rootSweep, extendedFlows } from './screen-coverage.mjs';
@@ -368,7 +369,36 @@ try {
   await checkpoint(stage);
   stage = 'haru-synthetic-status-mirror';
   report.haruStatus = await probeHaruStatusMirror(first.page, first.haru, haruCapture);
-  await haruCapture('real-restored-status', first.haru);
+  await checkpoint(stage);
+  const verifyHaruFrame = async (label, requireExpanded) => {
+    await verifyHaruVisual(first.haru, async visual => {
+      (report.haruVisualChecks ||= []).push({ label, ...visual, screenshot: `screens/haru-${label}.png` });
+      await haruCapture(label, first.haru);
+      await writeReport();
+    }, { requireExpanded });
+  };
+  stage = 'haru-real-idle-restored-visual';
+  await first.haru.getByRole('status').filter({ hasText: /^随时待命$/ }).waitFor();
+  await verifyHaruFrame('real-restored-status', false);
+  await checkpoint(stage);
+  stage = 'haru-expanded-visual';
+  await first.haru.getByRole('button', { name: '展开 Haru 对话', exact: true }).click();
+  await first.haru.getByRole('region', { name: 'Haru 对话', exact: true }).waitFor();
+  await verifyHaruFrame('expanded-visual', true);
+  await checkpoint(stage);
+  stage = 'haru-native-hide-show-visual';
+  await first.haru.getByRole('button', { name: '将 Haru 收到托盘', exact: true }).click();
+  const haruWindow = await first.app.browserWindow(first.haru);
+  await waitUntil(async () => !(await haruWindow.evaluate(win => win.isVisible())));
+  await first.haru.locator('.desktop-haru-portrait[data-runtime-state="hidden"]').waitFor({ state: 'attached' });
+  assert.equal(await first.page.evaluate(() => window.offerpilotDesktop.windowAction('show-haru')), true);
+  await waitUntil(() => haruWindow.evaluate(win => win.isVisible()));
+  await verifyHaruFrame('reshown-idle-visual', true);
+  await checkpoint(stage);
+  stage = 'haru-collapsed-visual';
+  await first.haru.getByRole('button', { name: '收起 Haru 对话', exact: true }).click();
+  await first.haru.getByRole('region', { name: 'Haru 对话', exact: true }).waitFor({ state: 'hidden' });
+  await verifyHaruFrame('collapsed-idle-visual', false);
   await checkpoint(stage);
   stage = 'desktop-capability-probes';
   report.capabilities = await probeInstalledCapabilities({ app: first.app, page: first.page,
@@ -464,6 +494,13 @@ try {
   console.error(`Installed UI validation failed at ${stage}; see whitelisted evidence.`);
   if (current?.page && !current.page.isClosed()) {
     try { await screenshot(current.page, 'failure'); } catch { /* Evidence unavailable is not success. */ }
+  }
+  if (current?.haru && !current.haru.isClosed()) {
+    try {
+      await fs.mkdir(path.join(evidence, 'screens'), { recursive: true });
+      await current.haru.screenshot({ path: path.join(evidence, 'screens', 'haru-failure.png'), timeout: 15000 });
+      report.haruFailureScreenshot = 'screens/haru-failure.png';
+    } catch { report.haruFailureCaptureFailed = true; }
   }
   if (current?.app) {
     try { await Promise.race([current.app.close(), delay(10000).then(() => { throw new Error('close timeout'); })]); }

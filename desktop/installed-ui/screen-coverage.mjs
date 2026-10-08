@@ -4,7 +4,8 @@ import { selectVisibleOption as select } from './select-option.mjs';
 import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
 import { waitForInputValue, selectSegment } from './ui-state.mjs';
 import { readSurfaceIdentity } from './surface-identity.mjs';
-import { measureControlHit, measureScrollableAncestors } from './control-hit.mjs';
+import { verifyHaruVisual } from './haru-visual.mjs';
+import { measureControlHit, measureScrollableAncestors, waitForHorizontalWheel } from './control-hit.mjs';
 
 const root = (view) => ROOTS.find((item) => item.view === view);
 const exact = (name) => ({ name, exact: true });
@@ -949,33 +950,70 @@ async function offerFlows(qa, page, applications) {
 
 async function verifyNarrowOfferAction(qa, page, offer) {
   await qa.size(900, 689);
+  let phase = 'offer-local-scroll';
+  let failed = false;
+  const step = value => { phase = value; markUiStep(page, value, 'offer'); };
   try {
+    step('offer-local-scroll');
     const target = btn(page.getByTestId(`offer-comparison-header-${offer.id}`), '准备谈薪');
     await target.scrollIntoViewIfNeeded();
+    await target.hover();
+    const before = await target.evaluate(measureScrollableAncestors);
+    const local = before.scrollers.filter(value => !value.documentScroller);
+    assert.ok(local.length <= 1, 'one unambiguous local Offer scroller required');
+    const scrollProbe = { mode: local.length ? 'real-horizontal-wheel' : 'no-horizontal-overflow', movements: [] };
+    if (local.length) {
+      let position = local[0];
+      // When already at the right edge, return left through the same genuine
+      // input path first, so a no-op wheel cannot become movement evidence.
+      if (position.scrollLeft >= position.scrollWidth - position.clientWidth - 1) {
+        await page.mouse.wheel(-position.scrollWidth, 0);
+        const movement = await target.evaluate(waitForHorizontalWheel, { depth: position.depth, previous: position.scrollLeft, direction: -1 });
+        scrollProbe.movements.push(movement);
+        position = { ...position, scrollLeft: movement.after };
+      }
+      await page.mouse.wheel(position.scrollWidth, 0);
+      scrollProbe.movements.push(await target.evaluate(waitForHorizontalWheel, { depth: position.depth, previous: position.scrollLeft, direction: 1 }));
+    }
     const controlHit = await target.evaluate(measureControlHit);
     const localScroll = await target.evaluate(measureScrollableAncestors);
     // Save the right-scrolled screen before asserting, preserving any defect.
-    await qa.capture('offer-second-card-action-right-900x689', { controlHit, localScroll });
+    await qa.capture('offer-second-card-action-right-900x689', { controlHit, localScroll, scrollProbe });
+    step('offer-local-scroll-verify');
     assert.equal(localScroll.width, 900);
     assert.ok(localScroll.documentWidth <= localScroll.width + 1, 'Offer content must not overflow the document');
     assert.equal(localScroll.controlFullyWithinViewport, true, 'whole second-card control must be visible');
     assert.equal(localScroll.controlFullyWithinScrollableBounds, true, 'scrolling ancestors must not clip the second-card control');
-    assert.ok(localScroll.scrollers.some(value => !value.documentScroller && value.scrollLeft > 0), 'right-side control must be reached through real local horizontal scrolling');
+    if (local.length) {
+      const after = localScroll.scrollers.find(value => !value.documentScroller && value.depth === local[0].depth);
+      assert.ok(after && after.scrollLeft > 0 && after.scrollLeft + after.clientWidth >= after.scrollWidth - 1,
+        'right-side content must be reached through real local horizontal scrolling');
+    } else {
+      assert.equal(localScroll.scrollers.filter(value => !value.documentScroller).length, 0, 'no-overflow path must still have no local horizontal overflow');
+      assert.equal(localScroll.cardCount, 2, 'both comparison cards must be observed when horizontal scrolling is unnecessary');
+      assert.equal(localScroll.allCardsHorizontallyVisible, true, 'without horizontal overflow both cards must fit fully across the visible pane');
+    }
     assert.equal(controlHit.receiver, 'target', 'second Offer action must receive ordinary pointer input');
+    step('offer-second-preflight');
     await target.click({ trial: true });
     await target.click();
     const form = region(page, '谈薪准备');
     await form.getByRole('heading', { level: 2, name: `为 ${offer.application.company_name} 准备谈薪`, exact: true }).waitFor();
     await qa.capture('offer-second-card-negotiation-open-900x689');
+    step('dialog-dismiss');
     await btn(form, '关闭').click();
     await form.waitFor({ state: 'hidden' });
     await region(page, 'Offer 横向对比').waitFor();
-    qa.observed('second Offer action reached by local horizontal scroll at 900px; pointer hit and exact Offer heading verified; unsent preflight closed back to comparison');
+    qa.observed('second Offer action reached at 900px by verified real horizontal wheel or both fully contained cards; pointer hit and exact Offer heading verified; unsent preflight closed back to comparison');
   } catch (error) {
+    failed = true;
     // Preserve the actual narrow failing state before restoring the main size.
     try { await qa.capture('offer-second-card-action-failure-900x689'); } catch { /* Original failure remains authoritative. */ }
     throw error;
-  } finally { if (qa.canProceed()) await qa.size(1280); }
+  } finally {
+    if (qa.canProceed()) await qa.size(1280);
+    if (failed) markUiStep(page, phase, 'offer');
+  }
 }
 
 async function closeComparisonSettings(qa, page, settings) {
@@ -1016,7 +1054,8 @@ async function pilotSettingsFlows(qa, page, record) {
     // The installed desktop owns a separate Haru BrowserWindow. A main-page
     // dialog or mascot cannot substitute for this live mirrored context check.
     await verifyStandaloneHaruContext(qa.haru, record);
-    await qa.captureHaru('pilot-row-context-standalone-haru');
+    markUiStep(qa.haru, 'companion-visual', 'pilot');
+    await verifyHaruVisual(qa.haru, visual => qa.captureHaru('pilot-row-context-standalone-haru', visual));
     qa.observed('actual standalone Haru window mirrors the clicked application context');
     await btn(qa.haru, '打开 OfferPilot 主窗口').click();
     await command(page, '打开 Pilot 工作区');

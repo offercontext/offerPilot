@@ -42,7 +42,39 @@ export function measureScrollableAncestors(node) {
         scrollWidth: parent.scrollWidth, documentScroller: parent === document.scrollingElement });
     }
   }
+  const card = node.closest?.('article[data-testid^="offer-comparison-header-"]');
+  const workspace = card?.closest('[aria-label="Offer 横向对比"]');
+  const cards = workspace ? [...workspace.querySelectorAll('article[data-testid^="offer-comparison-header-"]')] : [];
+  const horizontallyVisible = card => {
+    const rect = card.getBoundingClientRect();
+    if (!card.getClientRects().length || rect.left < 0 || rect.right > innerWidth) return false;
+    for (let parent = card.parentElement; parent; parent = parent.parentElement) {
+      if (!/(auto|scroll|hidden|clip)/.test(getComputedStyle(parent).overflowX)) continue;
+      const left = parent.getBoundingClientRect().left + parent.clientLeft;
+      if (rect.left < left - 1 || rect.right > left + parent.clientWidth + 1) return false;
+    }
+    return true;
+  };
   return { width: innerWidth, documentWidth: Math.max(document.documentElement.scrollWidth, document.body.scrollWidth),
     controlFullyWithinViewport: box.left >= 0 && box.right <= innerWidth && box.top >= 0 && box.bottom <= innerHeight,
-    controlFullyWithinScrollableBounds, scrollers };
+    controlFullyWithinScrollableBounds, cardCount: cards.length,
+    allCardsHorizontallyVisible: cards.length > 0 && cards.every(horizontallyVisible), scrollers };
+}
+
+
+// Observe an actual browser wheel result. This function never changes scroll state.
+export async function waitForHorizontalWheel(node, { depth, previous, direction, timeoutMs = 5000 }) {
+  let container = node;
+  for (let level = 0; level < depth; level++) container = container?.parentElement;
+  if (!container || !Number.isInteger(depth) || depth < 1 || ![-1, 1].includes(direction)) throw new Error('exact local scroller required');
+  const deadline = performance.now() + timeoutMs;
+  do {
+    const current = container.scrollLeft;
+    const end = container.scrollWidth - container.clientWidth;
+    const moved = direction === 1 ? current > previous + 0.5 : current < previous - 0.5;
+    const atEdge = direction === 1 ? current >= end - 1 : current <= 1;
+    if (moved && atEdge) return { depth, before: previous, after: current, clientWidth: container.clientWidth, scrollWidth: container.scrollWidth, direction };
+    await new Promise(resolve => requestAnimationFrame(resolve));
+  } while (performance.now() < deadline);
+  throw new Error('real horizontal wheel did not move the local scroller to the requested edge');
 }
