@@ -5,6 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import DesktopHaruWindow from './DesktopHaruWindow';
 import type { DesktopHaruState } from './desktopHaru';
 import { live2dPilotMascotRuntime } from '@/features/pilotMascot/live2dRuntime';
+import { ContextSystem } from '@pixi/core';
 vi.mock('@/features/pilotMascot/live2dRuntime', () => ({ live2dPilotMascotRuntime: { mount: vi.fn() } }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root; let host: HTMLDivElement; let update: (value: DesktopHaruState) => void;
@@ -65,4 +66,69 @@ it('idle is single-frame, hiding disposes runtime and showing restores latest st
   request.mockResolvedValue({ ok: true });
   await act(async () => button('停止').click());
   expect(request).toHaveBeenCalledWith({ action: 'stop', version: 2, generation: 3 });
+});
+it('never remounts a canvas whose WebGL context Pixi destroyed across status and visibility changes', async () => {
+  const lost = new WeakSet<HTMLCanvasElement>();
+  const canvases: HTMLCanvasElement[] = [];
+  vi.mocked(live2dPilotMascotRuntime.mount).mockImplementation(async canvas => {
+    if (lost.has(canvas)) throw new Error('Cannot reuse destroyed WebGL context');
+    canvases.push(canvas);
+    // Exercise the installed Pixi teardown, including its real loseContext call.
+    const context = new ContextSystem({ view: canvas } as never);
+    Object.assign(context, { gl: { useProgram: vi.fn() } });
+    context.extensions.loseContext = { loseContext: () => lost.add(canvas), restoreContext: vi.fn() };
+    return { dispose: () => context.destroy(), setActivity: vi.fn(), setZoom: vi.fn() };
+  });
+  await mount();
+  const initial = host.querySelector('canvas');
+  expect(host.querySelector('.desktop-haru-portrait')?.getAttribute('data-runtime-state')).toBe('ready');
+  for (const taskState of ['running', 'waiting_confirmation', 'completed', 'failed', 'idle'] as const) {
+    await act(async () => update({ ...state, snapshot: { ...state.snapshot!, taskState, hasPending: taskState === 'waiting_confirmation' } }));
+    expect(host.querySelector('.desktop-haru-portrait > span')).toBeNull();
+    expect(host.querySelector('canvas')).not.toBe(initial);
+    expect(host.querySelector('canvas')?.isConnected).toBe(true);
+    expect(host.querySelectorAll('canvas')).toHaveLength(1);
+  }
+  await act(async () => update({ ...state, visible: false }));
+  expect(host.querySelector('canvas')).toBeNull();
+  expect(host.querySelector('.desktop-haru-portrait')?.getAttribute('data-runtime-state')).toBe('hidden');
+  await act(async () => update(state));
+  expect(host.querySelector('.desktop-haru-portrait > span')).toBeNull();
+  expect(new Set(canvases).size).toBe(canvases.length);
+});
+it('removes a failed canvas instead of leaving its browser error surface over the conversation', async () => {
+  vi.mocked(live2dPilotMascotRuntime.mount).mockRejectedValueOnce(new Error('GPU unavailable'));
+  await mount();
+  expect(host.querySelector('.desktop-haru-portrait > span')?.textContent).toBe('Haru');
+  expect(host.querySelector('canvas')).toBeNull();
+  expect(host.querySelector('.desktop-haru-portrait')?.getAttribute('data-runtime-state')).toBe('failed');
+  expect(host.querySelector('textarea')!.disabled).toBe(false);
+});
+it('late activity mounts cannot remove or overwrite the current idle canvas', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof live2dPilotMascotRuntime.mount>>) => void;
+  const lateDispose = vi.fn();
+  vi.mocked(live2dPilotMascotRuntime.mount).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await mount();
+  const oldCanvas = host.querySelector('canvas');
+  await act(async () => update({ ...state, snapshot: { ...state.snapshot!, taskState: 'running' } }));
+  await act(async () => update(state));
+  const current = host.querySelector('canvas');
+  await act(async () => finish({ dispose: lateDispose, setActivity: vi.fn(), setZoom: vi.fn() }));
+  expect(lateDispose).toHaveBeenCalledTimes(1);
+  expect(oldCanvas?.isConnected).toBe(false);
+  expect(host.querySelectorAll('canvas')).toHaveLength(1);
+  expect(host.querySelector('canvas')).toBe(current);
+  expect(host.querySelector('.desktop-haru-portrait')?.getAttribute('data-runtime-state')).toBe('ready');
+});
+it('retains the idle canvas when selecting a new context and expanding or collapsing the window', async () => {
+  await mount();
+  const canvas = host.querySelector('canvas');
+  const mounts = vi.mocked(live2dPilotMascotRuntime.mount).mock.calls.length;
+  for (const expanded of [false, true, false, true]) {
+    await act(async () => update({ ...state, expanded, snapshot: { ...state.snapshot!, contextLabel: '选择的公司和岗位', version: 3 } }));
+    expect(host.querySelector('canvas')).toBe(canvas);
+    expect(host.querySelector('.desktop-haru-portrait')?.getAttribute('data-runtime-state')).toBe('ready');
+  }
+  expect(live2dPilotMascotRuntime.mount).toHaveBeenCalledTimes(mounts);
+  expect(host.querySelector('.desktop-haru-context')?.textContent).toContain('选择的公司和岗位');
 });

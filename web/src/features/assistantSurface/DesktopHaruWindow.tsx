@@ -7,22 +7,34 @@ const STATUS = { idle: '随时待命', running: '正在处理', waiting_confirma
 const INITIAL: DesktopHaruState = { connected: false, generation: 0, snapshot: null, visible: false, expanded: false, alwaysOnTop: false };
 
 function HaruCanvas({ active, activity }: { active: boolean; activity: PilotMascotActivity }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  const [failed, setFailed] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const [runtimeState, setRuntimeState] = useState<'loading' | 'ready' | 'failed' | 'hidden'>('hidden');
   useEffect(() => {
-    if (!active || !ref.current) return;
+    if (!active || !ref.current) { setRuntimeState('hidden'); return; }
+    // Pixi destroys the WebGL context on dispose. A disposed canvas cannot be
+    // reused for another activity or after hiding, including StrictMode remounts.
+    const canvas = document.createElement('canvas');
+    ref.current.append(canvas);
     const abort = new AbortController();
     let dispose: (() => void) | undefined;
-    setFailed(false);
+    setRuntimeState('loading');
     // Idle uses a single static frame. Hide unmounts the runtime and its ticker.
-    void live2dPilotMascotRuntime.mount(ref.current, abort.signal, activity === 'idle' ? 'off' : 'minimal').then(runtime => {
+    void live2dPilotMascotRuntime.mount(canvas, abort.signal, activity === 'idle' ? 'off' : 'minimal').then(runtime => {
       if (abort.signal.aborted) { runtime.dispose(); return; }
-      runtime.setActivity(activity);
       dispose = () => runtime.dispose();
-    }).catch(() => { if (!abort.signal.aborted) setFailed(true); });
-    return () => { abort.abort(); dispose?.(); };
+      runtime.setActivity(activity);
+      setRuntimeState('ready');
+    }).catch(() => {
+      if (!abort.signal.aborted) {
+        dispose?.();
+        dispose = undefined;
+        canvas.remove();
+        setRuntimeState('failed');
+      }
+    });
+    return () => { abort.abort(); dispose?.(); canvas.remove(); };
   }, [active, activity]);
-  return <div className="desktop-haru-portrait" aria-hidden="true"><canvas ref={ref} />{failed ? <span>Haru</span> : null}</div>;
+  return <div ref={ref} className="desktop-haru-portrait" data-runtime-state={runtimeState} aria-hidden="true">{runtimeState === 'failed' ? <span>Haru</span> : null}</div>;
 }
 
 export default function DesktopHaruWindow() {

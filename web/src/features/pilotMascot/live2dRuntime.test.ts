@@ -93,6 +93,7 @@ describe('serializePilotMascotRuntime', () => {
 function runtimeDependencies(overrides: Partial<Live2dRuntimeDependencies> = {}) {
   const application = {
     stage: { addChild: vi.fn() },
+    renderer: { resize: vi.fn() },
     render: vi.fn(),
     destroy: vi.fn(),
   };
@@ -107,7 +108,7 @@ function runtimeDependencies(overrides: Partial<Live2dRuntimeDependencies> = {})
     expression: vi.fn().mockResolvedValue(true),
     destroy: vi.fn(),
   };
-  const Application = vi.fn(function Application() {
+  const Application = vi.fn(function Application(_options: Record<string, unknown>) {
     return application;
   });
   const Live2DModel = {
@@ -153,6 +154,28 @@ describe('createLive2dPilotMascotRuntime', () => {
     await expect(createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas)).rejects.toThrow('model failed');
     expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
     expect(fixture.model.destroy).not.toHaveBeenCalled();
+  });
+
+  it('releases WebGL immediately when aborted during model loading and destroys the late model', async () => {
+    const fixture = runtimeDependencies();
+    let finish!: (value: typeof fixture.model) => void;
+    fixture.Live2DModel.from.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+    const abort = new AbortController();
+    const mount = createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, abort.signal);
+    await Promise.resolve();
+    expect(fixture.Application).toHaveBeenCalledTimes(1);
+    abort.abort();
+    expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.model.destroy).not.toHaveBeenCalled();
+    finish(fixture.model);
+    await expect(mount).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fixture.model.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.application.stage.addChild).not.toHaveBeenCalled();
+    expect(fixture.observer.observe).not.toHaveBeenCalled();
   });
 
   it('cleans up model and application when ResizeObserver setup fails', async () => {
@@ -202,6 +225,34 @@ describe('createLive2dPilotMascotRuntime', () => {
     controller.setActivity('success');
     expect(fixture.model.motion).not.toHaveBeenCalled();
     expect(fixture.model.expression).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('resizes the drawing buffer before the final static frame on every portrait resize', async () => {
+    const fixture = runtimeDependencies();
+    const host = document.createElement('div');
+    let width = 244;
+    let height = 254;
+    Object.defineProperties(host, {
+      clientWidth: { get: () => width },
+      clientHeight: { get: () => height },
+    });
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+    const controller = await createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, undefined, 'off');
+    expect(fixture.Application.mock.calls[0]?.[0]).not.toHaveProperty('resizeTo');
+    const resize = (fixture.dependencies.createResizeObserver as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    for (const size of [[404, 100], [244, 254]]) {
+      [width, height] = size;
+      fixture.application.renderer.resize.mockClear();
+      fixture.application.render.mockClear();
+      resize();
+      expect(fixture.application.renderer.resize).toHaveBeenCalledWith(width, height);
+      expect(fixture.application.render).toHaveBeenCalledTimes(1);
+      expect(fixture.application.renderer.resize.mock.invocationCallOrder[0]).toBeLessThan(fixture.application.render.mock.invocationCallOrder[0]);
+      expect(fixture.model.x).toBe(width / 2);
+      expect(fixture.model.y).toBe(height / 2);
+    }
     controller.dispose();
   });
 

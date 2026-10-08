@@ -40,6 +40,10 @@ test('Haru resource auth rejects API, encoded routes, methods, query and child f
   assert(allowHaruResource(request('/?desktopSurface=haru', { resourceType: 'mainFrame' }), origin));
   for (const route of ['/api/settings', '/%61pi/settings', '/assets/..%2fapi/settings', '/assets/%2e%2e/api/settings', '/assets/%252e%252e/api/settings', '/assets/index.js?secret=1', '/docs', '/', '/?desktopSurface=owner', '/assets/../api/settings']) assert(!allowHaruResource(request(route), origin), route);
   for (const overrides of [{ method: 'POST' }, { resourceType: 'subFrame' }, { url: 'https://evil.test/assets/a.js' }]) assert(!allowHaruResource(request('/assets/a.js', overrides), origin));
+  // Rendering recovery must not add a broad poster/file/network exception.
+  for (const url of ['data:image/png;base64,AA==', `blob:${origin}/haru`, 'file:///haru.png', 'https://evil.test/live2d/haru.png']) {
+    assert(!allowHaruResource(request('/live2d/haru.png', { url, resourceType: 'image' }), origin));
+  }
 });
 test('dual-session token injection confines owner API and Haru static requests and strips forged outbound headers', () => {
   let destroyed = false;

@@ -7,6 +7,7 @@ vi.mock('pixi.js', () => ({
   Ticker: {},
   Application: class {
     stage = { addChild: vi.fn() };
+    renderer = { resize: vi.fn() };
     render = vi.fn();
     destroy = vi.fn();
     constructor() {

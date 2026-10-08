@@ -7,8 +7,8 @@ html.desktop-haru-root, .desktop-haru-root body, .desktop-haru-root #root { back
 .desktop-haru-bar { -webkit-app-region: drag; display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 38px; padding: 0 7px; border-radius: 12px; background: var(--op-surface, #fff); box-shadow: 0 2px 12px #17234220; user-select: none; }
 .desktop-haru-bar nav { display: flex; gap: 4px; }
 .desktop-haru .desktop-haru-avatar { background: transparent; border: 0; padding: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; }
-.desktop-haru-portrait { min-height: 0; width: 100%; flex: 1; position: relative; }
-.desktop-haru-portrait canvas { display: block; width: 100%; height: 100%; }
+.desktop-haru-portrait { min-height: 0; width: 100%; flex: 1; position: relative; overflow: hidden; }
+.desktop-haru-portrait canvas { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: 100%; max-height: 100%; }
 .desktop-haru-portrait > span { position: absolute; inset: 35% 20%; border-radius: 24px; background: #e7e8ff; display: grid; place-items: center; font-size: 28px; }
 .desktop-haru-avatar > span { border-radius: 12px; padding: 5px 12px; background: var(--op-surface, #fff); }
 .desktop-haru.expanded .desktop-haru-avatar { flex: 0 0 clamp(70px, 18vh, 130px); }
