@@ -935,3 +935,28 @@ def test_settings_does_not_report_a_disabled_keyed_fallback_as_available(tmp_pat
 
     assert response.status_code == 200
     assert response.json()["has_api_key"] is False
+
+
+@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro"])
+def test_deepseek_connection_test_uses_bounded_non_thinking_probe(monkeypatch, tmp_path, model):
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(kwargs)
+        return {"choices": [{"message": {"content": "OK"}}]}
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    response = TestClient(create_app(data_dir=tmp_path)).post(
+        "/api/settings/providers/test", json={"provider": {
+            "id": "draft", "provider": "openai_compatible", "api_key": "sk-test",
+            "base_url": "https://api.deepseek.com/v1", "model": model,
+            "enabled": True, "context_window": 32768, "max_output_tokens": 4096,
+        }},
+    )
+    assert response.json()["ok"] is True
+    assert len(captured) == 1
+    assert captured[0]["max_tokens"] == 64
+    assert captured[0]["timeout"] == 15
+    assert captured[0]["num_retries"] == 0
+    assert captured[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "tools" not in captured[0]

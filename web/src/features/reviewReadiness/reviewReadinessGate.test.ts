@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, posix, relative } from 'node:path';
+import { join, posix, relative } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
@@ -1422,7 +1422,10 @@ function importTargetsSource(
   if (moduleName.startsWith('@/')) {
     resolved = `web/src/${moduleName.slice(2)}`;
   } else if (moduleName.startsWith('.')) {
-    resolved = join(dirname(importerPath), moduleName);
+    resolved = posix.join(
+      posix.dirname(importerPath.replace(/\\/g, '/')),
+      moduleName.replace(/\\/g, '/'),
+    );
   } else {
     return false;
   }
@@ -1801,6 +1804,16 @@ describe('review readiness mechanical gate', () => {
       '..\\features\\reviewReadiness\\ProductActionConfirmation',
       'web/src/features/reviewReadiness/ProductActionConfirmation.tsx',
     )).toBe(true);
+    expect(importTargetsSource(
+      'web\\src\\components\\InterviewStoryDrawer.tsx',
+      '..\\features\\reviewReadiness\\OtherConfirmation',
+      'web/src/features/reviewReadiness/ProductActionConfirmation.tsx',
+    )).toBe(false);
+    expect(importTargetsSource(
+      'web\\src\\components\\InterviewStoryDrawer.tsx',
+      '..\\..\\fixtures\\ProductActionConfirmation',
+      'web/src/features/reviewReadiness/ProductActionConfirmation.tsx',
+    )).toBe(false);
     const unsafe = `confirmInterviewStoryProposal(id, { confirmation_token: crypto.randomUUID() });`;
     expect(clientAuthorizationViolations(new Map([
       ['web/src/components/unsafe.test.tsx', unsafe],

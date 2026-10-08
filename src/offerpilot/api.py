@@ -8975,7 +8975,7 @@ def create_app(
         try:
             ConfiguredAIClient(
                 Config(active_provider_id=provider.id, providers=[provider]),
-            ).complete([Message(role="user", content="Reply with OK.")], [])
+            ).test_connection()
         except Exception as exc:
             message = _safe_provider_error(exc, [provider])
             append_log_entry(

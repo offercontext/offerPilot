@@ -22,6 +22,7 @@ import {
   type PilotMascotPlacement,
   type PilotMascotPosition,
 } from './pilotMascotPreference';
+import { useMascotVisibility } from './useMascotVisibility';
 import styles from './PilotMascot.module.css';
 
 export type { PilotMascotActivity, PilotMascotRuntime } from './live2dRuntime';
@@ -100,6 +101,7 @@ export default function PilotMascot({
   runtime = live2dPilotMascotRuntime,
   triggerRef: externalTriggerRef,
 }: Props) {
+  const pageVisible = useMascotVisibility();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const internalTriggerRef = useRef<HTMLButtonElement>(null);
   const triggerRef = externalTriggerRef ?? internalTriggerRef;
@@ -140,7 +142,7 @@ export default function PilotMascot({
 
   useEffect(() => {
     setRuntimeReady(false);
-    if (loadFailed) return;
+    if (loadFailed || !pageVisible) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const abortController = new AbortController();
@@ -169,7 +171,7 @@ export default function PilotMascot({
       runtimeControllerRef.current?.dispose();
       runtimeControllerRef.current = undefined;
     };
-  }, [animationLevel, loadFailed, reducedMotionRevision, runtime]);
+  }, [animationLevel, loadFailed, reducedMotionRevision, runtime, pageVisible]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;

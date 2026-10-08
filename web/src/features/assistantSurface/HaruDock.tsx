@@ -7,6 +7,7 @@ import PilotMascot, {
 } from '@/features/pilotMascot/PilotMascot';
 import type { PilotMascotRect } from '@/features/pilotMascot/pilotMascotPreference';
 import { useAssistantSurface } from './AssistantSurfaceProvider';
+import { isDesktopOwner } from './desktopHaru';
 import HaruChatWindow from './HaruChatWindow';
 
 interface Props {
@@ -42,7 +43,7 @@ export default function HaruDock({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [anchorRect, setAnchorRect] = useState<PilotMascotRect>();
 
-  if (!visible) return null;
+  if (!visible || isDesktopOwner()) return null;
 
   const notification = surface.completionNotice
     ? {

@@ -101,6 +101,7 @@ import {
   usePilotConversationController,
 } from '@/features/assistantSurface/AssistantSurfaceProvider';
 import HaruDock from '@/features/assistantSurface/HaruDock';
+import { isDesktopOwner } from '@/features/assistantSurface/desktopHaru';
 import PilotWorkspace from '@/features/assistantSurface/PilotWorkspace';
 import {
   DEFAULT_APPLICATION_VIEW_STATE,
@@ -1462,7 +1463,7 @@ function AppShellContent() {
     && assistantSurface.surface === 'mascot'
     && !pilotMascotVisible;
   const contextualPilotOpen = assistantSurface.surface === 'pilot_workspace' || contextualPilotRailMode;
-  const pilotControllerTransportActive = view === 'pilot'
+  const pilotControllerTransportActive = isDesktopOwner() || view === 'pilot'
     || contextualPilotOpen
     || assistantSurface.surface === 'haru_chat'
     || pilotController.loading

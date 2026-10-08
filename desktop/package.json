@@ -20,7 +20,7 @@
     "productName": "OfferPilot Desktop",
     "asar": true,
     "directories": { "output": "dist" },
-    "files": ["main.cjs", "lifecycle.cjs", "package.json"],
+    "files": ["main.cjs", "lifecycle.cjs", "capabilities.cjs", "haru.cjs", "haru-protocol.cjs", "preload.cjs", "assets/**", "package.json"],
     "extraResources": [
       { "from": "backend-dist/offerpilot-backend", "to": "backend" },
       { "from": "../web/dist", "to": "web" },

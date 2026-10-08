@@ -8,6 +8,8 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { useDesktopHaruOwner } from './useDesktopHaruOwner';
+import { isDesktopOwner } from './desktopHaru';
 import {
   assistantSurfaceReducer,
   initialAssistantSurfaceState,
@@ -51,7 +53,7 @@ const PilotConversationContext = createContext<PilotConversationController | nul
 
 export function AssistantSurfaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(assistantSurfaceReducer, initialAssistantSurfaceState);
-  const controller = usePilotConversationControllerState(state.surface !== 'mascot');
+  const controller = usePilotConversationControllerState(isDesktopOwner() || state.surface !== 'mascot');
   const surfaceRef = useRef(state.surface);
   const [conversationRequest, setConversationRequest] = useState<AssistantConversationRequest>();
   const nextConversationRequestKeyRef = useRef(0);
@@ -63,7 +65,13 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
   } | null>(null);
   const reportedLifecycleGenerationRef = useRef<number | null>(null);
   surfaceRef.current = state.surface;
-  const openHaru = useCallback(() => dispatch({ type: 'open_haru' }), []);
+  const openHaru = useCallback(() => {
+    dispatch({ type: 'open_haru' });
+    if (isDesktopOwner()) {
+      void window.offerpilotDesktop?.windowAction('show-haru');
+      void window.offerpilotDesktop?.windowAction('expand');
+    }
+  }, []);
   const openPilot = useCallback(() => dispatch({ type: 'open_pilot' }), []);
   const openPending = useCallback(() => dispatch({ type: 'open_pending' }), []);
   const openConversation = useCallback((conversationId: number) => {
@@ -156,6 +164,7 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
     });
   }, []);
   controller.bindTaskStateReporter(reportTaskState);
+  useDesktopHaruOwner(controller, openPending);
   const surfaceValue = useMemo(() => ({
     ...state,
     conversationRequest,

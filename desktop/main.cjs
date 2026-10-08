@@ -1,15 +1,21 @@
 'use strict';
-const { app, BrowserWindow, dialog, session } = require('electron');
+const { app, BrowserWindow, dialog, session, shell, Tray, Menu, nativeImage, screen, ipcMain } = require('electron');
 const { spawn } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
-const { TOKEN_HEADER, isSameOrigin, waitForReady, checkHealth, stopBackend } = require('./lifecycle.cjs');
+const { allowHaruResource, authenticatedHeaders } = require('./haru-protocol.cjs');
+const { createHaruShell } = require('./haru.cjs');
+const { createCapabilities } = require('./capabilities.cjs');
+const { isSameOrigin, waitForReady, checkHealth, stopBackend } = require('./lifecycle.cjs');
 
 app.setName('OfferPilot Desktop');
 app.setPath('userData', path.join(app.getPath('appData'), 'OfferPilot Desktop'));
 let child;
 let window;
+let haruShell;
+const trustedContents = new Set();
+const isTrustedContents = contents => trustedContents.has(contents) && !contents.isDestroyed();
 let quitting = false;
 let stopped = false;
 let logFile;
@@ -72,38 +78,53 @@ async function start() {
     fs.renameSync(`${portFile}.tmp`, portFile);
   }
   const desktopSession = session.fromPartition('persist:offerpilot-desktop', { cache: false });
-  desktopSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  desktopSession.setPermissionCheckHandler(() => false);
-  desktopSession.on('will-download', (event) => event.preventDefault());
-  desktopSession.webRequest.onBeforeSendHeaders((details, callback) => {
-    const headers = details.requestHeaders;
-    for (const name of Object.keys(headers)) {
-      if (name.toLowerCase() === TOKEN_HEADER.toLowerCase()) delete headers[name];
-    }
-    if (window && details.webContentsId === window.webContents.id && isSameOrigin(details.url, ready.origin)) {
-      headers[TOKEN_HEADER] = token;
-    }
-    callback({ requestHeaders: headers });
+  // An ephemeral, separate partition keeps Haru away from owner storage, auth
+  // cookies and BroadcastChannel, in addition to the restricted IPC boundary.
+  const haruSession = session.fromPartition('offerpilot-haru', { cache: false });
+  haruSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  haruSession.setPermissionCheckHandler(() => false);
+  haruSession.on('will-download', event => event.preventDefault());
+  haruSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !allowHaruResource(details, ready.origin) }));
+  const { installWindowPolicy, contentSecurityPolicy } = createCapabilities({
+    origin: ready.origin, desktopSession, isTrustedContents, dialog, shell, BrowserWindow,
   });
-  desktopSession.webRequest.onHeadersReceived((details, callback) => {
-    const headers = { ...details.responseHeaders };
-    if (isSameOrigin(details.url, ready.origin)) {
-      headers['Content-Security-Policy'] = ["default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; media-src 'self' blob:; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"];
-    }
-    callback({ responseHeaders: headers });
-  });
+  const registerWindow = win => {
+    const contents = win.webContents;
+    trustedContents.add(contents);
+    contents.once('destroyed', () => trustedContents.delete(contents));
+    installWindowPolicy(win);
+  };
+  for (const securedSession of [desktopSession, haruSession]) {
+    securedSession.webRequest.onBeforeSendHeaders((details, callback) => {
+      const headers = authenticatedHeaders(details, {
+        origin: ready.origin, token, role: securedSession === desktopSession ? 'owner' : 'haru',
+        ownerContents: window?.webContents, trustedContents,
+      });
+      callback({ requestHeaders: headers });
+    });
+    securedSession.webRequest.onHeadersReceived((details, callback) => {
+      const headers = { ...details.responseHeaders };
+      if (isSameOrigin(details.url, ready.origin)) {
+        headers['Content-Security-Policy'] = [contentSecurityPolicy];
+      }
+      callback({ responseHeaders: headers });
+    });
+  }
   window = new BrowserWindow({
     width: 1280, height: 850, minWidth: 900, minHeight: 600, show: false,
     title: 'OfferPilot Desktop', autoHideMenuBar: true,
     webPreferences: {
-      session: desktopSession, nodeIntegration: false, contextIsolation: true,
+      session: desktopSession, preload: path.join(__dirname, 'preload.cjs'),
+      additionalArguments: ['--offerpilot-owner'], nodeIntegration: false, contextIsolation: true,
       sandbox: true, webSecurity: true, devTools: !app.isPackaged,
     },
   });
-  window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', (event, url) => { if (!isSameOrigin(url, ready.origin)) event.preventDefault(); });
-  window.webContents.on('will-redirect', (event, url) => { if (!isSameOrigin(url, ready.origin)) event.preventDefault(); });
-  window.webContents.on('will-attach-webview', (event) => event.preventDefault());
+  registerWindow(window);
+  haruShell = createHaruShell({
+    BrowserWindow, Tray, Menu, nativeImage, screen, ipcMain,
+    mainWindow: window, desktopSession: haruSession, origin: ready.origin, userData, registerWindow,
+    isQuitting: () => quitting, quit: () => app.quit(), log,
+  });
   window.webContents.on('render-process-gone', () => {
     if (!quitting) {
       dialog.showErrorBox('OfferPilot Desktop', 'The application window stopped. Reopen OfferPilot to recover your saved work.');
@@ -131,6 +152,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
+    haruShell?.dispose();
     stopBackend(child).finally(() => { stopped = true; app.quit(); });
   });
   app.whenReady().then(start).catch((error) => {

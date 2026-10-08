@@ -1,9 +1,11 @@
-import { StrictMode } from 'react';
+import { StrictMode, Suspense, lazy } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ConfigProvider, App as AntApp } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
-import App from './App';
+const App = lazy(() => import('./App'));
+const DesktopHaruWindow = lazy(() => import('./features/assistantSurface/DesktopHaruWindow'));
+import { isDesktopHaru } from './features/assistantSurface/desktopHaru';
 import { ThemeProvider, useThemeMode } from './theme/ThemeContext';
 import { lightTheme, darkTheme } from './theme/antdTheme';
 import './theme/tokens.css';
@@ -19,7 +21,7 @@ function ThemedApp() {
   return (
     <ConfigProvider locale={zhCN} theme={mode === 'dark' ? darkTheme : lightTheme}>
       <AntApp>
-        <App />
+        <Suspense fallback={null}>{isDesktopHaru() ? <DesktopHaruWindow /> : <App />}</Suspense>
       </AntApp>
     </ConfigProvider>
   );

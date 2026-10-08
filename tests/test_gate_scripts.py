@@ -89,7 +89,7 @@ def gate(request, tmp_path):
         launcher = repo / "launch.ps1"
         launcher.write_text(
             r"""param([string]$Target, [int]$Port = 18765, [switch]$SkipBuild,
-    [switch]$RealAi, [switch]$Install, [switch]$Docker)
+    [switch]$RealAi, [switch]$Install, [switch]$Docker, [string]$PytestEvidence)
 $ErrorActionPreference = 'Stop'
 function Start-Process {
     Add-Content $env:GATE_LOG 'server start'
@@ -287,3 +287,29 @@ def test_powershell_optional_gate_failures_reach_parent(gate, flag, step):
     assert result.returncode != 0, result.stdout + result.stderr
     assert calls[-1] == step
     assert "Release gate passed" not in result.stdout
+
+
+@pytest.mark.parametrize("reject_evidence", [False, True])
+def test_powershell_release_requires_verified_pytest_evidence(gate, reject_evidence):
+    shell, run, _ = gate
+    if shell != "powershell":
+        pytest.skip("Windows evidence substitution branch")
+    aggregate = (
+        "uv run --frozen python scripts/test_shards/gate.py aggregate "
+        "--manifest pytest-evidence/manifest.json --output pytest-evidence"
+    )
+    result, calls = run(args=["-PytestEvidence", "pytest-evidence"],
+                        fail=aggregate if reject_evidence else "")
+    assert (result.returncode != 0) == reject_evidence, result.stdout
+    assert calls[0] == aggregate
+    assert "uv run pytest -q" not in calls
+    if reject_evidence:
+        assert calls == [aggregate]
+        assert "Release gate passed" not in result.stdout
+    else:
+        assert "uv run ruff check ." in calls
+        assert "uv run mypy src" in calls
+        assert "npm test" in calls
+        assert "npm run build" in calls
+        assert "uv run oc smoke --static-dir web/dist" in calls
+        assert "uv run oc verify --profile local --static-dir web/dist" in calls

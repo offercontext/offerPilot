@@ -290,6 +290,20 @@ class ConfiguredAIClient:
             timeout_seconds=timeout_seconds, output_limit=1024,
             disable_thinking=_is_deepseek_v4_provider(provider))
 
+    def test_connection(self) -> Assistant:
+        """Probe the selected provider once, without tools or fallback."""
+        provider = next((item for item in self._candidate_providers() if item.api_key), None)
+        if provider is None:
+            raise ValueError("AI provider unavailable")
+        return self._complete_with_provider(
+            provider,
+            [Message(role="user", content="Reply with OK.")],
+            [],
+            timeout_seconds=15,
+            output_limit=64,
+            disable_thinking=_is_deepseek_v4_provider(provider),
+        )
+
     def _complete_with_provider(
         self,
         provider: AIProviderProfile,
@@ -319,8 +333,7 @@ class ConfiguredAIClient:
         if timeout_seconds is not None:
             payload["timeout"] = timeout_seconds
             payload["num_retries"] = 0
-        if output_limit is not None:
-            payload["max_tokens"] = min(output_limit, provider.max_output_tokens or output_limit)
+        payload["max_tokens"] = _effective_output_limit(provider, output_limit)
         if disable_thinking:
             payload["extra_body"] = {"thinking": {"type": "disabled"}}
 
@@ -363,6 +376,7 @@ class ConfiguredAIClient:
             "messages": [_openai_message(message) for message in messages],
             "api_key": provider.api_key,
             "stream": True,
+            "max_tokens": _effective_output_limit(provider),
         }
         api_base = provider.base_url.rstrip("/") if force_api_base else _litellm_api_base(provider)
         if api_base:
@@ -436,7 +450,15 @@ def _litellm_model(provider: AIProviderProfile) -> str:
 def _is_deepseek_v4_provider(provider: AIProviderProfile) -> bool:
     hostname = (urlparse(provider.base_url).hostname or "").lower()
     model = provider.model.rsplit("/", 1)[-1].strip().lower()
-    return hostname == "api.deepseek.com" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}
+    return hostname == "api.deepseek.com" and model in {
+        "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro",
+    }
+
+
+def _effective_output_limit(provider: AIProviderProfile, output_limit: int | None = None) -> int:
+    # Match the output reserve used by preflight, including legacy zero-valued profiles.
+    configured_limit = provider.max_output_tokens or DEFAULT_OUTPUT_RESERVE
+    return min(configured_limit, output_limit) if output_limit is not None else configured_limit
 
 
 def _profile_from_frozen_candidate(candidate: FrozenProviderCandidate) -> AIProviderProfile:

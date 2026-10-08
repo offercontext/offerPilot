@@ -267,6 +267,8 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     setConfirmPhaseState(phase);
   }, []);
 
+  const isActionOwnerReady = useCallback(() => actionsOwnerRef.current !== null, []);
+
   const bindActions = useCallback((owner: object, actions: PilotConversationActions) => {
     actionsOwnerRef.current = owner;
     actionsRef.current = actions;
@@ -726,6 +728,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     consumedOnboardingFocusTokenRef,
     consumedConversationRequestRef,
     openRef,
+    isActionOwnerReady,
     bindActions,
     releaseActions,
     bindStopFeedback,
@@ -760,6 +763,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     presentationRefreshing,
     autoApprove,
     activateConversationContext,
+    isActionOwnerReady,
     bindActions,
     bindStopFeedback,
     bindTaskStateReporter,

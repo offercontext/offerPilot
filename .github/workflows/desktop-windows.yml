@@ -166,22 +166,12 @@ jobs:
           retention-days: 14
           path: desktop/ci-evidence/
 
-  full-regression:
-    name: Full release regression (required for release)
+  pytest-manifest:
+    name: Collect complete pytest manifest
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Record full gate scope and run identity
-        run: |
-          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
-          @(
-            "Full, unsharded scripts/release-gate.ps1 -Install is required for release readiness.",
-            "Commit: $env:GITHUB_SHA",
-            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
-            "Attempt: $env:GITHUB_RUN_ATTEMPT",
-            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
-          ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -194,36 +184,117 @@ jobs:
           node-version: "22"
           cache: npm
           cache-dependency-path: web/package-lock.json
+      - run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend dependency install failed" }
+          uv run --frozen python scripts/test_shards/gate.py collect --count 12 --manifest pytest-evidence/manifest.json
+          if ($LASTEXITCODE -ne 0) { throw "Complete pytest collection failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pytest-manifest-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Capacity estimate, not a measured guarantee: 89 minutes at 21% implies
+  # roughly 425 pytest runner-minutes, plus 12 dependency/collection startups
+  # and repeated fixture costs. Two shards at once; packaging can be a third
+  # runner. A shard has a 90-minute limit (1080 aggregate shard-minute ceiling).
+  # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
+  pytest-shards:
+    name: Complete pytest shard ${{ matrix.shard }} of 12
+    needs: pytest-manifest
+    runs-on: windows-2022
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: pytest-manifest-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence
+      - name: Execute exact manifest partition in isolated process
+        run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend dependency install failed" }
+          # No global PYTEST_ADDOPTS: nested pytest collection/parsing is unchanged.
+          uv run --frozen python scripts/test_shards/gate.py run --manifest pytest-evidence/manifest.json --index ${{ matrix.shard }} --output pytest-evidence
+          if ($LASTEXITCODE -ne 0) { throw "Full pytest shard failed" }
+      - name: Preserve shard evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence/shard-*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  full-regression:
+    name: Full release regression (required for release)
+    if: ${{ always() }}
+    needs: [pytest-manifest, pytest-shards]
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pytest-*-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence
+          merge-multiple: true
       - name: Install locked regression dependencies
         run: |
-          Start-Transcript -Path desktop/ci-evidence/01-install.log
           uv sync --frozen
           if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
           npm.cmd ci --prefix web
           if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
-          Stop-Transcript
-      - name: Complete repository release and installation gate
+      - name: Verify full pytest evidence and complete every remaining release phase
+        env:
+          SHARD_RESULT: ${{ needs.pytest-shards.result }}
+          MANIFEST_RESULT: ${{ needs.pytest-manifest.result }}
         run: |
-          Start-Transcript -Path desktop/ci-evidence/02-full-release-gate.log
-          $stdout = Join-Path $PWD "desktop/ci-evidence/full-gate-stdout.log"
-          $stderr = Join-Path $PWD "desktop/ci-evidence/full-gate-stderr.log"
-          $started = [DateTime]::UtcNow
-          # Execute the existing gate unchanged. Do not set PYTEST_ADDOPTS:
-          # nested tests also invoke pytest and parse its collection output.
-          $gate = Start-Process -FilePath powershell -WorkingDirectory $PWD -NoNewWindow -PassThru `
-            -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/release-gate.ps1', '-Install') `
-            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-          while (-not $gate.WaitForExit(60000)) {
-            $elapsed = [Math]::Round(([DateTime]::UtcNow - $started).TotalMinutes, 1)
-            Write-Host "[$([DateTime]::UtcNow.ToString('o'))] Full release gate running: $elapsed minutes. Latest stdout/stderr:"
-            Get-Content -LiteralPath $stdout -Tail 3 -ErrorAction SilentlyContinue
-            Get-Content -LiteralPath $stderr -Tail 3 -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          Start-Transcript -Path desktop/ci-evidence/full-release-gate.log
+          if ($env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success') {
+            throw "Collection and all shards must succeed; timeout/cancellation/skipped is not success"
           }
-          $gate.WaitForExit()
-          Get-Content -LiteralPath $stdout
-          Get-Content -LiteralPath $stderr
-          Write-Host "Full release gate exited $($gate.ExitCode) at $([DateTime]::UtcNow.ToString('o'))"
-          if ($gate.ExitCode -ne 0) { throw "Repository release gate failed (exit $($gate.ExitCode))" }
+          # This verifies exact execution coverage before ruff, mypy, frontend
+          # tests/build, real CLI/HTTP smoke, local verification and install gate.
+          # Runtime skips remain explicitly disclosed as skips, never passed tests.
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence
+          if ($LASTEXITCODE -ne 0) { throw "Complete repository release gate failed" }
           Stop-Transcript
       - name: Preserve full gate evidence even on failure
         if: ${{ always() }}
@@ -231,8 +302,10 @@ jobs:
         with:
           name: windows-full-regression-evidence-${{ github.sha }}-${{ github.run_attempt }}
           if-no-files-found: warn
-          retention-days: 14
-          path: desktop/ci-evidence/
+          retention-days: 7
+          path: |
+            desktop/ci-evidence/
+            pytest-evidence/
 
   validation-status:
     name: Validation results (both jobs must pass)

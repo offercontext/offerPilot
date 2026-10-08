@@ -1,0 +1,28 @@
+html.desktop-haru-root, .desktop-haru-root body, .desktop-haru-root #root { background: transparent !important; margin: 0; width: 100%; height: 100%; overflow: hidden; }
+.desktop-haru { box-sizing: border-box; height: 100dvh; display: flex; flex-direction: column; padding: 8px; color: var(--op-text, #242738); font-family: system-ui, sans-serif; font-size: 13px; }
+.desktop-haru button { font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--op-border, #d7d9e3); border-radius: 8px; padding: 5px 8px; background: var(--op-surface, #fff); -webkit-app-region: no-drag; }
+.desktop-haru button:disabled { opacity: .55; cursor: default; }
+.desktop-haru button:focus-visible, .desktop-haru textarea:focus-visible { outline: 3px solid #818cf8; outline-offset: 2px; }
+.desktop-haru button[aria-pressed=true] { background: #dfe3ff; color: #323987; }
+.desktop-haru-bar { -webkit-app-region: drag; display: flex; justify-content: space-between; align-items: center; gap: 8px; min-height: 38px; padding: 0 7px; border-radius: 12px; background: var(--op-surface, #fff); box-shadow: 0 2px 12px #17234220; user-select: none; }
+.desktop-haru-bar nav { display: flex; gap: 4px; }
+.desktop-haru .desktop-haru-avatar { background: transparent; border: 0; padding: 0; flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; }
+.desktop-haru-portrait { min-height: 0; width: 100%; flex: 1; position: relative; }
+.desktop-haru-portrait canvas { display: block; width: 100%; height: 100%; }
+.desktop-haru-portrait > span { position: absolute; inset: 35% 20%; border-radius: 24px; background: #e7e8ff; display: grid; place-items: center; font-size: 28px; }
+.desktop-haru-avatar > span { border-radius: 12px; padding: 5px 12px; background: var(--op-surface, #fff); }
+.desktop-haru.expanded .desktop-haru-avatar { flex: 0 0 clamp(70px, 18vh, 130px); }
+.desktop-haru-chat { overflow: auto; min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 8px; background: var(--op-surface, #fff); border: 1px solid var(--op-border, #d7d9e3); border-radius: 16px; padding: 12px; box-shadow: 0 4px 16px #17234222; }
+.desktop-haru-chat p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.desktop-haru-context { font-size: 12px; color: var(--op-muted, #687086); }
+.desktop-haru-messages { flex: 1; overflow: auto; min-height: 32px; }
+.desktop-haru-messages article { padding: 9px; border-radius: 10px; margin-bottom: 8px; background: var(--op-layout-bg, #f4f5fb); }
+.desktop-haru-messages article[data-role=user] { margin-left: 24px; }
+.desktop-haru-messages article p { line-height: 1.5; margin-top: 3px; }
+.desktop-haru-pending { padding: 8px; background: #fff3cd; color: #654a00; border-radius: 8px; }
+.desktop-haru-pending button { display: block; margin-top: 6px; }
+.desktop-haru-chat footer { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.desktop-haru-chat textarea { box-sizing: border-box; resize: none; min-width: 0; flex: 1; border: 1px solid var(--op-border, #d7d9e3); background: var(--op-surface, #fff); color: inherit; border-radius: 8px; padding: 8px; font: inherit; }
+.desktop-haru-chat small { flex-basis: 100%; color: var(--op-muted, #687086); font-size: 11px; }
+.desktop-haru-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.desktop-haru [role=alert] { max-height: 72px; overflow: auto; flex-shrink: 0; color: #b42318; font-size: 12px; }
