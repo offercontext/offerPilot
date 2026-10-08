@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
+import { auditInstalledResponseObserver, nativeEffectiveCspObserver, assertEffectiveCspObservation } from './effective-csp-observer.mjs';
 
 const { contentSecurityPolicy } = createRequire(import.meta.url)('../capabilities.cjs');
 const ASSET_NAMES = Object.freeze({
@@ -267,10 +268,25 @@ function diagnosticErrorCategory(error) {
 }
 
 function reloadDiagnostic() {
-  return { check: 'not-started', result: 'not-run', errorCategory: null,
+  return { check: 'not-started', result: 'not-run', errorCategory: null, rawHeaderError: null,
     observed: Object.fromEntries(['safeReloadGatePassed', 'reloadResolved', 'responsePresent', 'responseStatus200',
       'responseURLMatched', 'redirectAbsent', 'provisionalCspPresent', 'provisionalCspMatched',
-      'rawCspPresent', 'rawCspMatched', 'pageURLMatched'].map(key => [key, 'not-observed'])) };
+      'rawCspPresent', 'rawCspMatched', 'rawCspReadSucceeded', 'nativeCspObserved', 'nativeCspMatched',
+      'pageURLMatched'].map(key => [key, 'not-observed'])) };
+}
+
+// ExtraInfo/raw headers describe the upstream server and may precede Electron's
+// override. Keep this read bounded and diagnostic-only; effective policy needs
+// BOTH the browser response headers and native post-override observation below.
+async function rawCspDiagnostic(response, timeoutMs) {
+  let timer;
+  try {
+    const raw = await Promise.race([response.headerValue('content-security-policy'), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('raw CSP diagnostic timed out')), Math.min(timeoutMs, 5000));
+    })]);
+    return { present: typeof raw === 'string', matched: raw === contentSecurityPolicy, succeeded: true, error: null };
+  } catch (error) { return { present: 'not-observed', matched: 'not-observed', succeeded: false, error: diagnosticErrorCategory(error) }; }
+  finally { clearTimeout(timer); }
 }
 
 // Reloads the owner before the probe to verify the active main-document CSP,
@@ -294,6 +310,13 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   let importedResponses = 0;
   let reloadRequired = false;
   let observersDetached = false;
+  const nativeKey = randomUUID();
+  let nativeObserverStarted = false;
+  let nativeProof = null;
+  let responseObserverAuditPassed = false;
+  const native = (operation, extra = {}) => app.evaluate(nativeEffectiveCspObserver, { key: nativeKey, operation, ...extra });
+  const modulePolicy = { browserCspPresent: null, browserCspMatched: null,
+    rawCspPresent: null, rawCspMatched: null, rawCspReadSucceeded: null, rawHeaderError: null };
   const onRequest = (request) => {
     if (request.method() === 'GET' && Object.values(urls).includes(request.url())) return;
     try {
@@ -317,7 +340,13 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     responseChecks.push((async () => {
       assert.equal(response.status(), 200, 'installed module import must return HTTP 200');
       assert.equal(response.request().redirectedFrom(), null, 'ORT module import must not redirect');
-      assert.equal(await response.headerValue('content-security-policy'), contentSecurityPolicy, 'module production CSP mismatch');
+      const effective = response.headers()['content-security-policy'];
+      modulePolicy.browserCspPresent = typeof effective === 'string';
+      modulePolicy.browserCspMatched = effective === contentSecurityPolicy;
+      assert.equal(effective, contentSecurityPolicy, 'module effective production CSP mismatch');
+      const raw = await rawCspDiagnostic(response, timeoutMs);
+      Object.assign(modulePolicy, { rawCspPresent: raw.present, rawCspMatched: raw.matched,
+        rawCspReadSucceeded: raw.succeeded, rawHeaderError: raw.error });
       const bytes = await response.body();
       assert.equal(bytes.length, installed.assets.mjs.bytes, 'imported module byte count mismatch');
       assert.equal(sha256(bytes), installed.assets.mjs.sha256, 'imported module must equal installed bytes');
@@ -330,6 +359,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   const reloads = { beforeProbe: reloadDiagnostic(), releaseProbe: reloadDiagnostic() };
   const cleanup = {
     observers: { check: 'observer-detach', result: 'not-run', errorCategory: null },
+    nativeObserver: { check: 'native-observer-restore', result: 'not-run', errorCategory: null },
     ownerHandle: { check: 'owner-handle-dispose', result: 'not-run', errorCategory: null },
   };
   const observed = Object.fromEntries([...Object.keys(OWNER_EXPECTATIONS), 'additionalArgumentsArray', 'ownerArgument',
@@ -338,8 +368,9 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   let currentCheck = 'owner-observation';
   const emit = async (failedCheck = primaryFailure?.check ?? null) => {
     try {
-      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 2, phase, observed: { ...observed }, failedCheck,
+      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 3, phase, observed: { ...observed }, failedCheck,
         primaryFailure: primaryFailure && { ...primaryFailure },
+        effectiveCsp: { responseObserverAuditPassed, native: nativeProof && structuredClone(nativeProof), module: { ...modulePolicy } },
         reloads: Object.fromEntries(Object.entries(reloads).map(([key, value]) =>
           [key, { ...value, observed: { ...value.observed } }])),
         cleanup: Object.fromEntries(Object.entries(cleanup).map(([key, value]) => [key, { ...value }])) });
@@ -365,6 +396,8 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
       if (kind === 'beforeProbe') currentCheck = name;
     };
     try {
+      check('native-csp-arm');
+      assert.equal((await native('arm', { phase: kind })).armed, true);
       check('before-reload-gate');
       await beforeReload(kind === 'beforeProbe' ? 'before-probe' : 'release-probe');
       diagnostic.observed.safeReloadGatePassed = true;
@@ -389,13 +422,20 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
       const provisionalCsp = response.headers()['content-security-policy'];
       diagnostic.observed.provisionalCspPresent = typeof provisionalCsp === 'string';
       diagnostic.observed.provisionalCspMatched = provisionalCsp === contentSecurityPolicy;
+      check('browser-csp-match');
+      assert.equal(provisionalCsp, contentSecurityPolicy, 'active document must use effective production CSP');
       check('raw-csp-read');
-      const rawCsp = await response.headerValue('content-security-policy');
-      diagnostic.observed.rawCspPresent = typeof rawCsp === 'string';
-      diagnostic.observed.rawCspMatched = rawCsp === contentSecurityPolicy;
-      check('raw-csp-match');
-      // Provisional headers are diagnostic-only; retain the original strict gate.
-      assert.equal(rawCsp, contentSecurityPolicy, 'active document must use production CSP');
+      const raw = await rawCspDiagnostic(response, timeoutMs);
+      diagnostic.observed.rawCspPresent = raw.present;
+      diagnostic.observed.rawCspMatched = raw.matched;
+      diagnostic.observed.rawCspReadSucceeded = raw.succeeded;
+      diagnostic.rawHeaderError = raw.error;
+      check('native-effective-csp');
+      nativeProof = await native('snapshot');
+      diagnostic.observed.nativeCspObserved = nativeProof.records?.[kind]?.count === 1;
+      diagnostic.observed.nativeCspMatched = nativeProof.records?.[kind]?.cspMatched === true;
+      assert.equal(nativeProof.registered, true, 'native effective CSP observer must remain registered');
+      assertEffectiveCspObservation(nativeProof, { [kind]: 1 });
       check('page-url');
       diagnostic.observed.pageURLMatched = page.url() === ownerURL;
       assert.equal(diagnostic.observed.pageURLMatched, true, 'installed owner must not navigate');
@@ -441,6 +481,16 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
       await emit(passed ? null : check);
     });
     requireDiagnostic();
+    currentCheck = 'response-observer-source-audit';
+    const audit = await auditInstalledResponseObserver(installDir);
+    assert.equal(audit.responseStartedUnused, true);
+    responseObserverAuditPassed = true;
+    currentCheck = 'response-observer-install';
+    nativeObserverStarted = true;
+    const installedObserver = await native('install', { owner, ownerURL, moduleURL: urls.mjs,
+      policy: contentSecurityPolicy, sourceAuditPassed: true });
+    assert.equal(installedObserver.installed, true);
+    assert.equal(installedObserver.productionBlockingHandlersChanged, false);
     phase = 'document-csp';
     currentCheck = 'document-csp';
     await emit();
@@ -450,6 +500,8 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     page.on('request', onRequest);
     page.on('response', onResponse);
     page.on('worker', onWorker);
+    currentCheck = 'native-runtime-arm';
+    assert.equal((await native('arm', { phase: 'runtime' })).armed, true);
     phase = 'initialization';
     currentCheck = 'initialization';
     await emit();
@@ -468,6 +520,10 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
       checkedResponses += pending.length;
       for (const error of await Promise.all(pending)) if (error) throw error;
     }
+    currentCheck = 'native-runtime-effective-csp';
+    nativeProof = await native('snapshot');
+    assert.equal(nativeProof.registered, true);
+    assertEffectiveCspObservation(nativeProof, { beforeProbe: 1, module: 1, releaseProbe: 0 });
     // This is a finite observation window, ending after initialization and all
     // collected byte verifications. Close it synchronously before final checks:
     // no await may separate this detach from the counter/owner assertions.
@@ -500,6 +556,23 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     try { await reload('releaseProbe'); }
     catch { cleanupErrors.push(new Error('ORT renderer cleanup reload failed or was unsafe')); }
   }
+  if (nativeObserverStarted) {
+    try {
+      const restored = await native('restore');
+      assert.equal(restored.restored, true, 'native CSP observer restoration required');
+      assert.equal(restored.absent, false, 'installed native CSP observer cannot disappear before restoration');
+      nativeProof = restored.snapshot;
+      assert.equal(nativeProof.registered, false, 'native CSP observer must be unregistered');
+      if (!primaryError && cleanupErrors.length === 0) {
+        assertEffectiveCspObservation(nativeProof, { beforeProbe: 1, module: 1, releaseProbe: 1 });
+      }
+      cleanup.nativeObserver.result = 'passed';
+    } catch (error) {
+      cleanup.nativeObserver.result = 'failed';
+      cleanup.nativeObserver.errorCategory = diagnosticErrorCategory(error);
+      cleanupErrors.push(new Error('ORT native CSP observer cleanup or final observation failed'));
+    }
+  }
   try { await owner.dispose(); cleanup.ownerHandle.result = 'passed'; } catch (error) {
     cleanup.ownerHandle.result = 'failed';
     cleanup.ownerHandle.errorCategory = diagnosticErrorCategory(error);
@@ -512,6 +585,9 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'ORT probe cleanup failed');
   return { mechanism: 'installed-self-assets-in-real-owner-renderer', ...result, assets: installed.assets,
     mainDocumentProductionCspVerified: true, importedModuleBytesVerified: true,
+    effectiveCspVerifiedBy: ['browser-response-headers', 'electron-post-override-onResponseStarted'],
+    upstreamRawCspIsDiagnosticOnly: true, responseObserverAuditPassed,
+    nativeEffectiveCsp: nativeProof, nativeResponseObserverRestored: true,
     observationWindow: 'initialization-through-asset-and-response-verification',
     observedUnexpectedRequests: unexpectedRequests, expectedLocalBackgroundRequests, observedWorkersCreated: workersCreated,
     rendererReleasedByReload: true, securityPolicyChanged: false,

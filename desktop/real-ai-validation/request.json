@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "requestId": "offerpilot-fixed-exe-real-ai-20261008",
+  "environment": "offerpilot-real-ai-validation",
+  "workflow": ".github/workflows/desktop-real-ai.yml",
+  "limits": { "currency": "CNY", "budget": 10, "requests": 8, "seconds": 600, "retries": 0 },
+  "cases": ["connection", "pilot-stream", "pilot-cancel", "pilot-hitl-reject", "interview-preparation", "resume-structure", "offer-negotiation"],
+  "transport": "fixed-exe-ui-loopback-budget-broker-real-provider",
+  "profile": "single-synthetic-fresh-profile",
+  "rawEvidence": false,
+  "screenshots": false,
+  "reruns": false
+}

@@ -16,7 +16,9 @@ function fixture({ receiver = 'target', finiteAnimations = 0, failSnapshot = fal
   const node=element('close');node.parentElement=drawer;
   const topbar=element('topbar',{position:'fixed',zIndex:'1001'});topbar.selectors=['.op-topbar'];
   const mask=element('mask');mask.selectors=['.ant-drawer-mask'];
-  const receivers={target:node,topbar,mask,body,root};
+  const messageWrapper=element('message-wrapper',{opacity:'0'});messageWrapper.selectors=['.ant-message'];
+  const messageContent=element('message-content',{pointerEvents:'all'});messageContent.parentElement=messageWrapper;
+  const receivers={target:node,topbar,mask,body,root,message:messageContent};
   const doc={documentElement:root,body,visibilityState:'visible',hasFocus:()=>true,
     elementFromPoint:()=>receivers[receiver]??null,elementsFromPoint:()=>[receivers[receiver]??body,node,drawer],
     addEventListener:(type,fn,capture)=>{assert.equal(capture,true);listeners.set(type,fn);},
@@ -85,4 +87,13 @@ test('elapsed values remain finite, nonnegative, monotonic and capped across clo
   assert.ok(last.events.every(event=>Number.isFinite(event.elapsedMs)&&event.elapsedMs>=0&&event.elapsedMs<=120000));
   const invalid=fixture();invalid.setNow(NaN);assert.throws(invalid.install,/clock unavailable/);assert.equal(invalid.listeners.size,0);
   const lost=fixture();lost.install();lost.setNow(Infinity);assert.throws(()=>lost.read(true),/clock unavailable/);assert.equal(lost.listeners.size,0);
+});
+
+test('transparent message ancestry is retained separately from its hit-testable child opacity and pointer-events all',()=>{
+  const f=fixture({receiver:'message'});const snapshot=f.install();
+  assert.equal(snapshot.centerReceiver,'message');assert.equal(snapshot.hitStack[0].kind,'message');
+  assert.equal(snapshot.hitStack[0].opacity,1);assert.equal(snapshot.hitStack[0].visible,true);
+  assert.equal(snapshot.hitStack[0].pointerEvents,'all');assert.equal(snapshot.hitStack[0].ancestorOpacityMin,0);
+  assert.equal(snapshot.hitStack[0].ancestorVisibilityHidden,false);f.read(true);
+  assert.equal(drawerCloseFailure(new Error('ant-message-notice intercepts pointer events')).knownInterceptor,'message');
 });

@@ -28,7 +28,8 @@ test('exact branch and exact narrow paths, without alternate triggers or auto-ca
     assert.equal(workflow.concurrency, undefined);
     for (const job of Object.values(workflow.jobs)) assert.equal(job.concurrency, undefined);
   }
-  assert.deepEqual(original.on.push['paths-ignore'], [allowed[0], 'desktop/layout-retry/**', '.github/workflows/desktop-layout-retry.yml', ...allowed.slice(1)]);
+  assert.deepEqual(original.on.push['paths-ignore'], [allowed[0], 'desktop/layout-retry/**', '.github/workflows/desktop-layout-retry.yml', ...allowed.slice(1),
+    'desktop/real-ai-validation/**', '.github/workflows/desktop-real-ai.yml', 'docs/architecture/desktop-real-ai-validation.md']);
   assert.deepEqual(ui.on.push.paths, allowed);
   assert.equal(original.on.push.paths, undefined);
   assert.equal(ui.on.push['paths-ignore'], undefined);

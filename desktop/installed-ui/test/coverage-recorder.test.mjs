@@ -16,7 +16,7 @@ async function fixture(t, { pendingWrite=false, overflow=false, covered=0, wrong
   const sizes=[];
   const page={
     async evaluate(_callback,args) { if(args?.rules)return {observedView:'applications-list',visibleSurfaces:mainIdentity?[args.targetId]:['R05'],targetSurfaceConfirmed:mainIdentity}; return {width,height:wrongHeight?height-1:height,documentWidth:overflow?2000:width,theme:'dark',haruCoveredControls:covered,kanbanColumnCount:columnCount,kanbanColumnHorizontalOverflow:columnOverflow,kanbanControlsOutsideColumn:clippedControls,kanbanControlsOutsideCard:cardClipped,kanbanUnownedControls:unownedControls}; },
-    async screenshot({path}) { await fs.writeFile(path,'UNIT TEST ONLY, NOT A PRODUCT SCREENSHOT'); },
+    async screenshot({path,animations}) { assert.equal(animations,'allow','capture must not finish or cancel application animations'); await fs.writeFile(path,'UNIT TEST ONLY, NOT A PRODUCT SCREENSHOT'); },
     async reload() { reloads++; },
     async waitForFunction(callback,value,options) { if (value === undefined) { assert.equal(options.timeout,5000); assert.equal(options.polling,'raf'); return; } assert.equal(width,value.width); assert.equal(height,value.height); },
   };
@@ -41,6 +41,8 @@ test('recorder writes pin, native measured size, explicit assertion and screensh
   assert.deepEqual(report.screens[0].fixtureIds,[{kind:'application',id:27}]);
   assert.equal(report.screens[0].width,900);
   assert.equal(report.summary.functionalPasses,1);
+  assert.match(report.screenshotAnimationPolicy,/settles naturally/);
+  assert.match(report.screenshotAnimationPolicy,/no animation finishing\/cancellation/);
 });
 
 test('recorder uses actual native 689px content height for screenshot regression',async(t)=>{

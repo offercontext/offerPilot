@@ -1,0 +1,230 @@
+name: Pinned Windows real AI (manual approval only)
+
+# Feature-only activation: workflow_dispatch is deliberately NOT offered.
+# An ordinary push never reaches the protected job or evaluates a provider secret.
+# The owner selects one exact, reviewed empty request commit using repository variables.
+on:
+  push:
+    branches: [feat/20261005-windows-desktop-validation]
+permissions: {}
+concurrency:
+  group: offerpilot-fixed-exe-real-ai-20261008
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: pwsh
+jobs:
+  route:
+    name: Secret-free changed-path routing
+    if: ${{ github.repository == 'offercontext/offerPilot' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && github.run_attempt == 1 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      offline: ${{ steps.paths.outputs.offline }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - name: Read complete linear push range; never spend or read provider credentials
+        id: paths
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node desktop/real-ai-validation/classify-change.mjs
+
+  offline:
+    name: Pinned EXE offline UI
+    needs: route
+    if: ${{ needs.route.result == 'success' && needs.route.outputs.offline == 'true' && github.run_attempt == 1 }}
+    runs-on: windows-2022
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    env:
+      AI_PRODUCT_SOURCE: ${{ github.workspace }}/.ai-product-source
+      AI_EVIDENCE_DIR: ${{ github.workspace }}/desktop/real-ai-validation/mock-evidence
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - name: Initialize MOCK-only runner paths
+        run: |
+          if (-not $env:RUNNER_TEMP) { throw 'Hosted runner temporary directory unavailable' }
+          "AI_ARTIFACT_DIR=$(Join-Path $env:RUNNER_TEMP 'offerpilot-fixed-ai-mock-artifact')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install locked test helpers and run offline safety tests
+        run: |
+          npm.cmd ci --prefix desktop/real-ai-validation --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'MOCK helper installation failed' }
+          npm.cmd test --prefix desktop/real-ai-validation
+          if ($LASTEXITCODE -ne 0) { throw 'Offline safety tests failed' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          path: .ai-product-source
+          persist-credentials: false
+      - name: Download the identical fixed installer for MOCK UI validation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          repository: offercontext/offerPilot
+          run-id: 37754883783
+          name: offerpilot-windows-experimental-validation-16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          path: ${{ env.AI_ARTIFACT_DIR }}
+      - name: Verify and install exact EXE without any provider credential
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node desktop/real-ai-validation/offline.mjs prepare
+          if ($LASTEXITCODE -ne 0) { throw 'MOCK fixed installer preparation failed' }
+      - name: Real installed UI against synthetic MOCK provider only
+        timeout-minutes: 12
+        run: |
+          node desktop/real-ai-validation/offline.mjs run
+          if ($LASTEXITCODE -ne 0) { throw 'MOCK UI validation failed; paid validation remains blocked' }
+      - name: Clean only MOCK-owned temporary profile
+        if: ${{ always() }}
+        run: |
+          node desktop/real-ai-validation/cleanup.mjs --mock
+          if ($LASTEXITCODE -ne 0) { throw 'MOCK cleanup failed' }
+      - name: Retain explicitly MOCK, allowlisted evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fixed-exe-mock-evidence-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/real-ai-validation/mock-evidence/result.json
+            desktop/real-ai-validation/mock-evidence/ledger.json
+
+  preflight:
+    needs: route
+    name: Secret-free exact request and protection check
+    if: >-
+      ${{ needs.route.result == 'success' && github.repository == 'offercontext/offerPilot' &&
+          github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' &&
+          github.sha == vars.OFFERPILOT_AI_REQUEST_SHA &&
+          startsWith(github.event.head_commit.message, 'test: request OfferPilot real AI validation') &&
+          github.run_attempt == 1 }}
+    runs-on: windows-2022
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      helper_sha: ${{ steps.guard.outputs.helper_sha }}
+    env:
+      AI_APPROVED_HELPER_SHA: ${{ vars.OFFERPILOT_AI_APPROVED_HELPER_SHA }}
+      AI_REQUEST_SHA: ${{ vars.OFFERPILOT_AI_REQUEST_SHA }}
+      AI_REVIEWER_LOGIN: XiaoZheBrother
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - name: Fail closed before an environment job can be scheduled
+        id: guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node desktop/real-ai-validation/preflight.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Real AI preflight blocked; no provider credential was read' }
+
+  real-ai:
+    name: Approved bounded real AI
+    needs: preflight
+    if: ${{ needs.preflight.result == 'success' && github.run_attempt == 1 }}
+    environment:
+      name: offerpilot-real-ai-validation
+    runs-on: windows-2022
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    env:
+      AI_APPROVED_HELPER_SHA: ${{ vars.OFFERPILOT_AI_APPROVED_HELPER_SHA }}
+      AI_REQUEST_SHA: ${{ vars.OFFERPILOT_AI_REQUEST_SHA }}
+      AI_REVIEWER_LOGIN: XiaoZheBrother
+      AI_PRODUCT_SOURCE: ${{ github.workspace }}/.ai-product-source
+      AI_EVIDENCE_DIR: ${{ github.workspace }}/desktop/real-ai-validation/evidence
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ needs.preflight.outputs.helper_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - name: Initialize runner-local artifact destination
+        run: |
+          if (-not $env:RUNNER_TEMP) { throw 'Hosted runner temporary directory unavailable' }
+          "AI_ARTIFACT_DIR=$(Join-Path $env:RUNNER_TEMP 'offerpilot-fixed-ai-artifact')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Recheck actual manual approval without provider credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node desktop/real-ai-validation/preflight.mjs --approval
+          if ($LASTEXITCODE -ne 0) { throw 'Manual approval or session history is unverified' }
+      - name: Install only pinned helpers; no install scripts or caches
+        run: |
+          npm.cmd ci --prefix desktop/real-ai-validation --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated helper installation failed' }
+          npm.cmd test --prefix desktop/real-ai-validation
+          if ($LASTEXITCODE -ne 0) { throw 'Offline safety tests failed' }
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          path: .ai-product-source
+          persist-credentials: false
+      - name: Download fixed installer; never rebuild or choose latest
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          github-token: ${{ github.token }}
+          repository: offercontext/offerPilot
+          run-id: 37754883783
+          name: offerpilot-windows-experimental-validation-16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          path: ${{ env.AI_ARTIFACT_DIR }}
+      - name: Verify metadata, SHA, installed payload and fresh profile before key injection
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node desktop/real-ai-validation/prepare.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Fixed installer or owned profile preparation failed' }
+      - name: Manually approved real-provider UI validation
+        timeout-minutes: 12
+        env:
+          OFFERPILOT_REAL_AI_KEY: ${{ secrets.OFFERPILOT_REAL_AI_DEEPSEEK_20261008 }}
+        run: |
+          node desktop/real-ai-validation/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Bounded validation did not pass; no automatic retry is allowed' }
+      - name: Always remove only owned temporary profile and processes
+        if: ${{ always() }}
+        run: |
+          node desktop/real-ai-validation/cleanup.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Temporary cleanup failed; treat remaining budget as unavailable' }
+      - name: Retain only numeric ledger and allowlisted result
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: real-ai-single-session-ledger-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: |
+            desktop/real-ai-validation/evidence/result.json
+            desktop/real-ai-validation/evidence/ledger.json

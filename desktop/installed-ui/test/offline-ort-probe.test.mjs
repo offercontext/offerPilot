@@ -7,6 +7,8 @@ import { createHash, webcrypto } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
+import { nativeEffectiveCspObserver } from '../effective-csp-observer.mjs';
+import { auditedArchive, nativeObserverFixture } from './fixtures/effective-csp-fixture.mjs';
 import { discoverInstalledOfflineOrt, installedOfflineOrtURLs, initializeOfflineOrtInRenderer,
   assertOfflineOrtInitialization, assertInstalledResourcesIdentity, probeInstalledOfflineOrt, readOfflineOrtOwner,
   readOfflineOrtPreloadOwner } from '../offline-ort-probe.mjs';
@@ -277,17 +279,21 @@ test('result assertions reject incomplete/fabricated-success-shaped runtime evid
 
 async function probeHarness(t, options = {}) {
   const f = await files(t);
+  await auditedArchive(f.canonicalInstallDir, options.archiveOverrides);
+  const native = nativeObserverFixture(t, { ownerURL, moduleURL: installedOfflineOrtURLs(ownerURL, metadata).mjs,
+    policy: csp, installError: options.nativeInstallError, restoreError: options.nativeRestoreError, beforeRestore: options.beforeNativeRestore });
   const page = new EventEmitter();
   let reloads = 0;
   let disposed = 0;
   const reloadGates = [];
   const reloadResponse = { status: () => 200, url: () => ownerURL,
     request: () => ({ redirectedFrom: () => null }),
-    headers: () => ({ 'content-security-policy': csp }),
-    headerValue: async () => options.documentCsp ? "script-src 'self'" : csp };
+    headers: () => ({ 'content-security-policy': options.documentCsp ? "script-src 'self'" : csp }),
+    headerValue: async () => Object.hasOwn(options, 'rawDocumentCsp') ? options.rawDocumentCsp : csp };
   Object.assign(page, { url: () => ownerURL, reload: async () => {
     reloads++;
     if (options.cleanupFails && reloads === 2) throw new Error('reload failed');
+    if (!options.noNativeDocument) native.emit('document', options.nativeDocument);
     return reloadResponse;
   } });
   const renderer = rendererHarness({ ...options, onImport: () => {
@@ -299,8 +305,10 @@ async function probeHarness(t, options = {}) {
     if (options.localPolling) page.emit('request', { method: () => 'GET', url: () => `${origin}/api/logs?limit=20&offset=0` });
     if (options.unknownLocalRead) page.emit('request', { method: () => 'GET', url: () => `${origin}/api/models/download` });
     if (options.localWrite) page.emit('request', { method: () => 'POST', url: () => `${origin}/api/settings` });
+    if (!options.noNativeModule) native.emit('module', options.nativeModule);
     if (!options.noImportResponse) page.emit('response', { url: request.url, request: () => request,
-      status: () => 200, headerValue: async () => options.moduleCsp ? "script-src 'self'" : csp,
+      status: () => 200, headers: () => ({ 'content-security-policy': options.moduleCsp ? "script-src 'self'" : csp }),
+      headerValue: async () => Object.hasOwn(options, 'rawModuleCsp') ? options.rawModuleCsp : csp,
       body: async () => options.wrongModuleBytes ? Buffer.from('wrong executable module') : mjsBytes });
   } });
   page.evaluate = async (fn, args) => {
@@ -308,9 +316,10 @@ async function probeHarness(t, options = {}) {
     assert.equal(fn, initializeOfflineOrtInRenderer);
     return fn(args, renderer.dependencies);
   };
-  const owner = { dispose: async () => { disposed++; if (options.ownerDisposeError) throw options.ownerDisposeError; } };
+  const owner = { ...native.owner, dispose: async () => { disposed++; if (options.ownerDisposeError) throw options.ownerDisposeError; } };
   const app = { browserWindow: async (candidate) => { assert.equal(candidate, page); return owner; },
     evaluate: async (fn, args) => {
+      if (fn === nativeEffectiveCspObserver) return native.evaluate(args);
       assert.equal(fn, readOfflineOrtOwner);
       assert.equal(args.owner, owner);
       if (options.ownerReadError) throw options.ownerReadError;
@@ -326,11 +335,12 @@ async function probeHarness(t, options = {}) {
     reloadGates.push(phase);
     if (options.unsafeReload) throw new Error('pending write or unsaved draft');
   };
-  return { ...f, page, renderer, reloadGates, run: (extra = {}) => probeInstalledOfflineOrt({
+  return { ...f, page, renderer, native, reloadGates, run: (extra = {}) => probeInstalledOfflineOrt({
     app, page, installDir: f.installDir, beforeReload, timeoutMs: 200, ...extra }),
   checkCleanup(expectedReloads = 2) {
     assert.equal(reloads, expectedReloads);
     assert.equal(disposed, 1);
+    assert.equal(native.registered(), Boolean(options.nativeRestoreError));
     for (const name of ['request', 'response', 'worker']) assert.equal(page.listenerCount(name), 0);
   } };
 }
@@ -420,7 +430,7 @@ test('raw owner alias still reaches and rejects a late event at the canonical as
 });
 
 for (const [option, pattern] of [['noImportResponse', /actual installed module import/],
-  ['wrongModuleBytes', /module byte count/], ['moduleRedirect', /must not redirect/], ['moduleCsp', /module production CSP/],
+  ['wrongModuleBytes', /module byte count/], ['moduleRedirect', /must not redirect/], ['moduleCsp', /module effective production CSP/],
   ['unexpectedRequest', /unexpected request/], ['unknownLocalRead', /unexpected request/], ['localWrite', /unexpected request/], ['workerCreated', /must not start workers/],
   ['badInit', /initialization failed/], ['documentCsp', /active document/]]) {
   test(`orchestration ${option} fails closed and attempts safe renderer cleanup`, async (t) => {
@@ -540,15 +550,15 @@ const diagnosticFields = ['packaged', 'ownerURLMatched', 'twoWindows', 'ownerWin
   'devTools', 'preloadOwnerRole', 'resourcesPathsAbsolute', 'resourcesDirectoryChainsUnlinked',
   'resourcesCanonicalPathMatched', 'resourcesDirectories', 'resourcesDeviceMatched', 'resourcesFileMatched'];
 function assertSafeDiagnostic(value) {
-  assert.deepEqual(Object.keys(value).sort(), ['cleanup', 'failedCheck', 'observed', 'phase', 'primaryFailure', 'probe', 'reloads', 'schemaVersion']);
+  assert.deepEqual(Object.keys(value).sort(), ['cleanup', 'effectiveCsp', 'failedCheck', 'observed', 'phase', 'primaryFailure', 'probe', 'reloads', 'schemaVersion']);
   assert.equal(value.probe, 'offline-ort');
-  assert.equal(value.schemaVersion, 2);
+  assert.equal(value.schemaVersion, 3);
   assert.ok(['owner-observation', 'owner-validation', 'owner-resources', 'document-csp', 'initialization'].includes(value.phase));
   const reloadChecks = ['not-started', 'before-reload-gate', 'reload-await', 'response-present', 'response-status',
-    'response-url', 'response-redirect', 'provisional-csp-read', 'raw-csp-read', 'raw-csp-match', 'page-url', 'complete'];
+    'response-url', 'response-redirect', 'provisional-csp-read', 'raw-csp-read', 'browser-csp-match', 'native-csp-arm', 'native-effective-csp', 'page-url', 'complete'];
   const errorCategories = [null, 'assertion', 'timeout', 'aborted', 'connection-refused', 'connection-reset',
     'target-closed', 'protocol-error', 'type-error', 'other'];
-  const checks = [...diagnosticFields, ...reloadChecks, 'owner-observation', 'document-csp', 'initialization', 'diagnostic-recording'];
+  const checks = [...diagnosticFields, ...reloadChecks, 'owner-observation', 'document-csp', 'initialization', 'diagnostic-recording', 'response-observer-source-audit', 'response-observer-install', 'native-runtime-arm', 'native-runtime-effective-csp'];
   assert.ok(value.failedCheck === null || checks.includes(value.failedCheck));
   if (value.primaryFailure !== null) {
     assert.deepEqual(Object.keys(value.primaryFailure).sort(), ['check', 'errorCategory']);
@@ -558,24 +568,49 @@ function assertSafeDiagnostic(value) {
   }
   assert.deepEqual(Object.keys(value.reloads).sort(), ['beforeProbe', 'releaseProbe']);
   for (const reload of Object.values(value.reloads)) {
-    assert.deepEqual(Object.keys(reload).sort(), ['check', 'errorCategory', 'observed', 'result']);
+    assert.deepEqual(Object.keys(reload).sort(), ['check', 'errorCategory', 'observed', 'rawHeaderError', 'result']);
     assert.ok(reloadChecks.includes(reload.check));
     assert.ok(['not-run', 'running', 'passed', 'failed'].includes(reload.result));
     assert.ok(errorCategories.includes(reload.errorCategory));
+    assert.ok(errorCategories.includes(reload.rawHeaderError));
     assert.deepEqual(Object.keys(reload.observed).sort(), ['pageURLMatched', 'provisionalCspMatched', 'provisionalCspPresent',
-      'rawCspMatched', 'rawCspPresent', 'redirectAbsent', 'reloadResolved', 'responsePresent', 'responseStatus200', 'responseURLMatched', 'safeReloadGatePassed'].sort());
+      'rawCspMatched', 'rawCspPresent', 'rawCspReadSucceeded', 'nativeCspObserved', 'nativeCspMatched', 'redirectAbsent', 'reloadResolved', 'responsePresent', 'responseStatus200', 'responseURLMatched', 'safeReloadGatePassed'].sort());
     for (const observed of Object.values(reload.observed)) assert.ok([true, false, 'not-observed'].includes(observed));
   }
-  assert.deepEqual(Object.keys(value.cleanup).sort(), ['observers', 'ownerHandle']);
+  assert.deepEqual(Object.keys(value.cleanup).sort(), ['nativeObserver', 'observers', 'ownerHandle']);
   for (const [key, cleanup] of Object.entries(value.cleanup)) {
     assert.deepEqual(Object.keys(cleanup).sort(), ['check', 'errorCategory', 'result']);
-    assert.equal(cleanup.check, key === 'observers' ? 'observer-detach' : 'owner-handle-dispose');
+    assert.equal(cleanup.check, { observers: 'observer-detach', nativeObserver: 'native-observer-restore', ownerHandle: 'owner-handle-dispose' }[key]);
     assert.ok(['not-run', 'passed', 'failed'].includes(cleanup.result));
     assert.ok(errorCategories.includes(cleanup.errorCategory));
   }
+  assert.deepEqual(Object.keys(value.effectiveCsp).sort(), ['module', 'native', 'responseObserverAuditPassed']);
+  assert.equal(typeof value.effectiveCsp.responseObserverAuditPassed, 'boolean');
+  const modulePolicy = value.effectiveCsp.module;
+  assert.deepEqual(Object.keys(modulePolicy).sort(), ['browserCspMatched', 'browserCspPresent', 'rawCspMatched', 'rawCspPresent', 'rawCspReadSucceeded', 'rawHeaderError']);
+  for (const [key, observed] of Object.entries(modulePolicy)) {
+    assert.ok(key === 'rawHeaderError' ? errorCategories.includes(observed) : [null, true, false, 'not-observed'].includes(observed));
+  }
+  const native = value.effectiveCsp.native;
+  if (native !== null) {
+    assert.deepEqual(Object.keys(native).sort(), ['failures', 'ownerSessionMatched', 'phase', 'records', 'registered']);
+    assert.equal(typeof native.registered, 'boolean');
+    assert.equal(typeof native.ownerSessionMatched, 'boolean');
+    assert.ok(['inactive', 'beforeProbe', 'runtime', 'releaseProbe'].includes(native.phase));
+    assert.ok(native.failures.length <= 5);
+    assert.ok(native.failures.every(reason => ['unexpected-response-phase', 'duplicate-target-response',
+      'request-evidence-limit', 'invalid-effective-response', 'native-response-observation-error'].includes(reason)));
+    assert.deepEqual(Object.keys(native.records).sort(), ['beforeProbe', 'module', 'releaseProbe']);
+    for (const record of Object.values(native.records)) {
+      assert.deepEqual(Object.keys(record).sort(), ['count', 'cspMatched', 'methodMatched', 'ownerIdMatched', 'ownerObjectMatched',
+        'ownerSessionMatched', 'requestIdValid', 'resourceTypeMatched', 'singleCspHeader', 'statusMatched']);
+      assert.ok([0, 1, 2, 3].includes(record.count));
+      for (const [key, observed] of Object.entries(record)) if (key !== 'count') assert.ok([null, true, false].includes(observed));
+    }
+  }
   assert.deepEqual(Object.keys(value.observed).sort(), [...diagnosticFields].sort());
   for (const observed of Object.values(value.observed)) assert.ok([true, false, 'undefined', 'null', 'invalid-type'].includes(observed));
-  assert.doesNotMatch(JSON.stringify(value), /private-token|do-not-record|\/installed|offerpilot-ort-unit|ws:\/\//);
+  assert.doesNotMatch(JSON.stringify(value), /private-token|do-not-record|\/installed|offerpilot-ort-unit|ws:\/\/|127\.0\.0\.1|script-src|content-security-policy/i);
 }
 
 test('safe diagnostics are awaited, detached snapshots that distinguish missing getters from native identity', async t => {
@@ -686,21 +721,21 @@ test('normal same-origin API polling is separately counted and omitted Electron 
   f.checkCleanup();
 });
 
-test('document CSP diagnostics preserve a raw/provisional mismatch and both assertion failures', async t => {
+test('document CSP diagnostics fail closed on effective browser policy mismatch', async t => {
   const f = await probeHarness(t, { documentCsp: true });
   let latest;
   await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), AggregateError);
   assert.equal(latest.phase, 'document-csp');
-  assert.equal(latest.failedCheck, 'raw-csp-match');
-  assert.deepEqual(latest.primaryFailure, { check: 'raw-csp-match', errorCategory: 'assertion' });
+  assert.equal(latest.failedCheck, 'browser-csp-match');
+  assert.deepEqual(latest.primaryFailure, { check: 'browser-csp-match', errorCategory: 'assertion' });
   for (const reload of Object.values(latest.reloads)) {
-    assert.equal(reload.check, 'raw-csp-match');
+    assert.equal(reload.check, 'browser-csp-match');
     assert.equal(reload.result, 'failed');
     assert.equal(reload.errorCategory, 'assertion');
-    assert.equal(reload.observed.rawCspPresent, true);
-    assert.equal(reload.observed.rawCspMatched, false);
+    assert.equal(reload.observed.rawCspPresent, 'not-observed');
+    assert.equal(reload.observed.rawCspMatched, 'not-observed');
     assert.equal(reload.observed.provisionalCspPresent, true);
-    assert.equal(reload.observed.provisionalCspMatched, true);
+    assert.equal(reload.observed.provisionalCspMatched, false);
   }
   assert.equal(latest.cleanup.ownerHandle.result, 'passed');
   f.checkCleanup();
@@ -739,17 +774,17 @@ test('unsafe reload diagnostic identifies the gate without attempting either rel
   f.checkCleanup(0);
 });
 
-test('provisional CSP absence never substitutes for or changes the original raw CSP gate', async t => {
+test('missing effective browser CSP fails even if upstream raw CSP matches', async t => {
   const f = await probeHarness(t);
   const originalReload = f.page.reload;
   f.page.reload = async (...args) => ({ ...await originalReload(...args), headers: () => ({}) });
   let latest;
-  await f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } });
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }));
   for (const reload of Object.values(latest.reloads)) {
     assert.equal(reload.observed.provisionalCspPresent, false);
     assert.equal(reload.observed.provisionalCspMatched, false);
-    assert.equal(reload.observed.rawCspPresent, true);
-    assert.equal(reload.observed.rawCspMatched, true);
+    assert.equal(reload.observed.rawCspPresent, 'not-observed');
+    assert.equal(reload.observed.rawCspMatched, 'not-observed');
   }
   f.checkCleanup();
 });
@@ -871,7 +906,7 @@ test('cleanup observer and handle errors remain separate from the original CSP r
     assert.equal(error.errors.length, 4);
     return true;
   });
-  assert.deepEqual(latest.primaryFailure, { check: 'raw-csp-match', errorCategory: 'assertion' });
+  assert.deepEqual(latest.primaryFailure, { check: 'browser-csp-match', errorCategory: 'assertion' });
   assert.deepEqual(latest.cleanup.observers, { check: 'observer-detach', result: 'failed', errorCategory: 'type-error' });
   assert.deepEqual(latest.cleanup.ownerHandle, { check: 'owner-handle-dispose', result: 'failed', errorCategory: 'protocol-error' });
   f.checkCleanup();
@@ -890,7 +925,7 @@ test('a failed final diagnostic callback still fails closed after all cleanup is
     assert.equal(error.errors.at(-1).message, 'ORT diagnostic recording failed');
     return true;
   });
-  assert.deepEqual(latest.primaryFailure, { check: 'raw-csp-match', errorCategory: 'assertion' });
+  assert.deepEqual(latest.primaryFailure, { check: 'browser-csp-match', errorCategory: 'assertion' });
   assert.equal(latest.reloads.releaseProbe.result, 'failed');
   assert.equal(latest.cleanup.ownerHandle.result, 'passed');
   f.checkCleanup();
@@ -903,8 +938,7 @@ for (const [check, fault] of [
   ['response-url', response => ({ ...response, url: () => 'http://private-token/do-not-record' })],
   ['response-redirect', response => ({ ...response, request: () => ({ redirectedFrom: () => ({ private: 'private-token' }) }) })],
   ['provisional-csp-read', response => ({ ...response, headers: () => { throw new Error('Protocol error: private-token'); } })],
-  ['raw-csp-read', response => ({ ...response, headerValue: async () => { throw new Error('net::ERR_ABORTED private-token'); } })],
-  ['raw-csp-match', response => ({ ...response, headerValue: async () => null })],
+  ['browser-csp-match', response => ({ ...response, headers: () => ({}) })],
 ]) {
   test(`reload diagnostics distinguish ${check} and retain primary when cleanup also fails`, async t => {
     const f = await probeHarness(t, { cleanupFails: true });
@@ -953,7 +987,7 @@ function duringFinalAssetRead(t, f, callback) {
 function importResponse(f, body = async () => mjsBytes) {
   return { url: () => f.renderer.args.urls.mjs, status: () => 200,
     request: () => ({ resourceType: () => 'script', redirectedFrom: () => null }),
-    headerValue: async () => csp, body };
+    headers: () => ({ 'content-security-policy': csp }), headerValue: async () => csp, body };
 }
 for (const [kind, pattern] of [['request', /unexpected request/], ['worker', /must not start workers/],
   ['import', /one actual installed module import/]]) {
@@ -997,5 +1031,102 @@ test('a late response byte-verification failure is awaited rather than discarded
   });
   await assert.rejects(f.run(), /late module body unreadable/);
   assertDelivered();
+  f.checkCleanup();
+});
+
+for (const raw of [null, "upstream-policy-different-from-effective-policy"]) {
+  test(`upstream raw policy ${raw === null ? 'absence' : 'difference'} is diagnostic when both effective channels match`, async t => {
+    const f = await probeHarness(t, { rawDocumentCsp: raw, rawModuleCsp: raw });
+    let latest;
+    const result = await f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } });
+    assert.deepEqual(result.effectiveCspVerifiedBy, ['browser-response-headers', 'electron-post-override-onResponseStarted']);
+    assert.equal(result.upstreamRawCspIsDiagnosticOnly, true);
+    assert.equal(result.nativeResponseObserverRestored, true);
+    for (const reload of Object.values(latest.reloads)) {
+      assert.equal(reload.observed.rawCspMatched, false);
+      assert.equal(reload.observed.rawCspPresent, raw !== null);
+      assert.equal(reload.observed.provisionalCspMatched, true);
+      assert.equal(reload.observed.nativeCspMatched, true);
+      assert.equal(reload.result, 'passed');
+    }
+    assert.equal(latest.effectiveCsp.module.rawCspMatched, false);
+    f.checkCleanup();
+  });
+}
+for (const fault of ['reject', 'pending']) {
+  test(`raw header ${fault} remains a bounded diagnostic and cannot replace either effective proof`, async t => {
+    const f = await probeHarness(t);
+    const original = f.page.reload;
+    f.page.reload = async (...args) => ({ ...await original(...args), headerValue: () => fault === 'pending'
+      ? new Promise(() => {}) : Promise.reject(new Error('net::ERR_ABORTED private-token')) });
+    let latest;
+    await f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } });
+    for (const reload of Object.values(latest.reloads)) {
+      assert.equal(reload.observed.rawCspReadSucceeded, false);
+      assert.equal(reload.rawHeaderError, fault === 'pending' ? 'timeout' : 'aborted');
+      assert.equal(reload.observed.nativeCspMatched, true);
+    }
+    f.checkCleanup();
+  });
+}
+for (const [name, options] of [
+  ['missing document', { noNativeDocument: true }], ['missing module', { noNativeModule: true }],
+  ['wrong document owner', { nativeDocument: { webContentsId: 99 } }],
+  ['wrong module owner', { nativeModule: { webContentsId: 99 } }],
+  ['missing native document CSP', { nativeDocument: { responseHeaders: {} } }],
+  ['missing native module CSP', { nativeModule: { responseHeaders: {} } }],
+  ['different native document CSP', { nativeDocument: { responseHeaders: { 'Content-Security-Policy': ["script-src 'self'"] } } }],
+  ['different native module CSP', { nativeModule: { responseHeaders: { 'Content-Security-Policy': ["script-src 'self'"] } } }],
+]) {
+  test(`${name} prevents PASS despite exact browser policy`, async t => {
+    const f = await probeHarness(t, options);
+    await assert.rejects(f.run());
+    f.checkCleanup();
+  });
+}
+test('late native event at final restoration fails despite earlier successful observations', async t => {
+  const f = await probeHarness(t, { beforeNativeRestore: emit => emit('module') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), AggregateError);
+  assert.equal(latest.primaryFailure, null);
+  assert.equal(latest.cleanup.nativeObserver.result, 'failed');
+  assert.ok(latest.effectiveCsp.native.failures.includes('unexpected-response-phase'));
+  f.checkCleanup();
+});
+test('native observer unregister rejection cannot be hidden by successful initialization', async t => {
+  const f = await probeHarness(t, { nativeRestoreError: new Error('Protocol error private-token') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), AggregateError);
+  assert.equal(latest.primaryFailure, null);
+  assert.deepEqual(latest.cleanup.nativeObserver, { check: 'native-observer-restore', result: 'failed', errorCategory: 'protocol-error' });
+  f.checkCleanup();
+});
+test('changed installed product source fails the audit before any listener or reload can be installed', async t => {
+  const f = await probeHarness(t, { archiveOverrides: { 'main.cjs': '// changed source cannot own this probe' } });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), /audited product/);
+  assert.equal(latest.failedCheck, 'response-observer-source-audit');
+  assert.equal(latest.effectiveCsp.responseObserverAuditPassed, false);
+  assert.deepEqual(f.native.registrations, []);
+  f.checkCleanup(0);
+});
+test('partial native registration failure is cleaned while preserving its original failure', async t => {
+  const f = await probeHarness(t, { nativeInstallError: new Error('Protocol error private-token') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), /Protocol error/);
+  assert.deepEqual(latest.primaryFailure, { check: 'response-observer-install', errorCategory: 'protocol-error' });
+  assert.equal(latest.cleanup.nativeObserver.result, 'passed');
+  assert.equal(latest.effectiveCsp.native.registered, false);
+  f.checkCleanup(0);
+});
+test('a late duplicate native module response during final asset verification remains sticky FAIL', async t => {
+  const f = await probeHarness(t);
+  const delivered = duringFinalAssetRead(t, f, () => f.native.emit('module'));
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }));
+  delivered();
+  assert.equal(latest.failedCheck, 'native-runtime-effective-csp');
+  assert.ok(latest.effectiveCsp.native.failures.includes('duplicate-target-response'));
+  assert.equal(latest.effectiveCsp.native.records.module.count, 2);
   f.checkCleanup();
 });

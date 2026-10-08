@@ -12,6 +12,9 @@ on:
       - '.github/workflows/desktop-layout-retry.yml'
       - '.github/workflows/desktop-installed-ui.yml'
       - 'docs/architecture/desktop-installed-ui-validation.md'
+      - 'desktop/real-ai-validation/**'
+      - '.github/workflows/desktop-real-ai.yml'
+      - 'docs/architecture/desktop-real-ai-validation.md'
   workflow_dispatch:
 
 permissions:

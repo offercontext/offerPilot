@@ -27,7 +27,7 @@ export function installDrawerCloseObservation(node, { key }) {
     if (node.contains(element)) return 'target';
     if (element === doc.documentElement) return 'document-root';
     if (element === doc.body) return 'document-body';
-    for (const [selector, name] of [['.ant-drawer-mask', 'drawer-mask'], ['.ant-modal-mask', 'modal-mask'],
+    for (const [selector, name] of [['.ant-message', 'message'], ['.ant-notification', 'notification'], ['.ant-drawer-mask', 'drawer-mask'], ['.ant-modal-mask', 'modal-mask'],
       ['.ant-drawer-header', 'drawer-header'], ['.ant-drawer-body', 'drawer-body'],
       ['.ant-drawer-content', 'drawer-content'], ['.ant-drawer-section', 'drawer-content'],
       ['.ant-drawer-content-wrapper', 'drawer-wrapper'], ['.ant-drawer', 'drawer-root'],
@@ -41,8 +41,16 @@ export function installDrawerCloseObservation(node, { key }) {
   const describe = element => {
     const css = getComputedStyle(element);
     const animations = element.getAnimations();
+    let ancestorOpacityMin = 1, ancestorVisibilityHidden = false, depth = 0;
+    for (let parent = element.parentElement; parent && depth++ < 16; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      const opacity = Number(style.opacity);
+      if (Number.isFinite(opacity)) ancestorOpacityMin = Math.min(ancestorOpacityMin, Math.max(0, opacity));
+      ancestorVisibilityHidden ||= style.visibility !== 'visible' || style.display === 'none';
+    }
     return { kind: kind(element), ...box(element),
-      pointerEvents: css.pointerEvents === 'none' ? 'none' : css.pointerEvents === 'auto' ? 'auto' : 'other',
+      pointerEvents: ['none', 'auto', 'all'].includes(css.pointerEvents) ? css.pointerEvents : 'other',
+      ancestorOpacityMin: number(ancestorOpacityMin), ancestorVisibilityHidden,
       visible: Boolean(element.getClientRects().length) && css.visibility === 'visible', opacity: number(Number(css.opacity)),
       position: ['static', 'relative', 'absolute', 'fixed', 'sticky'].includes(css.position) ? css.position : 'other',
       zIndex: css.zIndex === 'auto' ? 'auto' : number(Number(css.zIndex)), transformed: css.transform !== 'none',
@@ -106,7 +114,8 @@ export function drawerCloseFailure(error) {
     intercepted: /intercepts pointer events/i.test(message),
     notVisible: /not visible/i.test(message), notStable: /not stable/i.test(message),
     outsideViewport: /outside of the viewport/i.test(message), detached: /not attached|detached/i.test(message),
-    knownInterceptor: /op-topbar/.test(message) ? 'app-topbar'
+    knownInterceptor: /ant-message/.test(message) ? 'message'
+      : /ant-notification/.test(message) ? 'notification' : /op-topbar/.test(message) ? 'app-topbar'
       : /ant-drawer-mask/.test(message) ? 'drawer-mask'
         : /ant-drawer-content-wrapper/.test(message) ? 'drawer-wrapper'
           : /ant-modal-mask/.test(message) ? 'modal-mask' : 'unclassified' };

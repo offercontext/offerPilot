@@ -1,0 +1,20 @@
+{
+  "name": "offerpilot-fixed-exe-real-ai-validation",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Fail-closed, manually approved real-provider validation for one fixed experimental installer",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs test/*.test.cjs",
+    "preflight": "node preflight.mjs",
+    "prepare": "node prepare.mjs",
+    "validate": "node run.mjs"
+  },
+  "dependencies": {
+    "@electron/asar": "4.3.1",
+    "@electron/fuses": "2.1.3",
+    "playwright-core": "1.63.0",
+    "yaml": "2.8.1"
+  }
+}

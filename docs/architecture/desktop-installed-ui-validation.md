@@ -64,11 +64,11 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 - 主窗截图检查文档水平溢出；看板必须有六列的生产 `data-kanban-*` 标记，并单独检查列内横向溢出、卡片控件越界。整个看板的正常横滚不当作缺陷，列内溢出不能被全页宽度正常掩盖。
 - 900px 下的第二份 Offer 操作使用真实水平滚轮并核对实际局部位移、右端、完整控件边界和命中；无横向溢出时要求两份卡片完整水平容纳。普通点击进入未发送预检，核对 canonical owner 的投递 ID；关闭后验证所属投递详情、让完整标题正常入视口，再经返回/Offer 导航重选原两份并重开比较，继续金额、差异开关与返回断言。不使用 force、直接写 scrollLeft 或替换页面状态。
 - 简历标题/姓名及题目分类在编辑器重新打开后，以有界精确等待核对 effect 回填的真实值；不会补写期望值或把持续错误当作通过。
-- AI 会话、生成结果、语音/模型下载和备份下载/恢复以 BLOCKED 单列；不存在的 Help/Brief 为 N/A。原始诊断日志不截图、不上传，保留固定分类的 renderer/CSP/资源错误计数，各 case 记录增量。自己的 API 4xx/5xx/非正常传输失败会失败，只有源码明确支持的 GET material-kit 404 缺失记录例外；100 条证据上限不会截断独立错误计数。逐屏 runtime 分类中的 CSP/Haru/graphics 等受限运行错误可记 BLOCKED；下述真实 Haru 视觉门禁失败则保留为 FAIL，不把整体 runtime-health 写成通过。模型正常启动、语音端到端等能力不会因界面可见而被判定通过。
+- 本无凭据流程不调用真实 AI；AI 会话、生成结果及真实语音/模型下载以 BLOCKED 单列。设置 JSON 与完整 ZIP 导出分别验证真实按钮保存/取消、响应与文件内容及脱敏结构；本产品未提供备份恢复 UI/API/CLI，恢复列 N/A，不视为桌面退化。不存在的 Help/Brief 为 N/A。原始诊断日志不截图、不上传，保留固定分类的 renderer/CSP/资源错误计数，各 case 记录增量。自己的 API 4xx/5xx/非正常传输失败会失败，只有源码明确支持的 GET material-kit 404 缺失记录例外；100 条证据上限不会截断独立错误计数。逐屏 runtime 分类中的 CSP/Haru/graphics 等受限运行错误可记 BLOCKED；下述真实 Haru 视觉门禁失败则保留为 FAIL，不把整体 runtime-health 写成通过。模型正常启动、语音端到端等能力不会因界面可见而被判定通过。
 
 每个 case 记录 `surfaceId/caseId/uiPath/kind/outcome/assertions/screenshots`，每张截图记录实测 viewport、主题、合成记录 ID；顶层记录精确源码/安装包/实际 EXE 摘要。单个界面失败会保存白名单诊断和现场截图，然后继续独立界面；只在没有未决 UI 写请求时使用正常 reload 恢复。写请求传输失败会保留 sticky 未知结果屏障，阻止后续 UI 操作；不会将 requestfailed 当成已确认未写入。未走到的根页面/子界面在收尾列为 NOT RUN，不补造 PASS。
 
-`coverage.json` 的 summary 区分 `visualPasses` 与 `functionalPasses`；存在 FAIL 时最终进程失败，即使后续生命周期检查通过。只有 BLOCKED/NOT RUN 时，运行状态为 `passed-with-coverage-limitations`，coverage 为 `incomplete`。`humanVisualReview=required-not-automated` 明确图片仍需人工检查，不把几何断言等同于“每个功能无问题”。根页面常规截图使用900px内容高度；关键子界面、长列表与横滚回归额外使用689px真实窗口内容高度，并记录实测尺寸。截图先结束有限CSS过渡再读几何，避免把切换动画当最终布局。Windows job 上限扩为 60 分钟，独立全量回归路由不变。
+`coverage.json` 的 summary 区分 `visualPasses` 与 `functionalPasses`；存在 FAIL 时最终进程失败，即使后续生命周期检查通过。只有 BLOCKED/NOT RUN 时，运行状态为 `passed-with-coverage-limitations`，coverage 为 `incomplete`。`humanVisualReview=required-not-automated` 明确图片仍需人工检查，不把几何断言等同于“每个功能无问题”。根页面常规截图使用900px内容高度；关键子界面、长列表与横滚回归额外使用689px真实窗口内容高度，并记录实测尺寸。主窗截图在 5 秒上限内只读等待有限 CSS 动画自然完成及连续稳定帧，再读几何；主窗与 Haru 截图均保留动画，不主动 finish/cancel。锁定 rc-motion 的受控事件实验显示提前完成动画可能留下透明命中层，真实 Windows 的 S22 偶发遮挡仍由命中层级、相对单调耗时与真实 pointer/click 事件验证，不能用一次成功抹去旧失败。Windows job 上限扩为 60 分钟，独立全量回归路由不变。
 
 ### 首轮真实安装证据后的 helper 修正
 
@@ -109,6 +109,16 @@ getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也
 固定合成 Blob 取消后要求目标文件不存在，保存后要求精确 32 字节。原生对话框选择由测试自动化；外部浏览器启动的安全 tripwire 只允许零尝试，不证明真实浏览器启动。原生保存框/托盘的人工指针操作、麦克风真实音频仍未验证。
 
 最近旧包的 7 项 BLOCKED 包含真实面试/刷题/谈薪/Pilot AI、复盘后续生成、备份恢复及真实语音/模型下载；1 项 NOT RUN 是刻意不导出的原始诊断日志。3 项 N/A 为已移除的页内 Haru、不能控制独立小窗的页内外观效果，以及本构建不存在的专用 Help/Knowledge Brief。新包报告仍逐项记录这些边界，不把旧计数预填为新结果。
+
+### 离线 ORT 的有效 CSP 双层观测
+
+run `37772990680` 的文档响应在 `response.headers()` 中具有精确生产 CSP，但 `headerValue()` 中缺失。固定 [Playwright 1.63.0 实现](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/client/network.ts#L640-L663) 分别读取浏览器 response 与 raw/ExtraInfo 头；后者不能用来要求上游后端重复注入 Electron 策略。这是 helper 观测层修正，尚不能将该次未执行的 WASM/ORT 初始化记为通过。
+
+`effective-csp-observer.mjs` 先独立核对实际 ASAR 入口、版本与六个桌面模块的固定 LF 文本摘要，确认固定产品的完整本地模块闭包没有 `onResponseStarted` listener。仅在已绑定安装身份、owner 和持久 session 上临时注册该非阻塞只读事件；不接管 `onHeadersReceived`、鉴权、权限或外部请求保护。Electron 每个事件只保留最后一个 listener，因此产品字节变化或已有 probe 所有权都会失败，不能默默覆盖。
+
+固定 [Electron 44.5.1 实现](https://github.com/electron/electron/blob/v44.5.1/shell/browser/net/proxying_url_loader_factory.cc#L612-L655) 在安装 `onHeadersReceived` 的 override 之后、向 renderer 交付同一 response 之前发出 `onResponseStarted`。该 [SimpleEvent](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_request.cc#L835-L851) 没有修改 callback；helper 不改变 details。两次文档 reload 和一次已安装模块 import 都要求浏览器头及这个后注入事件中的完整 CSP 严格一致；native 证据还要求精确 URL、owner id、session、GET、resource type、HTTP 200、唯一 request id，以及恰好一个 CSP 值。缺失、错误、重复、晚到或无法注销均失败。
+
+raw 头只保留有界读取结果的固定布尔/错误类别，缺失或不同不替代双层有效策略证明。最终事件监听移除和快照同步完成，无异步空隙；证据只保留固定计数/枚举/布尔，不保存头值、URL、路径或配置。原有安装资源 SHA、生产 CSP、网络失败锁存、WASM 编译与 ORT 初始化断言不变。Linux 单测仅验证 helper 传播与边界；真正 Windows 成功仍需新同包 run，不代表模型下载、模型加载、推理、麦克风或 ASR 已验证。
 
 ## 证据与不能声称的结论
 

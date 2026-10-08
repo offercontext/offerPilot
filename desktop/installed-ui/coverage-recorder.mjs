@@ -1,3 +1,4 @@
+import { naturalScreenshotPaintReady } from './screenshot-paint.mjs';
 import { measureScreenGeometry } from './screen-geometry.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -14,7 +15,7 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
   const report = { schema: 2, sourceCommit: pin.commit, buildCommit: pin.buildCommit, buildWorkflow: pin.buildWorkflow,
     buildRunId: pin.runId, fullRegressionRunId: pin.fullRegressionRunId, artifactId: pin.artifactId,
     installerSha256: pin.installerSha256, installedExeSha256, execution: 'real-installed-electron-native-content-size',
-    screenshotAnimationPolicy: 'CSS finite transitions fast-forwarded and infinite CSS animations temporarily cancelled by Playwright; not an animation-quality test',
+    screenshotAnimationPolicy: 'Main-window finite CSS motion settles naturally within a bounded wait; screenshots preserve animations in both renderers; no animation finishing/cancellation or animation-quality claim',
     syntheticProfileOnly: true, aiInvocationsAuthorized: false, browserFixturesUsed: false, expectedRootCases: ROOT_CASES.length,
     cases: [], screens: [], companionScreens: [], fixtures: [], summary: null, runtime: null };
   let active;
@@ -41,31 +42,12 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
   };
   const capture = async (label, extra = {}) => {
     markUiStep(page, 'screenshot-capture');
-    // All captures share this gate: a dialog that has a box but is still
-    // entering must never be accepted as its final visible screenshot.
-    await page.waitForFunction(() => {
-      const surfaces = [...document.querySelectorAll('[role="dialog"], [role="menu"], .ant-drawer-content-wrapper')]
-        .filter(node => node.getClientRects().length && getComputedStyle(node).visibility === 'visible');
-      const boxes = [];
-      for (const node of surfaces) {
-        for (let ancestor = node; ancestor; ancestor = ancestor.parentElement) {
-          const style = getComputedStyle(ancestor);
-          if (Number(style.opacity) < 0.999 || style.visibility !== 'visible') return false;
-          if (ancestor.getAnimations().some(animation => animation.playState === 'running'
-            && animation.effect?.getTiming().iterations !== Infinity)) return false;
-        }
-        const rect = node.getBoundingClientRect();
-        boxes.push([rect.x, rect.y, rect.width, rect.height].map(value => Math.round(value * 100) / 100));
-      }
-      const key = JSON.stringify(boxes);
-      const prior = window.__offerpilotScreenshotPaint;
-      const frames = prior?.key === key ? prior.frames + 1 : 1;
-      window.__offerpilotScreenshotPaint = { key, frames };
-      return frames >= 3;
-    }, undefined, { timeout: 5000, polling: 'raf' });
+    // Read-only bounded settling includes paused/start-phase notifications.
+    // Screenshotting must not finish their motion ahead of rc-motion listeners.
+    await page.waitForFunction(naturalScreenshotPaintReady, undefined, { timeout: 5000, polling: 'raf' });
     await page.evaluate(() => { delete window.__offerpilotScreenshotPaint; });
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
-    await page.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
+    await page.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'allow' });
     const measured = await page.evaluate(measureScreenGeometry);
     const identity = await readSurfaceIdentity(page, active?.surfaceId);
     if (identity.targetSurfaceConfirmed && active) active.targetSurfaceConfirmed = true;
@@ -96,7 +78,7 @@ export async function createCoverage({ app, page, haru, evidence, pin, installed
   const captureHaru = async (label, visual = null) => {
     if (!haru) throw new Error('actual companion renderer required for screenshot');
     const filename = safeShotName(`${String(++sequence).padStart(3, '0')}-${label}`);
-    await haru.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'disabled' });
+    await haru.screenshot({ path: path.join(dir, filename), timeout: 15000, animations: 'allow' });
     const measured = await haru.evaluate(measureScreenGeometry);
     const identity = await readSurfaceIdentity(haru, 'S24');
     const item = { ...identity, ...measured, filename: `screens/${filename}`, caseId: active?.caseId || null,
