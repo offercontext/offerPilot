@@ -249,6 +249,30 @@ export function assertOfflineOrtInitialization(result, assets) {
   assert.equal(result.cspViolations, 0, 'production CSP violations cannot pass');
 }
 
+// Match private exception text only in memory; diagnostics contain fixed enums.
+// In particular, the outer recorder normalizes AggregateError to Error, so keep
+// the primary failure separately from the later cleanup failures here.
+function diagnosticErrorCategory(error) {
+  if (error?.name === 'AssertionError' || error?.code === 'ERR_ASSERTION') return 'assertion';
+  if (error?.name === 'TimeoutError') return 'timeout';
+  if (error?.name === 'TypeError') return 'type-error';
+  const message = typeof error?.message === 'string' ? error.message : '';
+  if (/\b(?:timed out|timeout)\b/i.test(message)) return 'timeout';
+  if (/\b(?:ERR_ABORTED|aborted)\b/i.test(message)) return 'aborted';
+  if (/\b(?:ECONNREFUSED|ERR_CONNECTION_REFUSED)\b/i.test(message)) return 'connection-refused';
+  if (/\b(?:ECONNRESET|ERR_CONNECTION_RESET)\b/i.test(message)) return 'connection-reset';
+  if (/target.*closed|page.*closed|browser.*closed|context.*closed/i.test(message)) return 'target-closed';
+  if (/\bprotocol error\b/i.test(message)) return 'protocol-error';
+  return 'other';
+}
+
+function reloadDiagnostic() {
+  return { check: 'not-started', result: 'not-run', errorCategory: null,
+    observed: Object.fromEntries(['safeReloadGatePassed', 'reloadResolved', 'responsePresent', 'responseStatus200',
+      'responseURLMatched', 'redirectAbsent', 'provisionalCspPresent', 'provisionalCspMatched',
+      'rawCspPresent', 'rawCspMatched', 'pageURLMatched'].map(key => [key, 'not-observed'])) };
+}
+
 // Reloads the owner before the probe to verify the active main-document CSP,
 // and afterward to release the isolated ORT heap even on partial failure. The caller
 // must gate EACH reload through beforeReload: no pending write and no unsaved
@@ -299,23 +323,26 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
       assert.equal(sha256(bytes), installed.assets.mjs.sha256, 'imported module must equal installed bytes');
     })().then(() => null, (error) => error));
   };
-  const reload = async () => {
-    const response = await page.reload({ waitUntil: 'networkidle', timeout: timeoutMs });
-    assert.ok(response && response.status() === 200 && response.url() === ownerURL, 'installed owner reload failed');
-    assert.equal(response.request().redirectedFrom(), null, 'owner reload must not redirect');
-    assert.equal(await response.headerValue('content-security-policy'), contentSecurityPolicy, 'active document must use production CSP');
-    assert.equal(page.url(), ownerURL, 'installed owner must not navigate');
-  };
   let result;
   let primaryError;
+  let primaryFailure = null;
   const diagnosticErrors = [];
+  const reloads = { beforeProbe: reloadDiagnostic(), releaseProbe: reloadDiagnostic() };
+  const cleanup = {
+    observers: { check: 'observer-detach', result: 'not-run', errorCategory: null },
+    ownerHandle: { check: 'owner-handle-dispose', result: 'not-run', errorCategory: null },
+  };
   const observed = Object.fromEntries([...Object.keys(OWNER_EXPECTATIONS), 'additionalArgumentsArray', 'ownerArgument',
     'devTools', 'preloadOwnerRole', ...RESOURCE_CHECKS].map(key => [key, 'undefined']));
   let phase = 'owner-observation';
   let currentCheck = 'owner-observation';
-  const emit = async (failedCheck = null) => {
+  const emit = async (failedCheck = primaryFailure?.check ?? null) => {
     try {
-      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 1, phase, observed: { ...observed }, failedCheck });
+      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 2, phase, observed: { ...observed }, failedCheck,
+        primaryFailure: primaryFailure && { ...primaryFailure },
+        reloads: Object.fromEntries(Object.entries(reloads).map(([key, value]) =>
+          [key, { ...value, observed: { ...value.observed } }])),
+        cleanup: Object.fromEntries(Object.entries(cleanup).map(([key, value]) => [key, { ...value }])) });
     } catch {
       // A failed recorder must fail the probe, but must not replace an actual
       // security failure or copy the callback's potentially private exception.
@@ -328,6 +355,57 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   const expect = (security, key, value) => {
     currentCheck = key;
     assert.equal(security[key], value, key);
+  };
+  const reload = async (kind) => {
+    const diagnostic = reloads[kind];
+    diagnostic.result = 'running';
+    const check = name => {
+      diagnostic.check = name;
+      // Cleanup diagnostics must not overwrite the primary phase/check.
+      if (kind === 'beforeProbe') currentCheck = name;
+    };
+    try {
+      check('before-reload-gate');
+      await beforeReload(kind === 'beforeProbe' ? 'before-probe' : 'release-probe');
+      diagnostic.observed.safeReloadGatePassed = true;
+      if (kind === 'beforeProbe') reloadRequired = true;
+      // No diagnostic callback/await may intervene between the gate and reload.
+      check('reload-await');
+      const response = await page.reload({ waitUntil: 'networkidle', timeout: timeoutMs });
+      diagnostic.observed.reloadResolved = true;
+      check('response-present');
+      diagnostic.observed.responsePresent = Boolean(response);
+      assert.ok(response, 'installed owner reload failed');
+      check('response-status');
+      diagnostic.observed.responseStatus200 = response.status() === 200;
+      assert.equal(diagnostic.observed.responseStatus200, true, 'installed owner reload failed');
+      check('response-url');
+      diagnostic.observed.responseURLMatched = response.url() === ownerURL;
+      assert.equal(diagnostic.observed.responseURLMatched, true, 'installed owner reload failed');
+      check('response-redirect');
+      diagnostic.observed.redirectAbsent = response.request().redirectedFrom() === null;
+      assert.equal(diagnostic.observed.redirectAbsent, true, 'owner reload must not redirect');
+      check('provisional-csp-read');
+      const provisionalCsp = response.headers()['content-security-policy'];
+      diagnostic.observed.provisionalCspPresent = typeof provisionalCsp === 'string';
+      diagnostic.observed.provisionalCspMatched = provisionalCsp === contentSecurityPolicy;
+      check('raw-csp-read');
+      const rawCsp = await response.headerValue('content-security-policy');
+      diagnostic.observed.rawCspPresent = typeof rawCsp === 'string';
+      diagnostic.observed.rawCspMatched = rawCsp === contentSecurityPolicy;
+      check('raw-csp-match');
+      // Provisional headers are diagnostic-only; retain the original strict gate.
+      assert.equal(rawCsp, contentSecurityPolicy, 'active document must use production CSP');
+      check('page-url');
+      diagnostic.observed.pageURLMatched = page.url() === ownerURL;
+      assert.equal(diagnostic.observed.pageURLMatched, true, 'installed owner must not navigate');
+      diagnostic.check = 'complete';
+      diagnostic.result = 'passed';
+    } catch (error) {
+      diagnostic.result = 'failed';
+      diagnostic.errorCategory = diagnosticErrorCategory(error);
+      throw error;
+    }
   };
   try {
     setStage('installed-ort-owner');
@@ -368,9 +446,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     await emit();
     requireDiagnostic();
     setStage('installed-ort-document-csp');
-    await beforeReload('before-probe');
-    reloadRequired = true;
-    await reload();
+    await reload('beforeProbe');
     page.on('request', onRequest);
     page.on('response', onResponse);
     page.on('worker', onWorker);
@@ -404,18 +480,32 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     assert.equal(unexpectedRequests, 0, 'unexpected request during installed ORT initialization');
     assert.equal(workersCreated, 0, 'single-threaded ORT must not start workers');
     assert.equal(page.url(), ownerURL, 'installed ORT owner URL changed');
-  } catch (error) { primaryError = error; await emit(currentCheck); }
+  } catch (error) {
+    primaryError = error;
+    primaryFailure = { check: currentCheck, errorCategory: diagnosticErrorCategory(error) };
+    await emit();
+  }
   const cleanupErrors = [];
+  cleanup.observers.result = 'passed';
   if (!observersDetached) {
     for (const [event, listener] of [['request', onRequest], ['response', onResponse], ['worker', onWorker]]) {
-      try { page.removeListener(event, listener); } catch { cleanupErrors.push(new Error('ORT observer cleanup failed')); }
+      try { page.removeListener(event, listener); } catch (error) {
+        cleanup.observers.result = 'failed';
+        cleanup.observers.errorCategory ??= diagnosticErrorCategory(error);
+        cleanupErrors.push(new Error('ORT observer cleanup failed'));
+      }
     }
   }
   if (reloadRequired) {
-    try { await beforeReload('release-probe'); await reload(); }
+    try { await reload('releaseProbe'); }
     catch { cleanupErrors.push(new Error('ORT renderer cleanup reload failed or was unsafe')); }
   }
-  try { await owner.dispose(); } catch { cleanupErrors.push(new Error('ORT owner handle cleanup failed')); }
+  try { await owner.dispose(); cleanup.ownerHandle.result = 'passed'; } catch (error) {
+    cleanup.ownerHandle.result = 'failed';
+    cleanup.ownerHandle.errorCategory = diagnosticErrorCategory(error);
+    cleanupErrors.push(new Error('ORT owner handle cleanup failed'));
+  }
+  await emit();
   cleanupErrors.push(...diagnosticErrors.filter(error => error !== primaryError));
   if (primaryError && cleanupErrors.length) throw new AggregateError([primaryError, ...cleanupErrors], 'ORT probe and cleanup failed');
   if (primaryError) throw primaryError;

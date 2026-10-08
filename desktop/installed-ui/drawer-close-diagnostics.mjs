@@ -3,6 +3,18 @@
 export function installDrawerCloseObservation(node, { key }) {
   if (window[key]) throw new Error('drawer close observer already installed');
   const doc = node.ownerDocument;
+  // One renderer-monotonic origin for before/after snapshots and delivered
+  // pointer events. No wall clock or raw performance origin is exported.
+  const startedAt = performance.now();
+  if (!Number.isFinite(startedAt)) throw new Error('drawer diagnostic clock unavailable');
+  let lastElapsedMs = 0;
+  const elapsedMs = () => {
+    const current = performance.now();
+    if (!Number.isFinite(current)) throw new Error('drawer diagnostic clock unavailable');
+    // Saturate at two minutes and never regress (including precision rounding).
+    lastElapsedMs = Math.max(lastElapsedMs, Math.min(120000, Math.max(0, Math.round((current - startedAt) * 100) / 100)));
+    return lastElapsedMs;
+  };
   const number = value => Number.isFinite(value) ? Math.max(-100000, Math.min(100000, Math.round(value * 100) / 100)) : null;
   const box = element => {
     const rect = element.getBoundingClientRect();
@@ -47,11 +59,12 @@ export function installDrawerCloseObservation(node, { key }) {
       const dropped = moving ? 'droppedPointerMoves' : 'droppedEvents';
       state[dropped] = Math.min(10000, state[dropped] + 1); return;
     }
-    events.push({ sequence: state.sequence, type: event.type, trusted: event.isTrusted === true, target: kind(event.target),
+    events.push({ elapsedMs: elapsedMs(), sequence: state.sequence, type: event.type, trusted: event.isTrusted === true, target: kind(event.target),
       x: number(event.clientX), y: number(event.clientY), button: number(event.button) });
   };
   const eventTypes = ['pointermove', 'pointerdown', 'pointerup', 'click'];
   state.read = () => {
+    const observedElapsedMs = elapsedMs();
     const rect = node.getBoundingClientRect();
     const x = rect.left + rect.width / 2, y = rect.top + rect.height / 2;
     const top = doc.elementFromPoint(x, y);
@@ -60,7 +73,7 @@ export function installDrawerCloseObservation(node, { key }) {
       ancestors.push(describe(parent));
     }
     const drawer = node.closest('.ant-drawer');
-    return { connected: node.isConnected, control: describe(node),
+    return { elapsedMs: observedElapsedMs, connected: node.isConnected, control: describe(node),
       centerWithinViewport: x >= 0 && y >= 0 && x < innerWidth && y < innerHeight,
       centerReceiver: kind(top), hitStack: doc.elementsFromPoint(x, y).slice(0, 8).map(describe), ancestors,
       drawerOpenClass: Boolean(drawer?.classList.contains('ant-drawer-open')),

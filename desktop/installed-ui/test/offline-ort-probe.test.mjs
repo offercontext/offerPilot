@@ -283,6 +283,7 @@ async function probeHarness(t, options = {}) {
   const reloadGates = [];
   const reloadResponse = { status: () => 200, url: () => ownerURL,
     request: () => ({ redirectedFrom: () => null }),
+    headers: () => ({ 'content-security-policy': csp }),
     headerValue: async () => options.documentCsp ? "script-src 'self'" : csp };
   Object.assign(page, { url: () => ownerURL, reload: async () => {
     reloads++;
@@ -307,7 +308,7 @@ async function probeHarness(t, options = {}) {
     assert.equal(fn, initializeOfflineOrtInRenderer);
     return fn(args, renderer.dependencies);
   };
-  const owner = { dispose: async () => { disposed++; } };
+  const owner = { dispose: async () => { disposed++; if (options.ownerDisposeError) throw options.ownerDisposeError; } };
   const app = { browserWindow: async (candidate) => { assert.equal(candidate, page); return owner; },
     evaluate: async (fn, args) => {
       assert.equal(fn, readOfflineOrtOwner);
@@ -539,11 +540,39 @@ const diagnosticFields = ['packaged', 'ownerURLMatched', 'twoWindows', 'ownerWin
   'devTools', 'preloadOwnerRole', 'resourcesPathsAbsolute', 'resourcesDirectoryChainsUnlinked',
   'resourcesCanonicalPathMatched', 'resourcesDirectories', 'resourcesDeviceMatched', 'resourcesFileMatched'];
 function assertSafeDiagnostic(value) {
-  assert.deepEqual(Object.keys(value).sort(), ['failedCheck', 'observed', 'phase', 'probe', 'schemaVersion']);
+  assert.deepEqual(Object.keys(value).sort(), ['cleanup', 'failedCheck', 'observed', 'phase', 'primaryFailure', 'probe', 'reloads', 'schemaVersion']);
   assert.equal(value.probe, 'offline-ort');
-  assert.equal(value.schemaVersion, 1);
+  assert.equal(value.schemaVersion, 2);
   assert.ok(['owner-observation', 'owner-validation', 'owner-resources', 'document-csp', 'initialization'].includes(value.phase));
-  assert.ok(value.failedCheck === null || [...diagnosticFields, 'owner-observation', 'document-csp', 'initialization', 'diagnostic-recording'].includes(value.failedCheck));
+  const reloadChecks = ['not-started', 'before-reload-gate', 'reload-await', 'response-present', 'response-status',
+    'response-url', 'response-redirect', 'provisional-csp-read', 'raw-csp-read', 'raw-csp-match', 'page-url', 'complete'];
+  const errorCategories = [null, 'assertion', 'timeout', 'aborted', 'connection-refused', 'connection-reset',
+    'target-closed', 'protocol-error', 'type-error', 'other'];
+  const checks = [...diagnosticFields, ...reloadChecks, 'owner-observation', 'document-csp', 'initialization', 'diagnostic-recording'];
+  assert.ok(value.failedCheck === null || checks.includes(value.failedCheck));
+  if (value.primaryFailure !== null) {
+    assert.deepEqual(Object.keys(value.primaryFailure).sort(), ['check', 'errorCategory']);
+    assert.ok(checks.includes(value.primaryFailure.check));
+    assert.ok(errorCategories.includes(value.primaryFailure.errorCategory));
+    assert.equal(value.failedCheck, value.primaryFailure.check);
+  }
+  assert.deepEqual(Object.keys(value.reloads).sort(), ['beforeProbe', 'releaseProbe']);
+  for (const reload of Object.values(value.reloads)) {
+    assert.deepEqual(Object.keys(reload).sort(), ['check', 'errorCategory', 'observed', 'result']);
+    assert.ok(reloadChecks.includes(reload.check));
+    assert.ok(['not-run', 'running', 'passed', 'failed'].includes(reload.result));
+    assert.ok(errorCategories.includes(reload.errorCategory));
+    assert.deepEqual(Object.keys(reload.observed).sort(), ['pageURLMatched', 'provisionalCspMatched', 'provisionalCspPresent',
+      'rawCspMatched', 'rawCspPresent', 'redirectAbsent', 'reloadResolved', 'responsePresent', 'responseStatus200', 'responseURLMatched', 'safeReloadGatePassed'].sort());
+    for (const observed of Object.values(reload.observed)) assert.ok([true, false, 'not-observed'].includes(observed));
+  }
+  assert.deepEqual(Object.keys(value.cleanup).sort(), ['observers', 'ownerHandle']);
+  for (const [key, cleanup] of Object.entries(value.cleanup)) {
+    assert.deepEqual(Object.keys(cleanup).sort(), ['check', 'errorCategory', 'result']);
+    assert.equal(cleanup.check, key === 'observers' ? 'observer-detach' : 'owner-handle-dispose');
+    assert.ok(['not-run', 'passed', 'failed'].includes(cleanup.result));
+    assert.ok(errorCategories.includes(cleanup.errorCategory));
+  }
   assert.deepEqual(Object.keys(value.observed).sort(), [...diagnosticFields].sort());
   for (const observed of Object.values(value.observed)) assert.ok([true, false, 'undefined', 'null', 'invalid-type'].includes(observed));
   assert.doesNotMatch(JSON.stringify(value), /private-token|do-not-record|\/installed|offerpilot-ort-unit|ws:\/\//);
@@ -656,6 +685,246 @@ test('normal same-origin API polling is separately counted and omitted Electron 
   assert.equal(result.observedUnexpectedRequests, 0);
   f.checkCleanup();
 });
+
+test('document CSP diagnostics preserve a raw/provisional mismatch and both assertion failures', async t => {
+  const f = await probeHarness(t, { documentCsp: true });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), AggregateError);
+  assert.equal(latest.phase, 'document-csp');
+  assert.equal(latest.failedCheck, 'raw-csp-match');
+  assert.deepEqual(latest.primaryFailure, { check: 'raw-csp-match', errorCategory: 'assertion' });
+  for (const reload of Object.values(latest.reloads)) {
+    assert.equal(reload.check, 'raw-csp-match');
+    assert.equal(reload.result, 'failed');
+    assert.equal(reload.errorCategory, 'assertion');
+    assert.equal(reload.observed.rawCspPresent, true);
+    assert.equal(reload.observed.rawCspMatched, false);
+    assert.equal(reload.observed.provisionalCspPresent, true);
+    assert.equal(reload.observed.provisionalCspMatched, true);
+  }
+  assert.equal(latest.cleanup.ownerHandle.result, 'passed');
+  f.checkCleanup();
+});
+
+test('successful reload diagnostics include both header views and resist callback mutation', async t => {
+  const f = await probeHarness(t);
+  let latest;
+  await f.run({ onDiagnostic: value => {
+    assertSafeDiagnostic(value);
+    latest = structuredClone(value);
+    value.reloads.beforeProbe.observed.rawCspMatched = 'private-token';
+    value.reloads.releaseProbe.check = 'private-token';
+    value.cleanup.ownerHandle.result = 'private-token';
+  } });
+  assert.equal(latest.primaryFailure, null);
+  assert.equal(latest.failedCheck, null);
+  for (const reload of Object.values(latest.reloads)) {
+    assert.equal(reload.check, 'complete');
+    assert.equal(reload.result, 'passed');
+    assert.ok(Object.values(reload.observed).every(value => value === true));
+  }
+  assert.equal(latest.cleanup.observers.result, 'passed');
+  assert.equal(latest.cleanup.ownerHandle.result, 'passed');
+  f.checkCleanup();
+});
+
+test('unsafe reload diagnostic identifies the gate without attempting either reload', async t => {
+  const f = await probeHarness(t, { unsafeReload: true });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }));
+  assert.deepEqual(latest.primaryFailure, { check: 'before-reload-gate', errorCategory: 'other' });
+  assert.equal(latest.reloads.beforeProbe.result, 'failed');
+  assert.equal(latest.reloads.beforeProbe.observed.reloadResolved, 'not-observed');
+  assert.equal(latest.reloads.releaseProbe.result, 'not-run');
+  f.checkCleanup(0);
+});
+
+test('provisional CSP absence never substitutes for or changes the original raw CSP gate', async t => {
+  const f = await probeHarness(t);
+  const originalReload = f.page.reload;
+  f.page.reload = async (...args) => ({ ...await originalReload(...args), headers: () => ({}) });
+  let latest;
+  await f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } });
+  for (const reload of Object.values(latest.reloads)) {
+    assert.equal(reload.observed.provisionalCspPresent, false);
+    assert.equal(reload.observed.provisionalCspMatched, false);
+    assert.equal(reload.observed.rawCspPresent, true);
+    assert.equal(reload.observed.rawCspMatched, true);
+  }
+  f.checkCleanup();
+});
+
+test('diagnostic callbacks cannot intervene after either safe-reload gate', async t => {
+  const f = await probeHarness(t);
+  const originalReload = f.page.reload;
+  let callbackCount = 0;
+  let gateCallbackCount;
+  f.page.reload = async (...args) => {
+    assert.equal(callbackCount, gateCallbackCount);
+    return originalReload(...args);
+  };
+  await f.run({ beforeReload: async () => { gateCallbackCount = callbackCount; },
+    onDiagnostic: async value => { assertSafeDiagnostic(value); callbackCount++; await Promise.resolve(); } });
+  f.checkCleanup();
+});
+
+for (const [message, expected] of [
+  ['Timeout 60000ms exceeded private-token', 'timeout'],
+  ['net::ERR_ABORTED private-token', 'aborted'],
+  ['net::ERR_CONNECTION_REFUSED private-token', 'connection-refused'],
+  ['read ECONNRESET private-token', 'connection-reset'],
+  ['Target page, context or browser has been closed private-token', 'target-closed'],
+  ['Protocol error (Page.reload): private-token', 'protocol-error'],
+  ['unclassified private-token ws://do-not-record', 'other'],
+]) {
+  test(`reload API failure exposes only the fixed ${expected} category`, async t => {
+    const f = await probeHarness(t);
+    const originalReload = f.page.reload;
+    let calls = 0;
+    f.page.reload = async (...args) => {
+      const response = await originalReload(...args);
+      if (++calls === 1) throw new Error(message);
+      return response;
+    };
+    let latest;
+    await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }));
+    assert.deepEqual(latest.primaryFailure, { check: 'reload-await', errorCategory: expected });
+    assert.equal(latest.reloads.releaseProbe.result, 'passed');
+    f.checkCleanup();
+  });
+}
+
+for (const [check, alter] of [
+  ['response-status', response => ({ ...response, status: () => { throw new TypeError('private-token'); } })],
+  ['response-url', response => ({ ...response, url: () => { throw new TypeError('private-token'); } })],
+  ['response-redirect', response => ({ ...response, request: () => { throw new TypeError('private-token'); } })],
+  ['response-redirect', response => ({ ...response, request: () => ({ redirectedFrom: () => { throw new TypeError('private-token'); } }) })],
+]) {
+  test(`response accessor rejection remains localized to ${check}`, async t => {
+    const f = await probeHarness(t);
+    const originalReload = f.page.reload;
+    let calls = 0;
+    f.page.reload = async (...args) => {
+      const response = await originalReload(...args);
+      return ++calls === 1 ? alter(response) : response;
+    };
+    let latest;
+    await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), TypeError);
+    assert.deepEqual(latest.primaryFailure, { check, errorCategory: 'type-error' });
+    assert.equal(latest.reloads.releaseProbe.result, 'passed');
+    f.checkCleanup();
+  });
+}
+
+test('post-reload page URL mismatch keeps its own check when cleanup is safe', async t => {
+  const f = await probeHarness(t);
+  const originalReload = f.page.reload;
+  let calls = 0;
+  f.page.reload = async (...args) => {
+    const response = await originalReload(...args);
+    if (++calls === 1) {
+      let firstRead = true;
+      f.page.url = () => {
+        if (firstRead) { firstRead = false; return `${ownerURL}&private-token=do-not-record`; }
+        return ownerURL;
+      };
+    }
+    return response;
+  };
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }));
+  assert.deepEqual(latest.primaryFailure, { check: 'page-url', errorCategory: 'assertion' });
+  assert.equal(latest.reloads.beforeProbe.observed.pageURLMatched, false);
+  assert.equal(latest.reloads.releaseProbe.result, 'passed');
+  f.checkCleanup();
+});
+
+test('cleanup gate failure preserves a successful primary probe without claiming cleanup passed', async t => {
+  const f = await probeHarness(t);
+  let latest;
+  await assert.rejects(f.run({ beforeReload: async kind => {
+    if (kind === 'release-probe') throw new Error('private-token unsaved editing');
+  }, onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), AggregateError);
+  assert.equal(latest.primaryFailure, null);
+  assert.equal(latest.failedCheck, null);
+  assert.equal(latest.phase, 'initialization');
+  assert.equal(latest.reloads.beforeProbe.result, 'passed');
+  assert.equal(latest.reloads.releaseProbe.check, 'before-reload-gate');
+  assert.equal(latest.reloads.releaseProbe.result, 'failed');
+  f.checkCleanup(1);
+});
+
+test('cleanup observer and handle errors remain separate from the original CSP rejection', async t => {
+  const f = await probeHarness(t, { documentCsp: true,
+    ownerDisposeError: new Error('Protocol error private-token ws://do-not-record') });
+  const removeListener = f.page.removeListener;
+  let rejected = false;
+  f.page.removeListener = function (...args) {
+    const result = removeListener.apply(this, args);
+    if (!rejected) { rejected = true; throw new TypeError('private-token'); }
+    return result;
+  };
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.errors[0].name, 'AssertionError');
+    assert.equal(error.errors.length, 4);
+    return true;
+  });
+  assert.deepEqual(latest.primaryFailure, { check: 'raw-csp-match', errorCategory: 'assertion' });
+  assert.deepEqual(latest.cleanup.observers, { check: 'observer-detach', result: 'failed', errorCategory: 'type-error' });
+  assert.deepEqual(latest.cleanup.ownerHandle, { check: 'owner-handle-dispose', result: 'failed', errorCategory: 'protocol-error' });
+  f.checkCleanup();
+});
+
+test('a failed final diagnostic callback still fails closed after all cleanup is attempted', async t => {
+  const f = await probeHarness(t, { documentCsp: true });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => {
+    assertSafeDiagnostic(value);
+    latest = value;
+    if (value.cleanup.ownerHandle.result === 'passed') throw new Error('private-token');
+  } }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.errors[0].name, 'AssertionError');
+    assert.equal(error.errors.at(-1).message, 'ORT diagnostic recording failed');
+    return true;
+  });
+  assert.deepEqual(latest.primaryFailure, { check: 'raw-csp-match', errorCategory: 'assertion' });
+  assert.equal(latest.reloads.releaseProbe.result, 'failed');
+  assert.equal(latest.cleanup.ownerHandle.result, 'passed');
+  f.checkCleanup();
+});
+
+for (const [check, fault] of [
+  ['reload-await', () => { throw new Error('Protocol error: private-token ws://do-not-record'); }],
+  ['response-present', () => null],
+  ['response-status', response => ({ ...response, status: () => 503 })],
+  ['response-url', response => ({ ...response, url: () => 'http://private-token/do-not-record' })],
+  ['response-redirect', response => ({ ...response, request: () => ({ redirectedFrom: () => ({ private: 'private-token' }) }) })],
+  ['provisional-csp-read', response => ({ ...response, headers: () => { throw new Error('Protocol error: private-token'); } })],
+  ['raw-csp-read', response => ({ ...response, headerValue: async () => { throw new Error('net::ERR_ABORTED private-token'); } })],
+  ['raw-csp-match', response => ({ ...response, headerValue: async () => null })],
+]) {
+  test(`reload diagnostics distinguish ${check} and retain primary when cleanup also fails`, async t => {
+    const f = await probeHarness(t, { cleanupFails: true });
+    const originalReload = f.page.reload;
+    let calls = 0;
+    f.page.reload = async (...args) => {
+      const response = await originalReload(...args);
+      return ++calls === 1 ? fault(response) : response;
+    };
+    let latest;
+    await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }), AggregateError);
+    assert.equal(latest.failedCheck, check);
+    assert.equal(latest.primaryFailure.check, check);
+    assert.equal(latest.reloads.beforeProbe.check, check);
+    assert.equal(latest.reloads.releaseProbe.check, 'reload-await');
+    assert.equal(latest.reloads.releaseProbe.errorCategory, 'other');
+    assert.equal(latest.cleanup.ownerHandle.result, 'passed');
+    f.checkCleanup();
+  });
+}
 
 test('renderer initializer survives Playwright serialization without module-scope dependencies', async () => {
   const f = rendererHarness();

@@ -12,7 +12,7 @@ const NATIVE_PHASES = Object.freeze(['installed', 'arm-check', 'baseline-write',
   'dialog-check', 'dialog-answered', 'readback-check', 'readback-read', 'restored']);
 const NATIVE_FAILURES = Object.freeze(['none', 'unsafe-to-arm', 'sequence-rejected', 'baseline-write-error',
   'baseline-read-error', 'baseline-mismatch', 'unexpected-confirmation', 'unsafe-readback', 'wrong-request',
-  'readback-error', 'readback-mismatch', 'dialog-restore-failed']);
+  'readback-error', 'readback-mismatch', 'dialog-restore-failed', 'baseline-write-timeout', 'baseline-read-timeout', 'readback-timeout']);
 
 // Only this fixed projection may reach evidence. Never pass a main-process
 // object, exception, clipboard value, URL, or path through the callback.
@@ -28,6 +28,7 @@ export function clipboardProbeDiagnostic({ phase, sequence, native, outcome = 'o
       nativeFailure: NATIVE_FAILURES.includes(native?.nativeFailure) ? native.nativeFailure : 'not-observed',
       ownerURLUnchanged: flag(native?.ownerURLUnchanged), ownerDestroyed: flag(native?.ownerDestroyed),
       pendingConfirmation: flag(native?.pendingConfirmation), hasFailures: flag(native?.hasFailures),
+      operationAwaitPending: flag(native?.operationAwaitPending),
       baselineWriteAttempted: flag(native?.baselineWriteAttempted), baselineWriteCompleted: flag(native?.baselineWriteCompleted),
       baselineReadAttempted: flag(native?.baselineReadAttempted), baselineMatched: flag(native?.baselineMatched),
       confirmationCount: count(native?.confirmationCount, 4), baselineWrites: count(native?.baselineWrites, 3),
@@ -47,7 +48,28 @@ export function assertHostedClipboardEnvironment(environment = process.env, plat
 // Serialized into the real Electron main process. The production permission
 // handlers remain installed. Only their exact clipboard confirmation is answered.
 // Never read or preserve the pre-existing clipboard, nor return clipboard text.
-export function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
+export async function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
+  const operationTimeoutMs = args.operationTimeoutMs ?? 15000;
+  if (!Number.isFinite(operationTimeoutMs) || operationTimeoutMs <= 0 || operationTimeoutMs > 30000) {
+    throw new Error('invalid native clipboard operation timeout');
+  }
+  // Electron 44.5.1 readText/writeText return Promises. Await completion in the
+  // main process; comparing an unawaited read Promise to text always mismatches.
+  // https://github.com/electron/electron/blob/v44.5.1/docs/api/clipboard.md
+  // A deadline stops this probe, not the underlying native operation. A late
+  // write completion/rejection must never schedule a read or an automatic retry.
+  const complete = async operation => {
+    let timer;
+    try {
+      return await Promise.race([operation(), new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          const error = new Error('native clipboard operation timed out');
+          error.code = 'CLIPBOARD_OPERATION_TIMEOUT';
+          reject(error);
+        }, operationTimeoutMs);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
   const key = Symbol.for(args.key);
   if (args.operation === 'install') {
     if (globalThis[key]) throw new Error('clipboard instrumentation already installed');
@@ -58,7 +80,8 @@ export function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
     const state = { owner, contents, ownerURL: args.ownerURL, expectedText: args.expectedText,
       originalMessage: dialog.showMessageBox, armed: null, baseline: null, baselineWritten: false,
       writes: 0, reads: 0, messages: [], failures: [], nativePhase: 'installed', nativeFailure: 'none',
-      baselineWriteAttempted: false, baselineWriteCompleted: false, baselineReadAttempted: false, baselineMatched: null };
+      baselineWriteAttempted: false, baselineWriteCompleted: false, baselineReadAttempted: false, baselineMatched: null,
+      ioPending: false };
     state.wrapper = async (win, options) => {
       state.nativePhase = 'dialog-check';
       const active = state.armed;
@@ -91,13 +114,14 @@ export function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
   const diagnostic = () => ({ nativePhase: state.nativePhase, nativeFailure: state.nativeFailure,
       ownerURLUnchanged: ownerUnchanged(), ownerDestroyed: state.contents.isDestroyed(),
       pendingConfirmation: Boolean(state.armed), hasFailures: state.failures.length > 0,
+      operationAwaitPending: state.ioPending,
       baselineWriteAttempted: state.baselineWriteAttempted, baselineWriteCompleted: state.baselineWriteCompleted,
       baselineReadAttempted: state.baselineReadAttempted, baselineMatched: state.baselineMatched,
       confirmationCount: state.messages.length, baselineWrites: state.writes, comparisonReads: state.reads });
   if (args.operation === 'diagnostic') return diagnostic();
   if (args.operation === 'arm') {
     state.nativePhase = 'arm-check';
-    if (!ownerUnchanged() || state.armed || state.failures.length) {
+    if (!ownerUnchanged() || state.armed || state.failures.length || state.ioPending) {
       state.nativeFailure = 'unsafe-to-arm'; throw new Error('clipboard probe not safe to arm');
     }
     const choices = ['cancel', 'allow', 'cancel'];
@@ -114,23 +138,37 @@ export function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
     state.baselineReadAttempted = false;
     state.baselineMatched = null;
     state.nativePhase = 'baseline-write';
-    try { clipboard.writeText(state.baseline); }
-    catch { state.nativeFailure = 'baseline-write-error'; throw new Error('synthetic clipboard baseline write failed'); }
-    state.baselineWriteCompleted = true;
-    state.writes++;
-    state.baselineWritten = true;
-    state.reads++;
-    state.nativePhase = 'baseline-read';
-    state.baselineReadAttempted = true;
-    let baselineMatched;
-    try { baselineMatched = clipboard.readText() === state.baseline; }
-    catch { state.nativeFailure = 'baseline-read-error'; throw new Error('synthetic clipboard baseline read failed'); }
-    state.baselineMatched = baselineMatched;
-    state.baselineWritten = baselineMatched;
-    if (!baselineMatched) { state.nativeFailure = 'baseline-mismatch'; throw new Error('synthetic clipboard baseline not established'); }
-    state.nativePhase = 'baseline-verified';
-    state.armed = { choice: args.choice, sequence: args.sequence };
-    return { baselineMatched, syntheticBaselineWrittenBeforeRead: true };
+    state.ioPending = true;
+    try {
+      try { await complete(() => clipboard.writeText(state.baseline)); }
+      catch (error) {
+        state.nativeFailure = error?.code === 'CLIPBOARD_OPERATION_TIMEOUT' ? 'baseline-write-timeout' : 'baseline-write-error';
+        throw new Error('synthetic clipboard baseline write failed');
+      }
+      state.baselineWriteCompleted = true;
+      state.writes++;
+      if (!ownerUnchanged() || globalThis[key] !== state) {
+        state.nativeFailure = 'unsafe-to-arm'; throw new Error('clipboard owner changed before baseline read');
+      }
+      state.reads++;
+      state.nativePhase = 'baseline-read';
+      state.baselineReadAttempted = true;
+      let baselineMatched;
+      try { baselineMatched = (await complete(() => clipboard.readText())) === state.baseline; }
+      catch (error) {
+        state.nativeFailure = error?.code === 'CLIPBOARD_OPERATION_TIMEOUT' ? 'baseline-read-timeout' : 'baseline-read-error';
+        throw new Error('synthetic clipboard baseline read failed');
+      }
+      state.baselineMatched = baselineMatched;
+      state.baselineWritten = baselineMatched;
+      if (!baselineMatched) { state.nativeFailure = 'baseline-mismatch'; throw new Error('synthetic clipboard baseline not established'); }
+      if (!ownerUnchanged() || globalThis[key] !== state) {
+        state.nativeFailure = 'unsafe-to-arm'; throw new Error('clipboard owner changed during baseline read');
+      }
+      state.nativePhase = 'baseline-verified';
+      state.armed = { choice: args.choice, sequence: args.sequence };
+      return { baselineMatched, syntheticBaselineWrittenBeforeRead: true };
+    } finally { state.ioPending = false; }
   }
   if (args.operation === 'snapshot') {
     return { messages: state.messages, failures: state.failures, ownerURLUnchanged: ownerUnchanged(),
@@ -138,7 +176,7 @@ export function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
   }
   if (args.operation === 'readback') {
     state.nativePhase = 'readback-check';
-    if (!state.baselineWritten || !ownerUnchanged() || state.armed || state.failures.length) {
+    if (!state.baselineWritten || !ownerUnchanged() || state.armed || state.failures.length || state.ioPending) {
       state.nativeFailure = 'unsafe-readback'; throw new Error('clipboard readback not safe');
     }
     const last = state.messages.at(-1);
@@ -147,11 +185,20 @@ export function nativeClipboardInstrumentation({ dialog, clipboard }, args) {
     }
     state.reads++;
     state.nativePhase = 'readback-read';
-    let exactExpectedValue;
-    try { exactExpectedValue = clipboard.readText() === (last.choice === 'allow' ? state.expectedText : state.baseline); }
-    catch { state.nativeFailure = 'readback-error'; throw new Error('synthetic clipboard readback failed'); }
-    if (!exactExpectedValue) state.nativeFailure = 'readback-mismatch';
-    return { exactExpectedValue, comparisonOnly: true };
+    state.ioPending = true;
+    try {
+      let exactExpectedValue;
+      try { exactExpectedValue = (await complete(() => clipboard.readText())) === (last.choice === 'allow' ? state.expectedText : state.baseline); }
+      catch (error) {
+        state.nativeFailure = error?.code === 'CLIPBOARD_OPERATION_TIMEOUT' ? 'readback-timeout' : 'readback-error';
+        throw new Error('synthetic clipboard readback failed');
+      }
+      if (!ownerUnchanged() || globalThis[key] !== state) {
+        state.nativeFailure = 'unsafe-readback'; throw new Error('clipboard owner changed during readback');
+      }
+      if (!exactExpectedValue) state.nativeFailure = 'readback-mismatch';
+      return { exactExpectedValue, comparisonOnly: true };
+    } finally { state.ioPending = false; }
   }
   if (args.operation === 'restore') {
     dialog.showMessageBox = state.originalMessage;
@@ -201,7 +248,7 @@ export async function probeInstalledClipboard({ app, page, copyButton,
   const owner = await app.browserWindow(page);
   const key = `offerpilot.installed-clipboard.${randomUUID()}`;
   const run = (operation, extra = {}) => app.evaluate(nativeClipboardInstrumentation,
-    { operation, key, ownerURL, ...extra });
+    { operation, key, ownerURL, operationTimeoutMs: timeoutMs, ...extra });
   const steps = [];
   let phase = 'install';
   let sequence = null;

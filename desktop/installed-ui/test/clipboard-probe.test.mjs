@@ -27,15 +27,19 @@ function fixture(t, options = {}) {
   const originalValue = 'PRIVATE pre-existing clipboard must never be read';
   let value = originalValue;
   const operations = [];
+  let completedWrites = 0;
   const clipboard = {
-    writeText(text) {
+    async writeText(text) {
       operations.push({ type: 'write' });
+      await (options.writeGate ?? Promise.resolve());
       if (options.failWrite) throw new Error('write failed');
       value = options.ignoreWrites ? originalValue : text;
+      completedWrites++;
     },
-    readText() {
-      assert.equal(operations.some(item => item.type === 'write'), true, 'read cannot predate synthetic write');
+    async readText() {
+      assert.ok(completedWrites > 0, 'read cannot predate a resolved synthetic write');
       operations.push({ type: 'read' });
+      await (options.readGate ?? Promise.resolve());
       if (options.failRead) throw new Error('PRIVATE synthetic read exception');
       return value;
     },
@@ -49,9 +53,9 @@ function fixture(t, options = {}) {
   session.setPermissionCheckHandler = () => { throw new Error('permission check replacement forbidden'); };
   session.setPermissionRequestHandler = () => { throw new Error('permission request replacement forbidden'); };
   const run = (operation, extra = {}) => nativeClipboardInstrumentation({ dialog, clipboard },
-    { key, operation, ownerURL: origin, ...extra });
-  t.after(() => {
-    run('restore');
+    { key, operation, ownerURL: origin, operationTimeoutMs: options.operationTimeoutMs ?? 1000, ...extra });
+  t.after(async () => {
+    await run('restore');
     assert.equal(session.check, check);
     assert.equal(session.request, requestHandler);
     assert.equal(dialog.showMessageBox, original);
@@ -75,30 +79,30 @@ test('clipboard requires actual Windows on an explicitly hosted GitHub runner', 
 
 test('production permission policy independently confirms cancel, allow, and cancel with exact synthetic readbacks', async t => {
   const f = fixture(t);
-  f.install();
+  await f.install();
   assert.deepEqual(f.operations, [], 'install must never inspect the pre-existing clipboard');
   for (const [sequence, choice] of ['cancel', 'allow', 'cancel'].entries()) {
-    assert.deepEqual(f.run('arm', { sequence, choice }), {
+    assert.deepEqual(await f.run('arm', { sequence, choice }), {
       baselineMatched: true, syntheticBaselineWrittenBeforeRead: true,
     });
     const allowed = await f.request();
     assert.equal(allowed, choice === 'allow');
-    if (allowed) f.clipboard.writeText(SYNTHETIC_JD_SOURCE); // Simulate Chromium's write AFTER the real product decision.
-    assert.deepEqual(f.run('readback', { sequence }), { exactExpectedValue: true, comparisonOnly: true });
-    const snapshot = f.run('snapshot');
+    if (allowed) await f.clipboard.writeText(SYNTHETIC_JD_SOURCE); // Simulate Chromium's write AFTER the real product decision.
+    assert.deepEqual(await f.run('readback', { sequence }), { exactExpectedValue: true, comparisonOnly: true });
+    const snapshot = await f.run('snapshot');
     assertClipboardSnapshot(snapshot, sequence + 1);
     assert.equal(snapshot.messages.length, sequence + 1);
     assert.equal(f.session.check(f.contents, 'clipboard-sanitized-write', origin,
       { isMainFrame: true, requestingUrl: origin }), false, 'permission is not stored');
   }
-  const snapshot = f.run('snapshot');
+  const snapshot = await f.run('snapshot');
   assert.equal(snapshot.syntheticBaselineWrites, 3);
   assert.equal(snapshot.comparisonOnlyReads, 6);
   assert.equal(f.operations[0].type, 'write');
   assert.doesNotMatch(JSON.stringify(snapshot), /PRIVATE|baseline|example\.invalid/);
   assert.equal(await f.request('clipboard-read'), false, 'renderer never gains clipboard read access');
   assert.equal(await f.request('deprecated-sync-clipboard-read'), false);
-  const restored = f.run('restore');
+  const restored = await f.run('restore');
   assert.equal(restored.restored, true);
   assert.equal(restored.preExistingClipboardNeverRead, true);
   assert.equal(restored.oldClipboardRestorationAttempted, false);
@@ -106,74 +110,185 @@ test('production permission policy independently confirms cancel, allow, and can
 });
 
 test('one native answer is consumed and a second request cannot reuse allow', async t => {
-  const f = fixture(t); f.install();
-  f.run('arm', { sequence: 0, choice: 'cancel' }); await f.request();
-  f.run('arm', { sequence: 1, choice: 'allow' }); assert.equal(await f.request(), true);
+  const f = fixture(t); await f.install();
+  await f.run('arm', { sequence: 0, choice: 'cancel' }); await f.request();
+  await f.run('arm', { sequence: 1, choice: 'allow' }); assert.equal(await f.request(), true);
   assert.equal(await f.request(), false);
-  assert.deepEqual(f.run('snapshot').failures, ['unexpected-native-confirmation']);
-  assert.throws(() => f.run('readback', { sequence: 1 }), /not safe/);
+  assert.deepEqual((await f.run('snapshot')).failures, ['unexpected-native-confirmation']);
+  await assert.rejects(() => f.run('readback', { sequence: 1 }), /not safe/);
 });
 
 test('an unrelated native prompt is cancelled and cannot be passed off as a clipboard confirmation', async t => {
-  const f = fixture(t); f.install();
-  f.run('arm', { sequence: 0, choice: 'cancel' });
+  const f = fixture(t); await f.install();
+  await f.run('arm', { sequence: 0, choice: 'cancel' });
   assert.equal(await f.request('media', { mediaTypes: ['audio'] }), false);
-  const snapshot = f.run('snapshot');
+  const snapshot = await f.run('snapshot');
   assert.equal(snapshot.messages[0].expected, false);
   assert.equal(snapshot.messages[0].choice, 'cancel');
   assert.throws(() => assertClipboardSnapshot(snapshot, 1));
-  assert.throws(() => f.run('readback', { sequence: 0 }), /not safe/);
+  await assert.rejects(() => f.run('readback', { sequence: 0 }), /not safe/);
 });
 
-test('failed baseline write never reads the pre-existing clipboard', t => {
-  const f = fixture(t, { failWrite: true }); f.install();
-  assert.throws(() => f.run('arm', { sequence: 0, choice: 'cancel' }), /write failed/);
+test('failed baseline write never reads the pre-existing clipboard', async t => {
+  const f = fixture(t, { failWrite: true }); await f.install();
+  await assert.rejects(() => f.run('arm', { sequence: 0, choice: 'cancel' }), /write failed/);
   assert.deepEqual(f.operations, [{ type: 'write' }]);
-  assert.throws(() => f.run('readback', { sequence: 0 }), /not safe/);
+  await assert.rejects(() => f.run('readback', { sequence: 0 }), /not safe/);
 });
 
-test('unestablished baseline fails without leaking a value in returned evidence or errors', t => {
-  const f = fixture(t, { ignoreWrites: true }); f.install();
-  assert.throws(() => f.run('arm', { sequence: 0, choice: 'cancel' }), error => {
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
+  return { promise, resolve, reject };
+}
+
+test('pending async write cannot start any clipboard read; comparison begins only after write resolves', async t => {
+  const write = deferred();
+  const f = fixture(t, { writeGate: write.promise });
+  await f.install();
+  const pending = f.run('arm', { sequence: 0, choice: 'cancel' });
+  assert.deepEqual(f.operations, [{ type: 'write' }]);
+  const before = await f.run('diagnostic');
+  assert.equal(before.baselineWriteAttempted, true);
+  assert.equal(before.baselineWriteCompleted, false);
+  assert.equal(before.baselineReadAttempted, false);
+  assert.equal(before.comparisonReads, 0);
+  assert.equal(before.operationAwaitPending, true);
+  write.resolve();
+  assert.equal((await pending).baselineMatched, true);
+  assert.deepEqual(f.operations, [{ type: 'write' }, { type: 'read' }]);
+  assert.equal((await f.run('diagnostic')).operationAwaitPending, false);
+});
+
+test('async write rejection never reads clipboard and never authorizes a native confirmation', async t => {
+  const write = deferred();
+  const f = fixture(t, { writeGate: write.promise });
+  await f.install();
+  const pending = f.run('arm', { sequence: 0, choice: 'cancel' });
+  write.reject(new Error('PRIVATE asynchronous write rejection'));
+  await assert.rejects(pending, error => error.message === 'synthetic clipboard baseline write failed');
+  assert.deepEqual(f.operations, [{ type: 'write' }]);
+  const observed = await f.run('diagnostic');
+  assert.equal(observed.baselineWriteCompleted, false);
+  assert.equal(observed.baselineReadAttempted, false);
+  assert.equal(observed.confirmationCount, 0);
+  assert.equal(observed.nativeFailure, 'baseline-write-error');
+  assert.doesNotMatch(JSON.stringify(observed), /PRIVATE/);
+});
+
+test('async read is awaited before comparing or reporting baseline mismatch', async t => {
+  const read = deferred();
+  const f = fixture(t, { readGate: read.promise });
+  await f.install();
+  let settled = false;
+  const pending = f.run('arm', { sequence: 0, choice: 'cancel' }).finally(() => { settled = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  const before = await f.run('diagnostic');
+  assert.equal(settled, false);
+  assert.equal(before.baselineWriteCompleted, true);
+  assert.equal(before.baselineReadAttempted, true);
+  assert.equal(before.baselineMatched, null);
+  assert.equal(before.nativeFailure, 'none');
+  assert.equal(before.confirmationCount, 0);
+  read.resolve();
+  assert.equal((await pending).baselineMatched, true);
+  assert.equal(settled, true);
+});
+
+for (const [kind, option, failure] of [
+  ['write', 'writeGate', 'baseline-write-timeout'], ['read', 'readGate', 'baseline-read-timeout'],
+]) {
+  test(`a never-settling async ${kind} fails once at the bounded deadline without clicking production UI`, async t => {
+    const f = fixture(t, { [option]: new Promise(() => {}), operationTimeoutMs: 20 });
+    await f.install();
+    await assert.rejects(f.run('arm', { sequence: 0, choice: 'cancel' }));
+    const observed = await f.run('diagnostic');
+    assert.equal(observed.nativeFailure, failure);
+    assert.equal(observed.baselineWriteCompleted, kind !== 'write');
+    assert.equal(observed.baselineReadAttempted, kind !== 'write');
+    assert.equal(observed.confirmationCount, 0);
+    assert.equal(observed.operationAwaitPending, false);
+    assert.equal(f.operations.filter(operation => operation.type === 'write').length, 1);
+    assert.equal(f.operations.filter(operation => operation.type === 'read').length, kind === 'write' ? 0 : 1);
+  });
+}
+
+for (const change of ['navigation', 'restoration']) {
+  test(`${change} during pending write prevents any subsequent clipboard read`, async t => {
+    const write = deferred();
+    const f = fixture(t, { writeGate: write.promise });
+    await f.install();
+    const pending = f.run('arm', { sequence: 0, choice: 'cancel' });
+    if (change === 'navigation') f.navigate(`${origin}/?changed`);
+    else await f.run('restore');
+    write.resolve();
+    await assert.rejects(pending, /owner changed before baseline read/);
+    assert.deepEqual(f.operations, [{ type: 'write' }]);
+  });
+}
+
+for (const settlement of ['resolve', 'reject']) {
+  test(`native write ${settlement} after timeout and restoration never schedules a read or retry`, async t => {
+    const write = deferred();
+    const f = fixture(t, { writeGate: write.promise, operationTimeoutMs: 20 });
+    await f.install();
+    await assert.rejects(f.run('arm', { sequence: 0, choice: 'cancel' }), /write failed/);
+    const diagnostic = await f.run('diagnostic');
+    assert.equal(diagnostic.nativeFailure, 'baseline-write-timeout');
+    assert.equal(diagnostic.operationAwaitPending, false, 'probe no longer waits; native settlement remains unknown');
+    await f.run('restore');
+    if (settlement === 'resolve') write.resolve();
+    else write.reject(new Error('PRIVATE late native rejection'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(f.operations, [{ type: 'write' }]);
+    assert.equal(f.dialog.showMessageBox, f.original);
+  });
+}
+
+test('unestablished baseline fails without leaking a value in returned evidence or errors', async t => {
+  const f = fixture(t, { ignoreWrites: true }); await f.install();
+  await assert.rejects(() => f.run('arm', { sequence: 0, choice: 'cancel' }), error => {
     assert.equal(error.message, 'synthetic clipboard baseline not established'); return true;
   });
-  assert.equal(f.run('snapshot').messages.length, 0);
-  assert.throws(() => f.run('readback', { sequence: 0 }), /not safe/);
+  assert.equal((await f.run('snapshot')).messages.length, 0);
+  await assert.rejects(() => f.run('readback', { sequence: 0 }), /not safe/);
 });
 
 test('readback is forbidden before a baseline, while pending, after navigation, or for an incorrect request', async t => {
-  const f = fixture(t); f.install();
-  assert.throws(() => f.run('readback', { sequence: 0 }), /not safe/);
-  f.run('arm', { sequence: 0, choice: 'cancel' });
-  assert.throws(() => f.run('readback', { sequence: 0 }), /not safe/);
+  const f = fixture(t); await f.install();
+  await assert.rejects(() => f.run('readback', { sequence: 0 }), /not safe/);
+  await f.run('arm', { sequence: 0, choice: 'cancel' });
+  await assert.rejects(() => f.run('readback', { sequence: 0 }), /not safe/);
   await f.request();
-  assert.throws(() => f.run('readback', { sequence: 1 }), /not confirmed/);
+  await assert.rejects(() => f.run('readback', { sequence: 1 }), /not confirmed/);
   f.navigate(`${origin}/different-document`);
-  assert.throws(() => f.run('readback', { sequence: 0 }), /not safe/);
+  await assert.rejects(() => f.run('readback', { sequence: 0 }), /not safe/);
 });
 
 test('unsafe input, out-of-order requests, rearming, extra confirmations and failed readback cannot pass', async t => {
   const f = fixture(t);
-  assert.throws(() => f.install('https://owner.example/private'), /non-synthetic/);
-  f.install();
-  assert.throws(() => f.run('arm', { sequence: 1, choice: 'allow' }), /sequence/);
-  f.run('arm', { sequence: 0, choice: 'cancel' });
-  assert.throws(() => f.run('arm', { sequence: 0, choice: 'cancel' }), /not safe/);
+  await assert.rejects(() => f.install('https://owner.example/private'), /non-synthetic/);
+  await f.install();
+  await assert.rejects(() => f.run('arm', { sequence: 1, choice: 'allow' }), /sequence/);
+  await f.run('arm', { sequence: 0, choice: 'cancel' });
+  await assert.rejects(() => f.run('arm', { sequence: 0, choice: 'cancel' }), /not safe/);
   await f.request();
-  f.clipboard.writeText('unexpected synthetic modification');
-  assert.equal(f.run('readback', { sequence: 0 }).exactExpectedValue, false);
-  assert.throws(() => assertClipboardSnapshot({ ...f.run('snapshot'), ownerURLUnchanged: false }, 1));
-  assert.throws(() => assertClipboardSnapshot(f.run('snapshot'), 0));
+  await f.clipboard.writeText('unexpected synthetic modification');
+  assert.equal((await f.run('readback', { sequence: 0 })).exactExpectedValue, false);
+  const snapshot = await f.run('snapshot');
+  assert.throws(() => assertClipboardSnapshot({ ...snapshot, ownerURLUnchanged: false }, 1));
+  assert.throws(() => assertClipboardSnapshot(snapshot, 0));
 });
 
-test('cleanup restores dialog even while armed without reading or restoring prior clipboard content', t => {
-  const f = fixture(t); f.install();
-  f.run('arm', { sequence: 0, choice: 'cancel' });
+test('cleanup restores dialog even while armed without reading or restoring prior clipboard content', async t => {
+  const f = fixture(t); await f.install();
+  await f.run('arm', { sequence: 0, choice: 'cancel' });
   const before = f.operations.length;
-  f.run('restore');
+  await f.run('restore');
   assert.equal(f.operations.length, before);
   assert.equal(f.dialog.showMessageBox, f.original);
-  assert.deepEqual(f.run('restore'), { restored: true, absent: true });
+  assert.deepEqual(await f.run('restore'), { restored: true, absent: true });
 });
 
 test('probe refuses unsupported hosts before accessing app/page/clipboard', async () => {
@@ -192,20 +307,20 @@ test('helper preserves product API, permission handlers and ordinary UI clicks',
   }
 });
 
-test('main-process observer survives Playwright serialization without module-scope dependencies', () => {
-  const serialized = vm.runInNewContext(`(${nativeClipboardInstrumentation.toString()})`);
+test('main-process observer survives Playwright serialization without module-scope dependencies', async () => {
+  const serialized = vm.runInNewContext(`(${nativeClipboardInstrumentation.toString()})`, { setTimeout, clearTimeout });
   const original = async () => ({ response: 0 });
   const dialog = { showMessageBox: original };
   let value;
   const operations = [];
-  const clipboard = { writeText: text => { operations.push('write'); value = text; },
-    readText: () => { operations.push('read'); return value; } };
+  const clipboard = { writeText: async text => { operations.push('write'); await Promise.resolve(); value = text; },
+    readText: async () => { operations.push('read'); await Promise.resolve(); return value; } };
   const owner = { webContents: { isDestroyed: () => false, getURL: () => origin } };
   const args = { key: `serialized-${randomUUID()}`, ownerURL: origin };
-  serialized({ dialog, clipboard }, { ...args, operation: 'install', owner, expectedText: SYNTHETIC_JD_SOURCE });
-  assert.equal(serialized({ dialog, clipboard }, { ...args, operation: 'arm', sequence: 0, choice: 'cancel' }).baselineMatched, true);
+  await serialized({ dialog, clipboard }, { ...args, operation: 'install', owner, expectedText: SYNTHETIC_JD_SOURCE });
+  assert.equal((await serialized({ dialog, clipboard }, { ...args, operation: 'arm', sequence: 0, choice: 'cancel' })).baselineMatched, true);
   assert.deepEqual(operations, ['write', 'read']);
-  serialized({ dialog, clipboard }, { ...args, operation: 'restore' });
+  await serialized({ dialog, clipboard }, { ...args, operation: 'restore' });
   assert.equal(dialog.showMessageBox, original);
 });
 
@@ -246,7 +361,7 @@ function orchestration(t, options = {}) {
     click: async () => {
       if (options.clickFails) throw new Error('copy control failed');
       const allowed = await f.request();
-      if (allowed) f.clipboard.writeText(options.corruptCopy ? 'synthetic wrong source' : SYNTHETIC_JD_SOURCE);
+      if (allowed) await f.clipboard.writeText(options.corruptCopy ? 'synthetic wrong source' : SYNTHETIC_JD_SOURCE);
       toast = allowed ? '来源已复制' : '无法复制，请手动选择来源文字';
       clicks++;
     } };

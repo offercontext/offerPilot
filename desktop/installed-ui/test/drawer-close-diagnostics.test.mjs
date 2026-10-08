@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import { installDrawerCloseObservation, readDrawerCloseObservation, drawerCloseFailure } from '../drawer-close-diagnostics.mjs';
 function fixture({ receiver = 'target', finiteAnimations = 0, failSnapshot = false } = {}) {
   const listeners = new Map();
+  let now = 1000;
   const base = { visibility:'visible',opacity:'1',pointerEvents:'auto',position:'relative',zIndex:'auto',transform:'none' };
   const element = (name, css = {}) => ({name, parentElement:null, css:{...base,...css},isConnected:true,
     getBoundingClientRect:()=>({left:784,top:16,width:24,height:24}),getClientRects:()=>[{}],
@@ -23,10 +24,10 @@ function fixture({ receiver = 'target', finiteAnimations = 0, failSnapshot = fal
   node.ownerDocument=doc;
   let reads=0;
   if(failSnapshot)node.getBoundingClientRect=()=>{if(++reads>0)throw new Error('layout snapshot failed');};
-  const context=vm.createContext({window:{},node,args:{key:'safe-key'},innerWidth:1280,innerHeight:900,getComputedStyle:node=>node.css});
+  const context=vm.createContext({performance:{now:()=>now},window:{},node,args:{key:'safe-key'},innerWidth:1280,innerHeight:900,getComputedStyle:node=>node.css});
   const install=()=>structuredClone(vm.runInContext(`(${installDrawerCloseObservation.toString()})(node,args)`,context));
   const read=(dispose=false)=>{context.args={key:'safe-key',dispose};return structuredClone(vm.runInContext(`(${readDrawerCloseObservation.toString()})(args)`,context));};
-  return {install,read,listeners,context,emit:(type,target=node)=>listeners.get(type)({type,isTrusted:true,target,clientX:796,clientY:28,button:0})};
+  return {install,read,listeners,context,setNow:value=>{now=value;},emit:(type,target=node)=>listeners.get(type)({type,isTrusted:true,target,clientX:796,clientY:28,button:0})};
 }
 test('drawer diagnostics separate real hit receivers from a normal pointer-disabled drawer ancestor',()=>{
   const f=fixture();const first=f.install();
@@ -62,4 +63,26 @@ test('Playwright action logs become enums only, preserving intercepted and stabi
   const result=drawerCloseFailure(error);assert.equal(result.timeout,true);assert.equal(result.intercepted,true);assert.equal(result.notStable,true);assert.equal(result.knownInterceptor,'app-topbar');
   assert.doesNotMatch(JSON.stringify(result),/private-token|header|class=|</);
   assert.equal(drawerCloseFailure(new Error('arbitrary private value')).knownInterceptor,'unclassified');
+});
+
+test('snapshots and delivered pointer actions share a renderer-monotonic elapsed timeline',()=>{
+  const f=fixture();const before=f.install();assert.equal(before.elapsedMs,0);
+  f.setNow(1002.25);const beforeClick=f.read();assert.equal(beforeClick.elapsedMs,2.25);
+  f.setNow(1004.5);f.emit('pointermove');
+  f.setNow(1005);f.emit('pointerdown');f.setNow(1005.5);f.emit('pointerup');f.setNow(1006);f.emit('click');
+  f.setNow(1009);const after=f.read(true);
+  assert.equal(after.elapsedMs,9);assert.equal(after.pointerMoves[0].elapsedMs,4.5);
+  assert.deepEqual(after.events.map(event=>event.elapsedMs),[5,5.5,6]);
+  assert.ok(before.elapsedMs<=beforeClick.elapsedMs&&beforeClick.elapsedMs<=after.pointerMoves[0].elapsedMs);
+  assert.ok(after.events.at(-1).elapsedMs<=after.elapsedMs);
+  assert.doesNotMatch(JSON.stringify(after),/startedAt|timeOrigin|wallClock|2026/);
+});
+test('elapsed values remain finite, nonnegative, monotonic and capped across clock precision and large deltas',()=>{
+  const f=fixture();f.install();f.setNow(1012.345);assert.equal(f.read().elapsedMs,12.35);
+  f.setNow(1001);f.emit('pointerdown');assert.equal(f.read().events[0].elapsedMs,12.35);
+  f.setNow(Number.MAX_VALUE);f.emit('click');const last=f.read(true);
+  assert.equal(last.elapsedMs,120000);assert.equal(last.events.at(-1).elapsedMs,120000);
+  assert.ok(last.events.every(event=>Number.isFinite(event.elapsedMs)&&event.elapsedMs>=0&&event.elapsedMs<=120000));
+  const invalid=fixture();invalid.setNow(NaN);assert.throws(invalid.install,/clock unavailable/);assert.equal(invalid.listeners.size,0);
+  const lost=fixture();lost.install();lost.setNow(Infinity);assert.throws(()=>lost.read(true),/clock unavailable/);assert.equal(lost.listeners.size,0);
 });
