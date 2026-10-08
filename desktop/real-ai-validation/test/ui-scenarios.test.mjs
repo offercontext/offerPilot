@@ -47,7 +47,11 @@ function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick =
     and(other) { return new Locator(`${this.path}|and:${other.path}`); }
     async count() { return 1; }
     async isVisible() { return !this.path.includes('关闭任务') && !this.path.includes('退出沉浸模式，返回原页面'); }
-    async getAttribute(name) { return name === 'aria-checked' ? String(this.path.includes(':启用')) : null; }
+    async getAttribute(name) {
+      if (this.path.includes('role:switch:原生 JSON Schema') && !this.path.includes('label:原生 JSON Schema'))
+        throw Object.assign(new Error('tooltip accessible-name mismatch'), { name: 'TimeoutError' });
+      return name === 'aria-checked' ? String(this.path.includes(':启用')) : null;
+    }
     async fill(value) { filled.set(this.path, value); events.push(`fill:${this.path.split('|').pop()}`); }
     async waitFor() {}
     async click() {
@@ -79,7 +83,7 @@ function fakeHarness({ testOk = true, saveOk = true, forward = true, failClick =
   }
   const page = new Page();
   return { page, haru: new Page(), api: async () => { throw new Error('unexpected direct API'); }, broker, fixture,
-    capture: async () => { events.push('capture'); }, events };
+    capture: async (screenId, _page, caseId) => { events.push(`capture:${screenId}:${caseId || screenId}`); }, events };
 }
 
 test('one synthetic profile uses only explicit seed APIs and returns no raw record', async () => {
@@ -122,7 +126,7 @@ test('connection is UI save then arm then actual click and exactly one settled p
   assert.ok(at('prepare:connection') < at('save:connection'));
   assert.ok(at('save:connection') < at('arm:connection'));
   assert.ok(at('arm:connection') < at('test-click:connection'));
-  assert.equal(fake.events.includes('capture'), false, 'settings never captured');
+  assert.equal(fake.events.some(event => event.startsWith('capture:') && event.endsWith(':connection')), false, 'settings never captured');
   assert.equal(result.results[1].status, 'FAIL');
   assert.equal(result.results[1].code, 'UI_TIMEOUT');
   assert.ok(result.results.slice(2).every(({ status }) => status === 'BLOCKED'));
@@ -236,4 +240,22 @@ test('an upstream-only disconnect cannot certify product cancellation', () => {
   const normallySettled = { sentRequests: 1, active: false, requests: [{ caseId: 'connection', status: 'SETTLED',
     outboundStarted: true, upstreamResponded: true, clientDisconnectObserved: false }] };
   assert.doesNotThrow(() => assertProviderCase(normallySettled, 'connection', 0));
+});
+
+
+test('tooltip-decorated switch uses exact form label intersected with role', async () => {
+  const fake = fakeHarness();
+  const result = await runUiScenarios(fake);
+  assert.equal(result.results[0].status, 'PASS');
+  const source = await fs.readFile(new URL('../ui-scenarios.mjs', import.meta.url), 'utf8');
+  assert.ok(source.includes("scope.getByLabel(label, { exact: true }).and(scope.getByRole('switch'))"));
+  assert.equal(source.includes("scope.getByRole('switch', exact(label))"), false);
+});
+
+test('failed UI action preserves a fixed stage and bounded target booleans', async () => {
+  const result = await runUiScenarios(fakeHarness({ failClick: true }));
+  assert.equal(result.results[0].diagnostic.stage, 'SETTINGS_OPEN');
+  assert.equal(result.results[0].diagnostic.targetProbed, true);
+  assert.equal(result.results[0].diagnostic.targetUnique, true);
+  assert.doesNotMatch(JSON.stringify(result), /private-secret-example|local-fixture-token/);
 });

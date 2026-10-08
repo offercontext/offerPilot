@@ -31,10 +31,12 @@ GitHub hosted runner 和实际 AI step 会接触真 key，不能承诺 runner �
 
 只使用 hosted Windows 新建的真实 APPDATA profile；现有 profile 一律拒绝并保留。普通 finally 和 workflow always cleanup 只移除本轮持有的进程、安装目录和临时 profile；无法验证归属时不删。异常关机/强制取消可能来不及清理，依赖 hosted runner 销毁作为最后隔离；因此仍不得使用真实个人资料。
 
-当前禁用全部截图（含凭据页）、HAR、trace、环境/header/config/prompt/response/原始日志采集。不上传 DB、profile、export、crash、安装路径或原始账本。只上传两个明确结构的文件：
+Live 禁用全部截图；MOCK 仅允许下述固定非配置页面截图。两种模式都禁用 HAR、trace、环境/header/config/prompt/response/原始日志采集，凭据页绝不截图。不上传 DB、profile、export、crash、安装路径或原始账本。Live 只上传两个明确结构的文件；MOCK 另有严格白名单 PNG：
 
-- `result.json`：固定场景结果、布尔验收项、首要失败和独立 cleanup 状态
+- `result.json`：固定场景结果、固定 UI 子阶段与目标存在/唯一/可见布尔值、验收项、首要失败和独立 cleanup 状态
 - `ledger.json`：固定出处、请求计数、整数费用/token、每场景固定状态；没有 prompt/response/key
+
+MOCK 截图仅包含 Pilot 生成结果/停止/拒绝及对应 Haru、面试建议、简历预览、Offer 草稿，另可保存受控失败图。连接/配置场景禁止截图。截图前后都验证页面身份、凭据控件缺席、全部本轮临时 token 未出现；检查只返布尔，图片先留内存，通过后才独占写入固定文件名。拒绝或失败只记固定 skip code，不能用图掩盖业务失败。保留自然动画，不隐藏控件、不强行结束动画。Live 入口不能注入截图工厂，且其 artifact 白名单没有 PNG。
 
 进程和 profile 的完整清理不证明外部 provider 停止计费。取消请求保留未知 usage 的保守费用。
 
@@ -64,7 +66,7 @@ GitHub hosted runner 和实际 AI step 会接触真 key，不能承诺 runner �
 8. 设置非secret变量 `OFFERPILOT_AI_REQUEST_SHA=R`，再次检查 GitHub 上的 H 和待推送 R。仅在明确请求执行这一轮后，将 R 正常 push 到原 feature 分支，不 force push。
 9. 在 Actions 中查看本次 R 的 “Pinned Windows real AI (manual approval only)” run。secret-free preflight 成功后，人工打开等待的环境批准，逐项核对 run SHA=R、helper SHA=H、固定 EXE、模型、整轮 10 CNY 上限和新专用 key，才批准。
 10. preflight 会读 [environment protection](https://docs.github.com/en/rest/deployments/environments#get-an-environment)、[branch policies](https://docs.github.com/en/rest/deployments/branch-policies#list-deployment-branch-policies) 和 [审批记录](https://docs.github.com/en/rest/actions/workflow-runs#get-the-review-history-for-a-workflow-run)。仅 `contents: read`/`actions: read`；无 admin/PAT。403/404/字段缺失都停止，不代改保护。
-11. 完成后查看两份白名单报告。不要点 Re-run jobs。由用户按自己的密钥管理流程撤销这枚专用 key，并清空两项激活变量；不把本工具成功当成发布验收。
+11. 完成后查看白名单报告（MOCK 另有已通过安全检查的图片）。不要点 Re-run jobs。由用户按自己的密钥管理流程撤销这枚专用 key，并清空两项激活变量；不把本工具成功当成发布验收。
 
 请求 message 必须精确为（用完整 H 替换占位，此文本不是激活提交）：
 
@@ -103,3 +105,9 @@ npm test --prefix desktop/real-ai-validation
 首次修改原 workflow 的迁移提交本身仍触发旧流程。本次候选发布显式使用已存在的 `build: AI [windows-package-only] ` 前缀（末尾空格属于契约），允许额外 focused/build/packaging 和独立 Windows MOCK；不使用全 CI 跳过标记。该前缀不触发本工具 paid 入口：没有精确 R/H 和人工环境批准仍然跳过真实 AI。原 `validation-status` 仍按设计拒绝把 skipped full-regression 当成功，故 package-only run 不应被承诺整体绿色或发布就绪。后续完整验证须使用无此前缀的明确 full-gate 提交。
 
 空激活提交是否被其他 path-filtered workflow 忽略按真实 GitHub run 验证，不预先声称不会触发。
+
+## 首轮 MOCK 的已知诊断边界
+
+[Windows MOCK run 37780561724](https://github.com/offercontext/offerPilot/actions/runs/37780561724) 已完成：同固定安装器下载/校验/安装成功，连接场景 `UI_TIMEOUT`，其余场景 BLOCKED，broker 发送/拒绝均为 0，清理通过，paid jobs 跳过。旧报告未记录 UI 子阶段，不能据此把问题归因于 provider。
+
+真实 React/Ant 组件与 Playwright 原版 selector engine 的局部回归证实：带 tooltip 的“原生 JSON Schema”开关，其 accessible name 不等于纯 label，原 role-exact locator 匹配 0；改为 exact Form label 与 switch role 交集匹配唯一元素，且能实际切换状态。其他 input exact label 保留。该证据来自 jsdom，系统 Chromium sandbox 启动受环境 namespace 限制，未绕过；不是 Windows 重跑成功证明，也不证明该次超时只有一个原因。新增固定子阶段及安全 MOCK 图片用于下一轮定位。

@@ -145,3 +145,32 @@ test('live key is removed from environment before third-party module initializat
   assert.equal(live.includes('mock-provider'), false);
   assert.equal(/^import /m.test(live), false);
 });
+
+test('MOCK image uploads are a fixed whitelist and live remains JSON-only', async () => {
+  const { SCREEN_IDS } = await import('../mock-screenshots.mjs');
+  const offlineUpload = workflow.jobs.offline.steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+  assert.deepEqual(offlineUpload.with.path.trim().split('\n'), [
+    'desktop/real-ai-validation/mock-evidence/result.json', 'desktop/real-ai-validation/mock-evidence/ledger.json',
+    ...SCREEN_IDS.map(id => `desktop/real-ai-validation/mock-evidence/screens/${id}.png`),
+  ]);
+  const liveUpload = workflow.jobs['real-ai'].steps.find(step => step.uses?.startsWith('actions/upload-artifact@'));
+  assert.equal(liveUpload.with.path.includes('.png'), false);
+  const live = await fs.readFile(new URL('../run.mjs', import.meta.url), 'utf8');
+  const offline = await fs.readFile(new URL('../offline.mjs', import.meta.url), 'utf8');
+  const shared = await fs.readFile(new URL('../validation-runner.mjs', import.meta.url), 'utf8');
+  assert.equal(live.includes('screenshotFactory'), false);
+  assert.ok(offline.includes('screenshotFactory: createMockScreenshots'));
+  assert.ok(shared.includes("(mode !== 'live' || screenshotFactory === undefined)"));
+  assert.ok(shared.includes('screenshotEvidence.registerToken(preparedCase.clientToken)'));
+});
+
+test('screenshot summary cannot disclose arbitrary strings or appear in live evidence', async () => {
+  const { safeScreenshotEvidence } = await import('../safe-evidence.mjs');
+  assert.deepEqual(safeScreenshotEvidence(undefined, false), { captured: [], skipped: [] });
+  const value = { captured: ['pilot-stream'], skipped: [{ id: 'failure-owner', code: 'SCREEN_GUARD_REJECTED', token: 'private-key' }] };
+  const clean = safeScreenshotEvidence(value, true);
+  assert.doesNotMatch(JSON.stringify(clean), /private-key|token/);
+  assert.throws(() => safeScreenshotEvidence(value, false));
+  assert.throws(() => safeScreenshotEvidence({ captured: ['../private-key.png'] }, true));
+  assert.throws(() => safeScreenshotEvidence({ skipped: [{ id: 'failure-owner', code: 'private-key' }] }, true));
+});

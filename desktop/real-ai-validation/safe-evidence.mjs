@@ -1,5 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { SCREEN_IDS, SKIP_CODES } from './mock-screenshots.mjs';
+import { sanitizeUiDiagnostic } from './ui-diagnostics.mjs';
 import { CASES, PIN, demand, EVIDENCE_CODES } from './contract.mjs';
 const CHECKS = new Set('settingsSavedThroughUi connectionTestClicked connectionSucceeded incrementalAssistantRendering haruRunningAndIdleMirrored haruVisibleAssistantMatchesSnapshot hitlVisible rejectedThroughUi syntheticWriteAbsent haruPendingAndIdleMirrored stopClickedWhileRunning stopAcknowledged haruRunningAndStoppedMirrored sourceAndResumeSelected disclosureAccepted generatedProposalVisible classificationPreviewVisible cancelledThroughUi sourceUnchanged inputReviewedThroughUi generatedDraftVisible finalSaveNotSubmitted providerRequestObserved providerRequestSettled oneProviderRequestVerified productDisconnectObserved providerDisconnectObserved'.split(' '));
 export function safeResults(results) {
@@ -11,7 +13,7 @@ export function safeResults(results) {
       demand(CHECKS.has(key) && typeof value === 'boolean', 'SCENARIO_EVIDENCE_INVALID');
       return [key, value];
     }));
-    return { id: row.id, status: row.status, code: row.code, checks };
+    return { id: row.id, status: row.status, code: row.code, checks, diagnostic: sanitizeUiDiagnostic(row.diagnostic) };
   });
 }
 // No arbitrary strings, error messages, provider response bodies or nested objects can cross this boundary.
@@ -59,14 +61,26 @@ export function numericLedger(snapshot) {
   });
   return output;
 }
+export function safeScreenshotEvidence(value, isMock) {
+  const captured = value?.captured || [], skipped = value?.skipped || [];
+  demand(Array.isArray(captured) && Array.isArray(skipped) && captured.length <= SCREEN_IDS.length &&
+    skipped.length <= SCREEN_IDS.length && new Set(captured).size === captured.length, 'REPORT_INVALID');
+  demand(isMock || (!captured.length && !skipped.length), 'REPORT_INVALID');
+  demand(captured.every(id => SCREEN_IDS.includes(id)), 'REPORT_INVALID');
+  return { captured: [...captured], skipped: skipped.map(row => {
+    demand(SCREEN_IDS.includes(row?.id) && SKIP_CODES.includes(row?.code), 'REPORT_INVALID');
+    return { id: row.id, code: row.code };
+  }) };
+}
 export async function saveEvidence(directory, report, ledger, secrets = []) {
   demand(report.mode === undefined || ['live', 'mock'].includes(report.mode), 'REPORT_INVALID');
   const isMock = report.mode === 'mock';
+  const screenshotEvidence = safeScreenshotEvidence(report.screenshotEvidence, isMock);
   const safe = { schema: 1, mode: isMock ? 'MOCK' : 'LIVE', realProviderCalled: !isMock && Boolean(ledger?.requests?.some(row => row.outboundStarted === true)), productCommit: PIN.commit, buildRunId: PIN.runId, artifactId: PIN.artifactId,
     installerSha256: PIN.installerSha256, releaseReady: false, independentFullGateCertified: false,
     temporaryLoopbackDebugging: true, normalUndebuggedLaunchValidated: false, ordinaryUserUacSmartScreenValidated: false,
     route: isMock ? 'real-installed-ui-via-loopback-broker-to-synthetic-mock-transport' : 'real-installed-ui-via-loopback-budget-broker-to-real-provider',
-    screenshotsCaptured: false, rawLogsCaptured: false, status: report.status,
+    screenshotsCaptured: screenshotEvidence.captured.length > 0, screenshotEvidence, rawLogsCaptured: false, status: report.status,
     code: report.code, cleanupCode: report.cleanupCode || 'CLEANUP_PENDING', scenarios: safeResults(report.scenarios), cleanupPassed: report.cleanupPassed === true };
   demand(['PASS', 'FAIL', 'BLOCKED'].includes(safe.status) && EVIDENCE_CODES.has(safe.code), 'REPORT_INVALID');
   demand(['CLEANUP_PASSED', 'CLEANUP_PENDING', 'BROKER_CLEANUP_FAILED', 'LEDGER_UNAVAILABLE', 'LEDGER_PERSISTENCE_FAILED', 'PROFILE_CLEANUP_FAILED', 'EVIDENCE_WRITE_BLOCKED'].includes(safe.cleanupCode), 'REPORT_INVALID');

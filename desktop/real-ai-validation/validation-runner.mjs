@@ -11,11 +11,12 @@ import { saveEvidence } from './safe-evidence.mjs';
 import { syntheticApi } from './synthetic-api.mjs';
 import { prepareSyntheticProfile, runUiScenarios } from './ui-scenarios.mjs';
 
-export async function executeValidation({ mode, brokerFactory, providerKey } = {}) {
-  demand(['live', 'mock'].includes(mode) && typeof brokerFactory === 'function', 'INVALID_HARNESS');
+export async function executeValidation({ mode, brokerFactory, providerKey, screenshotFactory } = {}) {
+  demand(['live', 'mock'].includes(mode) && typeof brokerFactory === 'function' &&
+    (mode !== 'live' || screenshotFactory === undefined), 'INVALID_HARNESS');
 const blocked = code => CASES.map(id => ({ id, status: 'BLOCKED', code, checks: {} }));
 const report = { mode, status: 'BLOCKED', code: 'NOT_STARTED', scenarios: blocked('NOT_STARTED'), cleanupPassed: false };
-let app, broker, timer, ledger = {}, failure, cleanupFailure;
+let app, broker, timer, screenshotEvidence, ledger = {}, failure, cleanupFailure;
 const root = process.env.RUNNER_TEMP && path.join(process.env.RUNNER_TEMP, mode === 'live' ? 'offerpilot-bounded-ai' : 'offerpilot-bounded-ai-mock');
 const evidence = process.env.AI_EVIDENCE_DIR;
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -47,6 +48,18 @@ try {
   broker = await brokerFactory({ providerKey, ledgerPath: path.join(root, 'session-ledger.json'),
     sessionId: 'offerpilot-fixed-exe-real-ai-20261008', runId: process.env.GITHUB_RUN_ID,
     runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT), helperCommit: prepared.helperSha, requestCommit: prepared.requestSha });
+  let scenarioBroker = broker;
+  let capture;
+  if (mode === 'mock' && typeof screenshotFactory === 'function') {
+    screenshotEvidence = screenshotFactory({ mode: 'mock', directory: evidence });
+    scenarioBroker = { ...broker, prepareCase(caseId) {
+      const preparedCase = broker.prepareCase(caseId);
+      demand(screenshotEvidence.registerToken(preparedCase.clientToken) === true, 'INVALID_HARNESS');
+      return preparedCase;
+    } };
+    capture = (screenId, page, failedCase) => screenshotEvidence.capture(screenId, page,
+      { stage: failedCase || screenId.replace(/^haru-/, '') });
+  }
   const started = Date.now();
   const timeout = new Promise((_, reject) => { timer = setTimeout(() => {
     void broker.close().catch(() => { cleanupFailure = 'BROKER_CLEANUP_FAILED'; });
@@ -86,8 +99,8 @@ try {
     await haru.getByRole('main', { name: 'Haru 桌面小窗', exact: true }).waitFor();
     const api = syntheticApi(page);
     const fixture = await prepareSyntheticProfile(api);
-    const result = await runUiScenarios({ page, haru, api, broker, fixture,
-      capture: undefined, deadlineMs: started + 600000 });
+    const result = await runUiScenarios({ page, haru, api, broker: scenarioBroker, fixture,
+      capture, deadlineMs: started + 600000 });
     report.scenarios = CASES.map(id => result.results.find(row => row.id === id));
     demand(!externalRendererRequest, 'UNEXPECTED_RENDERER_NETWORK');
     report.status = result.allPassed ? 'PASS' : 'FAIL';
@@ -100,6 +113,7 @@ try {
   if (broker) { try { await broker.close(); } catch { cleanupFailure = 'BROKER_CLEANUP_FAILED'; }
     try { ledger = broker.snapshot(); } catch { cleanupFailure = 'LEDGER_UNAVAILABLE'; } }
   if (ledger.journalFailed) cleanupFailure = 'LEDGER_PERSISTENCE_FAILED';
+  report.screenshotEvidence = screenshotEvidence?.snapshot();
   // Save the durable-cost projection before deleting its owned scratch journal.
   if (evidence) { try { await saveEvidence(evidence, { ...report, status: 'BLOCKED', code: 'CLEANUP_PENDING', cleanupCode: 'CLEANUP_PENDING', cleanupPassed: false }, ledger, [providerKey]); }
     catch { cleanupFailure = 'EVIDENCE_WRITE_BLOCKED'; } }

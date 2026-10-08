@@ -31,18 +31,61 @@ for (const overrides of [{ 'main.cjs': '// changed' }, { 'haru.cjs': "session.we
     await assert.rejects(auditInstalledResponseObserver(await installation(t, overrides)));
   });
 }
-test('audit rejects a symlinked application archive even when its bytes match', async t => {
+// Model a Windows short-name lookup on every platform without creating a link.
+// Only the input spelling is mapped; realpath still reads the actual directory.
+function resourceAlias(t, root, canonicalResources) {
+  const aliasRoot = path.join(path.dirname(root), `CSP~1-${path.basename(root)}`);
+  const aliasResources = path.join(aliasRoot, 'resources');
+  assert.notEqual(aliasResources, canonicalResources);
+  const original = fs.realpath;
+  let observed = 0;
+  t.mock.method(fs, 'realpath', async (file, ...args) => {
+    if (file === aliasResources) {
+      observed++;
+      return original(path.join(root, 'resources'), ...args);
+    }
+    return original(file, ...args);
+  });
+  return { aliasRoot, assertObserved: () => assert.equal(observed, 1, 'raw resource alias must actually be resolved') };
+}
+
+test('ASAR audit resolves a distinct raw alias before reading the real canonical archive', async t => {
   const root = await installation(t);
-  const archive = path.join(root, 'resources', 'app.asar');
-  const target = path.join(root, 'matching.asar');
-  await fs.rename(archive, target);
-  // File symlinks require a Windows privilege that hosted runners do not grant.
-  // The filesystem seam exercises exactly that lstat fact on every platform.
-  const original = fs.lstat;
-  t.mock.method(fs, 'lstat', async (file, ...args) => file === archive
-    ? { isFile: () => true, isSymbolicLink: () => true } : original(file, ...args));
-  await assert.rejects(auditInstalledResponseObserver(root), /must not be a link/);
+  const resources = await fs.realpath(path.join(root, 'resources'));
+  const alias = resourceAlias(t, root, resources);
+  assert.equal((await auditInstalledResponseObserver(alias.aliasRoot)).responseStartedUnused, true);
+  alias.assertObserved();
 });
+
+for (const forceAlias of [false, true]) {
+  test(`audit rejects a symlinked application archive via ${forceAlias ? 'distinct raw alias' : 'native temp spelling'}`, async t => {
+    const nativeRoot = await installation(t);
+    // mkdtemp can return RUNNER~1 while the production audit uses runneradmin.
+    // Keep that raw root as the audit input; bind the lstat seam to real identity.
+    const resources = await fs.realpath(path.join(nativeRoot, 'resources'));
+    const alias = forceAlias ? resourceAlias(t, nativeRoot, resources) : null;
+    const root = alias?.aliasRoot ?? nativeRoot;
+    const archive = path.join(resources, 'app.asar');
+    const target = path.join(path.dirname(resources), 'matching.asar');
+    await fs.rename(archive, target);
+    // File symlinks require a Windows privilege that hosted runners do not grant.
+    // The filesystem seam exercises exactly that lstat fact on every platform.
+    const original = fs.lstat;
+    let observed = 0;
+    t.mock.method(fs, 'lstat', async (file, ...args) => {
+      if (file === archive) {
+        observed++;
+        return { isFile: () => true, isSymbolicLink: () => true };
+      }
+      return original(file, ...args);
+    });
+    await assert.rejects(auditInstalledResponseObserver(root), {
+      code: 'ERR_ASSERTION', message: 'installed application archive must not be a link',
+    });
+    assert.equal(observed, 1, 'canonical archive lstat must observe the simulated symlink');
+    alias?.assertObserved();
+  });
+}
 
 test('read-only observer binds documents and script to exact owner/session and atomically restores its empty slot', t => {
   const f = fixture(t);

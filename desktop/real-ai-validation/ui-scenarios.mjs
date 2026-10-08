@@ -1,6 +1,7 @@
 // Real installed-renderer actions only. No provider calls, secrets, raw response
 // logs, traces, exports, controller replacement, or synthetic Haru publication.
 import { randomUUID } from 'node:crypto';
+import { createUiDiagnostic } from './ui-diagnostics.mjs';
 
 export const scenarios = Object.freeze([
   { id: 'connection', maxOutputTokens: 64, timeoutMs: 25_000 },
@@ -78,12 +79,14 @@ const composer = (page) => pilot(page).getByPlaceholder('问问领航员，或�
 const settings = (page) => region(page, 'AI 设置');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function operationContext(deadline) {
+  const diagnostic = createUiDiagnostic();
   return {
+    mark: diagnostic.mark, target: diagnostic.target, diagnostic: diagnostic.snapshot,
     timeout(cap = 15_000) { const left = deadline - Date.now(); if (left <= 0) fail('SUITE_DEADLINE'); return Math.max(1, Math.min(left, cap)); },
-    async click(locator) { await locator.click({ timeout: this.timeout() }); },
-    async fill(locator, value) { await locator.fill(value, { timeout: this.timeout() }); },
-    async visible(locator) { await locator.waitFor({ state: 'visible', timeout: this.timeout() }); },
-    async hidden(locator) { await locator.waitFor({ state: 'hidden', timeout: this.timeout() }); },
+    async click(locator) { diagnostic.target(locator); await locator.click({ timeout: this.timeout() }); },
+    async fill(locator, value) { diagnostic.target(locator); await locator.fill(value, { timeout: this.timeout() }); },
+    async visible(locator) { diagnostic.target(locator); await locator.waitFor({ state: 'visible', timeout: this.timeout() }); },
+    async hidden(locator) { diagnostic.target(locator); await locator.waitFor({ state: 'hidden', timeout: this.timeout() }); },
     async until(predicate, cap = 15_000, code = 'UI_TIMEOUT') {
       const end = Date.now() + this.timeout(cap);
       do { if (await predicate()) return; await sleep(Math.min(50, Math.max(1, end - Date.now()))); } while (Date.now() < end);
@@ -92,6 +95,7 @@ function operationContext(deadline) {
   };
 }
 async function leaveTask(page, ctx) {
+  ctx.mark('LEAVE_TASK');
   const taskClose = page.getByRole('button', exact('关闭任务'));
   if (await taskClose.isVisible()) { await ctx.click(taskClose); await ctx.hidden(taskClose); }
   const exit = page.getByRole('button', exact('退出沉浸模式，返回原页面'));
@@ -99,10 +103,12 @@ async function leaveTask(page, ctx) {
 }
 async function navigate(page, name, ctx) {
   await leaveTask(page, ctx);
+  ctx.mark('NAVIGATE');
   await ctx.click(page.getByRole('navigation', exact('主导航')).getByRole('button', exact(name)));
 }
 async function openPilot(page, ctx) {
   await leaveTask(page, ctx);
+  ctx.mark('PILOT_OPEN');
   const quick = page.locator('header.op-topbar .op-topbar-actions').getByRole('button')
     .filter({ hasText: /^\s*快速打开\s+(?:Ctrl\s*K|⌘\s*K)\s*$/u });
   await ctx.click(quick);
@@ -134,42 +140,63 @@ async function uiResponse(page, pathname, method, action, ctx, timeout = 15_000)
 }
 async function openSettings(page, ctx) {
   await navigate(page, '设置', ctx);
+  ctx.mark('SETTINGS_OPEN');
   await ctx.click(button(page, '配置 AI'));
   await ctx.visible(settings(page));
 }
 async function setSwitch(scope, label, value, ctx) {
-  const target = scope.getByRole('switch', exact(label));
+  // Ant tooltip icons extend a switch's accessible name; the explicit Form label
+  // remains exact. Intersect label and role instead of broad name matching.
+  const target = scope.getByLabel(label, { exact: true }).and(scope.getByRole('switch'));
+  ctx.target(target);
   if (await target.getAttribute('aria-checked') !== String(value)) await ctx.click(target);
   check(await target.getAttribute('aria-checked') === String(value), 'SETTINGS_SAVE_FAILED');
 }
 async function configureCase(page, broker, current, ctx) {
+  ctx.mark('BROKER_PREPARE');
   const prepared = await broker.prepareCase(current.id);
   check(typeof prepared?.clientToken === 'string' && prepared.clientToken.length >= 16, 'INVALID_HARNESS');
   await openSettings(page, ctx);
   const form = settings(page);
+  ctx.mark('PROVIDER_LIST', form.getByTestId('ai-provider-list').locator('.ant-list-item'));
   await ctx.until(async () => await form.getByTestId('ai-provider-list').locator('.ant-list-item').count() === 1, 15_000, 'SETTINGS_SAVE_FAILED');
+  ctx.mark('PROVIDER_LABEL');
   await ctx.fill(form.getByLabel('显示名称', { exact: true }), 'Bounded AI Validation');
+  ctx.mark('PROVIDER_KEY');
   await ctx.fill(form.getByLabel('API 密钥', { exact: true }), prepared.clientToken);
   const provider = form.getByLabel('模型供应商', { exact: true });
   const selectRoot = provider.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " ant-select ")][1]');
+  ctx.mark('PROVIDER_TYPE_OPEN');
   await ctx.click(selectRoot.locator('.ant-select-selector'));
   const popup = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)');
   await ctx.visible(popup);
+  ctx.mark('PROVIDER_TYPE_SELECT');
   await ctx.click(popup.locator('.ant-select-item-option').and(popup.getByTitle('OpenAI 兼容', { exact: true })));
+  ctx.mark('PROVIDER_TYPE_CLOSED');
   await ctx.hidden(popup);
+  ctx.mark('PROVIDER_ENDPOINT');
   await ctx.fill(form.getByLabel('接口地址', { exact: true }), `${broker.origin}/v1`);
+  ctx.mark('PROVIDER_MODEL');
   await ctx.fill(form.getByLabel('模型', { exact: true }), 'deepseek-flash');
+  ctx.mark('PROVIDER_CONTEXT');
   await ctx.fill(form.getByLabel('上下文窗口（tokens）', { exact: true }), '131072');
+  ctx.mark('PROVIDER_OUTPUT');
   await ctx.fill(form.getByLabel('单次最大输出（tokens）', { exact: true }), String(current.maxOutputTokens));
+  ctx.mark('PROVIDER_ENABLED');
   await setSwitch(form, '启用', true, ctx);
+  ctx.mark('PROVIDER_JSON_SCHEMA');
   await setSwitch(form, '原生 JSON Schema', false, ctx);
+  ctx.mark('PROVIDER_HITL');
   await setSwitch(form, '写操作自动确认', false, ctx);
+  ctx.mark('SETTINGS_SAVE');
   const response = await uiResponse(page, '/api/settings', 'PUT', () => ctx.click(button(form, '保存')), ctx);
+  ctx.mark('SETTINGS_READBACK');
   const value = await response.json();
   check(value.chat_auto_approve_writes === false && value.fallback_provider_ids?.length === 0 && value.providers?.length === 1
     && value.providers[0].base_url === `${broker.origin}/v1` && value.providers[0].model === 'deepseek-flash'
     && value.providers[0].has_api_key === true && value.providers[0].max_output_tokens === current.maxOutputTokens,
   'SETTINGS_SAVE_FAILED');
+  ctx.mark('SETTINGS_CLOSED');
   await ctx.hidden(form);
 }
 
@@ -251,18 +278,23 @@ const PROMPTS = Object.freeze({
 async function runPilot({ page, haru, api, broker, fixture, capture, current, ctx }) {
   await openPilot(page, ctx);
   await expandHaru(haru, ctx);
+  ctx.mark('PILOT_COMPOSE');
   await ctx.fill(composer(page), PROMPTS[current.id]);
   if (current.id === 'pilot-stream') await installStreamObservation(page);
+  ctx.mark('PILOT_ARM');
   await broker.armCase(current.id);
+  ctx.mark('PILOT_SEND');
   await ctx.click(pilot(page).getByRole('button', exact('发送')));
   if (current.id === 'pilot-hitl-reject') {
     const proposal = pilot(page).getByRole('group', exact('AI 修改提议'));
+    ctx.mark('PILOT_HITL_VISIBLE', proposal);
     await ctx.until(() => proposal.isVisible(), current.timeoutMs, 'HITL_NOT_OBSERVED');
     await ctx.visible(proposal.getByText('AI 想执行一个修改操作 · 新建投递', { exact: true }));
     await waitMirror(page, haru, 'waiting_confirmation', ctx);
     await ctx.visible(haru.getByRole('button', exact('到 Pilot 查看并确认')));
     const before = await api('/api/applications', { method: 'GET' });
     check(Array.isArray(before) && before.length === 1 && before[0].id === fixture.applicationId, 'AUXILIARY_READBACK_FAILED');
+    ctx.mark('PILOT_REJECT');
     await ctx.click(button(proposal, '拒绝建议'));
     const reject = proposal.getByRole('region', exact('拒绝建议确认'));
     // The inline confirmation is an aria-labelled section, never an approval.
@@ -273,8 +305,10 @@ async function runPilot({ page, haru, api, broker, fixture, capture, current, ct
     const after = await api('/api/applications', { method: 'GET' });
     check(Array.isArray(after) && after.length === 1 && after[0].id === fixture.applicationId, 'AUXILIARY_READBACK_FAILED');
     await safeCapture(capture, current.id, page);
+    await safeCapture(capture, `haru-${current.id}`, haru);
     return { hitlVisible: true, rejectedThroughUi: true, syntheticWriteAbsent: true, haruPendingAndIdleMirrored: true };
   }
+  ctx.mark('PILOT_RUNNING');
   await waitMirror(page, haru, 'running', ctx, current.timeoutMs);
   const stop = pilot(page).getByRole('button', exact('停止当前回复'));
   await ctx.until(async () => await stop.isVisible() && await stop.isEnabled(), current.timeoutMs);
@@ -285,7 +319,9 @@ async function runPilot({ page, haru, api, broker, fixture, capture, current, ct
       return rows.length === 1 && rows[0].status === 'RESERVED' && ledger.active === true
         && rows[0].outboundStarted === true && rows[0].upstreamResponded === true;
     }, current.timeoutMs, 'UNEXPECTED_PROVIDER_REQUESTS');
+    ctx.mark('PILOT_STOP');
     await ctx.click(stop);
+    ctx.mark('PILOT_STOP_READBACK');
     await ctx.until(async () => { const state = await mirrorState(haru); return !state.loading && !state.canStop && state.stopped && !state.failed; }, current.timeoutMs);
     await waitMirror(page, haru, 'idle', ctx);
     // Observe product-driven upstream cancellation BEFORE our cleanup can close
@@ -299,26 +335,37 @@ async function runPilot({ page, haru, api, broker, fixture, capture, current, ct
         && rows[0].clientDisconnectObserved === true;
     }, current.timeoutMs, 'CANCEL_NOT_OBSERVED');
     await safeCapture(capture, current.id, page);
+    await safeCapture(capture, `haru-${current.id}`, haru);
     return { stopClickedWhileRunning: true, stopAcknowledged: true, providerDisconnectObserved: true, haruRunningAndStoppedMirrored: true };
   }
+  ctx.mark('PILOT_STREAM_READBACK');
   await ctx.until(() => page.evaluate(() => (window.__offerpilotBoundedUiObserver?.updates ?? 0) >= 2), current.timeoutMs, 'STREAM_NOT_OBSERVED');
   await ctx.until(async () => { const state = await mirrorState(haru); return !state.loading && state.assistantCount > 0 && !state.failed && !state.hasPending; }, current.timeoutMs);
   await waitMirror(page, haru, 'idle', ctx);
   await assertHaruRendered(haru, ctx);
   await safeCapture(capture, current.id, page);
+  await safeCapture(capture, `haru-${current.id}`, haru);
   return { incrementalAssistantRendering: true, haruRunningAndIdleMirrored: true, haruVisibleAssistantMatchesSnapshot: true };
 }
 async function runConnection({ page, broker, current, ctx }) {
+  ctx.mark('CONNECTION_REOPEN');
   await openSettings(page, ctx);
+  ctx.mark('CONNECTION_ARM');
   await broker.armCase(current.id);
-  const response = await uiResponse(page, '/api/settings/providers/test', 'POST', () => ctx.click(button(settings(page), '测试连接')), ctx, current.timeoutMs);
+  const response = await uiResponse(page, '/api/settings/providers/test', 'POST', () => {
+    ctx.mark('CONNECTION_CLICK'); return ctx.click(button(settings(page), '测试连接'));
+  }, ctx, current.timeoutMs);
+  ctx.mark('CONNECTION_RESPONSE');
   check((await response.json()).ok === true, 'CONNECTION_FAILED');
+  ctx.mark('CONNECTION_SUCCESS');
   await ctx.visible(settings(page).getByText('连接成功', { exact: true }));
+  ctx.mark('CONNECTION_RETURN');
   await ctx.click(button(settings(page), '返回设置'));
   return { settingsSavedThroughUi: true, connectionTestClicked: true, connectionSucceeded: true };
 }
 async function runInterview({ page, broker, fixture, current, capture, ctx }) {
   await navigate(page, '面试', ctx);
+  ctx.mark('INTERVIEW_OPEN');
   await ctx.click(page.getByRole('tab', exact('即将进行')));
   await ctx.click(page.getByTestId(`interview-event-card-${fixture.eventId}`).locator('[data-interview-primary="true"]'));
   const surface = region(page, '面试准备建议');
@@ -334,6 +381,7 @@ async function runInterview({ page, broker, fixture, current, capture, ctx }) {
   page.on('dialog', handleDialog);
   try {
     await broker.armCase(current.id);
+    ctx.mark('INTERVIEW_GENERATE');
     await uiResponse(page, `/api/applications/${fixture.applicationId}/interview-preparation-proposals`, 'POST', () => ctx.click(surface.getByTestId('interview-preparation-generate')), ctx, current.timeoutMs);
     check(dialogAccepted, 'UNEXPECTED_DIALOG');
     await ctx.visible(surface.getByRole('heading', exact('准备方向')));
@@ -346,6 +394,7 @@ async function runInterview({ page, broker, fixture, current, capture, ctx }) {
 }
 async function runResume({ page, api, broker, fixture, current, capture, ctx }) {
   await navigate(page, '素材库', ctx);
+  ctx.mark('RESUME_OPEN');
   await ctx.click(page.locator('.op-module-tabs').getByRole('tab', exact('简历')));
   await ctx.fill(page.getByPlaceholder('搜索简历', { exact: true }), fixture.resumeTitle);
   const card = page.locator('.ant-card').filter({ has: page.getByText(fixture.resumeTitle, { exact: true }) });
@@ -356,6 +405,7 @@ async function runResume({ page, api, broker, fixture, current, capture, ctx }) 
   const modal = page.getByRole('dialog', exact('AI 简历分类与核对'));
   await ctx.visible(modal);
   await broker.armCase(current.id);
+  ctx.mark('RESUME_GENERATE');
   await uiResponse(page, `/api/resumes/${fixture.resumeId}/structure-preview`, 'POST', () => ctx.click(button(modal, '开始分类')), ctx, current.timeoutMs);
   await ctx.visible(modal.getByRole('region', exact('分类候选')));
   check(await modal.getByRole('textbox').count() > 0);
@@ -370,6 +420,7 @@ async function runResume({ page, api, broker, fixture, current, capture, ctx }) 
 }
 async function runOffer({ page, broker, fixture, current, capture, ctx }) {
   await navigate(page, 'Offer', ctx);
+  ctx.mark('OFFER_OPEN');
   const card = page.locator('.ant-card').filter({ has: page.getByText(fixture.company, { exact: true }) });
   await ctx.visible(card);
   check(await card.count() === 1);
@@ -379,9 +430,11 @@ async function runOffer({ page, broker, fixture, current, capture, ctx }) {
   await ctx.fill(surface.getByLabel('本次沟通目标', { exact: true }), '确认虚构 Offer 的固定薪资构成');
   await ctx.fill(surface.getByLabel('本次顾虑', { exact: true }), '已知月薪两万元、十二薪；希望先确认是否有额外奖金');
   await ctx.fill(surface.getByLabel('沟通场景', { exact: true }), '虚构 HR 电话演练，不联系任何人');
+  ctx.mark('OFFER_REVIEW');
   await ctx.click(button(surface, '下一步：检查输入'));
   await ctx.visible(surface.getByRole('region', exact('确认本次 AI 输入')));
   await broker.armCase(current.id);
+  ctx.mark('OFFER_GENERATE');
   await uiResponse(page, `/api/offers/${fixture.offerId}/negotiation/proposals`, 'POST', () => ctx.click(button(surface, '确认生成谈薪准备草稿')), ctx, current.timeoutMs);
   await ctx.visible(surface.locator('[aria-label="谈薪准备草稿"]'));
   check(await surface.getByTestId('offer-negotiation-confirm').isVisible());
@@ -417,6 +470,7 @@ export async function runUiScenarios({ page, haru, api, broker, fixture, capture
   for (const current of scenarios) {
     if (blocked) { results.push({ id: current.id, status: 'BLOCKED', code: blocked, checks: {} }); continue; }
     if (Date.now() >= deadline) { blocked = 'SUITE_DEADLINE'; results.push({ id: current.id, status: 'BLOCKED', code: blocked, checks: {} }); continue; }
+    ctx.mark('CASE_START');
     let requestCountBefore = 0;
     try {
       const initialLedger = broker.snapshot();
@@ -437,13 +491,20 @@ export async function runUiScenarios({ page, haru, api, broker, fixture, capture
             : current.id === 'resume-structure' ? await runResume(args) : await runOffer(args);
       // Settle the one admitted call before exposing PASS; cancellation is the
       // only case allowed to retain an unresolved cost reservation.
+      ctx.mark('PROVIDER_TERMINAL');
       await broker.cancelCase();
       assertProviderCase(broker.snapshot(), current.id, requestCountBefore);
       results.push({ id: current.id, status: 'PASS', code: 'PASSED', checks: { ...checks, oneProviderRequestVerified: true } });
     } catch (error) {
       const code = safeUiCode(error);
       const isBlocked = ['SUITE_DEADLINE', 'PROVIDER_BUDGET_BLOCKED'].includes(code);
-      results.push({ id: current.id, status: isBlocked ? 'BLOCKED' : 'FAIL', code, checks: {} });
+      const diagnostic = await ctx.diagnostic();
+      if (!isBlocked && current.id !== 'connection' && typeof capture === 'function') {
+        for (const [screen, surface] of [['failure-owner', page], ['failure-haru', haru]]) {
+          try { await capture(screen, surface, current.id); } catch { /* Never replace the primary failure. */ }
+        }
+      }
+      results.push({ id: current.id, status: isBlocked ? 'BLOCKED' : 'FAIL', code, checks: {}, diagnostic });
       blocked = isBlocked ? code : 'PREVIOUS_SCENARIO_FAILED';
     } finally {
       try { await broker.cancelCase(); } catch {

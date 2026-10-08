@@ -109,6 +109,17 @@ jobs:
           path: |
             desktop/real-ai-validation/mock-evidence/result.json
             desktop/real-ai-validation/mock-evidence/ledger.json
+            desktop/real-ai-validation/mock-evidence/screens/pilot-stream.png
+            desktop/real-ai-validation/mock-evidence/screens/pilot-cancel.png
+            desktop/real-ai-validation/mock-evidence/screens/pilot-hitl-reject.png
+            desktop/real-ai-validation/mock-evidence/screens/haru-pilot-stream.png
+            desktop/real-ai-validation/mock-evidence/screens/haru-pilot-cancel.png
+            desktop/real-ai-validation/mock-evidence/screens/haru-pilot-hitl-reject.png
+            desktop/real-ai-validation/mock-evidence/screens/interview-preparation.png
+            desktop/real-ai-validation/mock-evidence/screens/resume-structure.png
+            desktop/real-ai-validation/mock-evidence/screens/offer-negotiation.png
+            desktop/real-ai-validation/mock-evidence/screens/failure-owner.png
+            desktop/real-ai-validation/mock-evidence/screens/failure-haru.png
 
   preflight:
     needs: route
