@@ -109,6 +109,30 @@ def test_default_workflow_and_regression_dependency_contract_remain_full():
     assert "cancel-in-progress:" not in WORKFLOW
 
 
+def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
+    expected_timeouts = {
+        "validation-package": "60",
+        "pytest-manifest": "20",
+        "pytest-shards": "120",
+        "full-regression": "90",
+        "validation-status": "5",
+    }
+    for job, minutes in expected_timeouts.items():
+        assert re.findall(r"^    timeout-minutes: (\d+)$", _job(job), re.M) == [minutes]
+    shards = _job("pytest-shards")
+    assert re.findall(r"^      fail-fast: (.+)$", shards, re.M) == ["false"]
+    assert re.findall(r"^      max-parallel: (\d+)$", shards, re.M) == ["2"]
+    matrix = re.findall(r"^        shard: \[([^\]]+)\]$", shards, re.M)
+    assert len(matrix) == 1
+    assert [int(value.strip()) for value in matrix[0].split(",")] == list(range(12))
+    assert "gate.py collect --count 12 --manifest" in _job("pytest-manifest")
+    assert "cancel-in-progress:" not in WORKFLOW
+    assert "continue-on-error:" not in WORKFLOW
+    assert 'if ($LASTEXITCODE -ne 0) { throw "Full pytest shard failed" }' in shards
+    assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in shards
+    assert "1440 aggregate shard-minute ceiling" in WORKFLOW
+
+
 def test_package_checks_remain_independent_and_mandatory():
     package = _job("validation-package")
     assert not re.search(r"^    (if|needs|continue-on-error):", package, re.M)

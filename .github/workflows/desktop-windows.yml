@@ -222,14 +222,17 @@ jobs:
   # Capacity estimate, not a measured guarantee: 89 minutes at 21% implies
   # roughly 425 pytest runner-minutes, plus 12 dependency/collection startups
   # and repeated fixture costs. Two shards at once; packaging can be a third
-  # runner. A shard has a 90-minute limit (1080 aggregate shard-minute ceiling).
+  # runner. A shard has a 120-minute limit (1440 aggregate shard-minute ceiling).
+  # Old run 37728772813 shard 5: 536 passed, 65m09s elapsed. The prior
+  # 90-minute cap left limited margin for slower runners/partitions; 120
+  # adds bounded headroom, not a speedup or completion guarantee.
   # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
   pytest-shards:
     name: Complete pytest shard ${{ matrix.shard }} of 12
     if: "${{ !(github.event_name == 'push' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     needs: pytest-manifest
     runs-on: windows-2022
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       max-parallel: 2
