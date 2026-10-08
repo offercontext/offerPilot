@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
+import syncFs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { PIN } from '../contract.mjs';
-import { readPinnedSource } from './pinned-source.mjs';
+import { readPinnedSource, assertSourceDirectoryIdentity } from './pinned-source.mjs';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const apiPath = 'src/offerpilot/api.py';
@@ -52,10 +53,11 @@ test('cold shallow helper requires its independent verified PIN checkout', async
       cwd: path.join(helper, 'desktop/real-ai-validation'), env, encoding: 'utf8', timeout: 30000,
     });
   };
-  const rejected = source => {
+  const rejected = (source, stage) => {
     const result = check(source);
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout + result.stderr, /PINNED_PRODUCT_SOURCE_(REQUIRED|UNVERIFIED)/);
+    if (stage) assert.ok((result.stdout + result.stderr).includes(`PINNED_PRODUCT_SOURCE_UNVERIFIED:${stage}`));
   };
   await t.test('correct PIN runs the original complete contract assertions from a shallow helper', () => {
     const result = check(product);
@@ -63,11 +65,68 @@ test('cold shallow helper requires its independent verified PIN checkout', async
     assert.match(result.stdout, /# pass 1/);
     assert.match(result.stdout, /# fail 0/);
   });
+  await t.test('native short-name and case aliases bind to the same real cold product directory', async t => {
+    const canonical = syncFs.realpathSync.native(product);
+    // Same filesystem seam as the installed ORT regression: only input spellings
+    // are mapped; native resolution, Git and bigint inode/device reads are real.
+    const aliases = [path.join(directory, 'PINNED~1'), path.join(directory, 'PINNED PRODUCT')];
+    const original = { native: syncFs.realpathSync.native, lstat: syncFs.lstatSync };
+    const mapped = value => aliases.includes(value) ? product : value;
+    const nativeInputs = [];
+    t.mock.method(syncFs.realpathSync, 'native', (value, ...args) => {
+      nativeInputs.push(value); return original.native(mapped(value), ...args);
+    });
+    t.mock.method(syncFs, 'lstatSync', (value, ...args) => original.lstat(mapped(value), ...args));
+    for (const alias of aliases) {
+      assert.notEqual(alias, canonical);
+      assert.equal(assertSourceDirectoryIdentity(alias, canonical), true);
+      assert.equal(assertSourceDirectoryIdentity(canonical, alias), true);
+      assert.equal(readPinnedSource(apiPath, { env: { AI_PRODUCT_SOURCE: alias } }), expectedApi);
+      assert.ok(nativeInputs.includes(alias), 'raw alias must reach the native resolver');
+    }
+    t.mock.restoreAll();
+    // Windows runs the actual OS aliases too; mkdtemp retains RUNNER~1 on the
+    // hosted runner, while Git and native realpath return its long spelling.
+    const realSpellings = process.platform === 'win32'
+      ? [product, canonical, canonical.toLowerCase(), canonical.replaceAll('\\', '/')]
+      : [product, canonical];
+    for (const spelling of realSpellings) {
+      const result = check(spelling);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+    }
+  });
+  await t.test('different directories, unreliable metadata and root or ancestor links stay rejected', async () => {
+    const other = path.join(directory, 'other product'); await fs.mkdir(other);
+    assert.throws(() => assertSourceDirectoryIdentity(product, other));
+    assert.throws(() => assertSourceDirectoryIdentity(product, path.join(product, 'src')));
+    for (const field of ['dev', 'ino']) {
+      let calls = 0;
+      const ports = { ...syncFs, statSync: (...args) => {
+        const stat = syncFs.statSync(...args);
+        return ++calls === 2 ? { ...stat, [field]: stat[field] + 1n, isDirectory: () => true } : stat;
+      } };
+      assert.throws(() => assertSourceDirectoryIdentity(product, product, ports));
+    }
+    for (const invalid of [{ ino: 0n }, { ino: undefined }, { ino: 1 }, { dev: undefined }, { dev: -1n }]) {
+      const ports = { ...syncFs, statSync: (...args) => ({ ...syncFs.statSync(...args), ...invalid, isDirectory: () => true }) };
+      assert.throws(() => assertSourceDirectoryIdentity(product, product, ports), /reliable directory identity/);
+    }
+    const type = process.platform === 'win32' ? 'junction' : 'dir';
+    const link = path.join(directory, 'product link'), parentLink = path.join(directory, 'ancestor link');
+    await fs.symlink(product, link, type); await fs.symlink(directory, parentLink, type);
+    for (const source of [link, link + path.sep, path.join(parentLink, 'pinned product')]) {
+      rejected(source, 'ROOT_IDENTITY');
+      assert.throws(() => readPinnedSource(apiPath, { env: { AI_PRODUCT_SOURCE: source } }),
+        /PINNED_PRODUCT_SOURCE_UNVERIFIED:ROOT_IDENTITY/);
+    }
+  });
   await t.test('missing, empty, nonrepository, nested and unpinned explicit sources fail closed', async () => {
     const empty = path.join(directory, 'not a repository'); await fs.mkdir(empty);
-    for (const source of [path.join(directory, 'missing'), '', empty, path.join(product, 'src'), helper]) rejected(source);
+    rejected(path.join(directory, 'missing'), 'SOURCE_REALPATH'); rejected('');
+    for (const source of [empty, path.join(product, 'src')]) rejected(source, 'ROOT_IDENTITY');
+    rejected(helper, 'PIN_OBJECT');
     // No environment is allowed locally only if the helper repo has PIN history.
-    rejected(undefined);
+    rejected(undefined, 'PIN_OBJECT');
   });
   await t.test('wrong HEAD fails even when exact PIN objects remain available', () => {
     const helperHead = git(helper, 'rev-parse', 'HEAD');
@@ -75,7 +134,7 @@ test('cold shallow helper requires its independent verified PIN checkout', async
     git(product, 'update-ref', 'HEAD', helperHead);
     try {
       assert.equal(git(product, 'rev-parse', '--verify', `${PIN.commit}^{commit}`), PIN.commit);
-      rejected(product);
+      rejected(product, 'PIN_HEAD');
     } finally { git(product, 'update-ref', 'HEAD', PIN.commit); }
   });
   await t.test('source bytes come from the PIN blob, never the working tree or arbitrary paths', async () => {
