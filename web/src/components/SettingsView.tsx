@@ -2,6 +2,7 @@ import ContextPolicySettings from './ContextPolicySettings';
 import ConfirmedMemorySettings from './ConfirmedMemorySettings';
 import ProactiveSettings from './ProactiveSettings';
 import ProactiveInbox from './ProactiveInbox';
+import DesktopUpdatesCard from './DesktopUpdatesCard';
 import { ApiOutlined, CopyOutlined, DownloadOutlined, FileSearchOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Divider, Empty, Input, Modal, Pagination, Select, Skeleton, Space, Spin, Switch, Tag, Typography, message } from 'antd';
@@ -156,7 +157,7 @@ export default function SettingsView({
           }}
         >
           <RuntimeField label="运行模式" value={formatRuntimeMode(settings?.runtime_mode)} />
-          <RuntimeField label="版本" value={settings?.version ?? '-'} />
+          <RuntimeField label="后端版本" value={settings?.version ?? '-'} />
           <RuntimeField label="密钥状态" value={settings?.has_api_key ? '已配置' : '未配置'} />
         </div>
         <details style={detailsStyle}>
@@ -176,6 +177,8 @@ export default function SettingsView({
           </Space>
         </div>
       </section>
+
+      <DesktopUpdatesCard />
 
       <ContextPolicySettings />
       <ConfirmedMemorySettings />

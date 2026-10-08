@@ -26,3 +26,23 @@ contextBridge.exposeInMainWorld('offerpilotDesktop', Object.freeze(role === 'own
   ...common,
   request: request => ipcRenderer.invoke(prefix + 'request', request),
 }));
+
+// Owner-only, finite update operations. No arbitrary paths, feeds or IPC.
+if (role === 'owner') {
+  const updates = 'offerpilot:updates:';
+  const listen = (name, listener) => {
+    if (typeof listener !== 'function') return () => {};
+    const handler = (_event, value) => listener(value);
+    ipcRenderer.on(updates + name, handler);
+    return () => ipcRenderer.removeListener(updates + name, handler);
+  };
+  contextBridge.exposeInMainWorld('offerpilotUpdates', Object.freeze({
+    getState: () => ipcRenderer.invoke(updates + 'state'),
+    check: () => ipcRenderer.invoke(updates + 'check'),
+    download: () => ipcRenderer.invoke(updates + 'download'),
+    install: () => ipcRenderer.invoke(updates + 'install'),
+    onState: listener => listen('state', listener),
+    onPrepareInstall: listener => listen('prepare', listener),
+    replyPrepareInstall: (id, snapshot) => ipcRenderer.send(updates + 'prepare-reply', { id, snapshot }),
+  }));
+}

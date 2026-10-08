@@ -9685,7 +9685,14 @@ def create_app(
             root = resolved_static_dir.resolve()
             requested = (root / full_path).resolve()
             if _is_relative_to(requested, root) and requested.is_file():
-                return FileResponse(requested)
+                # Host MIME databases (including the Windows registry) can label
+                # executable web assets as text/plain and block module loading.
+                media_type = {
+                    ".js": "text/javascript",
+                    ".mjs": "text/javascript",
+                    ".wasm": "application/wasm",
+                }.get(requested.suffix.lower())
+                return FileResponse(requested, media_type=media_type)
             index = root / "index.html"
             if index.is_file():
                 return FileResponse(index)

@@ -19,6 +19,7 @@ import {
   type ChatStreamRequestOptions,
 } from '@/services/chat';
 import type {
+  ChatResponse,
   ChatStartRequest,
   ChatUndo,
   Conversation,
@@ -36,7 +37,7 @@ import { pageContextKey } from '@/lib/pilotPageContext';
 import { usePilotPresentation } from '@/features/actionPresentation/usePilotPresentation';
 import type { AssistantTaskState } from './assistantSurfaceReducer';
 import { sameExecution, usePilotExecution } from './usePilotExecution';
-import { getRuntimeRequestExecution, observeRuntimeTurn } from '@/services/pilotRuntime';
+import { getRuntimeRequestExecution, observeRuntimeTurn, RuntimeEndedError } from '@/services/pilotRuntime';
 
 export type SendMessageOutcome = 'sent' | 'stopped' | 'failed' | 'ignored';
 
@@ -81,6 +82,21 @@ interface BuildRequestContextInput {
   offerId?: number;
   pageContext?: PilotPageContext;
   attachments: PilotContextAttachment[];
+}
+
+type KnownRuntimeTerminalState = Exclude<PilotExecution['state'], 'running' | 'result_unknown'>;
+const RUNTIME_TERMINAL_STATES = new Set<string>([
+  'waiting_confirmation', 'completed', 'failed', 'interrupted', 'stopped',
+]);
+function terminalResponseState(response: ChatResponse, target: PilotExecution): KnownRuntimeTerminalState | null {
+  if (target.protocol !== 'pilot-runtime-v1' || response.conversation_id !== target.conversation_id
+    || response.turn_id !== target.turn_id || response.execution_generation !== target.execution_generation) return null;
+  if (response.type === 'message') return 'completed';
+  if (response.type === 'confirmation_required') return 'waiting_confirmation';
+  const turn = response.turn;
+  return turn.turn_id === target.turn_id && turn.conversation_id === target.conversation_id
+    && turn.execution_generation === target.execution_generation && RUNTIME_TERMINAL_STATES.has(turn.state)
+    ? turn.state as KnownRuntimeTerminalState : null;
 }
 
 const CHAT_ATTACHMENT_LIMIT = 5;
@@ -151,7 +167,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
   const [turns, setTurns] = useState<UITurn[]>([]);
   const [conversationId, setConversationId] = useState<number>();
   const [pending, setPending] = useState<PendingAction | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [requestLoading, setLoading] = useState(false);
   const [autoApprove, setAutoApprove] = useState(false);
   const [hasKey, setHasKey] = useState(true);
   const [degraded, setDegraded] = useState(false);
@@ -174,7 +190,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
   const [contextChangeNotice, setContextChangeNotice] = useState<ContextChangeNotice | null>(null);
   const [requestContextSnapshot, setRequestContextSnapshot] = useState<PilotPageContext>();
   const [attachments, setAttachments] = useState<PilotContextAttachment[]>([]);
-  const { displayTurns, presentationSnapshot, refreshPresentation, acceptRuntimeSnapshot, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, loading, confirmPhase === 'error');
+  const { displayTurns, presentationSnapshot, refreshPresentation, acceptRuntimeSnapshot, presentationFailed, presentationRefreshing } = usePilotPresentation(conversationId, turns, pending, requestLoading, confirmPhase === 'error');
 
   const activeRequestRef = useRef<ActiveConversationRequest | null>(null);
   const streamingAssistantActiveRef = useRef(false);
@@ -206,7 +222,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
   const followingContextRef = useRef<PilotPageContext>();
   const pinnedContextRef = useRef<PilotPageContext>();
   const conversationsRef = useRef(conversations);
-  const loadingRef = useRef(loading);
+  const loadingRef = useRef(requestLoading);
 
   const stoppedExecution = useCallback((target: PilotExecution) => {
     const request = activeRequestRef.current;
@@ -251,6 +267,24 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     void refreshPresentation();
   }, [refreshPresentation]);
   const executionControl = usePilotExecution(conversationId, stoppedExecution);
+  // Subscriber ownership can transfer to GET recovery while execution keeps
+  // running. Every visible consumer uses the same busy value, scoped to the
+  // currently selected conversation. Pending keeps its distinct HITL state.
+  const visibleExecutionRunning = conversationId !== undefined
+    && executionControl.execution?.conversation_id === conversationId
+    && executionControl.execution.state === 'running';
+  const loading = requestLoading || (!pending && visibleExecutionRunning);
+  const settleRuntimeResponse = useCallback((response: ChatResponse, target: PilotExecution): PilotExecution | null => {
+    const state = terminalResponseState(response, target);
+    return state && executionControl.settleExecution(target, state) ? { ...target, state } : null;
+  }, [executionControl.settleExecution]);
+  const settleRuntimeError = useCallback((error: unknown, target: PilotExecution): PilotExecution | null => {
+    if (!(error instanceof RuntimeEndedError) || error.target.conversation_id !== target.conversation_id
+      || error.target.turn_id !== target.turn_id || error.target.execution_generation !== target.execution_generation
+      || !RUNTIME_TERMINAL_STATES.has(error.state)) return null;
+    const state = error.state as KnownRuntimeTerminalState;
+    return executionControl.settleExecution(target, state) ? { ...target, state } : null;
+  }, [executionControl.settleExecution]);
   const observedExecutionRef = useRef(executionControl.execution);
   observedExecutionRef.current = executionControl.execution;
 
@@ -476,7 +510,8 @@ export function usePilotConversationControllerState(observationEnabled = true) {
       onSnapshot: (page) => acceptRuntimeSnapshot(page, () => activeRequestRef.current === request
         && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current),
       onAccepted: (identity) => {
-        if (activeRequestRef.current === request && identity.executionGeneration) {
+        if (activeRequestRef.current !== request || request.controller.signal.aborted) return;
+        if (identity.executionGeneration) {
           request.execution = { turn_id: identity.turnId, conversation_id: identity.conversationId,
             execution_generation: identity.executionGeneration, state: 'running', protocol: identity.protocol };
           executionControl.acceptExecution(request.execution);
@@ -484,8 +519,16 @@ export function usePilotConversationControllerState(observationEnabled = true) {
         options.onAccepted?.(identity);
       },
       signal: request.controller.signal,
+    }).then(response => {
+      if (activeRequestRef.current === request && !request.controller.signal.aborted && request.execution)
+        settleRuntimeResponse(response, request.execution);
+      return response;
+    }).catch((error: unknown) => {
+      if (activeRequestRef.current === request && !request.controller.signal.aborted && request.execution)
+        settleRuntimeError(error, request.execution);
+      throw error;
     });
-  }, [ensureOwnedRequest, executionControl.acceptExecution, acceptRuntimeSnapshot]);
+  }, [ensureOwnedRequest, executionControl.acceptExecution, acceptRuntimeSnapshot, settleRuntimeResponse, settleRuntimeError]);
 
   const streamConfirmationRequest = useCallback((
     request: ActiveConversationRequest,
@@ -502,7 +545,8 @@ export function usePilotConversationControllerState(observationEnabled = true) {
       onSnapshot: (page) => acceptRuntimeSnapshot(page, () => activeRequestRef.current === request
         && !request.controller.signal.aborted && request.visibleGeneration === visibleRequestGenerationRef.current),
       onAccepted: (identity) => {
-        if (activeRequestRef.current === request && identity.executionGeneration) {
+        if (activeRequestRef.current !== request || request.controller.signal.aborted) return;
+        if (identity.executionGeneration) {
           request.execution = { turn_id: identity.turnId, conversation_id: identity.conversationId,
             execution_generation: identity.executionGeneration, state: 'running', protocol: identity.protocol };
           executionControl.acceptExecution(request.execution);
@@ -519,8 +563,16 @@ export function usePilotConversationControllerState(observationEnabled = true) {
         options.onEvent?.(event);
       },
       signal: request.controller.signal,
+    }).then(response => {
+      if (activeRequestRef.current === request && !request.controller.signal.aborted && request.execution)
+        settleRuntimeResponse(response, request.execution);
+      return response;
+    }).catch((error: unknown) => {
+      if (activeRequestRef.current === request && !request.controller.signal.aborted && request.execution)
+        settleRuntimeError(error, request.execution);
+      throw error;
     });
-  }, [ensureOwnedRequest, executionControl.acceptExecution, acceptRuntimeSnapshot]);
+  }, [ensureOwnedRequest, executionControl.acceptExecution, acceptRuntimeSnapshot, settleRuntimeResponse, settleRuntimeError]);
 
   const stopActiveRequest = useCallback((options: { silent?: boolean } = {}) => {
     if (!options.silent) {
@@ -555,16 +607,22 @@ export function usePilotConversationControllerState(observationEnabled = true) {
       onEvent: (event) => {
         if (event.event !== 'assistant_delta') void refreshPresentation();
       },
-    }).then(() => {
-      if (!subscription.signal.aborted) stoppedExecution({ ...target, state: 'completed' });
-    }).catch(() => {
-      // Durable polling remains available when transient observation fails.
+    }).then(response => {
+      if (subscription.signal.aborted || activeRequestRef.current) return;
+      const terminal = settleRuntimeResponse(response, target);
+      if (terminal) stoppedExecution(terminal);
+    }).catch((error: unknown) => {
+      if (subscription.signal.aborted || activeRequestRef.current) return;
+      const terminal = settleRuntimeError(error, target);
+      if (terminal) stoppedExecution(terminal);
+      // A network failure or result_unknown is not completion proof. Preserve
+      // durable busy for exact-identity polling, never start another POST.
     });
     return () => subscription.abort();
-  }, [observationEnabled, conversationId, executionControl.execution, loading, refreshPresentation, acceptRuntimeSnapshot, stoppedExecution]);
+  }, [observationEnabled, conversationId, executionControl.execution, requestLoading, refreshPresentation, acceptRuntimeSnapshot, stoppedExecution, settleRuntimeResponse, settleRuntimeError]);
 
   useEffect(() => {
-    if (!observationEnabled || !loading) return;
+    if (!observationEnabled || !requestLoading) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
     const lookup = new AbortController();
@@ -590,7 +648,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     };
     timer = setTimeout(() => void read(), 2000);
     return () => { cancelled = true; clearTimeout(timer); lookup.abort(); };
-  }, [observationEnabled, loading, executionControl.acceptExecution, stoppedExecution]);
+  }, [observationEnabled, requestLoading, executionControl.acceptExecution, stoppedExecution]);
 
   const sendMessage = useCallback((text: string) => executionControl.execution?.state === 'running'
     ? Promise.resolve('ignored' as const) : actionsRef.current.sendMessage(text), [executionControl.execution]);

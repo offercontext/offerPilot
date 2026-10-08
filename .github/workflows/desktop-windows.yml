@@ -196,10 +196,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Collection uses HEAD/index only, but fail before launching 12 shards
+          # if the historical backend/frontend source gates cannot run.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           architecture: x64
+      - name: Verify immutable regression history before collection
+        run: |
+          python scripts/test_shards/check_history.py
+          if ($LASTEXITCODE -ne 0) { throw "Required regression Git history is unavailable" }
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.19"
@@ -243,10 +251,17 @@ jobs:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Immutable asset tests read historical source blobs with git show.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           architecture: x64
+      - name: Verify immutable regression history before pytest
+        run: |
+          python scripts/test_shards/check_history.py
+          if ($LASTEXITCODE -ne 0) { throw "Required regression Git history is unavailable" }
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.19"
@@ -285,10 +300,17 @@ jobs:
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Frontend source gates audit historical ranges and HEAD ancestry.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           architecture: x64
+      - name: Verify immutable regression history before release gate
+        run: |
+          python scripts/test_shards/check_history.py
+          if ($LASTEXITCODE -ne 0) { throw "Required regression Git history is unavailable" }
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.19"

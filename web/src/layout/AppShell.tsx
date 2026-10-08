@@ -1,3 +1,6 @@
+import { applicationJdBaselineForOpen, desktopUpdateTaskGuard, retainedWorkSafety, type ApplicationJdDraftBaseline } from '@/features/desktopUpdates/retainedWorkSafety';
+import { readDesktopUpdateSafety } from '@/features/desktopUpdates/installSafety';
+import { useDesktopUpdateSafety } from '@/features/desktopUpdates/useDesktopUpdateSafety';
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1111,6 +1114,7 @@ function AppShellContent() {
   const [selected, setSelected] = useState<Application | null>(null);
   const [intakeApplicationId, setIntakeApplicationId] = useState<number | null>(null);
   const applicationJdDraftsRef = useRef(new Map<number, ApplicationJdDraft>());
+  const applicationJdBaselinesRef = useRef(new Map<number, ApplicationJdDraftBaseline>());
   const [applicationJdDrafts, setApplicationJdDrafts] = useState<Record<number, ApplicationJdDraft>>({});
   const [interviewReviewProposalAttempts, setInterviewReviewProposalAttempts] = useState<Record<number, InterviewReviewProposalAttemptState>>({});
   const [reviewReadinessDrafts, setReviewReadinessDrafts] = useState<Record<string, ReviewReadinessOwnerDraft>>({});
@@ -1148,7 +1152,31 @@ function AppShellContent() {
   const kanbanSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
-  const { addAttachment: addAttachmentToKey, createNewDraftWithAttachment } = usePilotAttachmentStore();
+  const { addAttachment: addAttachmentToKey, createNewDraftWithAttachment, drafts: pilotAttachmentDrafts } = usePilotAttachmentStore();
+  const readDesktopUpdateInput = () => {
+    const retained = retainedWorkSafety({
+      adaptivePractice: adaptivePracticeDrafts, applicationJd: applicationJdDrafts,
+      applicationJdBaselines: applicationJdBaselinesRef.current,
+      offerNegotiation: offerNegotiationDrafts, offerNegotiationPilot: offerNegotiationPilotDrafts,
+      reviewReadiness: reviewReadinessDrafts, knowledgeCapture: interviewKnowledgeCaptureDrafts,
+      interviewPreparation: interviewPreparationDrafts, interviewStory: interviewStoryDrafts,
+      preparationAttempts: interviewPreparationAttempts, reviewAttempts: interviewReviewProposalAttempts,
+    });
+    return {
+      pilot: pilotControllerRef.current,
+      taskGuard: desktopUpdateTaskGuard(coreTaskController.getState().active?.ref.taskId, taskSurfaceGuardRef.current, retained),
+      hasAttachmentDrafts: Object.values(pilotAttachmentDrafts).some((draft) => Boolean(draft?.attachments.length)),
+      hasRetainedDrafts: retained.hasDraft,
+      retainedActiveRun: retained.activeRun,
+      retainedPendingApproval: retained.pendingApproval,
+    };
+  };
+  const desktopUpdateInputRef = useRef(readDesktopUpdateInput);
+  desktopUpdateInputRef.current = readDesktopUpdateInput;
+  // Both sides of an async safety read use the newest render's draft buckets.
+  // Other editors are not globally registered: main must disclose that gap
+  // and request an explicit save-and-exit confirmation.
+  useDesktopUpdateSafety(() => readDesktopUpdateSafety(() => desktopUpdateInputRef.current()));
 
   const { data: applications = [], isLoading, isError: appsError } = useQuery({
     queryKey: ['applications'],
@@ -1265,7 +1293,8 @@ function AppShellContent() {
   };
 
   const updateApplicationJdDraft = useCallback((applicationId: number, patch: Partial<ApplicationJdDraft> | null) => {
-    const current = applicationJdDraftsRef.current.get(applicationId) ?? {
+    const previous = applicationJdDraftsRef.current.get(applicationId);
+    const current = previous ?? {
       jdText: '',
       sourceUrl: '',
       expectedCurrentVersionId: null,
@@ -1275,6 +1304,7 @@ function AppShellContent() {
     };
     if (patch === null) {
       applicationJdDraftsRef.current.delete(applicationId);
+      applicationJdBaselinesRef.current.delete(applicationId);
       setApplicationJdDrafts((state) => {
         const next = { ...state };
         delete next[applicationId];
@@ -1282,6 +1312,8 @@ function AppShellContent() {
       });
       return;
     }
+    const baseline = applicationJdBaselineForOpen(previous, patch);
+    if (baseline) applicationJdBaselinesRef.current.set(applicationId, baseline);
     const next = { ...current, ...patch };
     applicationJdDraftsRef.current.set(applicationId, next);
     setApplicationJdDrafts((state) => ({ ...state, [applicationId]: next }));

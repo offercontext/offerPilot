@@ -7,6 +7,11 @@ const path = require('node:path');
 const { allowHaruResource, authenticatedHeaders } = require('./haru-protocol.cjs');
 const { createHaruShell } = require('./haru.cjs');
 const { createCapabilities } = require('./capabilities.cjs');
+const { RELEASE_POLICY, unavailableReason, productionAdapter, createUpdater, registerUpdaterIPC } = require('./updater.cjs');
+const { createInstallSafety } = require('./update-safety.cjs');
+const { backupForUpdate } = require('./update-backup.cjs');
+const { verifyDownloadedUpdate } = require('./update-integrity.cjs');
+const { stopBackendForUpdate } = require('./update-install.cjs');
 const { isSameOrigin, waitForReady, checkHealth, stopBackend } = require('./lifecycle.cjs');
 
 app.setName('OfferPilot Desktop');
@@ -14,6 +19,8 @@ app.setPath('userData', path.join(app.getPath('appData'), 'OfferPilot Desktop'))
 let child;
 let window;
 let haruShell;
+let updateLock = false;
+let disposeUpdates = () => {};
 const trustedContents = new Set();
 const isTrustedContents = contents => trustedContents.has(contents) && !contents.isDestroyed();
 let quitting = false;
@@ -123,8 +130,60 @@ async function start() {
   haruShell = createHaruShell({
     BrowserWindow, Tray, Menu, nativeImage, screen, ipcMain,
     mainWindow: window, desktopSession: haruSession, origin: ready.origin, userData, registerWindow,
-    isQuitting: () => quitting, quit: () => app.quit(), log,
+    isQuitting: () => quitting || updateLock, quit: () => app.quit(), log,
   });
+  const lockUpdates = value => {
+    updateLock = value;
+    for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.setEnabled(!value);
+  };
+  const installSafety = createInstallSafety({ ipcMain, window, origin: ready.origin, dialog,
+    lock: () => lockUpdates(true), unlock: () => lockUpdates(false) });
+  let unavailable = unavailableReason({ packaged: app.isPackaged, platform: process.platform, policy: RELEASE_POLICY });
+  // The release channel remains disabled until an approved signed distribution
+  // config is packaged. No token, dev feed, or renderer-controlled URL is used.
+  let adapter = null;
+  if (!unavailable) {
+    try { adapter = await productionAdapter(RELEASE_POLICY); }
+    catch { unavailable = '正式更新源或发布者签名配置不完整，已阻止应用内更新。'; }
+  }
+  let recoveringUpdate = false;
+  const recoverStoppedVersion = () => {
+    if (recoveringUpdate) return;
+    recoveringUpdate = true;
+    stopped = true;
+    lockUpdates(false);
+    try { dialog.showErrorBox('更新未完成', '更新准备或安装启动失败。将尝试重新启动原版本；若未重新打开，请手动启动并核实安装结果。备份与数据目录未被删除。'); } catch { /* A closed OS dialog must not suppress recovery. */ }
+    try { app.relaunch(); } catch { log('Could not schedule the original application restart.\n'); }
+    app.quit();
+  };
+  const updates = createUpdater({ version: app.getVersion(), adapter, unavailable,
+    prepareInstall: () => installSafety.prepare(),
+    verifyDownload: (paths, info) => verifyDownloadedUpdate({ paths, info, verifier: adapter.verifyUpdateCodeSignature, publisher: RELEASE_POLICY.publisherName }),
+    onInstallError: recoverStoppedVersion,
+    performInstall: async install => {
+      try {
+        await desktopSession.flushStorageData();
+        quitting = true;
+        await stopBackendForUpdate(child);
+        stopped = true;
+        // Persist Haru position only after the backend confirms graceful exit.
+        haruShell?.dispose();
+        await backupForUpdate({ userData, version: app.getVersion(), backendExited: child.exitCode === 0 && child.signalCode === null });
+        await install();
+      } catch (error) {
+        lockUpdates(false);
+        if (stopped || child.exitCode !== null || child.signalCode !== null) {
+          recoverStoppedVersion();
+        } else {
+          quitting = false;
+          dialog.showErrorBox('更新未安装', '无法确认本地服务已停止，已阻止备份和安装。请等待当前操作结束，核对保存结果后重新启动应用。');
+        }
+        throw error;
+      }
+    },
+  });
+  const removeUpdateIPC = registerUpdaterIPC({ ipcMain, window, origin: ready.origin, updater: updates, isQuitting: () => quitting || updateLock });
+  disposeUpdates = () => { removeUpdateIPC(); installSafety.dispose(); updates.dispose(); };
   window.webContents.on('render-process-gone', () => {
     if (!quitting) {
       dialog.showErrorBox('OfferPilot Desktop', 'The application window stopped. Reopen OfferPilot to recover your saved work.');
@@ -152,6 +211,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
+    disposeUpdates();
     haruShell?.dispose();
     stopBackend(child).finally(() => { stopped = true; app.quit(); });
   });

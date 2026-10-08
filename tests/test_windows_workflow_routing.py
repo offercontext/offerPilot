@@ -133,6 +133,23 @@ def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
     assert "1440 aggregate shard-minute ceiling" in WORKFLOW
 
 
+@pytest.mark.parametrize("job", ["pytest-manifest", "pytest-shards", "full-regression"])
+def test_regression_jobs_restore_and_verify_history_before_expensive_work(job):
+    steps = re.split(r"^      - ", _job(job), flags=re.M)[1:]
+    assert steps[0].startswith("uses: actions/checkout@v4\n")
+    assert re.search(r"^        with:\n(?:          #[^\n]*\n)*"
+                     r"          fetch-depth: 0\n", steps[0], re.M)
+    assert steps[1].startswith("uses: actions/setup-python@v5\n")
+    preflight = steps[2]
+    assert preflight.startswith("name: Verify immutable regression history before ")
+    assert "        run: |\n" in preflight
+    assert "          python scripts/test_shards/check_history.py\n" in preflight
+    assert ('          if ($LASTEXITCODE -ne 0) { throw '
+            '"Required regression Git history is unavailable" }\n') in preflight
+    assert not re.search(r"^        (if|continue-on-error):", "".join(steps[:3]), re.M)
+    assert "uv sync" not in "".join(steps[:3])
+
+
 def test_package_checks_remain_independent_and_mandatory():
     package = _job("validation-package")
     assert not re.search(r"^    (if|needs|continue-on-error):", package, re.M)
