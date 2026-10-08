@@ -11,7 +11,7 @@ import { nativeEffectiveCspObserver } from '../effective-csp-observer.mjs';
 import { auditedArchive, nativeObserverFixture } from './fixtures/effective-csp-fixture.mjs';
 import { discoverInstalledOfflineOrt, installedOfflineOrtURLs, initializeOfflineOrtInRenderer,
   assertOfflineOrtInitialization, assertInstalledResourcesIdentity, probeInstalledOfflineOrt, readOfflineOrtOwner,
-  readOfflineOrtPreloadOwner } from '../offline-ort-probe.mjs';
+  readOfflineOrtPreloadOwner, safeOfflineOrtRendererDiagnostic } from '../offline-ort-probe.mjs';
 
 const { contentSecurityPolicy: csp } = createRequire(import.meta.url)('../../capabilities.cjs');
 const origin = 'http://127.0.0.1:18420';
@@ -70,6 +70,7 @@ function rendererHarness(options = {}) {
   const dependencies = { crypto: webcrypto, location, document,
     webAssembly: { Module: WebAssembly.Module, compile: async (bytes) => {
       calls.compilation++;
+      if (options.compileThrows) throw options.compileThrows;
       if (options.compileError) throw new Error('compile refused');
       return options.fakeCompilation ? {} : WebAssembly.compile(bytes);
     } },
@@ -84,6 +85,7 @@ function rendererHarness(options = {}) {
     importModule: async (url) => {
       calls.imports++;
       assert.equal(url, args.urls.mjs);
+      if (options.importThrows) throw options.importThrows;
       if (options.importError) throw new Error('module blocked by CSP');
       options.onImport?.();
       return { default: options.missingFactory ? undefined : async (config) => {
@@ -93,12 +95,13 @@ function rendererHarness(options = {}) {
         assert.deepEqual(config.wasmBinary, wasmBytes);
         assert.equal(config.locateFile('ort-wasm-simd-threaded.asyncify.wasm'), args.urls.wasm);
         if (options.unexpectedLocate) config.locateFile('https://example.invalid/model.onnx');
+        if (options.factoryThrows) throw options.factoryThrows;
         if (options.factoryRejects) throw new Error('factory refused');
         return { calledRun: !options.notInitialized, numThreads: options.wrongThreadCount ? 2 : 1,
           HEAPU8: options.missingHeap ? undefined : new Uint8Array(65536),
-          asyncInit() { if (options.violation) document.emit('securitypolicyviolation'); },
+          asyncInit() { if (options.asyncInitThrows) throw options.asyncInitThrows; if (options.violation) document.emit('securitypolicyviolation'); },
           _OrtCreateSession: options.missingExports ? undefined : () => { throw new Error('must not create an inference session'); },
-          _OrtInit(...values) { calls.init.push(values); return options.badInit ? 1 : 0; } };
+          _OrtInit(...values) { calls.init.push(values); if (options.initThrows) throw options.initThrows; return options.badInit ? 1 : 0; } };
       } };
     } };
   return { args, dependencies, calls, document, location,
@@ -550,9 +553,9 @@ const diagnosticFields = ['packaged', 'ownerURLMatched', 'twoWindows', 'ownerWin
   'devTools', 'preloadOwnerRole', 'resourcesPathsAbsolute', 'resourcesDirectoryChainsUnlinked',
   'resourcesCanonicalPathMatched', 'resourcesDirectories', 'resourcesDeviceMatched', 'resourcesFileMatched'];
 function assertSafeDiagnostic(value) {
-  assert.deepEqual(Object.keys(value).sort(), ['cleanup', 'effectiveCsp', 'failedCheck', 'observed', 'phase', 'primaryFailure', 'probe', 'reloads', 'schemaVersion']);
+  assert.deepEqual(Object.keys(value).sort(), ['cleanup', 'effectiveCsp', 'failedCheck', 'observed', 'phase', 'primaryFailure', 'probe', 'reloads', 'renderer', 'schemaVersion']);
   assert.equal(value.probe, 'offline-ort');
-  assert.equal(value.schemaVersion, 3);
+  assert.equal(value.schemaVersion, 4);
   assert.ok(['owner-observation', 'owner-validation', 'owner-resources', 'document-csp', 'initialization'].includes(value.phase));
   const reloadChecks = ['not-started', 'before-reload-gate', 'reload-await', 'response-present', 'response-status',
     'response-url', 'response-redirect', 'provisional-csp-read', 'raw-csp-read', 'browser-csp-match', 'native-csp-arm', 'native-effective-csp', 'page-url', 'complete'];
@@ -584,6 +587,7 @@ function assertSafeDiagnostic(value) {
     assert.ok(['not-run', 'passed', 'failed'].includes(cleanup.result));
     assert.ok(errorCategories.includes(cleanup.errorCategory));
   }
+  if (value.renderer !== null) assert.deepEqual(safeOfflineOrtRendererDiagnostic(value.renderer), value.renderer);
   assert.deepEqual(Object.keys(value.effectiveCsp).sort(), ['module', 'native', 'responseObserverAuditPassed']);
   assert.equal(typeof value.effectiveCsp.responseObserverAuditPassed, 'boolean');
   const modulePolicy = value.effectiveCsp.module;
@@ -1129,4 +1133,149 @@ test('a late duplicate native module response during final asset verification re
   assert.ok(latest.effectiveCsp.native.failures.includes('duplicate-target-response'));
   assert.equal(latest.effectiveCsp.native.records.module.count, 2);
   f.checkCleanup();
+});
+
+const rendererStageCases = [
+  ['fetchError', 'wasm-fetch', 'error'], ['httpFailure', 'wasm-response', 'check-rejected'],
+  ['wrongCsp', 'wasm-csp', 'check-rejected'], ['corruptBytes', 'wasm-sha256', 'check-rejected'],
+  ['compileError', 'wasm-compile', 'error'], ['fakeCompilation', 'wasm-compile', 'check-rejected'],
+  ['importError', 'module-import', 'error'], ['missingFactory', 'factory-export', 'check-rejected'],
+  ['factoryRejects', 'factory-invoke', 'error'], ['unexpectedLocate', 'factory-invoke', 'check-rejected'],
+  ['notInitialized', 'factory-ready', 'check-rejected'], ['wrongThreadCount', 'factory-ready', 'check-rejected'],
+  ['missingHeap', 'heap-check', 'check-rejected'], ['missingExports', 'exports-check', 'check-rejected'],
+  ['badInit', 'ort-init', 'check-rejected'], ['violation', 'csp-final', 'check-rejected'],
+];
+for (const [option, phase, category] of rendererStageCases) {
+  test(`renderer diagnostic localizes ${option} without turning rejection into success`, async () => {
+    const f = rendererHarness({ [option]: true });
+    f.args.captureDiagnostic = true;
+    const packet = await f.run();
+    assert.equal(packet.rendererFailure, true);
+    assert.equal(packet.rendererDiagnostic.phase, phase);
+    assert.equal(packet.rendererDiagnostic.errorCategory, category);
+    assert.deepEqual(safeOfflineOrtRendererDiagnostic(packet.rendererDiagnostic), packet.rendererDiagnostic);
+    assert.throws(() => assertOfflineOrtInitialization(packet, metadata));
+    assert.equal(f.document.listenerCount('securitypolicyviolation'), 0);
+  });
+}
+for (const [option, error, phase, category] of [
+  ['compileThrows', new WebAssembly.CompileError('private-token'), 'wasm-compile', 'wasm-compile-error'],
+  ['importThrows', new TypeError('private-token do-not-record'), 'module-import', 'type-error'],
+  ['importThrows', new WebAssembly.CompileError('private-token'), 'module-import', 'wasm-compile-error'],
+  ['importThrows', new WebAssembly.LinkError('private-token'), 'module-import', 'wasm-link-error'],
+  ['importThrows', new WebAssembly.RuntimeError('private-token'), 'module-import', 'wasm-runtime-error'],
+  ['importThrows', new EvalError('private-token unsafe-eval'), 'module-import', 'eval-error'],
+  ['factoryThrows', new WebAssembly.LinkError('private-token'), 'factory-invoke', 'wasm-link-error'],
+  ['factoryThrows', new WebAssembly.RuntimeError('private-token'), 'factory-invoke', 'wasm-runtime-error'],
+  ['asyncInitThrows', new TypeError('private-token'), 'async-init', 'type-error'],
+  ['initThrows', new WebAssembly.RuntimeError('private-token'), 'ort-init', 'wasm-runtime-error'],
+  ['initThrows', new RangeError('private-token'), 'ort-init', 'range-error'],
+  ['factoryThrows', { name: '__proto__', message: 'private-token' }, 'factory-invoke', 'other'],
+  ['factoryThrows', { get name() { throw new Error('private-token'); } }, 'factory-invoke', 'other'],
+]) {
+  test(`renderer ${phase} records only fixed ${category} and never raw error data`, async () => {
+    const f = rendererHarness({ [option]: error });
+    f.args.captureDiagnostic = true;
+    const packet = await f.run();
+    assert.equal(packet.rendererFailure, true);
+    const diagnostic = packet.rendererDiagnostic;
+    assert.equal(diagnostic.phase, phase);
+    assert.equal(diagnostic.errorCategory, category);
+    assert.equal(diagnostic.observed.wasmCompiled, phase === 'wasm-compile' ? null : true);
+    assert.deepEqual(safeOfflineOrtRendererDiagnostic(diagnostic), diagnostic);
+    assert.doesNotMatch(JSON.stringify(packet), /private-token|do-not-record|unsafe-eval|\.mjs|stack|message|127\.0\.0\.1/);
+  });
+}
+test('renderer success diagnostic distinguishes compile, factory, async init and ORT environment checks', async () => {
+  const f = rendererHarness(); f.args.captureDiagnostic = true;
+  const result = await f.run();
+  assertOfflineOrtInitialization(result, metadata);
+  const diagnostic = result.rendererDiagnostic;
+  assert.deepEqual(safeOfflineOrtRendererDiagnostic(diagnostic), diagnostic);
+  assert.equal(diagnostic.phase, 'complete');
+  assert.equal(diagnostic.outcome, 'passed');
+  assert.equal(diagnostic.errorCategory, null);
+  for (const field of ['wasmCompiled', 'moduleImported', 'factoryResolved', 'asyncInitCompleted', 'ortInitReturnedZero']) {
+    assert.equal(diagnostic.observed[field], true);
+  }
+  assert.equal(diagnostic.observed.cspViolationObserved, false);
+  assert.equal(typeof diagnostic.observed.sharedArrayBufferAvailable, 'boolean');
+  assert.ok([null, false, true].includes(diagnostic.observed.crossOriginIsolated));
+});
+test('renderer timeout retains its fixed active stage and aborts without serializing a rejected exception', async () => {
+  const f = rendererHarness({ fetchHangs: true }); f.args.captureDiagnostic = true; f.args.timeoutMs = 10;
+  const packet = await f.run();
+  assert.equal(packet.rendererFailure, true);
+  assert.equal(packet.rendererDiagnostic.phase, 'wasm-fetch');
+  assert.equal(packet.rendererDiagnostic.errorCategory, 'timeout');
+  assert.equal(packet.rendererDiagnostic.observed.wasmCompiled, null);
+  assert.equal(f.calls.fetch.config.signal.aborted, true);
+  assert.equal(f.document.listenerCount('securitypolicyviolation'), 0);
+});
+test('renderer diagnostic preflight fails before fetch and never retains the invalid URL', async () => {
+  const f = rendererHarness(); f.args.captureDiagnostic = true; f.args.urls.mjs = 'https://example.invalid/private-token';
+  const packet = await f.run();
+  assert.equal(packet.rendererDiagnostic.phase, 'asset-url-validation');
+  assert.equal(packet.rendererDiagnostic.observed.assetURLsMatched, false);
+  assert.equal(f.calls.fetch, undefined);
+  assert.doesNotMatch(JSON.stringify(packet), /private-token|example\.invalid/);
+});
+test('diagnostic sanitizer drops private extras and rejects malformed or incomplete success evidence', async () => {
+  const f = rendererHarness(); f.args.captureDiagnostic = true;
+  const valid = (await f.run()).rendererDiagnostic;
+  const extra = { ...valid, rawError: 'private-token', observed: { ...valid.observed, url: 'private-token' } };
+  assert.deepEqual(safeOfflineOrtRendererDiagnostic(extra), valid);
+  for (const patch of [{ schemaVersion: 2 }, { phase: 'private-token' }, { errorCategory: 'private-token' },
+    { outcome: 'unknown' }, { observed: {} }, { observed: { ...valid.observed, wasmCompiled: 'true' } },
+    { observed: { ...valid.observed, wasmCompiled: null } }, { observed: { ...valid.observed, cspViolationObserved: true } },
+    { outcome: 'failed' }, { phase: 'module-import' }]) {
+    assert.equal(safeOfflineOrtRendererDiagnostic({ ...valid, ...patch }), null);
+  }
+});
+test('orchestration retains renderer failure stage through cleanup and preserves FAIL', async t => {
+  const f = await probeHarness(t, { factoryThrows: new WebAssembly.LinkError('private-token ws://do-not-record') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: value => { assertSafeDiagnostic(value); latest = value; } }),
+    /installed ORT initialization failed at factory-invoke/);
+  assert.equal(latest.failedCheck, 'initialization');
+  assert.equal(latest.renderer.phase, 'factory-invoke');
+  assert.equal(latest.renderer.errorCategory, 'wasm-link-error');
+  assert.equal(latest.renderer.observed.wasmCompiled, true);
+  assert.equal(latest.renderer.observed.moduleImported, true);
+  assert.equal(latest.renderer.observed.factoryResolved, null);
+  assert.equal(latest.cleanup.nativeObserver.result, 'passed');
+  f.checkCleanup();
+});
+test('serialized renderer failure carries only fixed diagnostic data across the Playwright boundary', async () => {
+  const f = rendererHarness({ importThrows: new TypeError('private-token') }); f.args.captureDiagnostic = true;
+  const context = vm.createContext({ URL, Uint8Array, AbortController, setTimeout, clearTimeout, args: f.args, dependencies: f.dependencies });
+  const result = await vm.runInContext(`(${initializeOfflineOrtInRenderer.toString()})(args, dependencies)`, context);
+  assert.equal(result.rendererFailure, true);
+  assert.equal(safeOfflineOrtRendererDiagnostic(result.rendererDiagnostic).phase, 'module-import');
+  assert.doesNotMatch(JSON.stringify(result), /private-token/);
+});
+test('diagnostic callback mutation cannot alter renderer success evidence or a renderer rejection', async t => {
+  for (const options of [{}, { badInit: true }]) {
+    const f = await probeHarness(t, options);
+    let latest;
+    const run = f.run({ onDiagnostic: value => {
+      assertSafeDiagnostic(value);
+      latest = structuredClone(value);
+      if (value.renderer) {
+        value.renderer.phase = 'private-token';
+        value.renderer.outcome = 'passed';
+        value.renderer.observed.ortInitReturnedZero = true;
+      }
+    } });
+    if (options.badInit) {
+      await assert.rejects(run, /initialization failed at ort-init/);
+      assert.equal(latest.renderer.observed.ortInitReturnedZero, false);
+      assert.equal(latest.renderer.outcome, 'failed');
+    } else {
+      const result = await run;
+      assert.equal(result.rendererDiagnostic.phase, 'complete');
+      assert.equal(result.rendererDiagnostic.observed.ortInitReturnedZero, true);
+    }
+    f.checkCleanup();
+  }
 });

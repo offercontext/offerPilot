@@ -259,3 +259,72 @@ test('failed UI action preserves a fixed stage and bounded target booleans', asy
   assert.equal(result.results[0].diagnostic.targetUnique, true);
   assert.doesNotMatch(JSON.stringify(result), /private-secret-example|local-fixture-token/);
 });
+
+test('running proof is installed before send and stream does not re-wait a vanished Stop button', async () => {
+  const source = await fs.readFile(new URL('../ui-scenarios.mjs', import.meta.url), 'utf8');
+  const pilot = source.slice(source.indexOf('async function runPilot('), source.indexOf('async function runConnection('));
+  assert.ok(pilot.indexOf('installMirrorObservation(page, haru, current.id)') < pilot.indexOf('await broker.armCase(current.id)'));
+  assert.ok(pilot.indexOf('installMirrorObservation(page, haru, current.id)') < pilot.indexOf("ctx.mark('PILOT_SEND')"));
+  assert.equal(pilot.includes("waitMirror(page, haru, 'running'"), false);
+  assert.ok(pilot.includes('await observedRunning(page, haru, current, ctx)'));
+  const cancellation = pilot.slice(pilot.indexOf("if (current.id === 'pilot-cancel') {"));
+  assert.ok(cancellation.includes('await stop.isVisible() && await stop.isEnabled()'));
+  assert.ok(cancellation.includes("rows[0].status === 'RESERVED' && ledger.active === true"));
+  assert.ok(cancellation.includes("rows[0].status === 'DISCONNECT' && ledger.active === false"));
+  assert.ok(cancellation.includes('rows[0].clientDisconnectObserved === true'));
+  assert.equal(pilot.slice(0, pilot.indexOf("if (current.id === 'pilot-cancel') {")).includes('await stop.isVisible()'), false);
+  assert.ok(pilot.includes('await verifyFinalMirrorIdentity(page, haru, current, ctx)'));
+  assert.ok(pilot.includes('await assertHaruRendered(haru, ctx)'));
+  assert.ok(source.includes('await removeMirrorObservation(page, haru)'));
+});
+
+test('mirror diagnostic reports only bounded facts and never persists conversation IDs', async () => {
+  const { mirrorDiagnostic } = await import('../ui-scenarios.mjs');
+  const one = { caseId: 'pilot-stream', installed: true, baselineReady: true, healthy: true, connected: true,
+    bridgeRunningObserved: true, domRunningObserved: true, runningWithNullObserved: false,
+    conversationId: 37, runningConversationId: 37, identityChanged: false, generationChanged: false, readTimedOut: false, expired: false };
+  const value = mirrorDiagnostic({ owner: { ...one, raw: 'private-key' }, haru: { ...one, message: 'private-response' } }, 'pilot-stream');
+  assert.equal(value.sameRunningConversation, true); assert.equal(value.currentConversationMatches, true);
+  assert.equal(value.ownerRunningPositiveSeen, true); assert.equal(value.haruRunningDomSeen, true);
+  assert.equal(value.invalidObservation, false);
+  assert.ok(Object.values(value).every(item => typeof item === 'boolean'));
+  assert.doesNotMatch(JSON.stringify(value), /37|private|conversationId|message/);
+  assert.equal(mirrorDiagnostic({ owner: one, haru: { ...one, runningConversationId: null } }, 'pilot-stream').sameRunningConversation, false);
+  assert.equal(mirrorDiagnostic({ owner: one, haru: { ...one, identityChanged: true } }, 'pilot-stream').invalidObservation, true);
+});
+
+test('final mirror proof requires current idle on both windows after a real running transition', async () => {
+  const { isFinalMirrorProven } = await import('../ui-scenarios.mjs');
+  const value = { caseId: 'pilot-stream', installed: true, baselineReady: true, healthy: true, connected: true,
+    bridgeRunningObserved: true, domRunningObserved: true, runningWithNullObserved: false,
+    conversationId: 37, runningConversationId: 37, identityChanged: false, generationChanged: false,
+    readTimedOut: false, expired: false, currentTaskState: 'idle', loading: false, hasPending: false };
+  const good = { owner: { ...value, role: 'owner' }, haru: { ...value, role: 'haru' } };
+  assert.equal(isFinalMirrorProven(good), true);
+  for (const role of ['owner', 'haru']) for (const changes of [{ currentTaskState: 'running', loading: true },
+    { currentTaskState: 'waiting_confirmation', hasPending: true }, { currentTaskState: 'completed' },
+    { loading: true }, { hasPending: true }, { conversationId: 38 }])
+    assert.equal(isFinalMirrorProven({ ...good, [role]: { ...good[role], ...changes } }), false);
+});
+
+test('both observer cleanup failures preserve the original UI failure and diagnosis', async () => {
+  const { recordObserverCleanupFailure } = await import('../ui-scenarios.mjs');
+  const diagnostic = { stage: 'PILOT_RUNNING', targetProbed: false };
+  const rows = [{ id: 'pilot-stream', status: 'FAIL', code: 'HARU_SYNC_FAILED', diagnostic, checks: {} }];
+  recordObserverCleanupFailure(rows, 'pilot-stream', 'mirror', { stage: 'CASE_CLEANUP' });
+  recordObserverCleanupFailure(rows, 'pilot-stream', 'stream', { stage: 'CASE_CLEANUP' });
+  assert.equal(rows[0].code, 'HARU_SYNC_FAILED'); assert.equal(rows[0].diagnostic, diagnostic);
+  assert.equal(rows[0].checks.mirrorObserverCleanupFailed, true); assert.equal(rows[0].checks.streamObserverCleanupFailed, true);
+  const passed = [{ id: 'pilot-stream', status: 'PASS', code: 'PASSED', checks: {} }];
+  recordObserverCleanupFailure(passed, 'pilot-stream', 'stream', { stage: 'CASE_CLEANUP' });
+  assert.equal(passed[0].status, 'FAIL'); assert.equal(passed[0].code, 'UI_ACTION_FAILED');
+});
+
+test('stream observer cleanup is bounded to five seconds', async t => {
+  const { removeStreamObservation } = await import('../ui-scenarios.mjs');
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const pending = removeStreamObservation({ evaluate: () => new Promise(() => {}) });
+  const rejected = assert.rejects(pending, { code: 'UI_ACTION_FAILED' });
+  t.mock.timers.tick(5000);
+  await rejected;
+});

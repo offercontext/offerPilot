@@ -111,3 +111,9 @@ npm test --prefix desktop/real-ai-validation
 [Windows MOCK run 37780561724](https://github.com/offercontext/offerPilot/actions/runs/37780561724) 已完成：同固定安装器下载/校验/安装成功，连接场景 `UI_TIMEOUT`，其余场景 BLOCKED，broker 发送/拒绝均为 0，清理通过，paid jobs 跳过。旧报告未记录 UI 子阶段，不能据此把问题归因于 provider。
 
 真实 React/Ant 组件与 Playwright 原版 selector engine 的局部回归证实：带 tooltip 的“原生 JSON Schema”开关，其 accessible name 不等于纯 label，原 role-exact locator 匹配 0；改为 exact Form label 与 switch role 交集匹配唯一元素，且能实际切换状态。其他 input exact label 保留。该证据来自 jsdom，系统 Chromium sandbox 启动受环境 namespace 限制，未绕过；不是 Windows 重跑成功证明，也不证明该次超时只有一个原因。新增固定子阶段及安全 MOCK 图片用于下一轮定位。
+
+[第二轮 Windows MOCK run 37784479723](https://github.com/offercontext/offerPilot/actions/runs/37784479723) 中，连接配置/测试已真实 PASS；Pilot stream 在 `PILOT_RUNNING/HARU_SYNC_FAILED` 失败。两笔合成 provider 请求正常 SETTLED、无拒绝，主窗和 Haru 的失败截图均显示完整同一 MOCK 回复及终态 idle，清理通过。图片证明最终可见同步，不证明此前 running 已被观察。
+
+helper 原实现有确定的漏采窗口：发送点击返回后才轮询 running，又依次等待 Haru 标签和主窗 Stop；约六秒的合成 provider 帧序列不能替代实际 UI 状态采样。实际 React/controller/Haru hook 局部验证存在 `idle/null → running/null → running/正ID → idle/同ID`，故不放宽正 ID 要求。修复在发送前以 Haru 公共 `onState` 和两窗 DOM MutationObserver 被动锁存真正的 running/正 ID/可见运行控件，owner 用只读 getState 做关联核对；两次 getState 都来自同一 main-process snapshot，不能单独声称两份独立 UI 证据。只看见 idle、只有 bridge 或只有 DOM、ID改变/超时/失联均不得通过。
+
+正常 stream 可在结束后读取已真实锁存的运行中证据，再独立要求 idle、最终身份一致和 Haru 实际正文；cancel 仍必须当下 Stop 可点、broker 请求仍 active，真实点击后由产品断连。没有修改 MOCK 速度、模型、预算、重试或产品。每场景 finally 注销订阅/观察器，诊断只保留固定布尔，不记录正文或会话 ID；此改动仍须新的 Windows MOCK 实跑确认。

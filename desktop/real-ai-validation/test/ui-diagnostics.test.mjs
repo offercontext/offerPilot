@@ -41,3 +41,17 @@ test('stalled diagnostic locator returns after fixed short bound without replaci
   assert.deepEqual(await pending, { stage: 'PROVIDER_JSON_SCHEMA', targetProbed: false,
     targetFound: false, targetUnique: false, targetVisible: false });
 });
+
+test('mirror diagnosis contains only fixed booleans, never identifiers or prose', async () => {
+  const diagnostic = createUiDiagnostic();
+  diagnostic.mark('PILOT_RUNNING');
+  diagnostic.mirror({ ownerConnected: true, ownerRunningPositiveSeen: true, ownerRunningNullSeen: false,
+    haruRunningDomSeen: 'true', conversationId: 123, rawMessage: 'private response', token: 'private-key' });
+  const value = await diagnostic.snapshot();
+  assert.equal(value.mirror.ownerConnected, true);
+  assert.equal(value.mirror.ownerRunningPositiveSeen, true);
+  assert.equal(value.mirror.haruRunningDomSeen, false);
+  assert.doesNotMatch(JSON.stringify(value), /123|private|conversationId|rawMessage|token/);
+  diagnostic.mark('CASE_START');
+  assert.equal((await diagnostic.snapshot()).mirror, undefined);
+});

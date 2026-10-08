@@ -6,27 +6,36 @@ export const UI_STAGES = Object.freeze(['UNSPECIFIED', 'CASE_START', 'BROKER_PRE
   'SETTINGS_SAVE', 'SETTINGS_READBACK', 'SETTINGS_CLOSED', 'CONNECTION_REOPEN', 'CONNECTION_ARM',
   'CONNECTION_CLICK', 'CONNECTION_RESPONSE', 'CONNECTION_SUCCESS', 'CONNECTION_RETURN',
   'PILOT_OPEN', 'PILOT_COMPOSE', 'PILOT_ARM', 'PILOT_SEND', 'PILOT_HITL_VISIBLE', 'PILOT_REJECT',
-  'PILOT_RUNNING', 'PILOT_STOP', 'PILOT_STOP_READBACK', 'PILOT_STREAM_READBACK', 'HARU_MIRROR',
+  'PILOT_OBSERVER_INSTALL', 'PILOT_RUNNING', 'PILOT_FINAL_MIRROR', 'PILOT_STOP', 'PILOT_STOP_READBACK', 'PILOT_STREAM_READBACK', 'HARU_MIRROR',
   'INTERVIEW_OPEN', 'INTERVIEW_GENERATE', 'RESUME_OPEN', 'RESUME_GENERATE', 'OFFER_OPEN',
   'OFFER_REVIEW', 'OFFER_GENERATE', 'MOCK_CAPTURE', 'PROVIDER_TERMINAL', 'CASE_CLEANUP']);
+export const MIRROR_DIAGNOSTIC_FIELDS = Object.freeze(['observerInstalled', 'ownerBaselineReady', 'haruBaselineReady',
+  'ownerConnected', 'haruConnected', 'ownerIdleNow', 'haruIdleNow', 'ownerRunningPositiveSeen', 'haruRunningPositiveSeen',
+  'ownerRunningNullSeen', 'haruRunningNullSeen', 'ownerRunningDomSeen', 'haruRunningDomSeen',
+  'sameRunningConversation', 'currentConversationMatches', 'invalidObservation', 'observationReadFailed']);
+export function sanitizeMirrorDiagnostic(value) {
+  return Object.fromEntries(MIRROR_DIAGNOSTIC_FIELDS.map(key => [key, value?.[key] === true]));
+}
 export function sanitizeUiDiagnostic(value) {
   return { stage: UI_STAGES.includes(value?.stage) ? value.stage : 'UNSPECIFIED',
     targetProbed: value?.targetProbed === true, targetFound: value?.targetFound === true,
-    targetUnique: value?.targetUnique === true, targetVisible: value?.targetVisible === true };
+    targetUnique: value?.targetUnique === true, targetVisible: value?.targetVisible === true,
+    ...(value?.mirror === undefined ? {} : { mirror: sanitizeMirrorDiagnostic(value.mirror) }) };
 }
 export function createUiDiagnostic() {
-  let stage = 'UNSPECIFIED', locator;
+  let stage = 'UNSPECIFIED', locator, mirror;
   return {
-    mark(next, nextLocator) { stage = UI_STAGES.includes(next) ? next : 'UNSPECIFIED'; locator = nextLocator; },
+    mark(next, nextLocator) { if (next === 'CASE_START') mirror = undefined; stage = UI_STAGES.includes(next) ? next : 'UNSPECIFIED'; locator = nextLocator; },
     target(next) { locator = next; },
+    mirror(value) { mirror = sanitizeMirrorDiagnostic(value); },
     async snapshot() {
-      const result = sanitizeUiDiagnostic({ stage });
+      const result = sanitizeUiDiagnostic({ stage, mirror });
       if (!locator || typeof locator.count !== 'function') return result;
       let timer;
       try {
         const probe = (async () => {
           const count = await locator.count();
-          const observed = sanitizeUiDiagnostic({ stage, targetProbed: true,
+          const observed = sanitizeUiDiagnostic({ stage, mirror, targetProbed: true,
             targetFound: Number.isSafeInteger(count) && count > 0, targetUnique: count === 1 });
           if (count === 1) observed.targetVisible = await locator.isVisible();
           return sanitizeUiDiagnostic(observed);

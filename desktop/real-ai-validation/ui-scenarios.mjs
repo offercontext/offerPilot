@@ -2,6 +2,7 @@
 // logs, traces, exports, controller replacement, or synthetic Haru publication.
 import { randomUUID } from 'node:crypto';
 import { createUiDiagnostic } from './ui-diagnostics.mjs';
+import { installMirrorObservation, readMirrorObservation, removeMirrorObservation, isRunningMirrorProven } from './mirror-observer.mjs';
 
 export const scenarios = Object.freeze([
   { id: 'connection', maxOutputTokens: 64, timeoutMs: 25_000 },
@@ -81,7 +82,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function operationContext(deadline) {
   const diagnostic = createUiDiagnostic();
   return {
-    mark: diagnostic.mark, target: diagnostic.target, diagnostic: diagnostic.snapshot,
+    mark: diagnostic.mark, target: diagnostic.target, mirror: diagnostic.mirror, diagnostic: diagnostic.snapshot,
     timeout(cap = 15_000) { const left = deadline - Date.now(); if (left <= 0) fail('SUITE_DEADLINE'); return Math.max(1, Math.min(left, cap)); },
     async click(locator) { diagnostic.target(locator); await locator.click({ timeout: this.timeout() }); },
     async fill(locator, value) { diagnostic.target(locator); await locator.fill(value, { timeout: this.timeout() }); },
@@ -223,6 +224,47 @@ async function waitMirror(page, haru, state, ctx, cap = 15_000) {
   const label = { running: '正在处理', waiting_confirmation: '等待你确认', idle: '随时待命' }[state];
   await ctx.visible(haru.getByRole('status').filter({ hasText: new RegExp(`^${label}$`, 'u') }));
 }
+export function mirrorDiagnostic(pair, caseId) {
+  const owner = pair?.owner, haru = pair?.haru;
+  const positive = value => Number.isSafeInteger(value) && value > 0;
+  const same = positive(owner?.runningConversationId) && owner.runningConversationId === haru?.runningConversationId;
+  const valid = value => value?.healthy === true && value?.identityChanged === false && value?.generationChanged === false &&
+    value?.expired === false && value?.caseId === caseId;
+  return { observerInstalled: owner?.installed === true && haru?.installed === true,
+    ownerBaselineReady: owner?.baselineReady === true, haruBaselineReady: haru?.baselineReady === true,
+    ownerConnected: owner?.connected === true, haruConnected: haru?.connected === true,
+    ownerIdleNow: owner?.currentTaskState === 'idle' && owner?.loading === false && owner?.hasPending === false,
+    haruIdleNow: haru?.currentTaskState === 'idle' && haru?.loading === false && haru?.hasPending === false,
+    ownerRunningPositiveSeen: owner?.bridgeRunningObserved === true && positive(owner?.runningConversationId),
+    haruRunningPositiveSeen: haru?.bridgeRunningObserved === true && positive(haru?.runningConversationId),
+    ownerRunningNullSeen: owner?.runningWithNullObserved === true, haruRunningNullSeen: haru?.runningWithNullObserved === true,
+    ownerRunningDomSeen: owner?.domRunningObserved === true, haruRunningDomSeen: haru?.domRunningObserved === true,
+    sameRunningConversation: same,
+    currentConversationMatches: same && owner?.conversationId === owner.runningConversationId && haru?.conversationId === haru.runningConversationId,
+    invalidObservation: !valid(owner) || !valid(haru),
+    observationReadFailed: owner?.readTimedOut === true || haru?.readTimedOut === true };
+}
+async function observedRunning(page, haru, current, ctx) {
+  await ctx.until(async () => {
+    let pair;
+    try { pair = await readMirrorObservation(page, haru); }
+    catch { ctx.mirror({ observationReadFailed: true, invalidObservation: true }); fail('HARU_SYNC_FAILED'); }
+    ctx.mirror(mirrorDiagnostic(pair, current.id));
+    return isRunningMirrorProven(pair);
+  }, current.timeoutMs, 'HARU_SYNC_FAILED');
+}
+export function isFinalMirrorProven(pair) {
+  return isRunningMirrorProven(pair) && [pair.owner, pair.haru].every(value =>
+    value.currentTaskState === 'idle' && value.loading === false && value.hasPending === false);
+}
+async function verifyFinalMirrorIdentity(page, haru, current, ctx) {
+  ctx.mark('PILOT_FINAL_MIRROR');
+  let pair;
+  try { pair = await readMirrorObservation(page, haru); }
+  catch { ctx.mirror({ observationReadFailed: true, invalidObservation: true }); fail('HARU_SYNC_FAILED'); }
+  ctx.mirror(mirrorDiagnostic(pair, current.id));
+  check(isFinalMirrorProven(pair), 'HARU_SYNC_FAILED');
+}
 async function expandHaru(haru, ctx) {
   await ctx.visible(haru.getByRole('main', exact('Haru 桌面小窗')));
   const expand = haru.getByRole('button', exact('展开 Haru 对话'));
@@ -247,8 +289,21 @@ async function installStreamObservation(page) {
     window.__offerpilotBoundedUiObserver = state;
   });
 }
-async function removeStreamObservation(page) {
-  await page.evaluate(() => { window.__offerpilotBoundedUiObserver?.observer.disconnect(); delete window.__offerpilotBoundedUiObserver; });
+export async function removeStreamObservation(page) {
+  let timer;
+  try {
+    await Promise.race([page.evaluate(() => { window.__offerpilotBoundedUiObserver?.observer.disconnect(); delete window.__offerpilotBoundedUiObserver; }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new UiFailure('UI_ACTION_FAILED')), 5000); })]);
+  } catch { fail('UI_ACTION_FAILED'); }
+  finally { clearTimeout(timer); }
+}
+export function recordObserverCleanupFailure(results, caseId, kind, diagnostic) {
+  check(['mirror', 'stream'].includes(kind), 'INVALID_HARNESS');
+  const previous = results.at(-1);
+  check(previous?.id === caseId, 'INVALID_HARNESS');
+  results[results.length - 1] = { ...previous, checks: { ...previous.checks,
+    [kind === 'mirror' ? 'mirrorObserverCleanupFailed' : 'streamObserverCleanupFailed']: true },
+    ...(previous.status === 'PASS' ? { status: 'FAIL', code: kind === 'mirror' ? 'HARU_SYNC_FAILED' : 'UI_ACTION_FAILED', diagnostic } : {}) };
 }
 async function assertHaruRendered(haru, ctx) {
   await ctx.until(() => haru.evaluate(async () => {
@@ -281,6 +336,11 @@ async function runPilot({ page, haru, api, broker, fixture, capture, current, ct
   ctx.mark('PILOT_COMPOSE');
   await ctx.fill(composer(page), PROMPTS[current.id]);
   if (current.id === 'pilot-stream') await installStreamObservation(page);
+  if (['pilot-stream', 'pilot-cancel'].includes(current.id)) {
+    ctx.mark('PILOT_OBSERVER_INSTALL');
+    try { await installMirrorObservation(page, haru, current.id); }
+    catch { ctx.mirror({ invalidObservation: true, observationReadFailed: true }); fail('HARU_SYNC_FAILED'); }
+  }
   ctx.mark('PILOT_ARM');
   await broker.armCase(current.id);
   ctx.mark('PILOT_SEND');
@@ -309,10 +369,13 @@ async function runPilot({ page, haru, api, broker, fixture, capture, current, ct
     return { hitlVisible: true, rejectedThroughUi: true, syntheticWriteAbsent: true, haruPendingAndIdleMirrored: true };
   }
   ctx.mark('PILOT_RUNNING');
-  await waitMirror(page, haru, 'running', ctx, current.timeoutMs);
-  const stop = pilot(page).getByRole('button', exact('停止当前回复'));
-  await ctx.until(async () => await stop.isVisible() && await stop.isEnabled(), current.timeoutMs);
+  await observedRunning(page, haru, current, ctx);
   if (current.id === 'pilot-cancel') {
+    // Cancellation requires a current actionable control and active request,
+    // never merely a historical running observation. Streaming readback below
+    // may use genuinely observed transitions after a fast reply has ended.
+    const stop = pilot(page).getByRole('button', exact('停止当前回复'));
+    await ctx.until(async () => await stop.isVisible() && await stop.isEnabled(), current.timeoutMs);
     await ctx.until(() => {
       const ledger = broker.snapshot();
       const rows = ledger.requests.filter((row) => row.caseId === current.id);
@@ -334,18 +397,20 @@ async function runPilot({ page, haru, api, broker, fixture, capture, current, ct
       return rows.length === 1 && rows[0].status === 'DISCONNECT' && ledger.active === false
         && rows[0].clientDisconnectObserved === true;
     }, current.timeoutMs, 'CANCEL_NOT_OBSERVED');
+    await verifyFinalMirrorIdentity(page, haru, current, ctx);
     await safeCapture(capture, current.id, page);
     await safeCapture(capture, `haru-${current.id}`, haru);
-    return { stopClickedWhileRunning: true, stopAcknowledged: true, providerDisconnectObserved: true, haruRunningAndStoppedMirrored: true };
+    return { ownerRunningTransitionObserved: true, haruRunningTransitionObserved: true, positiveRunningConversationMatched: true, finalRunningConversationMatched: true, stopClickedWhileRunning: true, stopAcknowledged: true, providerDisconnectObserved: true, haruRunningAndStoppedMirrored: true };
   }
   ctx.mark('PILOT_STREAM_READBACK');
   await ctx.until(() => page.evaluate(() => (window.__offerpilotBoundedUiObserver?.updates ?? 0) >= 2), current.timeoutMs, 'STREAM_NOT_OBSERVED');
   await ctx.until(async () => { const state = await mirrorState(haru); return !state.loading && state.assistantCount > 0 && !state.failed && !state.hasPending; }, current.timeoutMs);
   await waitMirror(page, haru, 'idle', ctx);
   await assertHaruRendered(haru, ctx);
+  await verifyFinalMirrorIdentity(page, haru, current, ctx);
   await safeCapture(capture, current.id, page);
   await safeCapture(capture, `haru-${current.id}`, haru);
-  return { incrementalAssistantRendering: true, haruRunningAndIdleMirrored: true, haruVisibleAssistantMatchesSnapshot: true };
+  return { ownerRunningTransitionObserved: true, haruRunningTransitionObserved: true, positiveRunningConversationMatched: true, finalRunningConversationMatched: true, incrementalAssistantRendering: true, haruRunningAndIdleMirrored: true, haruVisibleAssistantMatchesSnapshot: true };
 }
 async function runConnection({ page, broker, current, ctx }) {
   ctx.mark('CONNECTION_REOPEN');
@@ -511,9 +576,18 @@ export async function runUiScenarios({ page, haru, api, broker, fixture, capture
         blocked = 'PROVIDER_BUDGET_BLOCKED';
         results[results.length - 1] = { id: current.id, status: 'BLOCKED', code: blocked, checks: {} };
       }
+      if (['pilot-stream', 'pilot-cancel'].includes(current.id)) {
+        try { await removeMirrorObservation(page, haru); }
+        catch {
+          blocked = 'PREVIOUS_SCENARIO_FAILED';
+          ctx.mark('CASE_CLEANUP');
+          recordObserverCleanupFailure(results, current.id, 'mirror', await ctx.diagnostic());
+        }
+      }
       if (current.id === 'pilot-stream') { try { await removeStreamObservation(page); } catch {
         blocked = 'PREVIOUS_SCENARIO_FAILED';
-        results[results.length - 1] = { id: current.id, status: 'FAIL', code: 'UI_ACTION_FAILED', checks: {} };
+        ctx.mark('CASE_CLEANUP');
+        recordObserverCleanupFailure(results, current.id, 'stream', await ctx.diagnostic());
       } }
     }
   }

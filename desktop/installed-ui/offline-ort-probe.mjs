@@ -174,70 +174,155 @@ export async function initializeOfflineOrtInRenderer(args, dependencies = {}) {
   const crypto = dependencies.crypto ?? globalThis.crypto;
   const location = dependencies.location ?? globalThis.location;
   const document = dependencies.document ?? globalThis.document;
-  const ensure = (condition, message) => { if (!condition) throw new Error(message); };
+  let phase = 'owner-validation';
+  let timedOut = false;
+  let checkRejected = false;
+  const observed = Object.fromEntries(['ownerMatched', 'assetURLsMatched', 'wasmResponseMatched', 'wasmCspMatched',
+    'wasmByteCountMatched', 'wasmSha256Matched', 'wasmCompiled', 'moduleImported', 'factoryExportMatched',
+    'factoryResolved', 'factoryCalledRun', 'factorySingleThread', 'heapPresent', 'exportsPresent',
+    'asyncInitCompleted', 'ortInitReturnedZero', 'ownerUnchanged', 'cspViolationObserved'].map(key => [key, null]));
+  observed.sharedArrayBufferAvailable = typeof globalThis.SharedArrayBuffer === 'function';
+  observed.crossOriginIsolated = typeof globalThis.crossOriginIsolated === 'boolean' ? globalThis.crossOriginIsolated : null;
+  const ensure = (condition, message) => { if (!condition) { checkRejected = true; throw new Error(message); } };
+  const snapshot = (outcome, errorCategory = null) => ({ schemaVersion: 1, phase, outcome, errorCategory, observed: { ...observed } });
+  // Classify only standard error names, never return message, stack, or an ORT
+  // object. A raw exception must not cross Playwright when diagnostics are on.
+  const category = error => {
+    if (timedOut) return 'timeout';
+    if (checkRejected) return 'check-rejected';
+    const names = { TypeError: 'type-error', CompileError: 'wasm-compile-error', LinkError: 'wasm-link-error',
+      RuntimeError: 'wasm-runtime-error', EvalError: 'eval-error', RangeError: 'range-error',
+      AbortError: 'aborted', SecurityError: 'security-error', Error: 'error' };
+    try { const name = error?.name; return Object.hasOwn(names, name) ? names[name] : 'other'; } catch { return 'other'; }
+  };
   const names = {
     mjs: /^\/assets\/ort-wasm-simd-threaded\.asyncify(?:-[A-Za-z0-9_-]+)?\.mjs$/,
     wasm: /^\/assets\/ort-wasm-simd-threaded\.asyncify(?:-[A-Za-z0-9_-]+)?\.wasm$/,
   };
-  const owner = new URL(args.ownerURL);
-  ensure(location.href === args.ownerURL && owner.protocol === 'http:' && owner.hostname === '127.0.0.1'
-    && owner.port && owner.pathname === '/' && !owner.username && !owner.password
-    && owner.searchParams.get('desktopSurface') !== 'haru', 'ORT renderer owner mismatch');
-  for (const kind of ['mjs', 'wasm']) {
-    const url = new URL(args.urls[kind]);
-    ensure(url.origin === owner.origin && url.protocol === 'http:' && !url.username && !url.password
-      && !url.search && !url.hash && names[kind].test(url.pathname), 'ORT asset must be an exact installed self URL');
-  }
   let violations = 0;
   const violation = () => { violations++; };
   document.addEventListener('securitypolicyviolation', violation);
   const controller = new AbortController();
   let timer;
   try {
+    const owner = new URL(args.ownerURL);
+    observed.ownerMatched = Boolean(location.href === args.ownerURL && owner.protocol === 'http:' && owner.hostname === '127.0.0.1'
+      && owner.port && owner.pathname === '/' && !owner.username && !owner.password
+      && owner.searchParams.get('desktopSurface') !== 'haru');
+    ensure(observed.ownerMatched, 'ORT renderer owner mismatch');
+    phase = 'asset-url-validation';
+    observed.assetURLsMatched = true;
+    for (const kind of ['mjs', 'wasm']) {
+      const url = new URL(args.urls[kind]);
+      observed.assetURLsMatched = url.origin === owner.origin && url.protocol === 'http:' && !url.username && !url.password
+        && !url.search && !url.hash && names[kind].test(url.pathname);
+      ensure(observed.assetURLsMatched, 'ORT asset must be an exact installed self URL');
+    }
     const deadline = new Promise((_, reject) => {
-      timer = setTimeout(() => { controller.abort(); reject(new Error('installed ORT initialization timed out')); }, args.timeoutMs);
+      timer = setTimeout(() => { timedOut = true; controller.abort(); reject(new Error('installed ORT initialization timed out')); }, args.timeoutMs);
     });
-    return await Promise.race([deadline, (async () => {
+    const result = await Promise.race([deadline, (async () => {
       // Authentication is supplied by the existing Electron session handler.
       // Never inspect or copy its token and never follow a redirect.
+      phase = 'wasm-fetch';
       const response = await fetchAsset(args.urls.wasm, { credentials: 'same-origin', mode: 'same-origin',
         redirect: 'error', cache: 'no-store', signal: controller.signal });
-      ensure(response.ok && response.url === args.urls.wasm && !response.redirected, 'installed WASM response mismatch');
-      ensure(response.headers.get('content-security-policy') === args.csp, 'installed WASM production CSP mismatch');
+      phase = 'wasm-response';
+      observed.wasmResponseMatched = response.ok === true && response.url === args.urls.wasm && !response.redirected;
+      ensure(observed.wasmResponseMatched, 'installed WASM response mismatch');
+      phase = 'wasm-csp';
+      observed.wasmCspMatched = response.headers.get('content-security-policy') === args.csp;
+      ensure(observed.wasmCspMatched, 'installed WASM production CSP mismatch');
+      phase = 'wasm-read';
       const bytes = new Uint8Array(await response.arrayBuffer());
-      ensure(bytes.byteLength === args.assets.wasm.bytes, 'installed WASM byte count mismatch');
+      phase = 'wasm-bytes';
+      observed.wasmByteCountMatched = bytes.byteLength === args.assets.wasm.bytes;
+      ensure(observed.wasmByteCountMatched, 'installed WASM byte count mismatch');
+      phase = 'wasm-sha256';
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)),
         (value) => value.toString(16).padStart(2, '0')).join('');
-      ensure(digest === args.assets.wasm.sha256, 'installed WASM digest mismatch');
+      observed.wasmSha256Matched = digest === args.assets.wasm.sha256;
+      ensure(observed.wasmSha256Matched, 'installed WASM digest mismatch');
+      phase = 'wasm-compile';
       const compiled = await webAssembly.compile(bytes);
-      ensure(compiled instanceof webAssembly.Module, 'real WebAssembly compilation required');
+      observed.wasmCompiled = compiled instanceof webAssembly.Module;
+      ensure(observed.wasmCompiled, 'real WebAssembly compilation required');
+      phase = 'module-import';
       const imported = await importModule(args.urls.mjs);
-      ensure(typeof imported.default === 'function', 'installed ORT factory missing');
+      observed.moduleImported = true;
+      phase = 'factory-export';
+      observed.factoryExportMatched = typeof imported.default === 'function';
+      ensure(observed.factoryExportMatched, 'installed ORT factory missing');
       // The locked factory creates numThreads - 1 workers. wasmBinary prevents
       // another fetch. locateFile refuses every asset except this exact WASM.
+      phase = 'factory-invoke';
       const ort = await imported.default({ numThreads: 1, wasmBinary: bytes, locateFile: (name) => {
         ensure(name === 'ort-wasm-simd-threaded.asyncify.wasm', 'unexpected ORT runtime asset requested');
         return args.urls.wasm;
       } });
-      ensure(ort?.calledRun === true && ort.numThreads === 1, 'ORT factory did not initialize single-threaded');
-      ensure(ort.HEAPU8 instanceof Uint8Array && ort.HEAPU8.byteLength >= 65536, 'initialized ORT WASM heap missing');
-      ensure(typeof ort.asyncInit === 'function' && typeof ort._OrtInit === 'function'
-        && typeof ort._OrtCreateSession === 'function', 'initialized ORT exports missing');
+      observed.factoryResolved = true;
+      phase = 'factory-ready';
+      observed.factoryCalledRun = ort?.calledRun === true;
+      observed.factorySingleThread = ort?.numThreads === 1;
+      ensure(observed.factoryCalledRun && observed.factorySingleThread, 'ORT factory did not initialize single-threaded');
+      phase = 'heap-check';
+      observed.heapPresent = ort.HEAPU8 instanceof Uint8Array && ort.HEAPU8.byteLength >= 65536;
+      ensure(observed.heapPresent, 'initialized ORT WASM heap missing');
+      phase = 'exports-check';
+      observed.exportsPresent = typeof ort.asyncInit === 'function' && typeof ort._OrtInit === 'function'
+        && typeof ort._OrtCreateSession === 'function';
+      ensure(observed.exportsPresent, 'initialized ORT exports missing');
+      phase = 'async-init';
       ort.asyncInit();
+      observed.asyncInitCompleted = true;
+      phase = 'ort-init';
       // Matches locked onnxruntime-web/lib/wasm/wasm-core-impl.ts initOrt:
       // one intra-op thread, warning logging, zero means environment ready.
       const initCode = ort._OrtInit(1, 2);
-      ensure(initCode === 0, 'ORT environment initialization failed');
-      ensure(location.href === args.ownerURL, 'ORT owner navigated during initialization');
+      observed.ortInitReturnedZero = initCode === 0;
+      ensure(observed.ortInitReturnedZero, 'ORT environment initialization failed');
+      phase = 'owner-stable';
+      observed.ownerUnchanged = location.href === args.ownerURL;
+      ensure(observed.ownerUnchanged, 'ORT owner navigated during initialization');
+      phase = 'csp-final';
+      observed.cspViolationObserved = violations !== 0;
       ensure(violations === 0, 'ORT initialization violated production CSP');
       return { wasmCompiled: true, factoryInitialized: ort.calledRun, numThreads: ort.numThreads,
         heapBytes: ort.HEAPU8.byteLength, ortInitCode: initCode, wasmSha256: digest, cspViolations: violations };
     })()]);
+    phase = 'complete';
+    return args.captureDiagnostic === true ? { ...result, rendererDiagnostic: snapshot('passed') } : result;
+  } catch (error) {
+    observed.cspViolationObserved = violations !== 0;
+    if (args.captureDiagnostic === true) return { rendererFailure: true, rendererDiagnostic: snapshot('failed', category(error)) };
+    throw error;
   } finally {
     clearTimeout(timer);
     controller.abort();
     document.removeEventListener('securitypolicyviolation', violation);
   }
+}
+
+export function safeOfflineOrtRendererDiagnostic(value) {
+  const phases = ['owner-validation', 'asset-url-validation', 'wasm-fetch', 'wasm-response', 'wasm-csp', 'wasm-read',
+    'wasm-bytes', 'wasm-sha256', 'wasm-compile', 'module-import', 'factory-export', 'factory-invoke', 'factory-ready',
+    'heap-check', 'exports-check', 'async-init', 'ort-init', 'owner-stable', 'csp-final', 'complete'];
+  const categories = [null, 'timeout', 'check-rejected', 'type-error', 'wasm-compile-error', 'wasm-link-error',
+    'wasm-runtime-error', 'eval-error', 'range-error', 'aborted', 'security-error', 'error', 'other'];
+  const fields = ['ownerMatched', 'assetURLsMatched', 'wasmResponseMatched', 'wasmCspMatched', 'wasmByteCountMatched',
+    'wasmSha256Matched', 'wasmCompiled', 'moduleImported', 'factoryExportMatched', 'factoryResolved', 'factoryCalledRun',
+    'factorySingleThread', 'heapPresent', 'exportsPresent', 'asyncInitCompleted', 'ortInitReturnedZero', 'ownerUnchanged',
+    'cspViolationObserved', 'sharedArrayBufferAvailable', 'crossOriginIsolated'];
+  if (!value || value.schemaVersion !== 1 || !phases.includes(value.phase) || !categories.includes(value.errorCategory)
+    || !['passed', 'failed'].includes(value.outcome) || !value.observed
+    || fields.some(key => ![null, true, false].includes(value.observed[key]))) return null;
+  if (value.outcome === 'passed' && (value.phase !== 'complete' || value.errorCategory !== null
+    || value.observed.cspViolationObserved !== false
+    || fields.filter(key => !['cspViolationObserved', 'sharedArrayBufferAvailable', 'crossOriginIsolated'].includes(key))
+      .some(key => value.observed[key] !== true))) return null;
+  if (value.outcome === 'failed' && (value.phase === 'complete' || value.errorCategory === null)) return null;
+  return { schemaVersion: 1, phase: value.phase, outcome: value.outcome, errorCategory: value.errorCategory,
+    observed: Object.fromEntries(fields.map(key => [key, value.observed[key]])) };
 }
 
 export function assertOfflineOrtInitialization(result, assets) {
@@ -353,6 +438,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     })().then(() => null, (error) => error));
   };
   let result;
+  let rendererDiagnostic = null;
   let primaryError;
   let primaryFailure = null;
   const diagnosticErrors = [];
@@ -368,8 +454,9 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   let currentCheck = 'owner-observation';
   const emit = async (failedCheck = primaryFailure?.check ?? null) => {
     try {
-      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 3, phase, observed: { ...observed }, failedCheck,
+      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 4, phase, observed: { ...observed }, failedCheck,
         primaryFailure: primaryFailure && { ...primaryFailure },
+        renderer: rendererDiagnostic && structuredClone(rendererDiagnostic),
         effectiveCsp: { responseObserverAuditPassed, native: nativeProof && structuredClone(nativeProof), module: { ...modulePolicy } },
         reloads: Object.fromEntries(Object.entries(reloads).map(([key, value]) =>
           [key, { ...value, observed: { ...value.observed } }])),
@@ -508,7 +595,13 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     requireDiagnostic();
     setStage('installed-ort-initialize');
     result = await page.evaluate(initializeOfflineOrtInRenderer,
-      { ownerURL, urls, assets: installed.assets, csp: contentSecurityPolicy, timeoutMs });
+      { ownerURL, urls, assets: installed.assets, csp: contentSecurityPolicy, timeoutMs, captureDiagnostic: true });
+    rendererDiagnostic = safeOfflineOrtRendererDiagnostic(result?.rendererDiagnostic);
+    assert.ok(rendererDiagnostic, 'installed ORT renderer diagnostic missing or invalid');
+    await emit();
+    requireDiagnostic();
+    if (result.rendererFailure === true) throw new Error('installed ORT initialization failed at ' + rendererDiagnostic.phase);
+    assert.equal(rendererDiagnostic.outcome, 'passed', 'installed ORT renderer result must succeed');
     assertOfflineOrtInitialization(result, installed.assets);
     assert.deepEqual((await discoverInstalledOfflineOrt(installDir)).assets, installed.assets, 'installed ORT assets changed during probe');
     // Keep observing throughout every asynchronous asset/response verification.
