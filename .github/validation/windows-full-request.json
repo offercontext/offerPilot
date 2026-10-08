@@ -1,0 +1,32 @@
+{
+  "repository": "offercontext/offerPilot",
+  "branch": "feat/20261005-windows-desktop-validation",
+  "productBaseline": {
+    "commit": "590291ce4e33407eb4f13f092298e7398aed394c",
+    "tree": "c0c3a36a6a20e853346441a72636dd4422a27c94"
+  },
+  "helperBaseline": {
+    "commit": "7f00fa946a90b2038e731828240d3eb6627555cc",
+    "tree": "5bc482d39e0dda1b718b7262c97f8760fcd8f395"
+  },
+  "waitForRunTerminal": 37806395272,
+  "reason": "为已冻结的数据库原子初始化、恢复流、真实停止和默认离线网络保护取得最终 Windows 验收；预验不替代本请求提交的完整门禁，也不作跨提交等价认证。 同时复验保持50ms旁路预算的Journal并发测试校正，不改变产品分配器或重试策略。",
+  "preliminaryEvidence": {
+    "packageOnlyRun": 37828103435,
+    "nonAiRun": 37831623023,
+    "nonAiScope": "183 PASS、0 FAIL、400 PNG；保留现有覆盖限制。",
+    "mockRun": 37835052480,
+    "mockScope": "7 PASS，Stop DISCONNECT；未调用真实 provider。"
+  },
+  "requiredAcceptance": [
+    "本请求提交通过普通 Windows manifest、全部 12 shards、full-regression、package 和 validation-status，并生成新的 EXE。",
+    "按本请求提交、完整门禁 run、artifact 和 EXE SHA256 重新固定最终包，再对同一 EXE 完成免费 non-AI 与 MOCK 验收。",
+    "同包免费验收全部通过且现有独立审批满足后，才进行唯一一次受限 live 验收。"
+  ],
+  "testCollection": {
+    "expectedNodes": 6615,
+    "previousNodes": 6540,
+    "removedNodes": 0,
+    "addedNodes": 75
+  }
+}
