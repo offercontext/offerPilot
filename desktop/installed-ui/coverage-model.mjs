@@ -23,7 +23,7 @@ export const SUBVIEWS = Object.freeze([
   'story-editor', 'knowledge-inputs', 'knowledge-detail', 'offer-form',
   'offer-comparison', 'offer-dimensions', 'offer-negotiation', 'pilot-surfaces',
   'haru-runtime', 'settings-ai', 'settings-context-memory-proactive', 'settings-data',
-  'settings-appearance', 'settings-voice', 'settings-diagnostics',
+  'settings-appearance', 'settings-voice', 'settings-diagnostics', 'settings-updates',
 ].map((view, index) => Object.freeze({ id: `S${String(index + 1).padStart(2, '0')}`, view })));
 export const OUTCOMES = Object.freeze(['PASS', 'FAIL', 'BLOCKED', 'NOT RUN', 'N/A']);
 export function safeShotName(value) {

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { parse } from 'yaml';
-import { CASES } from '../contract.mjs';
+import { CASES, PIN } from '../contract.mjs';
 import { validateSyntheticRoute } from '../synthetic-api.mjs';
 import { safeResults, numericLedger, saveEvidence } from '../safe-evidence.mjs';
 import { githubReader } from '../github-read.mjs';
@@ -61,11 +61,21 @@ test('numeric ledger does not serialize arbitrary fields or credential-shaped st
   const snapshot = { model: 'deepseek-flash', budgetMicroCny: 10000000, reserveMicroCny: 3000000, sentRequests: 1, settledMicroCny: 20,
     retainedMicroCny: 0, active: false, closed: true, journalFailed: false,
     denied: Object.fromEntries(reasons.map(key => [key, 0])), privateName123: 111,
-    apiKey: 'fake-secret', provenance: { helperCommit: 'a'.repeat(40), requestCommit: 'b'.repeat(40), runId: '1', runAttempt: 1 }, requests: [{ caseId: 'connection', status: 'SETTLED', envelope: 'UNCHANGED', cap: 64,
+    apiKey: 'fake-secret', provenance: { productCommit: PIN.commit, buildRunId: String(PIN.runId), artifactId: String(PIN.artifactId), installerSha256: PIN.installerSha256, helperCommit: 'a'.repeat(40), requestCommit: 'b'.repeat(40), runId: '1', runAttempt: 1 }, requests: [{ caseId: 'connection', status: 'SETTLED', envelope: 'UNCHANGED', cap: 64,
       micro: 20, outboundStarted: true, upstreamResponded: true, clientDisconnectObserved: false, promptTokens: 2, completionTokens: 2, cacheHitTokens: 0, cacheMissTokens: 2, raw: 'fake-secret' }] };
   const text = JSON.stringify(numericLedger(snapshot));
   assert.equal(text.includes('fake-secret'), false); assert.equal(text.includes('privateName123'), false);
   assert.equal(numericLedger(snapshot).requests[0].cap, 64);
+  for (const [field, other] of Object.entries({ productCommit: 'f'.repeat(40), buildRunId: String(PIN.runId + 1),
+    artifactId: String(PIN.artifactId + 1), installerSha256: 'f'.repeat(64) })) {
+    const mixed = { ...snapshot, provenance: { ...snapshot.provenance, [field]: other } };
+    assert.throws(() => numericLedger(mixed), { safeCode: 'LEDGER_SHAPE_INVALID' }, `mixed product provenance: ${field}`);
+  }
+  const previousProduct = { productCommit: '16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4', buildRunId: '37754883783',
+    artifactId: '11540740222', installerSha256: '2e7b144ef657dcfa6e9408b532b59617c00f5a442081ff47ec18b75753713439' };
+  assert.notEqual(PIN.commit, previousProduct.productCommit);
+  assert.throws(() => numericLedger({ ...snapshot, provenance: { ...snapshot.provenance, ...previousProduct } }),
+    { safeCode: 'LEDGER_SHAPE_INVALID' }, 'the old package ledger cannot be relabelled as the new product');
   snapshot.requests[0].status = 'KEY_WAS_FAKE'; assert.throws(() => numericLedger(snapshot));
 });
 test('unavailable ledger means entire remaining budget unavailable', () => {
@@ -103,7 +113,7 @@ test('ledger write failure cannot replace the existing result with PASS', async 
   const reasons = 'AUTH ROUTE CLOSED DEADLINE UNARMED BUSY CASE BUDGET COUNT BODY MODEL PARAMETER CANCELLED DISCONNECT TIMEOUT LEDGER UPSTREAM REDIRECT PROTOCOL USAGE SETTLED EXPIRED UPSTREAM_DISCONNECT'.split(' ');
   const ledger = { model: 'deepseek-flash', budgetMicroCny: 10000000, reserveMicroCny: 3000000,
     sentRequests: 7, settledMicroCny: 120, retainedMicroCny: 3000000, active: false, closed: true, journalFailed: false,
-    provenance: { helperCommit: 'a'.repeat(40), requestCommit: 'b'.repeat(40), runId: '1', runAttempt: 1 },
+    provenance: { productCommit: PIN.commit, buildRunId: String(PIN.runId), artifactId: String(PIN.artifactId), installerSha256: PIN.installerSha256, helperCommit: 'a'.repeat(40), requestCommit: 'b'.repeat(40), runId: '1', runAttempt: 1 },
     denied: Object.fromEntries(reasons.map(key => [key, 0])),
     requests: CASES.map(caseId => ({ caseId, status: caseId === 'pilot-cancel' ? 'DISCONNECT' : 'SETTLED',
       envelope: 'UNCHANGED', cap: 64, micro: caseId === 'pilot-cancel' ? 3000000 : 20,
@@ -181,4 +191,25 @@ test('screenshot guard reasons are a strict enum and cannot carry DOM or credent
   assert.deepEqual(safeScreenshotEvidence(value('BUSINESS_SURFACE'), true), { captured: [], skipped: [
     { id: 'failure-owner', code: 'SCREEN_GUARD_REJECTED', reason: 'BUSINESS_SURFACE' }] });
   for (const reason of ['private-key', 'PASSED', {}, 1]) assert.throws(() => safeScreenshotEvidence(value(reason), true));
+});
+
+test('both MOCK and live workflows bind source and download to the single reviewed product PIN', () => {
+  for (const job of [workflow.jobs.offline, workflow.jobs['real-ai']]) {
+    const source = job.steps.filter(step => step.uses?.startsWith('actions/checkout@') && step.with?.path === '.ai-product-source');
+    assert.equal(source.length, 1); assert.equal(source[0].with.ref, PIN.commit);
+    const download = job.steps.filter(step => step.uses?.startsWith('actions/download-artifact@'));
+    assert.equal(download.length, 1); assert.equal(download[0].with.repository, PIN.repository);
+    assert.equal(download[0].with['run-id'], PIN.runId); assert.equal(download[0].with.name, PIN.artifactName);
+  }
+});
+
+test('AI install source comparison consumes the shared complete desktop module closure', async () => {
+  const { DESKTOP_SOURCE_FILES, AUDITED_DESKTOP_PRODUCT } = await import('../../installed-ui/desktop-source-manifest.mjs');
+  assert.equal(AUDITED_DESKTOP_PRODUCT, PIN.commit);
+  assert.equal(DESKTOP_SOURCE_FILES.length, 12);
+  assert.equal(new Set(DESKTOP_SOURCE_FILES).size, 12);
+  const prepare = await fs.readFile(new URL('prepare.mjs', here), 'utf8');
+  assert.match(prepare, /import \{ DESKTOP_SOURCE_FILES \} from '\.\.\/installed-ui\/desktop-source-manifest\.mjs'/);
+  assert.match(prepare, /for \(const name of DESKTOP_SOURCE_FILES\)/);
+  assert.match(prepare, /normalizeSourceText\(extractFile[\s\S]*?normalizeSourceText\(await fs\.readFile/);
 });

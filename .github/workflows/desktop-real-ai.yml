@@ -72,7 +72,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Offline safety tests failed' }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          ref: c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0
           path: .ai-product-source
           persist-credentials: false
       - name: Download the identical fixed installer for MOCK UI validation
@@ -80,8 +80,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: offercontext/offerPilot
-          run-id: 37754883783
-          name: offerpilot-windows-experimental-validation-16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          run-id: 37806395272
+          name: offerpilot-windows-experimental-validation-c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0
           path: ${{ env.AI_ARTIFACT_DIR }}
       - name: Verify and install exact EXE without any provider credential
         env:
@@ -200,7 +200,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Offline safety tests failed' }
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          ref: c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0
           path: .ai-product-source
           persist-credentials: false
       - name: Download fixed installer; never rebuild or choose latest
@@ -208,8 +208,8 @@ jobs:
         with:
           github-token: ${{ github.token }}
           repository: offercontext/offerPilot
-          run-id: 37754883783
-          name: offerpilot-windows-experimental-validation-16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4
+          run-id: 37806395272
+          name: offerpilot-windows-experimental-validation-c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0
           path: ${{ env.AI_ARTIFACT_DIR }}
       - name: Verify metadata, SHA, installed payload and fresh profile before key injection
         env:

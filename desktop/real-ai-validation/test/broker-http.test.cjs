@@ -94,6 +94,12 @@ test('real local HTTP path reserves durably before exactly one fake upstream and
   const audit = JSON.stringify(broker.snapshot()) + fs.readFileSync(ledgerPath, 'utf8');
   for (const secret of [token, 'FAKE_ONLY_PROVIDER_KEY', 'FAKE_PRIVATE_PROMPT', 'FAKE_PRIVATE_RESPONSE', 'FAKE_UPSTREAM_HEADER']) assert.equal(audit.includes(secret), false);
   assert.equal(broker.snapshot().provenance.runId, '123');
+  const product = require('../product.json');
+  const provenance = broker.snapshot().provenance;
+  assert.equal(provenance.productCommit, product.commit);
+  assert.equal(provenance.buildRunId, String(product.runId));
+  assert.equal(provenance.artifactId, String(product.artifactId));
+  assert.equal(provenance.installerSha256, product.installerSha256);
 });
 test('only approved loopback route/auth/model may reach HTTPS, with no admin endpoint', async (t) => {
   const { broker } = await fixture(t); const calls = fakeUpstream(t, answer); const token = ready(broker);

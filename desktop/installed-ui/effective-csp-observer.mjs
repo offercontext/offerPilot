@@ -4,17 +4,11 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { extractFile } from '@electron/asar';
 
-// Audited complete local-module import closure of product 16f31e47. None owns
-// onResponseStarted. Verify installed bytes before occupying that separate,
-// nonblocking event; never replace production onHeadersReceived or auth hooks.
-export const AUDITED_RESPONSE_MODULES = Object.freeze({
-  'main.cjs': '1492bae806ab302f6468228beaa7c19b67eedcfa16d9ab9ea233dbadf6a9b5a5',
-  'lifecycle.cjs': 'd2eb0e4bacc449b561f73b10f999d0458e9a3a64e9fdae90961daa8f9c2c4b9f',
-  'capabilities.cjs': '0c6b3d8c8b8e10d6deeef91e528d1c7078dc3a256d1b2c45c94b26a375e50c9b',
-  'haru.cjs': 'e32f14caa39ec9d6f4364953ae464556b3cd3482b6286aa0e74974c917f9c046',
-  'haru-protocol.cjs': '25b863ce1f58e5653ca45e8385d819678f4d05f8b896d21f09c0946fb5f74f1d',
-  'preload.cjs': '47060ca34a3ba06f4bec2c072edc6a9674a1414b101a63b788eb7c456053faa5',
-});
+import { AUDITED_DESKTOP_PRODUCT, AUDITED_DESKTOP_MODULE_SHA256, DESKTOP_SOURCE_FILES } from './desktop-source-manifest.mjs';
+
+// All twelve reviewed local modules leave onResponseStarted unoccupied. Verify
+// installed bytes before observing that event, without replacing blocking hooks.
+export const AUDITED_RESPONSE_MODULES = AUDITED_DESKTOP_MODULE_SHA256;
 
 export async function auditInstalledResponseObserver(installDir) {
   assert.ok(typeof installDir === 'string' && path.isAbsolute(installDir), 'absolute installation required for response observer audit');
@@ -32,8 +26,8 @@ export async function auditInstalledResponseObserver(installDir) {
     assert.equal(createHash('sha256').update(source).digest('hex'), expected, 'installed response policy module differs from audited product');
     assert.equal(source.includes('onResponseStarted'), false, 'response observer event is already occupied by product source');
   }
-  return { auditedProductCommit: '16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4',
-    verifiedModuleCount: 6, mainEntryMatched: true, responseStartedUnused: true };
+  return { auditedProductCommit: AUDITED_DESKTOP_PRODUCT,
+    verifiedModuleCount: DESKTOP_SOURCE_FILES.length, mainEntryMatched: true, responseStartedUnused: true };
 }
 
 // Serialized into Electron. onResponseStarted is a SimpleEvent: it runs after

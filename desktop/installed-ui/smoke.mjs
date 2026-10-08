@@ -14,6 +14,7 @@ import { waitForDesktopSurfaces, readDesktopSecurity, validatePartitionIsolation
 import { installTrayObserver, invokeTrayAction, probeStorageIsolation, probeHaruApiDeny, probeHaruStatusMirror } from './haru-probes.mjs';
 import { probeInstalledCapabilities, readPermissionDecisions, assertDeniedPermissions } from './capability-probes.mjs';
 import { probeInstalledClipboard } from './clipboard-probe.mjs';
+import { DESKTOP_SOURCE_FILES } from './desktop-source-manifest.mjs';
 import { probeInstalledOfflineOrt } from './offline-ort-probe.mjs';
 import { probeSettingsExport } from './settings-export-probes.mjs';
 import { verifyHaruVisual } from './haru-visual.mjs';
@@ -316,7 +317,7 @@ try {
   stage = 'installed-payload-byte-hashes';
   const checkedPayloadFiles = await verifyPayload(installDir, payload);
   stage = 'packaged-source-text';
-  for (const name of ['main.cjs', 'lifecycle.cjs', 'capabilities.cjs', 'haru.cjs', 'haru-protocol.cjs', 'preload.cjs']) {
+  for (const name of DESKTOP_SOURCE_FILES) {
     assert.equal(normalizeSourceText(extractFile(path.join(installDir, 'resources', 'app.asar'), name)),
       normalizeSourceText(await fs.readFile(path.join(source, 'desktop', name))), 'packaged desktop source differs from pin');
   }
@@ -334,7 +335,7 @@ try {
   assert.equal(fuses[FuseV1Options.EnableNodeCliInspectArguments], FuseState.ENABLE, 'existing inspect fuse must permit testing without modification');
   assert.equal(await hash(exe), exeHashBefore);
   await checkpoint('installed-resource-integrity', { checkedPayloadFiles, installedExeSha256: exeHashBefore,
-    sourceDesktopModulesMatch: 'six-CRLF-normalized-modules', haruTrayAssetMatch: true, nodeCliInspectFuseAlreadyEnabled: true, fuseReadOnly: true });
+    sourceDesktopModulesMatch: 'twelve-CRLF-normalized-modules', sourceDesktopModuleCount: DESKTOP_SOURCE_FILES.length, haruTrayAssetMatch: true, nodeCliInspectFuseAlreadyEnabled: true, fuseReadOnly: true });
 
   stage = 'first-launch-ui';
   const first = await launch(1);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { DESKTOP_SOURCE_FILES } from '../desktop-source-manifest.mjs';
 const source = fs.readFileSync(new URL('../smoke.mjs', import.meta.url), 'utf8');
 const lifecycle = source.slice(source.indexOf('async function closeNormally()'), source.indexOf('async function openList'));
 async function runLifecycle(options = {}) {
@@ -54,11 +55,12 @@ for (const option of ['xQuits', 'reusedPid', 'unhealthy', 'disconnected', 'haruD
     await assert.rejects(runLifecycle({ [option]: true }));
   });
 }
-test('installed launch preserves native download policy and verifies all six packaged desktop modules', () => {
+test('installed launch preserves native download policy and verifies the complete reviewed desktop module list', () => {
   assert.doesNotMatch(source, /firstWindow\(|acceptDownloads\s*:/);
-  for (const file of ['main.cjs', 'lifecycle.cjs', 'capabilities.cjs', 'haru.cjs', 'haru-protocol.cjs', 'preload.cjs']) {
-    assert.ok(source.includes(`'${file}'`));
-  }
+  assert.match(source, /for \(const name of DESKTOP_SOURCE_FILES\)/);
+  assert.equal(DESKTOP_SOURCE_FILES.length, 12);
+  assert.ok(DESKTOP_SOURCE_FILES.includes('updater.cjs'));
+  assert.ok(DESKTOP_SOURCE_FILES.includes('update-signature.cjs'));
   assert.match(source, /security\.owner\.devToolsProbe = await app\.evaluate\(observeDevToolsDisabled, ids\.owner\)/);
   assert.match(source, /security\.haru\.devToolsProbe = await app\.evaluate\(observeDevToolsDisabled, ids\.haru\)/);
   assert.match(source, /validatePartitionIsolation\(security\.partitionIsolation\)/);

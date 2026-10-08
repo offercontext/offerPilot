@@ -21,11 +21,12 @@ async function installation(t, overrides) {
 test('installed ASAR audit verifies the exact production entrypoint and complete unoccupied module closure', async t => {
   const root = await installation(t);
   assert.deepEqual(await auditInstalledResponseObserver(root), {
-    auditedProductCommit: '16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4', verifiedModuleCount: 6,
+    auditedProductCommit: 'c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0', verifiedModuleCount: 12,
     mainEntryMatched: true, responseStartedUnused: true,
   });
 });
 for (const overrides of [{ 'main.cjs': '// changed' }, { 'haru.cjs': "session.webRequest.onResponseStarted(() => {});" },
+  ...['updater.cjs', 'update-safety.cjs', 'update-backup.cjs', 'update-install.cjs', 'update-signature.cjs', 'update-integrity.cjs'].map(name => ({ [name]: '// changed updater source' })),
   { metadata: { main: 'another.cjs' } }, { metadata: { name: 'different-product' } }, { metadata: { version: 'future' } }]) {
   test(`altered installed ${Object.keys(overrides)[0]} prevents native observer installation`, async t => {
     await assert.rejects(auditInstalledResponseObserver(await installation(t, overrides)));
@@ -202,4 +203,21 @@ test('partial registration rejection remains owned and recoverable without touch
   assert.equal(restored.restored, true);
   assert.equal(restored.absent, false);
   assert.equal(f.registered(), false);
+});
+test('reviewed desktop module manifest covers every packaged local CJS and relative import', async () => {
+  const { DESKTOP_SOURCE_FILES, AUDITED_DESKTOP_MODULE_SHA256 } = await import('../desktop-source-manifest.mjs');
+  const packageJson = JSON.parse(await fs.readFile(new URL('../../package.json', import.meta.url), 'utf8'));
+  assert.deepEqual([...DESKTOP_SOURCE_FILES].sort(), packageJson.build.files.filter(name => name.endsWith('.cjs')).sort());
+  assert.deepEqual([...DESKTOP_SOURCE_FILES].sort(), Object.keys(AUDITED_DESKTOP_MODULE_SHA256).sort());
+  for (const filename of DESKTOP_SOURCE_FILES) {
+    const source = await fs.readFile(new URL(`../../${filename}`, import.meta.url), 'utf8');
+    for (const match of source.matchAll(/require\(['"](\.\/[^'"]+)['"]\)/g)) {
+      assert.ok(DESKTOP_SOURCE_FILES.includes(match[1].slice(2)), 'relative desktop import missing from reviewed closure');
+    }
+  }
+  const updater = await fs.readFile(new URL('../../updater.cjs', import.meta.url), 'utf8');
+  assert.match(updater, /const RELEASE_POLICY = null;/);
+  const { RELEASE_POLICY, unavailableReason } = createRequire(import.meta.url)('../../updater.cjs');
+  assert.equal(RELEASE_POLICY, null);
+  assert.equal(unavailableReason({ packaged: true, platform: 'win32', policy: RELEASE_POLICY }), '此验证包尚未配置正式签名更新源。');
 });

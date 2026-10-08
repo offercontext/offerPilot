@@ -408,3 +408,38 @@ test('offline runtime integration uses non-editing Settings and gates both reloa
     assert.deepEqual(failed.steps.at(-1), { step: 'installed-ort-initialize', control: 'offline-ort' });
   }
 });
+
+test('desktop update unavailable case captures its actual card at four dark widths and light mode without update actions', async () => {
+  const { desktopUpdatesUnavailableFlow } = await import('../screen-coverage.mjs');
+  const { updatesFixture } = await import('./fixtures/desktop-updates-fixture.mjs');
+  const { readUnavailableDesktopUpdateState } = await import('../desktop-updates-probe.mjs');
+  const f = navigationPage();
+  const update = updatesFixture({}, f.page);
+  const originalRole = f.page.getByRole;
+  let selectedTheme = 'light';
+  f.page.getByRole = (role, value) => {
+    if (role === 'region' && value?.name === '桌面客户端更新') return update.card;
+    if (role === 'button' && value?.name === '切换明暗模式') return {
+      page: () => f.page, filter() { return this; }, click: async () => { selectedTheme = selectedTheme === 'dark' ? 'light' : 'dark'; },
+    };
+    return originalRole(role, value);
+  };
+  const originalLocator = f.page.locator;
+  f.page.locator = selector => selector === 'html' ? { getAttribute: async () => selectedTheme } : originalLocator(selector);
+  const originalEvaluate = f.page.evaluate;
+  f.page.evaluate = (fn, args) => fn === readUnavailableDesktopUpdateState ? update.evaluate(fn, args) : originalEvaluate(fn, args);
+  const shots = []; const sizes = []; let observations = 0;
+  const qa = { canProceed: () => true, size: async (...value) => sizes.push(value),
+    run: async (surface, id, _path, action) => { assert.equal(surface, 'S32'); assert.equal(id, 'desktop-updates-unavailable'); await action(); },
+    capture: async (name, extra) => { assert.equal(update.calls.at(-1), 'card-scroll'); shots.push([name, extra]); },
+    observed: () => { observations++; },
+    disposition: async (surface, id, outcome) => { assert.equal(surface, 'S32'); assert.equal(id, 'desktop-signed-upgrade-e2e'); assert.equal(outcome, 'BLOCKED'); } };
+  await desktopUpdatesUnavailableFlow(qa, f.page);
+  assert.equal(shots.length, 5);
+  assert.deepEqual(sizes.slice(0, 4), [[900, 689], [1008, 689], [1280, 689], [1440, 689]]);
+  assert.ok(shots.every(([, extra]) => extra.desktopUpdates.signedUpgradeEndToEndValidated === false));
+  assert.deepEqual(update.calls.filter(value => value !== 'card-scroll'), ['getState']);
+  assert.equal(observations, 1);
+  assert.equal(selectedTheme, 'light');
+  assert.deepEqual(sizes.at(-1), [1280]);
+});

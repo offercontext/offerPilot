@@ -1,26 +1,26 @@
 # 固定 Windows 安装包的 UI 自验
 
-状态：限定分支上的实验验证辅助工具。2026-10-08 将固定输入切换为普通完整验证 run `37754883783` 产出的安装包；打包 job 已成功，GitHub metadata、本地 ZIP 摘要与安装器 SHA256 已核验。本次更新时完整回归已有分组运行、其余排队，尚无完整终态；不能标为 PASS 或 NOT RUN，也不能以打包成功代替完整 gate 通过。该精确新安装包的安装后 UI 回归仍待执行。
+状态：限定分支上的实验验证辅助工具。2026-10-08 固定为产品 `c040a5d2`、普通构建 run `37806395272` 的实际安装包。打包 job 已成功；artifact 元数据、本地 ZIP 和安装器 SHA256 已核验。该 run 的完整回归仍在执行，安装后 UI 回归尚未运行，均不能由打包成功推导为通过。
 
-最近已完成的实装 [37756115470](https://github.com/offercontext/offerPilot/actions/runs/37756115470) 使用旧固定包 `bbea73303da401088c27999097439d3e7a9d7c9a`（构建 run `37747642914`，安装器 SHA256 `dcc803cd82c2ec7627a4cbd3f3eaafa1f953ad19d4162bbc4237191950941e33`）：178 PASS、0 FAIL、7 BLOCKED、1 NOT RUN、3 N/A；178 PASS 包括 45 项交互、131 项视觉和 2 项诊断。运行结果为 `passed-with-coverage-limitations`，coverage 仍为 `incomplete`，不能称全功能验收完成。
+上一固定产品 `16f31e47` 的实装 [37794297987](https://github.com/offercontext/offerPilot/actions/runs/37794297987) 为 115 PASS、1 FAIL、20 BLOCKED、66 NOT RUN、4 N/A。唯一失败位于 ORT 模块导入：真实 MJS 响应为 `text/plain`，HTTP 200、无重定向、响应字节和 SHA 与安装资源一致，WASM 编译及生产 CSP 检查通过；factory、ORT 初始化和 ASR 均未执行成功。旧结果保持失败，不转写为新包证据。
 
-已核对旧包源码至 `16f31e47` 的 `src`、`web`、桌面运行模块、打包入口与资源无产品差异；但新旧 EXE 字节不同，旧包 UI 结果不能自动转移给新包。本次只固定同一完整验证来源的实际安装器并安排同包复验，不重建、不重跑或取消独立完整回归，不修改产品、安全设置或 helper 断言。
+新产品包含静态 JS/MJS/WASM 的确定 MIME 类型、桌面手动更新入口，以及对话控制器/恢复与 CI 历史读取修复。本 helper 只消费已产出的精确安装器，不重建、不重跑或取消独立完整回归。更新发布策略仍为空，S32 仅验证真实不可更新状态与界面，签名升级端到端仍 BLOCKED。
 
 ## 固定输入与独立路由
 
-- 源提交：`16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`。
-- 构建 run：[37754883783](https://github.com/offercontext/offerPilot/actions/runs/37754883783)。完整回归归属同一 run 的独立分组与汇总 gate（本次更新时仍在执行/排队，尚无完整终态） [37754883783](https://github.com/offercontext/offerPilot/actions/runs/37754883783)；本流程不重跑、不取消、不替代它。
-- 成功打包 job：[113236876811](https://github.com/offercontext/offerPilot/actions/runs/37754883783/job/113236876811)；其成功只证明打包范围。
-- Artifact：`11540740222`，名称 `offerpilot-windows-experimental-validation-16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`。
-- Artifact 元数据摘要：`sha256:220bdcf1929e0a32c123664d2d268b02f1a2cc0f75de152bc9fed2820a90d3bc`。
+- 源提交：`c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`。
+- 构建 run：[37806395272](https://github.com/offercontext/offerPilot/actions/runs/37806395272)。完整回归归属同一 run 的独立分组与汇总 gate（本次更新时仍在执行/排队，尚无完整终态） [37806395272](https://github.com/offercontext/offerPilot/actions/runs/37806395272)；本流程不重跑、不取消、不替代它。
+- 成功打包 job：[113411681450](https://github.com/offercontext/offerPilot/actions/runs/37806395272/job/113411681450)；其成功只证明打包范围。
+- Artifact：`11564445795`，名称 `offerpilot-windows-experimental-validation-c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`。
+- Artifact 元数据摘要：`sha256:8751616fea7f065f635b493af8c2b3cd6d57e58b47ab9a2741ca541e39913572`。
 - 安装包：`OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe`。
-- 安装包 SHA256：`2e7b144ef657dcfa6e9408b532b59617c00f5a442081ff47ec18b75753713439`。
+- 安装包 SHA256：`9e33c18f5c83d01bd23ebed01e22d5952a72787fef48cefec8dd875686e46ea7`。
 
-schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`，构建激活提交为 `16f31e477fd9882392ea8f754b6e2ef5ebdcf5c4`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37754883783`，独立完整回归 run 为 `37754883783`。
+schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `buildWorkflow` / `runId` 是产出安装包的构建激活提交、工作流与 run；`fullRegressionRunId` 是独立完整回归的来源 run。当前产品提交为 `c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`，构建激活提交为 `c040a5d2f1949ff8a4ae806e7c3b593c6481e6d0`，构建工作流为 `desktop-windows.yml`，构建 run 为 `37806395272`，独立完整回归 run 为 `37806395272`。
 
 普通构建要求 `buildCommit === commit` 且构建与完整回归 run 相同。限定重试工作流 `.github/workflows/desktop-layout-retry.yml` 要求产品与激活 SHA 不同、构建与完整回归 run 不同；GitHub 的 build run 与 artifact.workflow_run.head_sha 必须匹配 `buildCommit`，独立 full-gate run 的 head_sha 必须匹配产品 `commit`。只接受既有精确仓库/分支、push 事件及上述两个审核过的 workflow 路径，不能通过 request 添加任意工作流、分支或下载地址。
 
-`source.json`、`result.json` 与 `coverage.json` 分别标注产品 SHA、构建 SHA/工作流/run 和 full-gate run；来源代码 checkout 及已安装六个桌面模块/托盘资源对比始终使用产品 `commit`，不是 helper 激活提交。安装包哈希、payload 字节校验、摘要与成功打包 job 检查不变。完整回归 metadata 仅校验来源归属，仍记 `not-certified-by-this-job`，不能从打包成功或本次 UI 通过推导 full-gate 通过。
+`source.json`、`result.json` 与 `coverage.json` 分别标注产品 SHA、构建 SHA/工作流/run 和 full-gate run；来源代码 checkout 及已安装 12 个桌面模块/托盘资源对比始终使用产品 `commit`，不是 helper 激活提交。安装包哈希、payload 字节校验、摘要与成功打包 job 检查不变。完整回归 metadata 仅校验来源归属，仍记 `not-certified-by-this-job`，不能从打包成功或本次 UI 通过推导 full-gate 通过。
 
 `desktop/installed-ui/contract.mjs` 固定以上值。执行要求 `desktop/installed-ui/request.json` 的全部键和值精确匹配，不接受 URL、任意 run、输入参数或额外键；缺少请求文件直接失败。只读 job token 分别验证构建 run 与独立完整回归 run 的仓库、分支、head SHA、workflow 路径，再验证安装包 job 已成功，以及 artifact ID、名称、摘要、未过期状态与构建归属。完整回归是否通过不能从安装包 job 推导。
 
@@ -44,7 +44,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 1. 要求真实 Windows。真实 `%APPDATA%\OfferPilot Desktop` 在安装和首启前必须不存在；如果存在就失败，绝不删除或替换。应用主动设置 userData，因此既不伪造 APPDATA，也不用 `--user-data-dir`。
 2. 核对安装包 SHA256；用 runner 已有 7-Zip 只读提取 NSIS 内嵌 `app-64.7z`。这份 payload 从已核对的安装包派生，不是假设旧 artifact 含有 manifest。
 3. 使用 NSIS `/S /currentuser /D=<全新目录>` 安装，`/D` 最后且不加引号；目标位于 RUNNER_TEMP，路径包含中文和空格。要求安装退出码 0 且没有自动启动。
-4. 检查实际安装的 exe、app.asar、冻结后端与 `_internal`、前端 assets、LICENSE；逐文件 SHA256 对比解包 payload。app.asar 的 main、lifecycle、capabilities、haru、haru-protocol、preload 六个模块及托盘资源另与固定源提交对比，源码文本仅将 CRLF 规范化为 LF；二进制 payload 对比始终严格逐字节。记录安装 exe 摘要、资源数量和版本核对结果。
+4. 检查实际安装的 exe、app.asar、冻结后端与 `_internal`、前端 assets、LICENSE；逐文件 SHA256 对比解包 payload。app.asar 的共享 `DESKTOP_SOURCE_FILES` 清单所列 12 个 CJS（原六模块及六个更新模块）与托盘资源另与固定源提交对比，源码文本仅将 CRLF 规范化为 LF；二进制 payload 对比始终严格逐字节。记录安装 exe 摘要、资源数量和版本核对结果。
 5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
 6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。DevTools 禁用按下述严格行为探针验证。
 7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
@@ -55,7 +55,7 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 ### 逐屏与交互覆盖
 
-`coverage-model.mjs` 列出 R01–R13 根页面、S01–S31 主要子界面及结果枚举；`screen-coverage.mjs` 驱动真实安装窗口中的控件。`coverage-recorder.mjs` 使用 `BrowserWindow.setContentSize` 设置 900、1008、1280、1440 内容宽度，并读取 `innerWidth/innerHeight` 核对；不使用浏览器 viewport 模拟、Vite fixture、React 状态注入、API 造数或数据库写入。
+`coverage-model.mjs` 列出 R01–R13 根页面、S01–S32 主要子界面及结果枚举；`screen-coverage.mjs` 驱动真实安装窗口中的控件。`coverage-recorder.mjs` 使用 `BrowserWindow.setContentSize` 设置 900、1008、1280、1440 内容宽度，并读取 `innerWidth/innerHeight` 核对；不使用浏览器 viewport 模拟、Vite fixture、React 状态注入、API 造数或数据库写入。
 
 - 13 个根页面分别保留空白基线和已通过本地 UI 建立数据后的暗色四宽度截图；亮色根页面为 1280。大页面另滚动到下部截图。根页面的 PASS 是 `kind=visual`，只表示导航标记/可见内容/几何断言通过，不能计入功能通过数。
 - 通过 UI 建立 11 条额外投递，加初始记录共 12 条。包括超长中文和不间断英文名称，验证搜索、分页、详情分段、Back 与实际 `popstate` 前进/后退。按真实 POST ID 定位，不假设 ID=1 或记录在第一页。
@@ -88,13 +88,13 @@ schema 2 明确区分三种身份：`commit` 是产品源码；`buildCommit` / `
 
 旧包 run `37641876533` 已建立全部合成实体，162 PASS / 17 FAIL / 7 BLOCKED / 1 NOT RUN，339张图。13根页面的130个目标均实际抵达；其中10个旧Haru遮挡仍为FAIL。其余7项helper错误修正为：等待受控值回填、点击可见Segmented label再核对radio、限定故事searchbox、按真实Haru入口展开Pilot、history结束列表按R05验证。不会将旧包执行改写为通过。
 
-当前产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。最近旧包的零失败实装结果见本文开头；精确新安装包仍须完整安装逐屏复验及人工图像复核。无 provider 配置时真实发送保持 BLOCKED；真实 AI/音频不伪造成功。能力探针只验证固定合成 Blob 的取消/保存精确字节，以及权限拒绝边界。
+当前产品包含独立 Haru 小窗与托盘生命周期、受控能力边界及网页版功能对齐。更早旧包的阶段性零失败结果不能覆盖后续 ORT 导入失败；精确新安装包仍须完整安装逐屏复验及人工图像复核。无 provider 配置时真实发送保持 BLOCKED；真实 AI/音频不伪造成功。能力探针只验证固定合成 Blob 的取消/保存精确字节、真实导出与剪贴板流程，以及权限拒绝边界；ORT 的 MIME/响应字节、WASM 编译和初始化分别保留真实结果。
 
 ### Electron 44.5.1 的 DevTools 观测限制
 
 固定版本的 [`SaveLastPreferences()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/web_contents_preferences.cc#L362-L383) 不返回 `devTools` 键，因此不能把 `getLastWebPreferences().devTools === undefined` 当成产品打开了 DevTools，也不能把 undefined 默认为 false。原 helper 对该 getter 的 false 断言会造成假失败。
 
-本 helper 保留精确安装 payload/源入口匹配与 `app.isPackaged === true`，并对主窗与 Haru 各自用公开 API 做独立禁用探针：先采样 `isDevToolsOpened()` 和 `devToolsWebContents` 是否存在；注册 `devtools-opened` 监听后尝试 `openDevTools({ mode: 'detach', activate: false })`，固定观察 1 秒，再采样。前后打开状态、前后 contents 存在状态与 opened 事件五项必须全为 false；缺项、出现事件或创建 contents 都失败，不能靠随后关闭变成通过。监听在 finally 移除，失败仍走既有清理。官方固定版本 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_contents.cc#L3201-L3245) 在禁用时直接返回；这不需要修改任何 app 保护设置。
+本 helper 保留精确安装 payload/12 模块源入口匹配与 `app.isPackaged === true`，并对主窗与 Haru 各自用公开 API 做独立禁用探针：先采样 `isDevToolsOpened()` 和 `devToolsWebContents` 是否存在；注册 `devtools-opened` 监听后尝试 `openDevTools({ mode: 'detach', activate: false })`，固定观察 1 秒，再采样。前后打开状态、前后 contents 存在状态与 opened 事件五项必须全为 false；缺项、出现事件或创建 contents 都失败，不能靠随后关闭变成通过。监听在 finally 移除，失败仍走既有清理。官方固定版本 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_contents.cc#L3201-L3245) 在禁用时直接返回；这不需要修改任何 app 保护设置。
 
 getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也必须为 false。所有安全观测先保存再断言，错误字段只用固定名称，不能输出原始 preferences。外部网络观测使用独立失败阶段，避免与安全属性混淆。此探针不把临时 CDP 测试启动变成正常无调试启动的证明。
 
@@ -108,13 +108,19 @@ getter 仍仅作为布尔/缺失枚举诊断保存；若它实际返回值，也
 
 固定合成 Blob 取消后要求目标文件不存在，保存后要求精确 32 字节。原生对话框选择由测试自动化；外部浏览器启动的安全 tripwire 只允许零尝试，不证明真实浏览器启动。原生保存框/托盘的人工指针操作、麦克风真实音频仍未验证。
 
-最近旧包的 7 项 BLOCKED 包含真实面试/刷题/谈薪/Pilot AI、复盘后续生成、备份恢复及真实语音/模型下载；1 项 NOT RUN 是刻意不导出的原始诊断日志。3 项 N/A 为已移除的页内 Haru、不能控制独立小窗的页内外观效果，以及本构建不存在的专用 Help/Knowledge Brief。新包报告仍逐项记录这些边界，不把旧计数预填为新结果。
+早期旧包的 7 项 BLOCKED 包含真实面试/刷题/谈薪/Pilot AI、复盘后续生成、备份恢复及真实语音/模型下载；1 项 NOT RUN 是刻意不导出的原始诊断日志。3 项 N/A 为已移除的页内 Haru、不能控制独立小窗的页内外观效果，以及本构建不存在的专用 Help/Knowledge Brief。新包报告仍逐项记录这些边界，不把旧计数预填为新结果。
+
+### 桌面更新入口的不可用状态
+
+S32 仅从真实 owner preload 读取 `getState()`，核对“桌面客户端更新”卡片的当前版本、不可更新原因与原生状态一致，检查更新按钮禁用，下载/安装按钮不存在。卡片保留暗色 900/1008/1280/1440 和亮色 1280 截图，并恢复原主题。缺卡片、角色/版本/状态不一致、检查可用或出现下载/安装入口均失败。
+
+固定产品的 `RELEASE_POLICY=null`，主进程不会进入 `productionAdapter()`，也不会加载其 lazy `electron-updater` 依赖。共享 `desktop-source-manifest.mjs` 记录 12 个本地 CJS 的审计摘要；payload 与源文件比较和只读 CSP observer 都使用该清单，新增更新模块缺失或被改写同样失败。本流程不调用检查、下载或安装，不激活 feed，也不触发签名校验、备份或升级；签名升级端到端独立列为 BLOCKED。卡片状态通过不能解释为升级成功。
 
 ### 离线 ORT 的有效 CSP 双层观测
 
 run `37772990680` 的文档响应在 `response.headers()` 中具有精确生产 CSP，但 `headerValue()` 中缺失。固定 [Playwright 1.63.0 实现](https://github.com/microsoft/playwright/blob/v1.63.0/packages/playwright-core/src/client/network.ts#L640-L663) 分别读取浏览器 response 与 raw/ExtraInfo 头；后者不能用来要求上游后端重复注入 Electron 策略。这是 helper 观测层修正，尚不能将该次未执行的 WASM/ORT 初始化记为通过。
 
-`effective-csp-observer.mjs` 先独立核对实际 ASAR 入口、版本与六个桌面模块的固定 LF 文本摘要，确认固定产品的完整本地模块闭包没有 `onResponseStarted` listener。仅在已绑定安装身份、owner 和持久 session 上临时注册该非阻塞只读事件；不接管 `onHeadersReceived`、鉴权、权限或外部请求保护。Electron 每个事件只保留最后一个 listener，因此产品字节变化或已有 probe 所有权都会失败，不能默默覆盖。
+`effective-csp-observer.mjs` 先独立核对实际 ASAR 入口、版本与十二个桌面模块的固定 LF 文本摘要，确认固定产品的完整本地模块闭包没有 `onResponseStarted` listener。仅在已绑定安装身份、owner 和持久 session 上临时注册该非阻塞只读事件；不接管 `onHeadersReceived`、鉴权、权限或外部请求保护。Electron 每个事件只保留最后一个 listener，因此产品字节变化或已有 probe 所有权都会失败，不能默默覆盖。
 
 固定 [Electron 44.5.1 实现](https://github.com/electron/electron/blob/v44.5.1/shell/browser/net/proxying_url_loader_factory.cc#L612-L655) 在安装 `onHeadersReceived` 的 override 之后、向 renderer 交付同一 response 之前发出 `onResponseStarted`。该 [SimpleEvent](https://github.com/electron/electron/blob/v44.5.1/shell/browser/api/electron_api_web_request.cc#L835-L851) 没有修改 callback；helper 不改变 details。两次文档 reload 和一次已安装模块 import 都要求浏览器头及这个后注入事件中的完整 CSP 严格一致；native 证据还要求精确 URL、owner id、session、GET、resource type、HTTP 200、唯一 request id，以及恰好一个 CSP 值。缺失、错误、重复、晚到或无法注销均失败。
 

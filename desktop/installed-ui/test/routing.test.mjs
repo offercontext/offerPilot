@@ -136,3 +136,17 @@ test('runtime artifact directory is initialized for subsequent steps before use'
   const smokeIndex = job.steps.findIndex((step) => step.run?.includes('npm.cmd run smoke'));
   assert.ok(smokeIndex > downloadIndex, 'smoke inherits the same initialized directory after download');
 });
+
+test('reviewed source manifest, request, scope and evidence label all bind the same exact product pin', async () => {
+  const { AUDITED_DESKTOP_PRODUCT } = await import('../desktop-source-manifest.mjs');
+  assert.equal(AUDITED_DESKTOP_PRODUCT, PIN.commit);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'desktop/installed-ui/request.json'), 'utf8')), PIN);
+  const job = ui.jobs['installed-ui'];
+  const script = job.steps.map(step => step.run || '').join('\n');
+  assert.ok(script.includes(`Product source commit: ${PIN.commit}.`));
+  assert.ok(script.includes(`Installer build activation commit: ${PIN.buildCommit}.`));
+  assert.ok(script.includes(`build run: ${PIN.runId}.`));
+  assert.ok(script.includes(`actions/runs/${PIN.fullRegressionRunId} (not certified by this job)`));
+  const upload = job.steps.find(step => step.uses === 'actions/upload-artifact@v4');
+  assert.equal(upload.with.name, `windows-installed-ui-evidence-${PIN.commit.slice(0, 8)}-` + '${{ github.run_id }}-${{ github.run_attempt }}');
+});

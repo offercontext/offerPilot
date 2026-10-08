@@ -42,6 +42,7 @@ export const SURFACE_RULES = Object.freeze([
   ['S27',null,null,['确认个人偏好']],
   ['S28',null,'#data-backup-settings-title'], ['S29',null,'#pilot-mascot-settings-title'],
   ['S30',null,'#voice-settings-title'], ['S31',null,'[aria-label="运行日志列表"]'],
+  ['S32','settings','#desktop-updates-title'],
 ].map(([id, view, selector, dialogs=[], buttons=[]])=>Object.freeze({id,view,selector,dialogs,buttons})));
 
 export async function readSurfaceIdentity(page, targetId) {

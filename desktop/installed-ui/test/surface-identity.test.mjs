@@ -23,7 +23,7 @@ test('surface identity publishes only fixed IDs and allowed root names',async()=
  const result=await identity('S14',{view:'token-secret',dialogs:[element('personal-secret'),element('上传简历')]});
  assert.equal(result.observedView,'unknown');assert.deepEqual(result.visibleSurfaces,['S14']);
  assert.doesNotMatch(JSON.stringify(result),/personal-secret|token-secret|never-output|http/);
- assert.equal(new Set(SURFACE_RULES.map(({id})=>id)).size,44);
+ assert.equal(new Set(SURFACE_RULES.map(({id})=>id)).size,45);
 });
 
 test('standalone Haru is identified without fabricating a dashboard or a full Pilot workspace',async()=>{

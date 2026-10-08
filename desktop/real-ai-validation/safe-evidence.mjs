@@ -34,6 +34,9 @@ export function numericLedger(snapshot) {
   const reasons = ['AUTH', 'ROUTE', 'CLOSED', 'DEADLINE', 'UNARMED', 'BUSY', 'CASE', 'BUDGET', 'COUNT',
     'BODY', 'MODEL', 'PARAMETER', 'CANCELLED', 'DISCONNECT', 'TIMEOUT', 'LEDGER', 'UPSTREAM', 'REDIRECT', 'PROTOCOL', 'USAGE', 'SETTLED', 'EXPIRED', 'UPSTREAM_DISCONNECT'];
   demand(snapshot.provenance && typeof snapshot.provenance === 'object', 'LEDGER_SHAPE_INVALID');
+  demand(snapshot.provenance.productCommit === PIN.commit && snapshot.provenance.buildRunId === String(PIN.runId)
+    && snapshot.provenance.artifactId === String(PIN.artifactId)
+    && snapshot.provenance.installerSha256 === PIN.installerSha256, 'LEDGER_SHAPE_INVALID');
   if (snapshot.provenance) {
     for (const key of ['helperCommit', 'requestCommit']) {
       demand(/^[0-9a-f]{40}$/.test(snapshot.provenance[key] || ''), 'LEDGER_SHAPE_INVALID'); output[key] = snapshot.provenance[key];

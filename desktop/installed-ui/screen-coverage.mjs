@@ -7,6 +7,7 @@ import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
 import { waitForInputValue, selectSegment } from './ui-state.mjs';
 import { readSurfaceIdentity } from './surface-identity.mjs';
 import { verifyHaruVisual } from './haru-visual.mjs';
+import { verifyUnavailableDesktopUpdates } from './desktop-updates-probe.mjs';
 import { SETTINGS_EXPORTS } from './settings-export-probes.mjs';
 import { measureControlHit, measureScrollableAncestors, waitForHorizontalWheel } from './control-hit.mjs';
 
@@ -365,6 +366,7 @@ export async function extendedFlows(qa, page, initialRecord, { settingsExport, c
   await offerFlows(qa, page, apps.length >= 2 ? apps.slice(0, 2) : [initialRecord]);
   await pilotSettingsFlows(qa, page, primary);
   await settingsExportFlows(qa, page, settingsExport);
+  await desktopUpdatesUnavailableFlow(qa, page);
   await offlineOrtFlow(qa, page, offlineOrt);
   await rootSweep(qa, page, 'populated-to-supported-extent');
   await qa.disposition('S10', 'ai-interview-studio', 'BLOCKED', 'real session, generated questions and feedback require unapproved AI; no hidden-state injection', ['面试', '面试练习']);
@@ -1318,4 +1320,33 @@ export async function offlineOrtFlow(qa, page, probe) {
     }
     qa.observed('installed self-hosted ORT module/WASM compiled and initialized under production CSP; no model, inference session, microphone, or Whisper transcription; renderer released by safe reload');
   }, 'interaction', { recoveryReload: false });
+}
+
+
+export async function desktopUpdatesUnavailableFlow(qa, page) {
+  await qa.run('S32', 'desktop-updates-unavailable', ['设置', '桌面客户端更新'], async () => {
+    await navigate(page, 'settings');
+    const updates = await verifyUnavailableDesktopUpdates(page);
+    const card = page.getByRole('region', { name: '桌面客户端更新', exact: true });
+    const originalTheme = await page.locator('html').getAttribute('data-theme');
+    assert.ok(['dark', 'light'].includes(originalTheme));
+    try {
+      await theme(page, 'dark');
+      for (const width of WIDTHS) {
+        await qa.size(width, 689);
+        await ready(page);
+        await card.scrollIntoViewIfNeeded();
+        await qa.capture(`desktop-updates-unavailable-dark-${width}`, { desktopUpdates: updates });
+      }
+      await theme(page, 'light');
+      await qa.size(1280);
+      await card.scrollIntoViewIfNeeded();
+      await qa.capture('desktop-updates-unavailable-light-1280', { desktopUpdates: updates });
+    } finally {
+      if (qa.canProceed()) { await theme(page, originalTheme); await qa.size(1280); }
+    }
+    qa.observed('production owner update state and Settings card agree: unsigned channel unavailable, current version shown, check disabled, no download/install controls; no update action or signed upgrade exercised');
+  });
+  await qa.disposition('S32', 'desktop-signed-upgrade-e2e', 'BLOCKED',
+    'no approved signed update channel; update feed, download, signature verification, backup and installation are not exercised', ['设置', '桌面客户端更新']);
 }

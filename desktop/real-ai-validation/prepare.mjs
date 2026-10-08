@@ -7,6 +7,7 @@ import { extractFile } from '@electron/asar';
 import { getCurrentFuseWire, FuseState, FuseV1Options } from '@electron/fuses';
 import { hash, treeFiles, verifyPayload, normalizeSourceText } from '../installed-ui/integrity.mjs';
 import { validateMetadata } from '../installed-ui/contract.mjs';
+import { DESKTOP_SOURCE_FILES } from '../installed-ui/desktop-source-manifest.mjs';
 import { PIN, demand, safeCode, childEnvironment, validateFixedFiles } from './contract.mjs';
 import { githubReader } from './github-read.mjs';
 import { preflight } from './preflight.mjs';
@@ -70,7 +71,7 @@ export async function prepare({ mode = 'live' } = {}) {
   demand(result.exitCode === 0 && !await exists(profile), 'INSTALLER_UNEXPECTED_LAUNCH');
   const count = await verifyPayload(installDir, payload);
   const source = path.resolve(process.env.AI_PRODUCT_SOURCE);
-  for (const name of ['main.cjs', 'lifecycle.cjs', 'capabilities.cjs', 'haru.cjs', 'haru-protocol.cjs', 'preload.cjs']) {
+  for (const name of DESKTOP_SOURCE_FILES) {
     demand(normalizeSourceText(extractFile(path.join(installDir, 'resources/app.asar'), name)) ===
       normalizeSourceText(await fs.readFile(path.join(source, 'desktop', name))), 'PRODUCT_SOURCE_MISMATCH');
   }

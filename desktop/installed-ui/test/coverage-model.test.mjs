@@ -32,7 +32,7 @@ test('coverage inventory exactly matches production navigation routes, module la
     if (module) assert.equal(module.defaultView, route.defaultView, `${item.view} module default must be consistent`);
     else assert.equal(item.view, 'pilot', 'only the command-palette Pilot root has no sidebar entry');
   }
-  assert.equal(SUBVIEWS.length, 31); assert.equal(new Set(SUBVIEWS.map(({ id }) => id)).size, 31);
+  assert.equal(SUBVIEWS.length, 32); assert.equal(new Set(SUBVIEWS.map(({ id }) => id)).size, 32);
   assert.deepEqual(WIDTHS, [900, 1008, 1280, 1440]);
 });
 

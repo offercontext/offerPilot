@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createCoverage, observeRuntime } from '../coverage-recorder.mjs';
+import { ROOT_CASES, SUBVIEWS } from '../coverage-model.mjs';
 import { PIN } from '../contract.mjs';
 import { markUiStep } from '../ui-locators.mjs';
 import { rootSweep } from '../screen-coverage.mjs';
@@ -97,10 +98,11 @@ test('failure never reloads an unresolved UI write and never serializes sensitiv
 test('finish enumerates unvisited roots and subviews as NOT RUN, never manufactured passes',async(t)=>{
   const {qa}=await fixture(t);
   await qa.finish();
-  assert.equal(qa.report.cases.length,161);
-  assert.equal(qa.report.summary.counts['NOT RUN'],161);
+  assert.equal(qa.report.cases.length,ROOT_CASES.length + SUBVIEWS.length);
+  assert.equal(qa.report.summary.counts['NOT RUN'],ROOT_CASES.length + SUBVIEWS.length);
   assert.equal(qa.report.summary.status,'incomplete');
-  await qa.finish(); assert.equal(qa.report.cases.length,161);
+  assert.equal(qa.report.cases.find(item => item.surfaceId === 'S32')?.outcome, 'NOT RUN');
+  await qa.finish(); assert.equal(qa.report.cases.length,ROOT_CASES.length + SUBVIEWS.length);
 });
 
 test('observer publishes only bounded classifications and marks pending mutations until settled',()=>{
