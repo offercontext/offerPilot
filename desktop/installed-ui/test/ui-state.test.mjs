@@ -47,3 +47,13 @@ test('evidence-backed story role, final history identity and desktop Haru handof
   assert.match(flow,/btn\(page, '发送'\)\.isDisabled/);
   assert.doesNotMatch(flow,/getByRole\('radio',[^\n]+\.check\(/);
 });
+
+test('question editor category readback waits for the same open-form effect without replacing the value',async()=>{
+  const {input,calls}=changingInput(['','previous category','安装界面验收']);
+  const steps=[];bindUiSteps(input.page(),step=>steps.push(step));
+  assert.equal(await waitForInputValue(input,'安装界面验收',{control:'question',pollMs:1,timeoutMs:100}),'安装界面验收');
+  assert.deepEqual(steps,[{step:'readback',control:'question'}]);
+  assert.equal(calls.filter(([name])=>name==='read').length,3);
+  const flow=fs.readFileSync(new URL('../screen-coverage.mjs',import.meta.url),'utf8');
+  assert.match(flow,/waitForInputValue\(form\.getByLabel\('分类', \{ exact: true \}\), '安装界面验收', \{ control: 'question' \}\)/);
+});

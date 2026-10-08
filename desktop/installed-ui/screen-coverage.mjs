@@ -588,7 +588,7 @@ async function questionFlows(qa, page) {
     await bank.getByText(`${prefix} 如何确认本地数据保存成功？`, { exact: true }).waitFor();
     await btn(bank, '编辑题目').click();
     form = dialog(page, '编辑题目');
-    assert.equal(await form.getByLabel('分类', { exact: true }).inputValue(), '安装界面验收');
+    await waitForInputValue(form.getByLabel('分类', { exact: true }), '安装界面验收', { control: 'question' });
     await qa.capture('question-edit-readback');
     await btn(form, '取消').click();
     await bank.getByPlaceholder('搜索题目 / 分类 / 标签', { exact: true }).fill('QA-no-matching-question');
@@ -612,6 +612,16 @@ async function questionFlows(qa, page) {
     qa.observed('review mode and AI input surface reachable; no generation or rating submitted');
   });
   await qa.disposition('S13', 'question-ai-generation', 'BLOCKED', 'unapproved provider invocation deliberately not performed');
+}
+
+async function verifyReopenedResume(editor, title, candidateName, options = {}) {
+  await editor.waitFor({ state: 'visible' });
+  // ResumeEditor initializes title to '' and fills it in an open/resume effect.
+  // A visible first render alone does not prove that saved fields have hydrated.
+  await waitForInputValue(editor.getByPlaceholder('简历标题', { exact: true }), title, { ...options, control: 'resume' });
+  await btn(editor.getByRole('navigation', exact('简历章节')), '基本信息').click();
+  await waitForInputValue(editor.locator('label').filter({ hasText: /^姓名$/ }).locator('..').locator('input'),
+    candidateName, { ...options, control: 'resume' });
 }
 
 async function resumeFlows(qa, page) {
@@ -663,9 +673,7 @@ async function resumeFlows(qa, page) {
     const card = page.locator('.ant-card').filter({ has: page.getByText(title, { exact: true }) });
     assert.equal(await card.count(), 1);
     await btn(card, '编辑').click();
-    assert.equal(await editor.getByPlaceholder('简历标题', { exact: true }).inputValue(), title);
-    await btn(sections, '基本信息').click();
-    assert.equal(await editor.locator('label').filter({ hasText: /^姓名$/ }).locator('..').locator('input').inputValue(), '合成候选人 QA');
+    await verifyReopenedResume(editor, title, '合成候选人 QA');
     await editor.getByPlaceholder('简历标题', { exact: true }).fill(`${title}-未保存`);
     await btn(editor, '取消').click();
     const guard = dialog(page, '有未保存的更改');
@@ -1202,4 +1210,4 @@ async function pilotSettingsFlows(qa, page, record) {
 }
 
 // Exported for isolated helper preflight; these functions still drive only the public UI.
-export { navigate, createApplication, verifyStandaloneHaruContext, recordDesktopMascotScope, closeComparisonSettings, verifyNarrowOfferAction };
+export { navigate, createApplication, verifyStandaloneHaruContext, recordDesktopMascotScope, closeComparisonSettings, verifyNarrowOfferAction, verifyReopenedResume };
