@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
 import { discoverInstalledOfflineOrt, installedOfflineOrtURLs, initializeOfflineOrtInRenderer,
-  assertOfflineOrtInitialization, probeInstalledOfflineOrt, readOfflineOrtOwner } from '../offline-ort-probe.mjs';
+  assertOfflineOrtInitialization, assertInstalledResourcesIdentity, probeInstalledOfflineOrt, readOfflineOrtOwner } from '../offline-ort-probe.mjs';
 
 const { contentSecurityPolicy: csp } = createRequire(import.meta.url)('../../capabilities.cjs');
 const origin = 'http://127.0.0.1:18420';
@@ -24,11 +24,35 @@ const metadata = { mjs: { name: mjsName, bytes: mjsBytes.length, sha256: digest(
 async function files(t) {
   const installDir = await fs.mkdtemp(path.join(os.tmpdir(), 'offerpilot-ort-unit-'));
   t.after(() => fs.rm(installDir, { recursive: true, force: true }));
-  const assetsDir = path.join(installDir, 'resources', 'web', 'assets');
+  // Keep the raw mkdtemp spelling as an input: Windows may return RUNNER~1.
+  // Disk-observer hooks and expected discovery output use its actual identity.
+  const canonicalInstallDir = await fs.realpath(installDir);
+  const assetsDir = path.join(canonicalInstallDir, 'resources', 'web', 'assets');
   await fs.mkdir(assetsDir, { recursive: true });
   await fs.writeFile(path.join(assetsDir, mjsName), mjsBytes);
   await fs.writeFile(path.join(assetsDir, wasmName), wasmBytes);
-  return { installDir, assetsDir };
+  return { installDir, canonicalInstallDir, assetsDir };
+}
+
+// Simulate an OS short-name lookup, not a symlink: all reads still use the real
+// fixture directory and real inode/device metadata. The raw alias deliberately
+// differs even on Linux, where mkdtemp alone would hide the Windows regression.
+function filesystemAlias(f) {
+  const aliasRoot = path.join(path.dirname(f.canonicalInstallDir), `ORT~1-${path.basename(f.canonicalInstallDir)}`);
+  const map = (value) => {
+    const relative = path.relative(aliasRoot, value);
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative))
+      ? path.join(f.canonicalInstallDir, relative) : value;
+  };
+  const original = { realpath: fs.realpath, lstat: fs.lstat, stat: fs.stat };
+  const realpathInputs = [];
+  const ports = { ...fs,
+    realpath: async (value, ...args) => { realpathInputs.push(value); return original.realpath(map(value), ...args); },
+    lstat: (value, ...args) => original.lstat(map(value), ...args),
+    stat: (value, ...args) => original.stat(map(value), ...args),
+  };
+  return { aliasRoot, ports, realpathInputs,
+    install(t) { for (const name of Object.keys(original)) t.mock.method(fs, name, ports[name]); } };
 }
 
 // Injected factory below tests failure propagation only. It is deliberately NOT
@@ -82,7 +106,87 @@ test('asset discovery selects only unique installed asyncify files and hashes th
   const f = await files(t);
   await fs.writeFile(path.join(f.assetsDir, 'ort-wasm-simd-threaded-standard.wasm'), 'ignored unrelated asset');
   assert.deepEqual(await discoverInstalledOfflineOrt(f.installDir),
-    { resourcesPath: path.join(f.installDir, 'resources'), assets: metadata });
+    { resourcesPath: path.join(f.canonicalInstallDir, 'resources'), assets: metadata });
+});
+
+test('discovery resolves a raw short-name alias while retaining canonical asset paths and byte hashes', async t => {
+  const f = await files(t);
+  const alias = filesystemAlias(f);
+  assert.notEqual(alias.aliasRoot, f.canonicalInstallDir);
+  const discovered = await discoverInstalledOfflineOrt(alias.aliasRoot, alias.ports);
+  assert.deepEqual(discovered, { resourcesPath: path.join(f.canonicalInstallDir, 'resources'), assets: metadata });
+  assert.ok(alias.realpathInputs.includes(alias.aliasRoot), 'raw installation input must really be resolved');
+});
+
+test('resource binding resolves both raw and canonical spellings to one real directory identity', async t => {
+  const f = await files(t);
+  const alias = filesystemAlias(f);
+  const raw = path.join(alias.aliasRoot, 'resources');
+  const canonical = path.join(f.canonicalInstallDir, 'resources');
+  assert.notEqual(raw, canonical, 'plain string comparison must not accidentally pass the regression');
+  assert.equal(await assertInstalledResourcesIdentity(raw, canonical, alias.ports), true);
+  assert.ok(alias.realpathInputs.includes(raw));
+  assert.ok(alias.realpathInputs.includes(canonical));
+  assert.equal(await assertInstalledResourcesIdentity(canonical, raw, alias.ports), true);
+});
+
+test('an actually different installation remains rejected even when its ORT asset bytes are identical', async t => {
+  const first = await files(t);
+  const second = await files(t);
+  await assert.rejects(assertInstalledResourcesIdentity(path.join(first.installDir, 'resources'),
+    path.join(second.installDir, 'resources')), /running app must use selected installation/);
+  await assert.rejects(assertInstalledResourcesIdentity('relative/resources', path.join(first.installDir, 'resources')),
+    /absolute installed resources/);
+});
+
+test('file identity differences cannot pass a matching canonical path comparison', async t => {
+  const f = await files(t);
+  const resource = path.join(f.installDir, 'resources');
+  for (const field of ['ino', 'dev']) {
+    let reads = 0;
+    await assert.rejects(assertInstalledResourcesIdentity(resource, resource, { ...fs, stat: async (...args) => {
+      const stat = await fs.stat(...args);
+      if (++reads === 2) return { ...stat, [field]: stat[field] + 1n, isDirectory: () => true };
+      return stat;
+    } }), field === 'ino' ? /file identity mismatch/ : /device identity mismatch/);
+  }
+});
+
+test('resource, installation-root, and ancestor symlinks/junctions remain rejected despite resolving to the same target', async t => {
+  const f = await files(t);
+  const type = process.platform === 'win32' ? 'junction' : 'dir';
+  const resource = path.join(f.canonicalInstallDir, 'resources');
+  const resourceLink = path.join(f.canonicalInstallDir, 'resource-link');
+  const rootLink = path.join(f.canonicalInstallDir, 'root-link');
+  await fs.symlink(resource, resourceLink, type);
+  await fs.symlink(f.canonicalInstallDir, rootLink, type);
+  await assert.rejects(assertInstalledResourcesIdentity(resourceLink, resource), /must not use links/);
+  for (const suffix of new Set([path.sep, '/', path.sep.repeat(2)])) {
+    await assert.rejects(assertInstalledResourcesIdentity(`${resourceLink}${suffix}`, resource), /must not use links/);
+    await assert.rejects(assertInstalledResourcesIdentity(resource, `${resourceLink}${suffix}`), /must not use links/);
+    await assert.rejects(discoverInstalledOfflineOrt(`${rootLink}${suffix}`), /must not be links/);
+  }
+  await assert.rejects(assertInstalledResourcesIdentity(path.join(rootLink, 'resources'), resource), /must not use links/);
+  await assert.rejects(assertInstalledResourcesIdentity(`${rootLink}${path.sep.repeat(2)}resources`, resource), /must not use links/);
+  await assert.rejects(discoverInstalledOfflineOrt(rootLink), /must not be links/);
+  const holder = path.join(f.canonicalInstallDir, 'holder');
+  const nested = path.join(holder, 'nested-installation', 'resources');
+  const holderLink = path.join(f.canonicalInstallDir, 'holder-link');
+  await fs.mkdir(nested, { recursive: true });
+  await fs.symlink(holder, holderLink, type);
+  await assert.rejects(assertInstalledResourcesIdentity(path.join(holderLink, 'nested-installation', 'resources'), nested),
+    /must not use links/);
+  await assert.rejects(assertInstalledResourcesIdentity(`${holderLink}${path.sep.repeat(2)}nested-installation${path.sep}resources`, nested),
+    /must not use links/);
+});
+
+test('case-distinct POSIX directories never become the same installed resource identity', { skip: process.platform === 'win32' }, async t => {
+  const f = await files(t);
+  const upper = path.join(f.canonicalInstallDir, 'Upper', 'resources');
+  const lower = path.join(f.canonicalInstallDir, 'upper', 'resources');
+  await fs.mkdir(upper, { recursive: true });
+  await fs.mkdir(lower, { recursive: true });
+  await assert.rejects(assertInstalledResourcesIdentity(upper, lower), /running app must use selected installation/);
 });
 
 for (const kind of ['mjs', 'wasm']) {
@@ -206,7 +310,7 @@ async function probeHarness(t, options = {}) {
     evaluate: async (fn, args) => {
       assert.equal(fn, readOfflineOrtOwner);
       assert.equal(args.owner, owner);
-      return { packaged: !options.notPackaged, resourcesPath: path.join(f.installDir, 'resources'), ownerURLMatched: true,
+      return { packaged: !options.notPackaged, resourcesPath: options.resourcesPath?.(f) ?? path.join(f.installDir, 'resources'), ownerURLMatched: true,
         ownerArgument: true, contextIsolation: true, sandbox: true, webSecurity: !options.noWebSecurity,
         nodeIntegration: false, devTools: options.devToolsMissing ? undefined : false,
         devToolsOpened: Boolean(options.devToolsOpened), devToolsContentsPresent: false };
@@ -233,6 +337,42 @@ test('orchestration harness verifies actual imported response bytes, gates reloa
   assert.equal(result.inferenceSessionCreated, false);
   assert.equal(result.modelDownloaded, false);
   assert.deepEqual(f.reloadGates, ['before-probe', 'release-probe']);
+  f.checkCleanup();
+});
+
+test('orchestration binds a raw owner alias to canonical discovered resources without skipping real initialization assertions', async t => {
+  let reportedResources;
+  const f = await probeHarness(t, { resourcesPath: () => reportedResources });
+  const alias = filesystemAlias(f);
+  reportedResources = path.join(alias.aliasRoot, 'resources');
+  alias.install(t);
+  const result = await f.run();
+  assert.equal(result.wasmCompiled, true);
+  assert.equal(result.ortInitCode, 0);
+  assert.equal(result.importedModuleBytesVerified, true);
+  assert.ok(alias.realpathInputs.includes(reportedResources));
+  assert.ok(alias.realpathInputs.includes(path.join(f.canonicalInstallDir, 'resources')));
+  f.checkCleanup();
+});
+
+test('orchestration wrong-installation binding fails before any renderer reload', async t => {
+  const wrong = await files(t);
+  const f = await probeHarness(t, { resourcesPath: () => path.join(wrong.installDir, 'resources') });
+  await assert.rejects(f.run(), /running app must use selected installation/);
+  f.checkCleanup(0);
+});
+
+test('raw owner alias still reaches and rejects a late event at the canonical asset read', async t => {
+  let reportedResources;
+  const f = await probeHarness(t, { resourcesPath: () => reportedResources });
+  const alias = filesystemAlias(f);
+  reportedResources = path.join(alias.aliasRoot, 'resources');
+  alias.install(t);
+  const assertDelivered = duringFinalAssetRead(t, f, () => {
+    f.page.emit('request', { method: () => 'GET', url: () => 'https://example.invalid/late-model.onnx' });
+  });
+  await assert.rejects(f.run(), /unexpected request/);
+  assertDelivered();
   f.checkCleanup();
 });
 

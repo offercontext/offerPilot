@@ -10,12 +10,52 @@ const ASSET_NAMES = Object.freeze({
   wasm: /^ort-wasm-simd-threaded\.asyncify(?:-[A-Za-z0-9_-]+)?\.wasm$/,
 });
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const comparablePath = (value) => path.resolve(value).replaceAll('\\', '/').toLowerCase();
+const comparablePath = (value) => {
+  const resolved = path.resolve(value);
+  return process.platform === 'win32' ? resolved.replaceAll('\\', '/').toLowerCase() : resolved;
+};
+
+async function assertUnlinkedDirectoryChain(value, filesystem, message) {
+  let directory = value;
+  while (true) {
+    // lstat('link/') follows a directory link. Remove only trailing separators
+    // (not lexical '.'/'..' components), including at each ancestor iteration.
+    const root = path.parse(directory).root;
+    const separator = process.platform === 'win32' ? /[/\\]$/ : /\/$/;
+    while (directory.length > root.length && separator.test(directory)) directory = directory.slice(0, -1);
+    const stat = await filesystem.lstat(directory);
+    assert.ok(stat.isDirectory() && !stat.isSymbolicLink(), message);
+    const parent = path.dirname(directory);
+    if (parent === directory) return;
+    directory = parent;
+  }
+}
+
+// String normalization cannot identify Windows 8.3 aliases. Resolve BOTH real
+// filesystem locations, then bind their actual directory identities as well.
+// A symbolic link/junction anywhere in either directory chain is not an
+// acceptable substitute for the selected installed directory.
+export async function assertInstalledResourcesIdentity(actualPath, expectedPath, filesystem = fs) {
+  for (const value of [actualPath, expectedPath]) {
+    assert.ok(typeof value === 'string' && path.isAbsolute(value), 'absolute installed resources path required');
+    await assertUnlinkedDirectoryChain(value, filesystem, 'installed resources identity must not use links');
+  }
+  const [actual, expected] = await Promise.all([filesystem.realpath(actualPath), filesystem.realpath(expectedPath)]);
+  assert.equal(comparablePath(actual), comparablePath(expected), 'running app must use selected installation');
+  const [actualStat, expectedStat] = await Promise.all([
+    filesystem.stat(actual, { bigint: true }), filesystem.stat(expected, { bigint: true }),
+  ]);
+  assert.ok(actualStat.isDirectory() && expectedStat.isDirectory(), 'installed resources identity must be a directory');
+  assert.equal(actualStat.dev, expectedStat.dev, 'installed resources device identity mismatch');
+  assert.equal(actualStat.ino, expectedStat.ino, 'installed resources file identity mismatch');
+  return true;
+}
 
 // Only inspect the installed executable assets. No recursive search, developer
 // build fallback, user profile, token, model, or owner data is read.
 export async function discoverInstalledOfflineOrt(installDir, filesystem = fs) {
   assert.ok(typeof installDir === 'string' && path.isAbsolute(installDir), 'absolute installed directory required');
+  await assertUnlinkedDirectoryChain(installDir, filesystem, 'installed asset directories must not be links');
   const root = await filesystem.realpath(installDir);
   let directory = root;
   for (const segment of ['resources', 'web', 'assets']) {
@@ -215,7 +255,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     setStage('installed-ort-owner');
     const security = await app.evaluate(readOfflineOrtOwner, { owner, ownerURL });
     assert.equal(security.packaged, true, 'installed packaged app required');
-    assert.equal(comparablePath(security.resourcesPath), comparablePath(installed.resourcesPath), 'running app must use selected installation');
+    await assertInstalledResourcesIdentity(security.resourcesPath, installed.resourcesPath);
     for (const key of ['ownerURLMatched', 'ownerArgument', 'contextIsolation', 'sandbox', 'webSecurity']) assert.equal(security[key], true, key);
     for (const key of ['nodeIntegration', 'devToolsOpened', 'devToolsContentsPresent']) assert.equal(security[key], false, key);
     // Electron 44 may omit devTools in getLastWebPreferences. The outer suite
