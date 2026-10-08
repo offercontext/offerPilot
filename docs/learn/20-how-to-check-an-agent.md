@@ -49,6 +49,25 @@
 
 Harness 是被检查的运行系统的一部分；用来组织测试和评分的评估程序有时也叫 evaluation harness。两者用途不同：一个负责把用户任务运行起来，一个负责检查它运行得怎样。
 
+## 把过程画出来
+
+下面是本例的教学流程图，用来对照上述解释，不是实际运行记录或全部产品分支。
+
+![把过程画出来](images/flowcharts/basic-20-1.svg)
+
+<details>
+<summary>查看可编辑的 Mermaid 图源</summary>
+
+```mermaid
+flowchart TD
+    cases["规定任务、初始资料和判断标准"] --> run["在隔离数据中运行案例"]
+    run --> outcomes["核对业务结果、过程与代价"]
+    outcomes --> compare["比较不同版本和多次尝试"]
+    compare --> report["报告成功与失败，不只挑最好的一次"]
+```
+
+</details>
+
 ## 用自己的话说说看
 
 新版本第一次新增正确，重复确认时却多记了一场。能只因为第一次演示成功，就说这项能力已经验证通过吗？

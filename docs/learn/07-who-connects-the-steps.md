@@ -57,6 +57,28 @@ Harness 也不会自动保证每次理解和保存都正确。模型可能误解
 
 现在回看前几篇，“AI 需要拿到资料”“修改前要确认”“保存后要看结果”“任务何时继续或结束”，就有了一条共同的线：**模型提出动作，工具完成具体工作，Harness 组织它们按规则运行，你在需要时提供信息和作出决定。**
 
+## 把过程画出来
+
+下面是本例的教学流程图，用来对照上述解释，不是实际运行记录或全部产品分支。
+
+![把过程画出来](images/flowcharts/basic-07-1.svg)
+
+<details>
+<summary>查看可编辑的 Mermaid 图源</summary>
+
+```mermaid
+flowchart TD
+    user["你：说明目标与作出决定"] --> harness["Harness：组织输入与执行"]
+    harness --> model["模型：提出请求或回答"]
+    model --> harness
+    harness --> gate{"现在允许执行吗？"}
+    gate -->|"允许"| tool["工具：查询或保存"]
+    tool --> harness
+    gate -->|"需要你决定"| user
+```
+
+</details>
+
 ## 用自己的话说说看
 
 如果模型已经准确理解了“把面试改到下午三点”，也生成了正确的修改请求，为什么还需要工具和 Harness？
