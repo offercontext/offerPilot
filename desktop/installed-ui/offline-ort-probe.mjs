@@ -35,19 +35,40 @@ async function assertUnlinkedDirectoryChain(value, filesystem, message) {
 // filesystem locations, then bind their actual directory identities as well.
 // A symbolic link/junction anywhere in either directory chain is not an
 // acceptable substitute for the selected installed directory.
-export async function assertInstalledResourcesIdentity(actualPath, expectedPath, filesystem = fs) {
-  for (const value of [actualPath, expectedPath]) {
-    assert.ok(typeof value === 'string' && path.isAbsolute(value), 'absolute installed resources path required');
-    await assertUnlinkedDirectoryChain(value, filesystem, 'installed resources identity must not use links');
-  }
-  const [actual, expected] = await Promise.all([filesystem.realpath(actualPath), filesystem.realpath(expectedPath)]);
-  assert.equal(comparablePath(actual), comparablePath(expected), 'running app must use selected installation');
-  const [actualStat, expectedStat] = await Promise.all([
-    filesystem.stat(actual, { bigint: true }), filesystem.stat(expected, { bigint: true }),
-  ]);
-  assert.ok(actualStat.isDirectory() && expectedStat.isDirectory(), 'installed resources identity must be a directory');
-  assert.equal(actualStat.dev, expectedStat.dev, 'installed resources device identity mismatch');
-  assert.equal(actualStat.ino, expectedStat.ino, 'installed resources file identity mismatch');
+export async function assertInstalledResourcesIdentity(actualPath, expectedPath, filesystem = fs, onCheck = async () => {}) {
+  // Only these fixed check names and booleans can leave this filesystem check.
+  // Persist a failed check before rethrowing; never serialize paths or errors.
+  const checked = async (name, operation) => {
+    let result;
+    try { result = await operation(); }
+    catch (error) { await onCheck(name, false); throw error; }
+    await onCheck(name, true);
+    return result;
+  };
+  await checked('resourcesPathsAbsolute', () => {
+    for (const value of [actualPath, expectedPath]) {
+      assert.ok(typeof value === 'string' && path.isAbsolute(value), 'absolute installed resources path required');
+    }
+  });
+  await checked('resourcesDirectoryChainsUnlinked', async () => {
+    for (const value of [actualPath, expectedPath]) {
+      await assertUnlinkedDirectoryChain(value, filesystem, 'installed resources identity must not use links');
+    }
+  });
+  const [actual, expected] = await checked('resourcesCanonicalPathMatched', async () => {
+    const resolved = await Promise.all([filesystem.realpath(actualPath), filesystem.realpath(expectedPath)]);
+    assert.equal(comparablePath(resolved[0]), comparablePath(resolved[1]), 'running app must use selected installation');
+    return resolved;
+  });
+  const [actualStat, expectedStat] = await checked('resourcesDirectories', async () => {
+    const stats = await Promise.all([
+      filesystem.stat(actual, { bigint: true }), filesystem.stat(expected, { bigint: true }),
+    ]);
+    assert.ok(stats.every(stat => stat.isDirectory()), 'installed resources identity must be a directory');
+    return stats;
+  });
+  await checked('resourcesDeviceMatched', () => assert.equal(actualStat.dev, expectedStat.dev, 'installed resources device identity mismatch'));
+  await checked('resourcesFileMatched', () => assert.equal(actualStat.ino, expectedStat.ino, 'installed resources file identity mismatch'));
   return true;
 }
 
@@ -97,16 +118,50 @@ export function installedOfflineOrtURLs(ownerURL, assets) {
 }
 
 // Serialized into the real Electron main process; no policy is replaced.
-export function readOfflineOrtOwner({ app }, { owner, ownerURL }) {
+export function readOfflineOrtOwner({ app, BrowserWindow, session }, { owner, ownerURL }) {
   const contents = owner.webContents;
   const prefs = contents.getLastWebPreferences();
+  const windows = BrowserWindow.getAllWindows();
+  const alive = win => !win.isDestroyed() && !win.webContents.isDestroyed();
+  const matchingOwners = windows.filter(win => alive(win) && win.webContents.getURL() === ownerURL);
+  const others = windows.filter(win => win !== owner);
+  const haru = others.length === 1 && alive(others[0]) ? others[0] : null;
+  const additionalArguments = prefs.additionalArguments;
   return { packaged: app.isPackaged, resourcesPath: process.resourcesPath,
-    ownerURLMatched: !contents.isDestroyed() && contents.getURL() === ownerURL,
-    ownerArgument: prefs.additionalArguments?.includes('--offerpilot-owner') === true,
+    ownerURLMatched: alive(owner) && contents.getURL() === ownerURL,
+    twoWindows: windows.length === 2,
+    ownerWindowUnique: matchingOwners.length === 1 && matchingOwners[0] === owner,
+    ownerSessionMatched: contents.session === session.fromPartition('persist:offerpilot-desktop'),
+    haruURLMatched: Boolean(haru && haru.webContents.getURL() === new URL('/?desktopSurface=haru', ownerURL).href),
+    haruSessionMatched: Boolean(haru && haru.webContents.session === session.fromPartition('offerpilot-haru')),
+    distinctSessions: Boolean(haru && contents.session !== haru.webContents.session),
+    // v44.5.1 SaveLastPreferences omits additionalArguments (and devTools):
+    // https://github.com/electron/electron/blob/v44.5.1/shell/browser/web_contents_preferences.cc#L362-L383
+    // Absence is diagnostic only, never fabricated as a present owner marker.
+    additionalArgumentsArray: Array.isArray(additionalArguments) ? true
+      : additionalArguments === undefined ? undefined : additionalArguments === null ? null : 'invalid-type',
+    ownerArgument: Array.isArray(additionalArguments) && additionalArguments.includes('--offerpilot-owner'),
     nodeIntegration: prefs.nodeIntegration, contextIsolation: prefs.contextIsolation,
     sandbox: prefs.sandbox, webSecurity: prefs.webSecurity, devTools: prefs.devTools,
     devToolsOpened: contents.isDevToolsOpened(), devToolsContentsPresent: Boolean(contents.devToolsWebContents) };
 }
+
+// Serialized into the already main-process-bound renderer. The production
+// preload defaults to owner without a Haru marker, so this is never identity on
+// its own: the real window, exact URLs, and both session objects are required.
+export function readOfflineOrtPreloadOwner() {
+  return window.offerpilotDesktop?.role === 'owner';
+}
+
+const OWNER_EXPECTATIONS = Object.freeze({ packaged: true, ownerURLMatched: true,
+  twoWindows: true, ownerWindowUnique: true, ownerSessionMatched: true,
+  haruURLMatched: true, haruSessionMatched: true, distinctSessions: true,
+  contextIsolation: true, sandbox: true, webSecurity: true,
+  nodeIntegration: false, devToolsOpened: false, devToolsContentsPresent: false });
+const RESOURCE_CHECKS = Object.freeze(['resourcesPathsAbsolute', 'resourcesDirectoryChainsUnlinked',
+  'resourcesCanonicalPathMatched', 'resourcesDirectories', 'resourcesDeviceMatched', 'resourcesFileMatched']);
+const diagnosticBoolean = value => typeof value === 'boolean' ? value
+  : value === undefined ? 'undefined' : value === null ? 'null' : 'invalid-type';
 
 // Standalone for Playwright serialization. Optional dependencies are solely for
 // unit boundary/failure tests; the installed caller passes only the first arg.
@@ -198,10 +253,12 @@ export function assertOfflineOrtInitialization(result, assets) {
 // and afterward to release the isolated ORT heap even on partial failure. The caller
 // must gate EACH reload through beforeReload: no pending write and no unsaved
 // editing operation. Missing authorization to reload fails before any probe.
-export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutMs = 60000, setStage = () => {}, beforeReload }) {
+export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutMs = 60000, setStage = () => {},
+  beforeReload, onDiagnostic = async () => {} }) {
   assert.ok(Number.isFinite(timeoutMs) && timeoutMs > 0, 'positive ORT timeout required');
   assert.equal(typeof setStage, 'function');
   assert.equal(typeof beforeReload, 'function', 'explicit safe-reload callback required');
+  assert.equal(typeof onDiagnostic, 'function', 'safe diagnostic callback required');
   const installed = await discoverInstalledOfflineOrt(installDir);
   const ownerURL = page.url();
   const urls = installedOfflineOrtURLs(ownerURL, installed.assets);
@@ -251,16 +308,65 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
   };
   let result;
   let primaryError;
+  const diagnosticErrors = [];
+  const observed = Object.fromEntries([...Object.keys(OWNER_EXPECTATIONS), 'additionalArgumentsArray', 'ownerArgument',
+    'devTools', 'preloadOwnerRole', ...RESOURCE_CHECKS].map(key => [key, 'undefined']));
+  let phase = 'owner-observation';
+  let currentCheck = 'owner-observation';
+  const emit = async (failedCheck = null) => {
+    try {
+      await onDiagnostic({ probe: 'offline-ort', schemaVersion: 1, phase, observed: { ...observed }, failedCheck });
+    } catch {
+      // A failed recorder must fail the probe, but must not replace an actual
+      // security failure or copy the callback's potentially private exception.
+      if (!diagnosticErrors.length) diagnosticErrors.push(new Error('ORT diagnostic recording failed'));
+    }
+  };
+  const requireDiagnostic = () => {
+    if (diagnosticErrors.length) { currentCheck = 'diagnostic-recording'; throw diagnosticErrors[0]; }
+  };
+  const expect = (security, key, value) => {
+    currentCheck = key;
+    assert.equal(security[key], value, key);
+  };
   try {
     setStage('installed-ort-owner');
     const security = await app.evaluate(readOfflineOrtOwner, { owner, ownerURL });
-    assert.equal(security.packaged, true, 'installed packaged app required');
-    await assertInstalledResourcesIdentity(security.resourcesPath, installed.resourcesPath);
-    for (const key of ['ownerURLMatched', 'ownerArgument', 'contextIsolation', 'sandbox', 'webSecurity']) assert.equal(security[key], true, key);
-    for (const key of ['nodeIntegration', 'devToolsOpened', 'devToolsContentsPresent']) assert.equal(security[key], false, key);
+    for (const key of [...Object.keys(OWNER_EXPECTATIONS), 'additionalArgumentsArray', 'ownerArgument', 'devTools']) {
+      observed[key] = diagnosticBoolean(security[key]);
+    }
+    await emit();
+    phase = 'owner-validation';
+    for (const [key, value] of Object.entries(OWNER_EXPECTATIONS)) expect(security, key, value);
+    // The fixed Electron getter does not expose constructor arguments. Strong
+    // identity is instead checked above against real main-process windows and
+    // sessions, and below against the production preload. If args are returned,
+    // malformed values or a missing owner marker still fail closed.
+    if (security.additionalArgumentsArray !== undefined) {
+      expect(security, 'additionalArgumentsArray', true);
+      expect(security, 'ownerArgument', true);
+    }
     // Electron 44 may omit devTools in getLastWebPreferences. The outer suite
     // independently exercises openDevTools; this probe never opens them.
-    if (security.devTools !== undefined) assert.equal(security.devTools, false, 'devTools');
+    if (security.devTools !== undefined) expect(security, 'devTools', false);
+    requireDiagnostic();
+    currentCheck = 'preloadOwnerRole';
+    const preloadOwnerRole = await page.evaluate(readOfflineOrtPreloadOwner);
+    observed.preloadOwnerRole = diagnosticBoolean(preloadOwnerRole);
+    await emit();
+    assert.equal(preloadOwnerRole, true, 'preloadOwnerRole');
+    requireDiagnostic();
+    phase = 'owner-resources';
+    await assertInstalledResourcesIdentity(security.resourcesPath, installed.resourcesPath, fs, async (check, passed) => {
+      currentCheck = check;
+      observed[check] = passed;
+      await emit(passed ? null : check);
+    });
+    requireDiagnostic();
+    phase = 'document-csp';
+    currentCheck = 'document-csp';
+    await emit();
+    requireDiagnostic();
     setStage('installed-ort-document-csp');
     await beforeReload('before-probe');
     reloadRequired = true;
@@ -268,6 +374,10 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     page.on('request', onRequest);
     page.on('response', onResponse);
     page.on('worker', onWorker);
+    phase = 'initialization';
+    currentCheck = 'initialization';
+    await emit();
+    requireDiagnostic();
     setStage('installed-ort-initialize');
     result = await page.evaluate(initializeOfflineOrtInRenderer,
       { ownerURL, urls, assets: installed.assets, csp: contentSecurityPolicy, timeoutMs });
@@ -294,7 +404,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     assert.equal(unexpectedRequests, 0, 'unexpected request during installed ORT initialization');
     assert.equal(workersCreated, 0, 'single-threaded ORT must not start workers');
     assert.equal(page.url(), ownerURL, 'installed ORT owner URL changed');
-  } catch (error) { primaryError = error; }
+  } catch (error) { primaryError = error; await emit(currentCheck); }
   const cleanupErrors = [];
   if (!observersDetached) {
     for (const [event, listener] of [['request', onRequest], ['response', onResponse], ['worker', onWorker]]) {
@@ -306,6 +416,7 @@ export async function probeInstalledOfflineOrt({ app, page, installDir, timeoutM
     catch { cleanupErrors.push(new Error('ORT renderer cleanup reload failed or was unsafe')); }
   }
   try { await owner.dispose(); } catch { cleanupErrors.push(new Error('ORT owner handle cleanup failed')); }
+  cleanupErrors.push(...diagnosticErrors.filter(error => error !== primaryError));
   if (primaryError && cleanupErrors.length) throw new AggregateError([primaryError, ...cleanupErrors], 'ORT probe and cleanup failed');
   if (primaryError) throw primaryError;
   if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'ORT probe cleanup failed');

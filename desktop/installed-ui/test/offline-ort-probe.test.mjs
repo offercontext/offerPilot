@@ -8,7 +8,8 @@ import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
 import { discoverInstalledOfflineOrt, installedOfflineOrtURLs, initializeOfflineOrtInRenderer,
-  assertOfflineOrtInitialization, assertInstalledResourcesIdentity, probeInstalledOfflineOrt, readOfflineOrtOwner } from '../offline-ort-probe.mjs';
+  assertOfflineOrtInitialization, assertInstalledResourcesIdentity, probeInstalledOfflineOrt, readOfflineOrtOwner,
+  readOfflineOrtPreloadOwner } from '../offline-ort-probe.mjs';
 
 const { contentSecurityPolicy: csp } = createRequire(import.meta.url)('../../capabilities.cjs');
 const origin = 'http://127.0.0.1:18420';
@@ -302,6 +303,7 @@ async function probeHarness(t, options = {}) {
       body: async () => options.wrongModuleBytes ? Buffer.from('wrong executable module') : mjsBytes });
   } });
   page.evaluate = async (fn, args) => {
+    if (fn === readOfflineOrtPreloadOwner) return Object.hasOwn(options, 'preloadOwnerRole') ? options.preloadOwnerRole : true;
     assert.equal(fn, initializeOfflineOrtInRenderer);
     return fn(args, renderer.dependencies);
   };
@@ -310,10 +312,14 @@ async function probeHarness(t, options = {}) {
     evaluate: async (fn, args) => {
       assert.equal(fn, readOfflineOrtOwner);
       assert.equal(args.owner, owner);
+      if (options.ownerReadError) throw options.ownerReadError;
       return { packaged: !options.notPackaged, resourcesPath: options.resourcesPath?.(f) ?? path.join(f.installDir, 'resources'), ownerURLMatched: true,
-        ownerArgument: true, contextIsolation: true, sandbox: true, webSecurity: !options.noWebSecurity,
+        ownerArgument: !options.ownerArgumentMissing, additionalArgumentsArray: options.ownerArgumentMissing ? undefined : true,
+        twoWindows: true, ownerWindowUnique: true, ownerSessionMatched: true,
+        haruURLMatched: true, haruSessionMatched: true, distinctSessions: true,
+        contextIsolation: true, sandbox: true, webSecurity: !options.noWebSecurity,
         nodeIntegration: false, devTools: options.devToolsMissing ? undefined : false,
-        devToolsOpened: Boolean(options.devToolsOpened), devToolsContentsPresent: false };
+        devToolsOpened: Boolean(options.devToolsOpened), devToolsContentsPresent: false, ...options.security };
     } };
   const beforeReload = async (phase) => {
     reloadGates.push(phase);
@@ -362,6 +368,42 @@ test('orchestration wrong-installation binding fails before any renderer reload'
   f.checkCleanup(0);
 });
 
+test('omitted Electron 44.5.1 arguments cannot cause a false failure when real window/session and preload identity pass', async t => {
+  const f = await probeHarness(t, { ownerArgumentMissing: true, devToolsMissing: true });
+  const result = await f.run();
+  assert.equal(result.wasmCompiled, true);
+  f.checkCleanup();
+});
+
+for (const field of ['twoWindows', 'ownerWindowUnique', 'ownerSessionMatched', 'haruURLMatched', 'haruSessionMatched', 'distinctSessions']) {
+  for (const value of [false, undefined]) {
+    test(`actual ${field}=${value} fails even when the owner argument and preload role appear valid`, async t => {
+      const f = await probeHarness(t, { security: { [field]: value } });
+      await assert.rejects(f.run(), new RegExp(field));
+      f.checkCleanup(0);
+    });
+  }
+}
+
+for (const preloadOwnerRole of [false, undefined, null, 'owner']) {
+  test(`missing or malformed preload owner observation (${preloadOwnerRole}) fails real window/session checks`, async t => {
+    const f = await probeHarness(t, { preloadOwnerRole, ownerArgumentMissing: true });
+    await assert.rejects(f.run(), /preloadOwnerRole/);
+    f.checkCleanup(0);
+  });
+}
+
+for (const security of [
+  { additionalArgumentsArray: true, ownerArgument: false },
+  { additionalArgumentsArray: null }, { additionalArgumentsArray: 'invalid-type' },
+]) {
+  test('returned malformed arguments or an absent owner marker never use the omitted-getter exception', async t => {
+    const f = await probeHarness(t, { security });
+    await assert.rejects(f.run(), /additionalArgumentsArray|ownerArgument/);
+    f.checkCleanup(0);
+  });
+}
+
 test('raw owner alias still reaches and rejects a late event at the canonical asset read', async t => {
   let reportedResources;
   const f = await probeHarness(t, { resourcesPath: () => reportedResources });
@@ -407,17 +449,205 @@ test('cleanup failure cannot be called successful initialization', async (t) => 
   f.checkCleanup();
 });
 
-test('main-process security observation is standalone and reads only existing owner preferences', () => {
-  const context = vm.createContext({ process: { resourcesPath: '/installed/resources' }, args: {
-    ownerURL, owner: { webContents: { isDestroyed: () => false, getURL: () => ownerURL, isDevToolsOpened: () => false,
-      getLastWebPreferences: () => ({ additionalArguments: ['--offerpilot-owner'], nodeIntegration: false,
-        contextIsolation: true, sandbox: true, webSecurity: true, devTools: false }) } } } });
-  const value = vm.runInContext(`(${readOfflineOrtOwner.toString()})({ app: { isPackaged: true } }, args)`, context);
+function mainOwnerHarness() {
+  const ownerSession = {};
+  const haruSession = {};
+  const prefs = { additionalArguments: ['--offerpilot-owner'], nodeIntegration: false,
+    contextIsolation: true, sandbox: true, webSecurity: true, devTools: false };
+  const owner = { isDestroyed: () => false, webContents: { session: ownerSession, isDestroyed: () => false,
+    getURL: () => ownerURL, isDevToolsOpened: () => false, getLastWebPreferences: () => prefs } };
+  const haru = { isDestroyed: () => false, webContents: { session: haruSession,
+    isDestroyed: () => false, getURL: () => `${origin}/?desktopSurface=haru` } };
+  const windows = [owner, haru];
+  const runtime = { app: { isPackaged: true }, BrowserWindow: { getAllWindows: () => windows },
+    session: { fromPartition: name => {
+      assert.ok(['persist:offerpilot-desktop', 'offerpilot-haru'].includes(name));
+      return name === 'persist:offerpilot-desktop' ? ownerSession : haruSession;
+    } } };
+  const context = vm.createContext({ URL, process: { resourcesPath: '/installed/resources' }, runtime, args: { ownerURL, owner } });
+  return { owner, haru, windows, prefs,
+    read: () => vm.runInContext(`(${readOfflineOrtOwner.toString()})(runtime, args)`, context) };
+}
+
+test('main-process security observation is standalone and binds existing real windows, sessions and preferences', () => {
+  const value = mainOwnerHarness().read();
   assert.equal(value.ownerArgument, true);
+  assert.equal(value.additionalArgumentsArray, true);
   assert.equal(value.ownerURLMatched, true);
   assert.equal(value.webSecurity, true);
   assert.equal(value.resourcesPath, '/installed/resources');
+  for (const key of ['twoWindows', 'ownerWindowUnique', 'ownerSessionMatched', 'haruURLMatched', 'haruSessionMatched', 'distinctSessions']) {
+    assert.equal(value[key], true, key);
+  }
 });
+
+test('Electron 44.5.1 getter omission stays missing without fabricating an owner marker', () => {
+  const f = mainOwnerHarness();
+  delete f.prefs.additionalArguments;
+  delete f.prefs.devTools;
+  const value = f.read();
+  assert.equal(value.additionalArgumentsArray, undefined);
+  assert.equal(value.ownerArgument, false);
+  assert.equal(value.devTools, undefined);
+  assert.equal(value.ownerWindowUnique, true);
+});
+
+for (const [args, arrayState, ownerFlag] of [
+  [[], true, false], [['--offerpilot-haru'], true, false],
+  [['--offerpilot-owner', '--private-token=do-not-record'], true, true],
+  ['--offerpilot-owner', 'invalid-type', false], [{ token: 'do-not-record' }, 'invalid-type', false],
+  [null, null, false],
+]) {
+  test('main-process arguments diagnostic reports shape and owner presence without copying their contents', () => {
+    const f = mainOwnerHarness();
+    f.prefs.additionalArguments = args;
+    const value = f.read();
+    assert.equal(value.additionalArgumentsArray, arrayState);
+    assert.equal(value.ownerArgument, ownerFlag);
+    assert.doesNotMatch(JSON.stringify(value), /do-not-record|--offerpilot|private-token/);
+  });
+}
+
+for (const [key, mutate] of [
+  ['twoWindows', f => f.windows.push(f.haru)],
+  ['ownerWindowUnique', f => { f.windows[0] = { ...f.owner }; }],
+  ['ownerWindowUnique', f => { f.haru.webContents.getURL = () => ownerURL; }],
+  ['ownerURLMatched', f => { f.owner.webContents.isDestroyed = () => true; }],
+  ['ownerSessionMatched', f => { f.owner.webContents.session = {}; }],
+  ['haruURLMatched', f => { f.haru.webContents.getURL = () => `${origin}/?desktopSurface=haru&extra=1`; }],
+  ['haruURLMatched', f => { f.haru.isDestroyed = () => true; }],
+  ['haruSessionMatched', f => { f.haru.webContents.session = {}; }],
+  ['distinctSessions', f => { f.haru.webContents.session = f.owner.webContents.session; }],
+]) {
+  test(`main-process ${key} detects altered native identity instead of relying on the page role`, () => {
+    const f = mainOwnerHarness();
+    mutate(f);
+    assert.equal(f.read()[key], false);
+  });
+}
+
+test('preload role check is serializable and returns only a strict owner boolean', () => {
+  for (const role of ['owner', 'haru', undefined, 'private-value', true]) {
+    const context = vm.createContext({ window: { offerpilotDesktop: role === undefined ? undefined : { role } } });
+    assert.equal(vm.runInContext(`(${readOfflineOrtPreloadOwner.toString()})()`, context), role === 'owner');
+  }
+});
+
+const diagnosticFields = ['packaged', 'ownerURLMatched', 'twoWindows', 'ownerWindowUnique', 'ownerSessionMatched',
+  'haruURLMatched', 'haruSessionMatched', 'distinctSessions', 'contextIsolation', 'sandbox', 'webSecurity',
+  'nodeIntegration', 'devToolsOpened', 'devToolsContentsPresent', 'additionalArgumentsArray', 'ownerArgument',
+  'devTools', 'preloadOwnerRole', 'resourcesPathsAbsolute', 'resourcesDirectoryChainsUnlinked',
+  'resourcesCanonicalPathMatched', 'resourcesDirectories', 'resourcesDeviceMatched', 'resourcesFileMatched'];
+function assertSafeDiagnostic(value) {
+  assert.deepEqual(Object.keys(value).sort(), ['failedCheck', 'observed', 'phase', 'probe', 'schemaVersion']);
+  assert.equal(value.probe, 'offline-ort');
+  assert.equal(value.schemaVersion, 1);
+  assert.ok(['owner-observation', 'owner-validation', 'owner-resources', 'document-csp', 'initialization'].includes(value.phase));
+  assert.ok(value.failedCheck === null || [...diagnosticFields, 'owner-observation', 'document-csp', 'initialization', 'diagnostic-recording'].includes(value.failedCheck));
+  assert.deepEqual(Object.keys(value.observed).sort(), [...diagnosticFields].sort());
+  for (const observed of Object.values(value.observed)) assert.ok([true, false, 'undefined', 'null', 'invalid-type'].includes(observed));
+  assert.doesNotMatch(JSON.stringify(value), /private-token|do-not-record|\/installed|offerpilot-ort-unit|ws:\/\//);
+}
+
+test('safe diagnostics are awaited, detached snapshots that distinguish missing getters from native identity', async t => {
+  const f = await probeHarness(t, { ownerArgumentMissing: true, devToolsMissing: true,
+    security: { rawPreferences: { token: 'private-token' }, unknownField: 'do-not-record' } });
+  const snapshots = [];
+  let activeCallback = false;
+  const originalReload = f.page.reload;
+  f.page.reload = async (...args) => {
+    assert.equal(activeCallback, false, 'recording must finish before reload');
+    assert.equal(snapshots.at(-1).observed.resourcesFileMatched, true);
+    return originalReload(...args);
+  };
+  await f.run({ onDiagnostic: async diagnostic => {
+    activeCallback = true;
+    await new Promise(resolve => setTimeout(resolve, 1));
+    assertSafeDiagnostic(diagnostic);
+    snapshots.push(structuredClone(diagnostic));
+    diagnostic.observed.ownerWindowUnique = 'private-token';
+    activeCallback = false;
+  } });
+  assert.equal(snapshots[0].observed.additionalArgumentsArray, 'undefined');
+  assert.equal(snapshots[0].observed.ownerArgument, false);
+  assert.equal(snapshots[0].observed.devTools, 'undefined');
+  assert.equal(snapshots[0].observed.resourcesFileMatched, 'undefined');
+  assert.equal(snapshots.at(-1).observed.resourcesFileMatched, true);
+  assert.equal(snapshots.at(-1).observed.preloadOwnerRole, true);
+  assert.ok(snapshots.every(snapshot => snapshot.observed.ownerWindowUnique === true));
+  f.checkCleanup();
+});
+
+test('malformed security values are sanitized and diagnostic mutation cannot change a failing assertion', async t => {
+  const f = await probeHarness(t, { security: { webSecurity: { token: 'private-token' },
+    devTools: 'ws://private-token', resourcesPath: 'do-not-record' } });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: async diagnostic => {
+    assertSafeDiagnostic(diagnostic);
+    latest = structuredClone(diagnostic);
+    diagnostic.observed.webSecurity = true;
+  } }), /webSecurity/);
+  assert.equal(latest.failedCheck, 'webSecurity');
+  assert.equal(latest.observed.webSecurity, 'invalid-type');
+  assert.equal(latest.observed.devTools, 'invalid-type');
+  f.checkCleanup(0);
+});
+
+test('resources diagnostics localize actual identity rejection without retaining either path or raw failure', async t => {
+  const wrong = await files(t);
+  const f = await probeHarness(t, { resourcesPath: () => path.join(wrong.installDir, 'resources') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: async diagnostic => {
+    assertSafeDiagnostic(diagnostic);
+    latest = diagnostic;
+  } }), /selected installation/);
+  assert.equal(latest.phase, 'owner-resources');
+  assert.equal(latest.failedCheck, 'resourcesCanonicalPathMatched');
+  assert.equal(latest.observed.resourcesPathsAbsolute, true);
+  assert.equal(latest.observed.resourcesDirectoryChainsUnlinked, true);
+  assert.equal(latest.observed.resourcesCanonicalPathMatched, false);
+  assert.equal(latest.observed.resourcesDirectories, 'undefined');
+  f.checkCleanup(0);
+});
+
+test('native owner read errors expose only the fixed observation failure name', async t => {
+  const f = await probeHarness(t, { ownerReadError: new Error('private-token ws://do-not-record') });
+  let latest;
+  await assert.rejects(f.run({ onDiagnostic: async diagnostic => {
+    assertSafeDiagnostic(diagnostic);
+    latest = diagnostic;
+  } }));
+  assert.equal(latest.failedCheck, 'owner-observation');
+  assert.ok(Object.values(latest.observed).every(value => value === 'undefined'));
+  f.checkCleanup(0);
+});
+
+test('failed diagnostic recording cannot suppress a primary security failure or prevent cleanup', async t => {
+  const f = await probeHarness(t, { noWebSecurity: true });
+  await assert.rejects(f.run({ onDiagnostic: async () => { throw new Error('private-token ws://do-not-record'); } }), error => {
+    assert.ok(error instanceof AggregateError);
+    assert.match(error.errors[0].message, /webSecurity/);
+    assert.equal(error.errors[1].message, 'ORT diagnostic recording failed');
+    assert.equal(error.errors.length, 2);
+    return true;
+  });
+  f.checkCleanup(0);
+});
+
+for (const failingPhase of ['owner-observation', 'initialization']) {
+  test(`diagnostic recording failure at ${failingPhase} fails closed and releases owned handles`, async t => {
+    const f = await probeHarness(t);
+    let latest;
+    await assert.rejects(f.run({ onDiagnostic: async diagnostic => {
+      assertSafeDiagnostic(diagnostic);
+      latest = diagnostic;
+      if (diagnostic.phase === failingPhase) throw new Error('private-token');
+    } }), /ORT diagnostic recording failed/);
+    assert.equal(latest.failedCheck, 'diagnostic-recording');
+    assert.equal(f.renderer.calls.imports, 0);
+    f.checkCleanup(failingPhase === 'initialization' ? 2 : 0);
+  });
+}
 
 test('normal same-origin API polling is separately counted and omitted Electron preference is tolerated', async (t) => {
   const f = await probeHarness(t, { localPolling: true, devToolsMissing: true });

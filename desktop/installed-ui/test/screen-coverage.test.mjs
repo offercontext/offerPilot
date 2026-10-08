@@ -145,24 +145,39 @@ test('populated board with twelve matching card statuses selects only the pendin
   await navigate(navigationPage({populatedBoard:true}).page,'board');
   await assert.rejects(navigate(navigationPage({populatedBoard:true,missingBoardHeader:true}).page,'board'), /absent or ambiguous/);
 });
-function drawerFixture({ count = 1, blocked = false } = {}) {
+function drawerFixture({ count = 1, blocked = false, failureCapture = false, cleanupFailure = false } = {}) {
   const steps=[];
-  const hit={receiver:blocked?'other-dialog-element':'target',visible:true,inViewport:true};
-  const close={count:async()=>count,scrollIntoViewIfNeeded:async()=>steps.push('scroll'),evaluate:async()=>hit,
-    click:async options=>{assert.equal(options,undefined);steps.push('click');if(blocked)throw new Error('other element intercepts pointer events');}};
+  const hit={receiver:blocked?'other-element':'target',visible:true,inViewport:true,ancestorPointerDisabled:true};
+  const diagnostic={centerReceiver:blocked?'app-topbar':'target',events:[],ancestors:[]};
+  const close={count:async()=>count,scrollIntoViewIfNeeded:async()=>steps.push('scroll'),
+    evaluate:async fn=>{if(fn.name==='measureControlHit')return hit;assert.equal(fn.name,'installDrawerCloseObservation');steps.push('observe');return diagnostic;},
+    click:async options=>{assert.equal(options,undefined);steps.push('click');if(blocked){const error=new Error('<div class="op-topbar">private text</div> intercepts pointer events');error.name='TimeoutError';throw error;}}};
   const settings={getByRole:(role,options)=>{assert.equal(role,'button');assert.ok(options.name.test('关闭'));assert.ok(options.name.test('Close'));assert.equal(options.name.test('关闭全部'),false);return close;},
     waitFor:async options=>{assert.deepEqual(options,{state:'hidden'});steps.push('hidden');}};
-  const qa={capture:async(label,value)=>{assert.equal(label,'offer-comparison-close-hit');assert.equal(value.controlHit,hit);steps.push('screenshot');}};
-  return {qa,settings,steps};
+  const page={evaluate:async(fn,args)=>{assert.equal(fn.name,'readDrawerCloseObservation');steps.push(args.dispose ? 'dispose' : 'post-capture-observe');if(cleanupFailure && args.dispose)throw new Error('observer cleanup failed');return diagnostic;}};
+  const captures=[];
+  const qa={capture:async(label,value)=>{captures.push([label,value]);steps.push('screenshot');if(label.endsWith('action-failure')&&failureCapture)throw new Error('screenshot failed');}};
+  return {qa,page,settings,steps,captures,hit};
 }
-test('drawer close uses the exact semantic button, records hit evidence, and requires ordinary click plus dismissal',async()=>{
-  const f=drawerFixture();await closeComparisonSettings(f.qa,{},f.settings);
-  assert.deepEqual(f.steps,['scroll','screenshot','click','hidden']);
+test('drawer close preserves one ordinary click and dismissal while collecting bounded before/after evidence',async()=>{
+  const f=drawerFixture();await closeComparisonSettings(f.qa,f.page,f.settings);
+  assert.deepEqual(f.steps,['scroll','observe','screenshot','post-capture-observe','click','hidden','dispose','screenshot']);
+  assert.equal(f.captures[0][1].controlHit,f.hit);
+  assert.equal(f.captures[1][0],'offer-comparison-close-action-complete');
 });
-test('ambiguous or blocked drawer close cannot fall back to Escape, force, or a false success',async()=>{
-  const ambiguous=drawerFixture({count:2});await assert.rejects(closeComparisonSettings(ambiguous.qa,{},ambiguous.settings));assert.deepEqual(ambiguous.steps,[]);
-  const blocked=drawerFixture({blocked:true});await assert.rejects(closeComparisonSettings(blocked.qa,{},blocked.settings),/intercepts pointer/);
-  assert.deepEqual(blocked.steps,['scroll','screenshot','click']);
+test('ambiguous or persistently blocked close remains FAIL without fallback and retains safe action diagnostics',async()=>{
+  const ambiguous=drawerFixture({count:2});await assert.rejects(closeComparisonSettings(ambiguous.qa,ambiguous.page,ambiguous.settings));assert.deepEqual(ambiguous.steps,[]);
+  const blocked=drawerFixture({blocked:true});await assert.rejects(closeComparisonSettings(blocked.qa,blocked.page,blocked.settings),/intercepts pointer/);
+  assert.deepEqual(blocked.steps,['scroll','observe','screenshot','post-capture-observe','click','dispose','screenshot']);
+  assert.equal(blocked.captures[1][0],'offer-comparison-close-action-failure');
+  assert.equal(blocked.captures[1][1].drawerCloseFailure.knownInterceptor,'app-topbar');
+  assert.equal(blocked.captures[1][1].drawerCloseFailure.intercepted,true);
+  assert.doesNotMatch(JSON.stringify(blocked.captures),/private text|<div/);
+});
+test('drawer diagnostic failures cannot mask the original click failure or leak an observer after a completed click',async()=>{
+  const f=drawerFixture({blocked:true,failureCapture:true});await assert.rejects(closeComparisonSettings(f.qa,f.page,f.settings),/intercepts pointer/);
+  assert.ok(f.steps.includes('dispose'));
+  const cleanup=drawerFixture({cleanupFailure:true});await assert.rejects(closeComparisonSettings(cleanup.qa,cleanup.page,cleanup.settings),/observer cleanup failed/);
 });
 
 function narrowOfferFixture({overflow=false,unscrolled=false,clipped=false,ancestorClipped=false,blocked=false,trialFailure=false,noOverflow=false,cardsClipped=false,initialRight=false,wrongOwner=false,wrongDetail=false,reopenFailure=false,clippedReturnedTitle=false}={}) {
@@ -338,6 +353,22 @@ test('native clipboard integration scopes the real prepared JD copy button and r
   assert.equal(screenshots.at(-1)[1].clipboard.preExistingClipboardNeverRead, true);
   await assert.rejects(verifySyntheticClipboard(qa, page), /real installed clipboard probe required/);
   await assert.rejects(verifySyntheticClipboard(qa, page, async () => { throw new Error('native copy failed'); }), /native copy failed/);
+  for (const captureFails of [false, true]) {
+    const steps = []; bindUiSteps(page, value => steps.push(value));
+    const failureScreens = [];
+    const safe = { schemaVersion: 1, probe: 'clipboard', phase: 'native-arm', outcome: 'failed' };
+    const original = new Error('native copy failed without exposing private details');
+    await assert.rejects(verifySyntheticClipboard({ capture: async (label, extra) => {
+      failureScreens.push([label, extra]); markUiStep(page, 'geometry-check');
+      if (captureFails) throw new Error('screenshot also failed');
+    } }, page, async ({ onDiagnostic, setStage }) => {
+      setStage('clipboard-0-cancel'); await onDiagnostic(safe); throw original;
+    }), error => error === original);
+    assert.equal(failureScreens.length, 1);
+    assert.equal(failureScreens[0][1].clipboardDiagnostic, safe);
+    assert.deepEqual(steps.at(-1), { step: 'clipboard-0-cancel', control: 'application-jd' });
+    assert.doesNotMatch(JSON.stringify(failureScreens), /private details/);
+  }
 });
 
 test('offline runtime integration uses non-editing Settings and gates both reloads against pending writes and dialogs', async () => {
@@ -352,20 +383,28 @@ test('offline runtime integration uses non-editing Settings and gates both reloa
     f.page.locator = selector => selector === '#voice-settings-title'
       ? { scrollIntoViewIfNeeded: async () => {}, waitFor: async () => {} } : locator(selector);
     const screenshots = []; let observed = false; let reloads = 0;
-    const qa = { run: async (_id, _case, _path, action, kind, policy) => { assert.equal(kind, 'interaction'); assert.deepEqual(policy, { recoveryReload: false }); return action(); }, capture: async (label, evidence) => screenshots.push([label, evidence]),
+    const steps = []; bindUiSteps(f.page, value => steps.push(value));
+    const qa = { run: async (_id, _case, _path, action, kind, policy) => { assert.equal(kind, 'interaction'); assert.deepEqual(policy, { recoveryReload: false }); return action(); }, capture: async (label, evidence) => { screenshots.push([label, evidence]); markUiStep(f.page, 'geometry-check'); if(options.captureFails && label.endsWith('probe-failure'))throw new Error('screenshot also failed'); },
       canProceed: () => !options.pendingWrite, observed: () => { observed = true; } };
-    await offlineOrtFlow(qa, f.page, async ({ beforeReload, setStage }) => {
+    let caught;
+    try { await offlineOrtFlow(qa, f.page, async ({ beforeReload, setStage, onDiagnostic }) => {
       setStage('installed-ort-owner');
       await beforeReload('before-probe'); reloads++;
       setStage('installed-ort-initialize');
-      if (options.initializeFails) throw new Error('WASM failed');
+      if (options.initializeFails) { await onDiagnostic({ schemaVersion: 1, probe: 'offline-ort', phase: 'renderer-initialization', outcome: 'failed' }); throw new Error('WASM failed'); }
       await beforeReload('release-probe'); reloads++;
       return { mainDocumentProductionCspVerified: true, whisperTranscriptionValidated: false };
-    });
-    return { screenshots, observed, reloads };
+    }); } catch(error) { if(!options.expectFailure)throw error; caught=error; }
+    return { screenshots, observed, reloads, caught, steps };
   }
   const passed = await run();
   assert.equal(passed.reloads, 2); assert.equal(passed.observed, true); assert.equal(passed.screenshots.length, 2);
   assert.equal(passed.screenshots[1][1].offlineOrt.whisperTranscriptionValidated, false);
   for (const option of ['pendingWrite', 'wrongRoute', 'openDialog', 'initializeFails']) await assert.rejects(run({ [option]: true }));
+  for (const captureFails of [false, true]) {
+    const failed = await run({ initializeFails: true, expectFailure: true, captureFails });
+    assert.equal(failed.caught.message, 'WASM failed'); assert.equal(failed.observed, false);
+    assert.equal(failed.screenshots.at(-1)[1].offlineOrtDiagnostic.outcome, 'failed');
+    assert.deepEqual(failed.steps.at(-1), { step: 'installed-ort-initialize', control: 'offline-ort' });
+  }
 });

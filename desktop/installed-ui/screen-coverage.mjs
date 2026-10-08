@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
+import { installDrawerCloseObservation, readDrawerCloseObservation, drawerCloseFailure } from './drawer-close-diagnostics.mjs';
 import { ROOTS, WIDTHS } from './coverage-model.mjs';
 import { selectVisibleOption as select } from './select-option.mjs';
 import { button as btn, quickOpenButton, markUiStep } from './ui-locators.mjs';
@@ -1066,11 +1068,34 @@ async function closeComparisonSettings(qa, page, settings) {
   assert.equal(await close.count(), 1, 'exactly one visible semantic drawer close button required');
   await close.scrollIntoViewIfNeeded();
   const controlHit = await close.evaluate(measureControlHit);
-  await qa.capture('offer-comparison-close-hit', { controlHit });
-  markUiStep(page, 'dialog-dismiss', '关闭');
-  // No force, Escape fallback or DOM-dispatched click: retain genuine hit failures.
-  await close.click();
-  await settings.waitFor({ state: 'hidden' });
+  const key = `offerpilot.drawer-close.${randomUUID()}`;
+  let observed = false;
+  let primaryError;
+  let drawerCloseBeforeClick;
+  try {
+    const drawerClose = await close.evaluate(installDrawerCloseObservation, { key });
+    observed = true;
+    await qa.capture('offer-comparison-close-hit', { controlHit, drawerClose });
+    drawerCloseBeforeClick = await page.evaluate(readDrawerCloseObservation, { key });
+    markUiStep(page, 'dialog-dismiss', '关闭');
+    // Keep Playwright's existing bounded actionability wait. No force, Escape,
+    // duplicate click, DOM dispatch or CSS/animation mutation is a fallback.
+    await close.click();
+    await settings.waitFor({ state: 'hidden' });
+  } catch (error) { primaryError = error; }
+  if (observed) {
+    try {
+      const drawerClose = await page.evaluate(readDrawerCloseObservation, { key, dispose: true });
+      await qa.capture(primaryError ? 'offer-comparison-close-action-failure' : 'offer-comparison-close-action-complete',
+        { drawerClose, drawerCloseBeforeClick, ...(primaryError ? { drawerCloseFailure: drawerCloseFailure(primaryError) } : {}) });
+    } catch (error) {
+      if (!primaryError) primaryError = error;
+    }
+  }
+  if (primaryError) {
+    markUiStep(page, 'dialog-dismiss', '关闭');
+    throw primaryError;
+  }
 }
 
 async function verifyStandaloneHaruContext(haru, record) {
@@ -1252,9 +1277,18 @@ export async function verifySyntheticClipboard(qa, page, probe) {
   await copyButton.waitFor({ state: 'visible' });
   await copyButton.scrollIntoViewIfNeeded();
   await copyButton.click({ trial: true });
-  const clipboardEvidence = await probe({ copyButton, expectedText: 'https://example.invalid/qa-local-only',
-    capture: label => qa.capture(label), setStage: step => markUiStep(page, step, 'application-jd') });
-  await qa.capture('jd-source-clipboard-final', { clipboard: clipboardEvidence });
+  let clipboardDiagnostic;
+  let phase = 'clipboard-instrumentation';
+  try {
+    const clipboardEvidence = await probe({ copyButton, expectedText: 'https://example.invalid/qa-local-only',
+      onDiagnostic: value => { clipboardDiagnostic = value; },
+      capture: label => qa.capture(label, { clipboardDiagnostic }), setStage: step => { phase = step; markUiStep(page, step, 'application-jd'); } });
+    await qa.capture('jd-source-clipboard-final', { clipboard: clipboardEvidence, clipboardDiagnostic });
+  } catch (error) {
+    try { await qa.capture('jd-source-clipboard-probe-failure', { clipboardDiagnostic }); } catch { /* Keep the original probe failure. */ }
+    markUiStep(page, phase, 'application-jd');
+    throw error;
+  }
 }
 
 export async function offlineOrtFlow(qa, page, probe) {
@@ -1269,10 +1303,19 @@ export async function offlineOrtFlow(qa, page, probe) {
       assert.equal(new URL(page.url()).searchParams.get('view'), 'settings', 'ORT reload requires the non-editing Settings surface');
       assert.equal(await page.getByRole('dialog').filter({ visible: true }).count(), 0, 'open editing dialog blocks ORT reload');
     };
-    const offlineOrt = await probe({ beforeReload, setStage: step => markUiStep(page, step, 'offline-ort') });
-    await heading.waitFor({ state: 'visible' });
-    await heading.scrollIntoViewIfNeeded();
-    await qa.capture('installed-offline-ort-ready', { offlineOrt });
+    let offlineOrtDiagnostic;
+    let phase = 'installed-ort-owner';
+    try {
+      const offlineOrt = await probe({ beforeReload, onDiagnostic: value => { offlineOrtDiagnostic = value; },
+        setStage: step => { phase = step; markUiStep(page, step, 'offline-ort'); } });
+      await heading.waitFor({ state: 'visible' });
+      await heading.scrollIntoViewIfNeeded();
+      await qa.capture('installed-offline-ort-ready', { offlineOrt, offlineOrtDiagnostic });
+    } catch (error) {
+      try { await qa.capture('installed-offline-ort-probe-failure', { offlineOrtDiagnostic }); } catch { /* Keep the original probe failure. */ }
+      markUiStep(page, phase, 'offline-ort');
+      throw error;
+    }
     qa.observed('installed self-hosted ORT module/WASM compiled and initialized under production CSP; no model, inference session, microphone, or Whisper transcription; renderer released by safe reload');
   }, 'interaction', { recoveryReload: false });
 }

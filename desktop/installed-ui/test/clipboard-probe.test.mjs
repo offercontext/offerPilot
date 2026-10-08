@@ -6,7 +6,7 @@ import { createRequire } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { SYNTHETIC_JD_SOURCE, assertHostedClipboardEnvironment, assertClipboardSnapshot,
-  nativeClipboardInstrumentation, probeInstalledClipboard } from '../clipboard-probe.mjs';
+  nativeClipboardInstrumentation, probeInstalledClipboard, clipboardProbeDiagnostic } from '../clipboard-probe.mjs';
 
 const require = createRequire(import.meta.url);
 const { createCapabilities } = require('../../capabilities.cjs');
@@ -36,6 +36,7 @@ function fixture(t, options = {}) {
     readText() {
       assert.equal(operations.some(item => item.type === 'write'), true, 'read cannot predate synthetic write');
       operations.push({ type: 'read' });
+      if (options.failRead) throw new Error('PRIVATE synthetic read exception');
       return value;
     },
   };
@@ -211,10 +212,11 @@ test('main-process observer survives Playwright serialization without module-sco
 // VM dependencies exercise orchestration only; these tests are not actual
 // Windows/clipboard/UI evidence, and provide no production host-check bypass.
 function orchestration(t, options = {}) {
-  const f = fixture(t);
+  const f = fixture(t, options);
   const choices = ['cancel', 'allow', 'cancel'];
   const toasts = [];
   const captures = [];
+  const diagnostics = [];
   let toast;
   let clicks = 0;
   let disposed = 0;
@@ -222,7 +224,7 @@ function orchestration(t, options = {}) {
     { GITHUB_ACTIONS: 'true', RUNNER_ENVIRONMENT: 'github-hosted' }, 'win32');
   const context = vm.createContext({ assert, randomUUID, setTimeout, URL,
     SYNTHETIC_JD_SOURCE, CHOICES: choices, SUCCESS: '来源已复制', DENIED: '无法复制，请手动选择来源文字',
-    assertHostedClipboardEnvironment: hostCheck, nativeClipboardInstrumentation, assertClipboardSnapshot });
+    assertHostedClipboardEnvironment: hostCheck, nativeClipboardInstrumentation, assertClipboardSnapshot, clipboardProbeDiagnostic });
   const invoke = vm.runInContext(`(${probeInstalledClipboard.toString()})`, context);
   const page = { url: () => origin, bringToFront: async () => {},
     getByText: text => ({ waitFor: async ({ state }) => {
@@ -233,6 +235,8 @@ function orchestration(t, options = {}) {
   const app = {
     browserWindow: async () => f.owner,
     evaluate: async (fn, args) => {
+      if (args.operation === 'arm' && options.navigateBeforeArm) f.navigate(`${origin}/?changed`);
+      if (args.operation === 'arm') assert.equal(diagnostics.at(-1).phase, 'arm', 'diagnostic callback must finish before action');
       if (args.operation === 'restore' && options.lateConfirmation && clicks === 3) await f.request();
       return fn({ dialog: f.dialog, clipboard: f.clipboard }, args);
     },
@@ -247,8 +251,13 @@ function orchestration(t, options = {}) {
       clicks++;
     } };
   return { run: () => invoke({ app, page, copyButton, timeoutMs: 100,
+    onDiagnostic: async diagnostic => {
+      await Promise.resolve(); diagnostics.push(diagnostic);
+      if (options.diagnosticFails) throw new Error('PRIVATE callback exception');
+      if (options.finalDiagnosticFails && disposed === 1) throw new Error('PRIVATE final callback exception');
+    },
     capture: async label => { captures.push(label); if (options.captureFails) throw new Error('capture failed'); } }),
-    check: () => { assert.equal(f.dialog.showMessageBox, f.original); return { clicks, disposed, captures, toasts, operations: f.operations }; } };
+    check: () => { assert.equal(f.dialog.showMessageBox, f.original); return { clicks, disposed, captures, toasts, operations: f.operations, diagnostics }; } };
 }
 
 test('orchestration requires each product toast, captures all three choices, and restores instrumentation', async t => {
@@ -264,13 +273,26 @@ test('orchestration requires each product toast, captures all three choices, and
   assert.equal(observed.disposed, 1);
   assert.deepEqual(observed.captures, ['clipboard-0-cancel', 'clipboard-1-allow', 'clipboard-2-cancel']);
   assert.equal(observed.operations[0].type, 'write');
+  assert.equal(observed.diagnostics.at(-1).outcome, 'complete');
+  assert.equal(observed.diagnostics.at(-1).phase, 'complete');
 });
 
 for (const option of ['clickFails', 'corruptCopy', 'captureFails', 'lateConfirmation']) {
   test(`orchestration ${option} fails instead of returning successful evidence and restores native dialog`, async t => {
     const f = orchestration(t, { [option]: true });
     await assert.rejects(f.run());
-    assert.equal(f.check().disposed, 1);
+    const observed = f.check();
+    assert.equal(observed.disposed, 1);
+    assert.equal(observed.diagnostics.at(-1).outcome, 'failed');
+    if (option === 'lateConfirmation') {
+      assert.equal(observed.diagnostics.at(-1).phase, 'restore');
+      assert.equal(observed.diagnostics.at(-1).observed.nativeFailure, 'unexpected-confirmation');
+      assert.equal(observed.diagnostics.at(-1).observed.confirmationCount, 4);
+    }
+    if (option === 'corruptCopy') {
+      assert.equal(observed.diagnostics.at(-1).phase, 'readback');
+      assert.equal(observed.diagnostics.at(-1).observed.nativeFailure, 'readback-mismatch');
+    }
   });
 }
 
@@ -281,4 +303,66 @@ test('wrong displayed JD source is rejected before any clipboard or owner handle
   assert.deepEqual(observed.operations, []);
   assert.equal(observed.clicks, 0);
   assert.equal(observed.disposed, 0);
+});
+
+for (const [option, nativeFailure, writeCompleted, readAttempted] of [
+  ['failWrite', 'baseline-write-error', false, false],
+  ['failRead', 'baseline-read-error', true, true],
+  ['ignoreWrites', 'baseline-mismatch', true, true],
+  ['navigateBeforeArm', 'unsafe-to-arm', false, false],
+]) {
+  test(`diagnostic distinguishes ${option} without clipboard text and preserves primary phase after cleanup`, async t => {
+    const f = orchestration(t, { [option]: true });
+    await assert.rejects(f.run());
+    const observed = f.check();
+    const last = observed.diagnostics.at(-1);
+    assert.equal(last.phase, 'arm');
+    assert.equal(last.sequence, 0);
+    assert.equal(last.outcome, 'failed');
+    assert.equal(last.observed.nativeFailure, nativeFailure);
+    assert.equal(last.observed.baselineWriteCompleted, writeCompleted);
+    assert.equal(last.observed.baselineReadAttempted, readAttempted);
+    assert.equal(last.observed.ownerURLUnchanged, option !== 'navigateBeforeArm');
+    assert.equal(observed.clicks, 0);
+    assert.equal(observed.disposed, 1);
+    assert.doesNotMatch(JSON.stringify(observed.diagnostics), /PRIVATE|https?:|baseline \d|clipboard must never/);
+  });
+}
+
+test('diagnostic projection drops unknown properties and malformed observed values', () => {
+  const secret = 'DO-NOT-EXPORT-CREDENTIAL';
+  const value = clipboardProbeDiagnostic({ phase: secret, sequence: secret, outcome: secret, errorClass: secret,
+    native: { value: secret, ownerURL: secret, nativePhase: secret, nativeFailure: secret,
+      ownerURLUnchanged: secret, baselineWrites: secret, comparisonReads: 9999 } });
+  assert.doesNotMatch(JSON.stringify(value), new RegExp(secret));
+  assert.equal(value.observed.ownerURLUnchanged, 'not-observed');
+  assert.equal(value.observed.comparisonReads, 'not-observed');
+  assert.equal(value.errorClass, 'unknown');
+  assert.equal(Object.hasOwn(value.observed, 'value'), false);
+});
+
+test('failed diagnostic callback still restores the native dialog and disposes owner', async t => {
+  const f = orchestration(t, { diagnosticFails: true });
+  await assert.rejects(f.run());
+  const observed = f.check();
+  assert.equal(observed.disposed, 1);
+  assert.deepEqual(observed.operations, []);
+  assert.doesNotMatch(JSON.stringify(observed.diagnostics), /PRIVATE/);
+});
+
+test('a final diagnostic callback failure preserves an existing primary clipboard failure as the first error', async t => {
+  const f = orchestration(t, { corruptCopy: true, finalDiagnosticFails: true });
+  await assert.rejects(f.run(), error => {
+    assert.equal(error.name, 'AggregateError');
+    assert.equal(error.errors[0].name, 'AssertionError');
+    assert.match(error.errors[0].message, /system clipboard did not match/);
+    assert.equal(error.errors[1].message, 'clipboard diagnostic callback failed');
+    assert.equal(error.errors.length, 2);
+    return true;
+  });
+  const observed = f.check();
+  assert.equal(observed.disposed, 1);
+  assert.equal(observed.diagnostics.at(-1).phase, 'readback');
+  assert.equal(observed.diagnostics.at(-1).outcome, 'failed');
+  assert.doesNotMatch(JSON.stringify(observed.diagnostics), /PRIVATE/);
 });
