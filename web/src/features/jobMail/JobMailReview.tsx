@@ -16,7 +16,7 @@ interface Props {
   onNavigate: (view: ViewMode) => void;
 }
 export function MailRecord({ value, kind = 'event' }: { value: Record<string, unknown> | null; kind?: 'event' | 'application' }) {
-  if (!value) return <p className={styles.muted}>无现有记录（将新增）</p>;
+  if (!value || Object.keys(value).length === 0) return <p className={styles.muted}>无现有记录（将新增）</p>;
   return <dl className={styles.details}>{Object.entries(value).map(([key, item]) => <div key={key} style={{ display: 'contents' }}><dt>{key === 'id' && kind === 'application' ? '投递 ID' : fieldLabel(key)}</dt><dd>{displayMailValue(item)}</dd></div>)}</dl>;
 }
 export default function JobMailReview(props: Props) {

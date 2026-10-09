@@ -92,6 +92,13 @@ def fixture_safety() -> dict[str, int | bool]:
     return {"synthetic_only": True, "body_read_attempts": SyntheticQQTransport.body_read_attempts,
             "vault_entries": len(vault.values)}
 
+
+# create_app registers its SPA fallback last. The fixture route must precede
+# that catch-all, otherwise the final browser safety assertion receives a 404.
+fixture_route = app.router.routes.pop()
+assert getattr(fixture_route, "path", None) == "/api/job-mail/fixture-safety"
+app.router.routes.insert(0, fixture_route)
+
 if __name__ == "__main__":
     uvicorn.run(app, host="127.0.0.1", port=int(os.environ.get("OFFERPILOT_MAIL_FIXTURE_PORT", "38091")),
                 access_log=False)

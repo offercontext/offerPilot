@@ -3,6 +3,8 @@ import os
 import subprocess
 import sys
 
+import pytest
+
 from offerpilot.job_mail.process_lock import LocalMailProcessLock
 
 
@@ -46,7 +48,7 @@ def test_unsupported_or_failed_native_lock_is_closed_without_soft_fallback(tmp_p
 
 def test_posix_symlink_lock_path_fails_closed(tmp_path):
     if os.name != "posix":
-        return
+        pytest.skip("POSIX-specific symlink protection")
     database = tmp_path / "data.db"
     database.touch()
     target = tmp_path / "unrelated.txt"

@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobMailStatus } from '@/types/jobMail';
 import { MailSecureSetupError, type JobMailSecureCapability } from '@/types/jobMailSecureSetup';
 const secure = vi.hoisted(() => ({ getJobMailSecureCapability: vi.fn(), startJobMailSecureSetup: vi.fn(), testJobMailSecureSetup: vi.fn(), saveJobMailSecureSetup: vi.fn(), cancelJobMailSecureSetup: vi.fn(), disconnectRealJobMail: vi.fn() }));
-const mail = vi.hoisted(() => ({ getJobMailStatus: vi.fn(), disconnectJobMail: vi.fn() }));
+const mail = vi.hoisted(() => ({ getJobMailStatus: vi.fn(), disconnectJobMail: vi.fn(), syncJobMail: vi.fn() }));
 vi.mock('@/services/jobMailSecureSetup', () => ({ ...secure, JOB_MAIL_SECURE_CAPABILITY_KEY: ['job-mail', 'secure-setup', 'capability'] }));
-vi.mock('@/services/jobMail', () => ({ ...mail, JOB_MAIL_QUERY_KEY: ['job-mail'], JOB_MAIL_STATUS_KEY: ['job-mail', 'status'], cancelJobMailSync: vi.fn(), connectSyntheticJobMail: vi.fn(), syncJobMail: vi.fn(), updateJobMailSettings: vi.fn(), importJobMail: vi.fn() }));
+vi.mock('@/services/jobMail', () => ({ ...mail, JOB_MAIL_QUERY_KEY: ['job-mail'], JOB_MAIL_STATUS_KEY: ['job-mail', 'status'], cancelJobMailSync: vi.fn(), connectSyntheticJobMail: vi.fn(), updateJobMailSettings: vi.fn(), importJobMail: vi.fn() }));
 vi.mock('antd', () => ({
   Alert: ({ message, description, action }: { message: ReactNode; description?: ReactNode; action?: ReactNode }) => <div role="status">{message}{description}{action}</div>,
   Button: ({ children, onClick, disabled, loading }: { children?: ReactNode; onClick?: () => void; disabled?: boolean; loading?: boolean }) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>,
@@ -108,6 +108,24 @@ describe('real credential deletion confirmation', () => {
   beforeEach(() => {
     capability.configured = true;
     status.connection = { id: 'qq-id', provider: 'qq', email_masked: 'fi***@qq.com', status: 'connected', folders: ['INBOX'], scope_version: 1, sync_mode: 'manual', interval_minutes: 15, ai_enabled: false, start_at: '2026-10-09T00:00:00Z', next_run_at: null, last_attempt_at: null, last_success_at: null, not_before_at: null };
+  });
+  it('shows stored but inactive QQ configuration and blocks reading without hiding disconnect', async () => {
+    status.capabilities.real_connection = false;
+    await render(<JobMailSettings />);
+    expect(host.textContent).toContain('已保存邮箱配置，但本实例当前不会读取邮件');
+    expect(button('立即同步').disabled).toBe(true); expect(button('调整读取范围').disabled).toBe(true);
+    expect((host.querySelector('[aria-label="同步间隔"]') as HTMLInputElement).disabled).toBe(true);
+    expect((host.querySelector('input[type="checkbox"]') as HTMLInputElement).disabled).toBe(true);
+    expect(button('保存同步方式').disabled).toBe(true);
+    expect(button('断开邮箱').disabled).toBe(false);
+    await click(button('立即同步')); expect(mail.syncJobMail).not.toHaveBeenCalled();
+  });
+  it('does not present a cached inactive result as current after status refresh fails', async () => {
+    status.capabilities.real_connection = false; await render(<JobMailSettings />);
+    mail.getJobMailStatus.mockRejectedValue(new Error('offline'));
+    await act(async () => { await client.invalidateQueries({ queryKey: ['job-mail', 'status'] }); }); await settle();
+    expect(host.textContent).toContain('状态待核对');
+    expect(host.textContent).not.toContain('本实例当前不会读取邮件');
   });
   it('requires explicit deletion consent and keeps failed deletion retryable without false success', async () => {
     secure.disconnectRealJobMail.mockImplementation(async () => { capability.deletion_pending = true; status.connection!.status = 'disconnected'; throw new MailSecureSetupError('credential_delete_pending'); });

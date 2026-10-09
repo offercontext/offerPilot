@@ -35,6 +35,7 @@ export default function JobMailSettings() {
   useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
   const connection = query.data?.connection;
   const connected = connection?.status === 'connected';
+  const realReadingUnavailable = !query.isError && connected && connection.provider === 'qq' && query.data?.capabilities.real_connection !== true;
   const running = query.data?.run?.status === 'running';
   const realCredential = connection?.provider === 'qq' || secureQuery.data?.configured === true || secureQuery.data?.deletion_pending === true;
   const deletionPending = secureQuery.data?.deletion_pending === true;
@@ -63,10 +64,12 @@ export default function JobMailSettings() {
   }
   function openScope() { setFolders(connected ? connection.folders : []); setBackfill(false); setScopeOpen(true); }
   function saveSchedule() {
+    if (realReadingUnavailable) return;
     if (!intervalValid) { setError('同步间隔必须是 5–1440 之间的整数分钟。'); return; }
     void runAction('schedule', () => updateJobMailSettings({ sync_mode: automatic ? 'automatic' : 'manual', interval_minutes: Number(interval), ai_enabled: false }), automatic ? '自动同步已保存，下一次时间以服务器返回为准。' : '已关闭未来自动同步；仍可立即同步。正在运行的任务继续，可单独取消。');
   }
   function saveScope() {
+    if (realReadingUnavailable) return;
     if (!folders.length) { setError('请明确选择至少一个读取文件夹。'); return; }
     if (connected) void runAction('scope', () => updateJobMailSettings({ sync_mode: connection.sync_mode, interval_minutes: connection.interval_minutes, folders }), '读取范围已保存。新目录不会自动纳入。');
     else void runAction('connect', () => connectSyntheticJobMail({ provider: 'synthetic', email: 'demo@qq.com', folders, backfill_days: backfill ? 7 : 0 }), '合成测试邮箱已连接，默认手动；尚未读取正文，请按需立即同步。');
@@ -93,9 +96,10 @@ export default function JobMailSettings() {
   const run = query.data?.run;
   const runLabels = { running: '运行中', completed: '本次已完成', failed: '本次失败', cancelled: '已取消本次', interrupted: '已中断' };
   return <section className={styles.panel} aria-labelledby="job-mail-settings-title">
-    <div className={styles.heading}><div><h3 className={styles.title} id="job-mail-settings-title">求职邮箱</h3><p className={styles.muted}>默认手动检查，邮件建议必须逐项核对确认。</p></div><span className={styles.status}>{connected ? connection.provider === 'synthetic' ? '合成测试连接' : '已连接' : '未连接'}</span></div>
+    <div className={styles.heading}><div><h3 className={styles.title} id="job-mail-settings-title">求职邮箱</h3><p className={styles.muted}>默认手动检查，邮件建议必须逐项核对确认。</p></div><span className={styles.status}>{query.isError ? '状态待核对' : realReadingUnavailable ? '已配置，本实例不读取' : connected ? connection.provider === 'synthetic' ? '合成测试连接' : '已连接' : '未连接'}</span></div>
     <Alert type="info" showIcon message="求职邮件：安全连接与逐项确认" description="真实 QQ 邮箱连接须通过本机原生凭据库和本地安全访问检查。你亲自验证后，还需另行确认保存凭据与读取范围，默认手动。AI 识别当前不可用；仅使用安全规则提出建议，不调用模型。" />
     <div className={styles.stat}><span className={styles.muted}>原生凭据能力</span><span>{secureQuery.isError ? '读取失败，暂不接收授权码' : secureQuery.data?.configured ? '已配置' : secureQuery.data?.available ? '支持库可用' : '当前不可用或尚未确认'}</span><span className={styles.muted}>{mailSecureCapabilityReason(secureQuery.isError ? undefined : secureQuery.data)}</span></div>
+    {realReadingUnavailable && <Alert type="warning" showIcon message="已保存邮箱配置，但本实例当前不会读取邮件" description="本实例未满足安全运行条件。若同目录另有持锁后端，它可能仍按原计划检查，请在该实例明确停止及清理凭据。普通启动或非持锁实例不能完成真实邮箱清理；可继续手动粘贴邮件。" />}
     {deletionPending && <Alert type="error" showIcon message="本机凭据仍待删除" description="检查已停止，但凭据删除尚未成功，不能视为已清理。已确认业务事件保留。" action={<Button disabled={!!busy} onClick={openDisconnect}>重试删除凭据</Button>} />}
     {query.isPending ? <Skeleton active paragraph={{ rows: 3 }} /> : query.isError || !query.data ? <Alert type="error" showIcon message="邮箱状态读取失败" description="无法判断是否检查成功，这不代表没有新邮件。" action={<Button onClick={() => void query.refetch()}>重试</Button>} /> : <>
       <div className={styles.stats}>
@@ -115,15 +119,15 @@ export default function JobMailSettings() {
         </div>
         <p className={styles.muted}>覆盖说明：只检查以上已选目录，自起始时间按已保存游标推进。最近成功时间不证明积压已全部覆盖；延期或失败的范围仍待处理。</p>
         <div className={styles.actions}>
-          <Button type="primary" disabled={unavailable || running || waitSeconds > 0} loading={busy === 'sync'} onClick={() => void runAction('sync', syncJobMail, '已请求手动同步，请查看任务状态。')}>{running ? '正在同步' : waitSeconds > 0 ? `${waitSeconds} 秒后可同步` : '立即同步'}</Button>
+          <Button type="primary" disabled={unavailable || realReadingUnavailable || running || waitSeconds > 0} loading={busy === 'sync'} onClick={() => void runAction('sync', syncJobMail, '已请求手动同步，请查看任务状态。')}>{running ? '正在同步' : waitSeconds > 0 ? `${waitSeconds} 秒后可同步` : '立即同步'}</Button>
           {running && run && <Button disabled={unavailable} loading={busy === 'cancel'} onClick={() => void runAction('cancel', () => cancelJobMailSync(run.id), '已请求取消本次；自动开关和未来计划保持原状。')}>取消本次</Button>}
-          <Button disabled={unavailable || running} onClick={openScope}>调整读取范围</Button>
+          <Button disabled={unavailable || realReadingUnavailable || running} onClick={openScope}>调整读取范围</Button>
           <Button danger disabled={unavailable} onClick={openDisconnect}>断开邮箱</Button>
         </div>
         <div className={styles.form}>
-          <div className={styles.actions}><Switch aria-label="自动同步" checked={automatic} disabled={unavailable} onChange={(checked) => { setAutomatic(checked); setDirty(true); setNotice(''); }} /><span>自动同步（可选，保存后生效）</span></div>
-          <label className={styles.field}>检查间隔（5–1440 分钟）<input className={styles.input} style={{ maxWidth: 220 }} aria-label="同步间隔" type="number" min={5} max={1440} step={1} value={interval} disabled={unavailable} onChange={(e) => { setIntervalMinutes(e.target.value ? Number(e.target.value) : ''); setDirty(true); setNotice(''); }} /></label>
-          <div><Button disabled={unavailable || !dirty || !intervalValid} loading={busy === 'schedule'} onClick={saveSchedule}>保存同步方式</Button>{dirty && <span className={styles.muted}> 有未保存的同步设置</span>}</div>
+          <div className={styles.actions}><Switch aria-label="自动同步" checked={automatic} disabled={unavailable || realReadingUnavailable} onChange={(checked) => { setAutomatic(checked); setDirty(true); setNotice(''); }} /><span>自动同步（可选，保存后生效）{realReadingUnavailable ? '，当前不可运行' : ''}</span></div>
+          <label className={styles.field}>检查间隔（5–1440 分钟）<input className={styles.input} style={{ maxWidth: 220 }} aria-label="同步间隔" type="number" min={5} max={1440} step={1} value={interval} disabled={unavailable || realReadingUnavailable} onChange={(e) => { setIntervalMinutes(e.target.value ? Number(e.target.value) : ''); setDirty(true); setNotice(''); }} /></label>
+          <div><Button disabled={unavailable || realReadingUnavailable || !dirty || !intervalValid} loading={busy === 'schedule'} onClick={saveSchedule}>保存同步方式</Button>{dirty && <span className={styles.muted}> 有未保存的同步设置</span>}</div>
           <p className={styles.muted}>关闭自动仍可手动同步，正在运行的任务不会因此取消。自动检查依赖后端持续运行；休眠、关机或服务停止时不会检查。修改间隔从保存后重新计时，不补跑错过的轮次。</p>
         </div>
       </>}
