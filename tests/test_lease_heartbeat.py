@@ -60,8 +60,26 @@ def _wait_until(predicate, timeout: float = 3.0) -> None:  # type: ignore[no-unt
     raise AssertionError("condition did not become true")
 
 
-def test_heartbeat_renews_matching_stage_owner_and_stops_cleanly(tmp_path) -> None:
+def test_heartbeat_renews_matching_stage_owner_and_stops_cleanly(tmp_path, monkeypatch) -> None:
     factory, stage_id, initial_expiry = _stage(tmp_path)
+    # Setup, SQLite commits and thread scheduling must not consume this test's
+    # subsecond lease. Advance business time only after observing a real commit.
+    renewal_time = initial_expiry - timedelta(seconds=0.25)
+
+    class HeartbeatClock:
+        @staticmethod
+        def now(_timezone):  # type: ignore[no-untyped-def]
+            return renewal_time
+
+    monkeypatch.setattr("offerpilot.repositories.lease_heartbeat.datetime", HeartbeatClock)
+
+    def persisted_expiry():  # type: ignore[no-untyped-def]
+        with factory() as session:
+            stage = session.get(OpportunityFitReviewStage, stage_id)
+            assert stage is not None
+            assert stage.lease_expires_at is not None
+            return stage.lease_expires_at.replace(tzinfo=timezone.utc)
+
     heartbeat = LeaseHeartbeat(
         factory,
         stage_id=stage_id,
@@ -72,17 +90,26 @@ def test_heartbeat_renews_matching_stage_owner_and_stops_cleanly(tmp_path) -> No
     )
 
     heartbeat.start()
-    time.sleep(0.25)
-    assert heartbeat.is_alive
-    heartbeat.stop()
+    try:
+        first_expiry = renewal_time + timedelta(seconds=0.5)
+        _wait_until(lambda: persisted_expiry() == first_expiry)
+        assert heartbeat.is_alive
+        assert not heartbeat.lost_ownership
+
+        # A second real renewal beyond the original expiry proves that the
+        # background loop continues to own the lease it extended.
+        renewal_time = initial_expiry + timedelta(seconds=0.1)
+        final_expiry = renewal_time + timedelta(seconds=0.5)
+        _wait_until(lambda: persisted_expiry() == final_expiry)
+        assert heartbeat.is_alive
+    finally:
+        heartbeat.stop()
 
     assert not heartbeat.is_alive
     assert not heartbeat.lost_ownership
-    with factory() as session:
-        stage = session.scalar(select(OpportunityFitReviewStage).where(OpportunityFitReviewStage.id == stage_id))
-        assert stage is not None
-        assert stage.lease_expires_at is not None
-        assert stage.lease_expires_at.replace(tzinfo=timezone.utc) > initial_expiry
+    assert persisted_expiry() == final_expiry > initial_expiry
+    assert heartbeat._renew_once() is False
+    assert persisted_expiry() == final_expiry
 
 
 def test_heartbeat_loses_ownership_when_generation_or_token_does_not_match(tmp_path) -> None:

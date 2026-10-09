@@ -15,7 +15,7 @@ async function productionAdapter(policy, load = () => require('electron-updater'
   if (!policy || policy.provider !== 'github' || policy.owner !== 'offercontext' || policy.repo !== 'offerPilot'
     || typeof policy.publisherName !== 'string' || !policy.publisherName.startsWith('CN=')) throw new Error('Unapproved release policy');
   const adapter = load();
-  // Pinned electron-updater 6.6.2 skips signature checks without publisherName.
+  // Pinned electron-updater 6.8.9 skips signature checks without publisherName.
   // Validate its actual packaged config before any network request. Do not use
   // setFeedURL, which could diverge from the config supplying the trust anchor.
   const config = await adapter.configOnDisk.value;

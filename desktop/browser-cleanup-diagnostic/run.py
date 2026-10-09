@@ -10,7 +10,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import subprocess
 import time
@@ -40,6 +40,10 @@ ALLOWED_SOURCE_PATHS = frozenset({
     "desktop/real-ai-validation/test/full-gate-routing.test.mjs",
     TEST_RELATIVE,
 })
+PYTHON_ROOT_LABELS = frozenset({
+    "provider proxy", "isolated service", "forced chromium startup",
+    "isolated python story-context-seed", "isolated python forbidden-domain-snapshot",
+})
 
 
 def replace_once(source: str, original: str, replacement: str) -> str:
@@ -51,7 +55,7 @@ def replace_once(source: str, original: str, replacement: str) -> str:
 def instrument(source: str) -> str:
     """Add append-only stage records without changing cleanup decisions."""
     trace = r"""
-function Write-CleanupDiagnostic([string]$stage, [int]$targetId = 0, [string]$label = '') {
+function Write-CleanupDiagnostic([string]$stage, [int]$targetId = 0, [string]$label = '', [object]$details = $null) {
   try {
     $record = [ordered]@{
       utc = [DateTime]::UtcNow.ToString('o')
@@ -61,7 +65,8 @@ function Write-CleanupDiagnostic([string]$stage, [int]$targetId = 0, [string]$la
       stage = $stage
       target_id = $targetId
       label = $label
-    } | ConvertTo-Json -Compress
+      details = $details
+    } | ConvertTo-Json -Compress -Depth 5
     [IO.File]::AppendAllText($env:STORY_CLEANUP_TRACE, $record + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
   } catch { }
 }
@@ -84,7 +89,8 @@ function Write-CleanupDiagnostic([string]$stage, [int]$targetId = 0, [string]$la
         "    Write-CleanupDiagnostic 'cim.begin' $processId $label\n"
         + enumeration
         + "\n    Write-CleanupDiagnostic ('cim.end children=' + (($children | "
-        "ForEach-Object { $_.ProcessId }) -join ',')) $processId $label",
+        "ForEach-Object { $_.ProcessId }) -join ',')) $processId $label "
+        "@($children | Select-Object ProcessId, ParentProcessId, Name, ExecutablePath, CreationDate)",
     )
     source = replace_once(
         source,
@@ -164,6 +170,28 @@ function Write-CleanupDiagnostic([string]$stage, [int]$targetId = 0, [string]$la
             f"  Write-CleanupDiagnostic '{stage}.begin'\n{statement}\n"
             f"  Write-CleanupDiagnostic '{stage}.end'",
         )
+    for statement, expression, label, executable in (
+        (
+            "    $process = Start-Process -FilePath $projectPython -WorkingDirectory $repo -ArgumentList @($scriptPath) -PassThru -Wait -NoNewWindow -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath",
+            "$process.Id", "('isolated python ' + $label)", "$projectPython",
+        ),
+        (
+            "  $proxy = Start-Process -FilePath $projectPython -WorkingDirectory $repo -WindowStyle Hidden -PassThru -ArgumentList @('scripts/provider-egress-proxy.py', '--port', $proxyPort, '--audit', $providerAudit, '--expected-endpoints-file', $providerAllowlist)",
+            "$proxy.Id", "'provider proxy'", "$projectPython",
+        ),
+        (
+            "  $server = Start-Process -FilePath $projectOc -WorkingDirectory $repo -WindowStyle Hidden -PassThru -ArgumentList @('start', '--port', $port)",
+            "$server.Id", "'isolated service'", "$projectOc",
+        ),
+        (
+            "      $script:browserStartupAttempt = $process",
+            "$process.Id", "'forced chromium startup'", "$projectPython",
+        ),
+    ):
+        source = replace_once(
+            source, statement,
+            statement + f"\n  Write-CleanupDiagnostic 'python.root' {expression} {label} @{{ executable = {executable} }}",
+        )
     return source
 
 
@@ -239,6 +267,8 @@ def bounded_run(
     return {
         "name": name,
         "pid": process.pid,
+        "ppid": os.getpid(),
+        "executable": command[0],
         "returncode": process.returncode,
         "timed_out": timed_out,
         "elapsed_seconds": round(time.monotonic() - started, 3),
@@ -250,14 +280,25 @@ def bounded_run(
 def prepare_offline_environment(repo: Path, evidence: Path, harness: Path) -> dict[str, str]:
     bootstrap = evidence / "bootstrap"
     bootstrap.mkdir()
+    guard_directory = evidence / "offline-guards"
+    guard_directory.mkdir()
     (bootstrap / "sitecustomize.py").write_text(
-        "import json, os, sys\n"
+        "import ctypes, json, os, sys, tempfile\n"
         "try:\n"
         "    import tests._offline_network_guard as guard\n"
         "    if not guard._EARLY_INSTALL:\n"
         "        raise RuntimeError('Offline guard did not load before product modules')\n"
-        "    with open(os.environ['STORY_GUARD_TRACE'], 'a', encoding='utf-8') as output:\n"
-        "        output.write(json.dumps({'pid': os.getpid(), 'ppid': os.getppid(), 'early': True}) + '\\n')\n"
+        "    if os.name == 'nt':\n"
+        "        image = ctypes.create_unicode_buffer(32768)\n"
+        "        count = ctypes.windll.kernel32.GetModuleFileNameW(None, image, len(image))\n"
+        "        if not count or count >= len(image):\n"
+        "            raise RuntimeError('Cannot identify this Python process image')\n"
+        "        executable = image.value\n"
+        "    else:\n"
+        "        executable = os.readlink('/proc/self/exe')\n"
+        "    descriptor, path = tempfile.mkstemp(prefix='guard-' + str(os.getpid()) + '-', suffix='.json', dir=os.environ['STORY_GUARD_DIRECTORY'])\n"
+        "    with os.fdopen(descriptor, 'w', encoding='utf-8') as output:\n"
+        "        json.dump({'pid': os.getpid(), 'ppid': os.getppid(), 'early': True, 'executable': executable}, output)\n"
         "except BaseException as error:\n"
         "    sys.stderr.write('Diagnostic offline guard startup failed: ' + str(error) + '\\n')\n"
         "    os._exit(86)\n",
@@ -285,12 +326,108 @@ def prepare_offline_environment(repo: Path, evidence: Path, harness: Path) -> di
         "PYTHONUTF8": "1",
         "PYTHONUNBUFFERED": "1",
         "LITELLM_LOCAL_MODEL_COST_MAP": "True",
-        "STORY_GUARD_TRACE": str(evidence / "offline-guard.jsonl"),
+        "STORY_GUARD_DIRECTORY": str(guard_directory),
         "STORY_DIAGNOSTIC_HARNESS": str(harness),
         "STORY_DIAGNOSTIC_MODE": "target",
         "STORY_CLEANUP_TRACE": str(evidence / "harness-cleanup.jsonl"),
     })
     return environment
+
+
+def read_guard_records(evidence: Path) -> list[dict]:
+    files = sorted((evidence / "offline-guards").iterdir())
+    records = []
+    for path in files:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if (
+            not isinstance(record, dict)
+            or set(record) != {"pid", "ppid", "early", "executable"}
+            or any(type(record[key]) is not int or record[key] <= 0 for key in ("pid", "ppid"))
+            or record["early"] is not True
+            or not isinstance(record["executable"], str)
+            or not (PureWindowsPath(record["executable"]).is_absolute() or Path(record["executable"]).is_absolute())
+            or re.fullmatch(r"python(?:\d+(?:\.\d+)?)?(?:\.exe)?", PureWindowsPath(record["executable"]).name, re.I) is None
+            or not path.name.startswith(f"guard-{record['pid']}-") or path.suffix != ".json"
+        ):
+            raise ValueError("Invalid early-guard process identity record")
+        records.append(record)
+    if not records or len({record["pid"] for record in records}) != len(records):
+        raise ValueError("Missing or duplicate early-guard process identities")
+    return records
+
+
+def verify_guard_coverage(records: list[dict], trace: list[dict], results: list[dict]) -> None:
+    launches = [event for event in trace if event["stage"] == "python.root"]
+    if len(launches) != 5 or {event["label"] for event in launches} != PYTHON_ROOT_LABELS:
+        raise ValueError("Missing or duplicate owned Python launch roots")
+    roots = [row["pid"] for row in results] + [event["target_id"] for event in launches]
+    if (
+        len(roots) != 7 or any(type(pid) is not int or pid <= 0 for pid in roots)
+        or len(set(roots)) != 7 or len(records) != 7
+    ):
+        raise ValueError("Every one of the seven owned Python launches requires a distinct guard record")
+    for label, executable in (
+        [("pytest", row["executable"]) for row in results]
+        + [(event["label"], event["details"]["executable"]) for event in launches]
+    ):
+        expected_name = "oc.exe" if label == "isolated service" else "python.exe"
+        if (
+            not isinstance(executable, str) or not PureWindowsPath(executable).is_absolute()
+            or PureWindowsPath(executable).name.casefold() != expected_name
+        ):
+            raise ValueError("Owned launch root has an invalid executable identity")
+    children: dict[int, set[int]] = {}
+    parents: dict[int, int] = {}
+    images: dict[int, str] = {}
+
+    def add_identity(pid: int, ppid: int, executable: str | None) -> None:
+        if any(type(value) is not int or value <= 0 for value in (pid, ppid)) or pid == ppid:
+            raise ValueError("Invalid process parent identity")
+        if pid in parents and parents[pid] != ppid:
+            raise ValueError("Process has conflicting parent identities")
+        parents[pid] = ppid
+        children.setdefault(ppid, set()).add(pid)
+        if executable:
+            if not isinstance(executable, str):
+                raise ValueError("Invalid process executable identity")
+            image = str(PureWindowsPath(executable)).casefold()
+            if pid in images and images[pid] != image:
+                raise ValueError("Process has conflicting executable identities")
+            images[pid] = image
+
+    for row in results:
+        add_identity(row["pid"], row["ppid"], row["executable"])
+    for event in launches:
+        add_identity(event["target_id"], event["powershell_pid"], event["details"]["executable"])
+    for event in trace:
+        if event["stage"].startswith("cim.end"):
+            for child in event["details"] or []:
+                if child["ParentProcessId"] != event["target_id"]:
+                    raise ValueError("CIM child has an inconsistent parent identity")
+                add_identity(child["ProcessId"], child["ParentProcessId"], child["ExecutablePath"])
+    for record in records:
+        add_identity(record["pid"], record["ppid"], record["executable"])
+    for pid in parents:
+        ancestors = set()
+        while pid in parents:
+            if pid in ancestors:
+                raise ValueError("Process identity chain contains a cycle")
+            ancestors.add(pid)
+            pid = parents[pid]
+    covered = set()
+    for root in roots:
+        descendants = set()
+        pending = [root]
+        while pending:
+            process_id = pending.pop()
+            if process_id in descendants:
+                continue
+            descendants.add(process_id)
+            pending.extend(children.get(process_id, ()))
+        matches = {record["pid"] for record in records if record["pid"] in descendants}
+        if len(matches) != 1 or covered & matches:
+            raise ValueError("Missing, ambiguous, or duplicated guard coverage for an owned launch root")
+        covered.update(matches)
 
 
 def evidence_errors(evidence: Path, results: list[dict[str, object]]) -> list[str]:
@@ -310,18 +447,14 @@ def evidence_errors(evidence: Path, results: list[dict[str, object]]) -> list[st
             errors.append("JUnit did not identify exactly the requested case")
         if any(case.find(tag) is not None for case in races + cases for tag in ("failure", "error", "skipped")):
             errors.append("An approved case failed, errored, or skipped")
-        stages = [
-            json.loads(line)["stage"]
+        trace = [
+            json.loads(line)
             for line in (evidence / "harness-cleanup.jsonl").read_text(encoding="utf-8").splitlines()
         ]
+        stages = [event["stage"] for event in trace]
         if not {"harness.begin", "chromium.begin", "finally.exit failures=0"}.issubset(stages):
             errors.append("Requested case did not complete the fail-closed cleanup path")
-        guards = [
-            json.loads(line)
-            for line in (evidence / "offline-guard.jsonl").read_text(encoding="utf-8").splitlines()
-        ]
-        if not guards or any(row.get("early") is not True for row in guards):
-            errors.append("Early offline guard activation evidence is missing")
+        verify_guard_coverage(read_guard_records(evidence), trace, results)
     except (OSError, ValueError, KeyError, TypeError, ET.ParseError) as error:
         errors.append(f"Incomplete diagnostic evidence: {error}")
     return errors

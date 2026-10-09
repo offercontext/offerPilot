@@ -88,15 +88,17 @@ def test_outer_timeout_only_kills_the_created_process_tree(
     assert result["returncode"] == 1
 
 
-@pytest.mark.parametrize("broken", (False, True))
+@pytest.mark.parametrize("fault", (None, "guard-import", "record-directory"))
 def test_subprocess_offline_bootstrap_blocks_external_sockets_or_exits_closed(
-    tmp_path: Path, broken: bool,
+    tmp_path: Path, fault: str | None,
 ) -> None:
     environment = _MODULE.prepare_offline_environment(_REPO, tmp_path, _REPO / _MODULE.HARNESS_RELATIVE)
-    if broken:
+    if fault == "guard-import":
         bootstrap = tmp_path / "bootstrap" / "sitecustomize.py"
         source = bootstrap.read_text(encoding="utf-8")
         bootstrap.write_text(source.replace("import tests._offline_network_guard as guard", "raise RuntimeError('forced guard failure')"))
+    elif fault == "record-directory":
+        environment["STORY_GUARD_DIRECTORY"] = str(tmp_path / "missing-directory")
     result = subprocess.run(
         [
             sys.executable, "-c",
@@ -110,17 +112,175 @@ def test_subprocess_offline_bootstrap_blocks_external_sockets_or_exits_closed(
         ],
         cwd=tmp_path, env=environment, text=True, capture_output=True, timeout=20,
     )
-    if broken:
+    if fault is not None:
         assert result.returncode == 86
         assert "Diagnostic offline guard startup failed" in result.stderr
-        assert not (tmp_path / "offline-guard.jsonl").exists()
+        assert list((tmp_path / "offline-guards").iterdir()) == []
     else:
         assert result.returncode == 0, result.stderr
         assert "external socket blocked before DNS" in result.stdout
-        records = [json.loads(line) for line in (tmp_path / "offline-guard.jsonl").read_text().splitlines()]
+        records = _MODULE.read_guard_records(tmp_path)
         assert len(records) == 1
         assert records[0]["early"] is True
         assert records[0]["ppid"] == os.getpid()
+
+
+def test_concurrent_python_startups_keep_one_complete_record_per_process(tmp_path: Path) -> None:
+    environment = _MODULE.prepare_offline_environment(_REPO, tmp_path, _REPO / _MODULE.HARNESS_RELATIVE)
+    processes = []
+    try:
+        for _ in range(8):
+            processes.append(subprocess.Popen(
+                [sys.executable, "-c", "import os; print(os.getpid())"],
+                cwd=tmp_path, env=environment, text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            ))
+        identities = set()
+        for process in processes:
+            stdout, stderr = process.communicate(timeout=20)
+            assert process.returncode == 0, stderr
+            identities.add(int(stdout.strip()))
+        records = _MODULE.read_guard_records(tmp_path)
+        assert len(records) == len(identities) == 8
+        assert {record["pid"] for record in records} == identities
+        assert all(record["early"] is True for record in records)
+    finally:
+        for process in processes:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+
+
+def _write_guard_evidence(tmp_path: Path) -> tuple[list[dict], list[dict]]:
+    """Seven startups, including an oc launcher with an intermediate parent."""
+    directory = tmp_path / "offline-guards"
+    directory.mkdir()
+    image = r"C:\Python\python.exe"
+    launcher = r"C:\repo\.venv\Scripts\python.exe"
+    results = [
+        {"pid": root, "ppid": 10, "executable": launcher, "returncode": 0, "timed_out": False}
+        for root in (100, 200)
+    ]
+    roots = [100, 200, 300, 400, 500, 600, 700]
+    labels = sorted(_MODULE.PYTHON_ROOT_LABELS)
+    trace = [
+        {"stage": "python.root", "target_id": root, "powershell_pid": 20, "label": label,
+         "details": {"executable": r"C:\repo\.venv\Scripts\oc.exe" if label == "isolated service" else launcher}}
+        for root, label in zip(roots[2:], labels, strict=True)
+    ]
+    for root in roots:
+        parent = root + 1
+        pid = root + 2
+        trace.append({
+            "stage": f"cim.end children={parent}", "target_id": root,
+            "details": [{"ProcessId": parent, "ParentProcessId": root,
+                         "Name": "python.exe", "ExecutablePath": launcher}],
+        })
+        record = {"pid": pid, "ppid": parent, "early": True, "executable": image}
+        (directory / f"guard-{pid}-unique.json").write_text(json.dumps(record))
+    return trace, results
+
+
+@pytest.mark.parametrize("depth", (0, 1, 2))
+def test_guard_coverage_resolves_actual_python_through_recorded_launcher_chain(
+    tmp_path: Path, depth: int,
+) -> None:
+    trace, results = _write_guard_evidence(tmp_path)
+    if depth < 2:
+        trace = [event for event in trace if event["stage"] == "python.root"]
+        directory = tmp_path / "offline-guards"
+        roots = results + [
+            {"pid": event["target_id"], "ppid": event["powershell_pid"], "executable": event["details"]["executable"]}
+            for event in trace
+        ]
+        for root in roots:
+            path = directory / f"guard-{root['pid'] + 2}-unique.json"
+            record = json.loads(path.read_text())
+            if depth == 0 and not root["executable"].endswith("oc.exe"):
+                record.update({key: root[key] for key in ("pid", "ppid", "executable")})
+            else:
+                record["ppid"] = root["pid"]
+            path.unlink()
+            (directory / f"guard-{record['pid']}-unique.json").write_text(json.dumps(record))
+    _MODULE.verify_guard_coverage(_MODULE.read_guard_records(tmp_path), trace, results)
+
+
+@pytest.mark.parametrize("fault", (
+    None, "damaged", "missing-record", "duplicate-pid", "forged-filename",
+    "not-early", "not-python", "missing-root", "duplicate-root", "orphan",
+    "wrong-parent", "wrong-image", "conflicting-parent", "conflicting-image", "wrong-root-image",
+    "guard-parent-conflict", "relative-image", "parent-cycle", "root-parent-conflict", "root-image-conflict",
+))
+def test_guard_evidence_rejects_incomplete_or_conflicting_process_identities(
+    tmp_path: Path, fault: str | None,
+) -> None:
+    trace, results = _write_guard_evidence(tmp_path)
+    directory = tmp_path / "offline-guards"
+    record_path = directory / "guard-302-unique.json"
+    record = json.loads(record_path.read_text())
+    if fault == "damaged":
+        record_path.write_text('{"pid":')
+    elif fault == "missing-record":
+        record_path.unlink()
+    elif fault == "duplicate-pid":
+        (directory / "guard-302-duplicate.json").write_text(json.dumps(record))
+    elif fault == "forged-filename":
+        record_path.rename(directory / "guard-999-unique.json")
+    elif fault in ("not-early", "not-python", "orphan", "relative-image"):
+        record.update({
+            "not-early": {"early": False}, "not-python": {"executable": r"C:\Windows\cmd.exe"},
+            "orphan": {"ppid": 999}, "relative-image": {"executable": "python.exe"},
+        }[fault])
+        record_path.write_text(json.dumps(record))
+    elif fault == "missing-root":
+        del trace[0]
+    elif fault == "duplicate-root":
+        trace[0]["target_id"] = trace[1]["target_id"]
+    elif fault == "wrong-root-image":
+        trace[0]["details"]["executable"] = r"C:\Windows\cmd.exe"
+    elif fault == "guard-parent-conflict":
+        trace.append({
+            "stage": "cim.end children=302", "target_id": 301,
+            "details": [{"ProcessId": 302, "ParentProcessId": 301,
+                         "Name": "python.exe", "ExecutablePath": record["executable"]}],
+        })
+        record["ppid"] = 999
+        record_path.write_text(json.dumps(record))
+    elif fault == "parent-cycle":
+        for parent, pid in ((900, 901), (901, 900)):
+            trace.append({
+                "stage": f"cim.end children={pid}", "target_id": parent,
+                "details": [{"ProcessId": pid, "ParentProcessId": parent,
+                             "Name": "python.exe", "ExecutablePath": record["executable"]}],
+            })
+    elif fault in ("root-parent-conflict", "root-image-conflict"):
+        record["pid"] = 300
+        record["ppid"] = 9999 if fault == "root-parent-conflict" else 20
+        record["executable"] = trace[0]["details"]["executable"] if fault == "root-parent-conflict" else r"C:\other\python.exe"
+        record_path.unlink()
+        (directory / "guard-300-unique.json").write_text(json.dumps(record))
+    elif fault in ("wrong-parent", "wrong-image"):
+        trace.append({
+            "stage": "cim.end children=302", "target_id": 301,
+            "details": [{"ProcessId": 302, "ParentProcessId": 999 if fault == "wrong-parent" else 301,
+                         "Name": "python.exe", "ExecutablePath": r"C:\other\python.exe"}],
+        })
+    elif fault in ("conflicting-parent", "conflicting-image"):
+        for parent, image in (
+            (301, record["executable"]),
+            (999 if fault == "conflicting-parent" else 301,
+             r"C:\other\python.exe" if fault == "conflicting-image" else record["executable"]),
+        ):
+            trace.append({
+                "stage": "cim.end children=302", "target_id": parent,
+                "details": [{"ProcessId": 302, "ParentProcessId": parent,
+                             "Name": "python.exe", "ExecutablePath": image}],
+            })
+    if fault is None:
+        _MODULE.verify_guard_coverage(_MODULE.read_guard_records(tmp_path), trace, results)
+    else:
+        with pytest.raises((OSError, ValueError, KeyError, TypeError)):
+            _MODULE.verify_guard_coverage(_MODULE.read_guard_records(tmp_path), trace, results)
 
 
 @pytest.mark.parametrize("fault", (None, "collection-error", "assertion-failed", "no-stage", "wrong-case", "extra-case"))
@@ -138,11 +298,9 @@ def test_evidence_requires_exact_five_control_cases_to_pass(
         f'<testsuites><testsuite tests="1"><testcase name="{case}">{failure}</testcase></testsuite></testsuites>'
     )
     stages = ["harness.begin"] if fault == "no-stage" else ["harness.begin", "chromium.begin", "finally.exit failures=0"]
-    (tmp_path / "harness-cleanup.jsonl").write_text(
-        "\n".join(json.dumps({"stage": stage}) for stage in stages)
-    )
-    (tmp_path / "offline-guard.jsonl").write_text(json.dumps({"early": True}))
-    results = [{"returncode": 0, "timed_out": False} for _ in range(2)]
+    trace, results = _write_guard_evidence(tmp_path)
+    trace.extend({"stage": stage} for stage in stages)
+    (tmp_path / "harness-cleanup.jsonl").write_text("\n".join(map(json.dumps, trace)))
     if fault == "collection-error":
         results[-1]["returncode"] = 2
     if fault == "assertion-failed":

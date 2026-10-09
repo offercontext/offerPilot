@@ -851,7 +851,11 @@ def _find_v2_stage_by_application_key(
 def _v2_live_owner_conditions(
     stage: OpportunityFitReviewStage, provider_token: str, now: datetime
 ) -> tuple[Any, ...]:
+    # Callers load this stage after BEGIN IMMEDIATE. Compare parsed instants as
+    # well as the CAS so legacy offset-bearing expiry text cannot pass equality.
+    expires_at = _as_utc(stage.lease_expires_at)
     return (
+        expires_at is not None and expires_at > now,
         OpportunityFitReviewStage.id == stage.id,
         OpportunityFitReviewStage.stage_generation == stage.stage_generation,
         OpportunityFitReviewStage.provider_call_token == provider_token,

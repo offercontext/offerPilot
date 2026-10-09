@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Optional, Sequence
 
-from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -724,30 +724,38 @@ class KnowledgeRepository:
         *,
         job_id: int,
         attempt_token: str,
-        moment: datetime,
-    ) -> bool:
-        """原子获取一个仍在 lease 内且未取消的 running Job 写入资格。
+        moment: Optional[datetime] = None,
+    ) -> Optional[datetime]:
+        """锁定有效 running Job，返回锁后采样的 UTC 时间；拒绝时返回 None。
 
-        先读 Job 再更新会留下取消/过期竞态；这里用带完整门禁的 UPDATE 抢占
-        SQLite 写锁，后续 Attempt、Brief、Job 更新都在同一事务中完成。
+        guarded no-op UPDATE 先取得 SQLite 写锁，再精确比较 typed datetime。
+        raw adapter/ORM 的小数位和时区后缀不同，不能按文本判断 expiry。
+        后续 Attempt、Brief、Job 更新都保留在同一写事务内。
         """
 
         result = session.execute(
             text(
                 """
                 UPDATE knowledge_jobs
-                SET updated_at = :moment
+                SET updated_at = updated_at
                 WHERE id = :jid
                   AND status = 'running'
                   AND canceled = 0
                   AND attempt_token = :token
                   AND lease_expires_at IS NOT NULL
-                  AND lease_expires_at > :moment
                 """
             ),
-            {"jid": job_id, "token": attempt_token, "moment": moment},
+            {"jid": job_id, "token": attempt_token},
         )
-        return int(getattr(result, "rowcount", 0) or 0) == 1
+        if int(getattr(result, "rowcount", 0) or 0) != 1:
+            return None
+        locked_moment = _as_utc_datetime(moment) or datetime.now(timezone.utc)
+        expiry = _as_utc_datetime(session.scalar(
+            select(KnowledgeJob.lease_expires_at).where(KnowledgeJob.id == job_id)
+        ))
+        if expiry is None or expiry <= locked_moment:
+            return None
+        return locked_moment
 
     # Source
 
@@ -1471,12 +1479,14 @@ class KnowledgeRepository:
         Spec §12 "Job claim 使用 lease owner、expiry 和 heartbeat"。token 不匹配
         返回 ``None``——可能是同一 job 已被另一个 lease 重 claim，旧 worker 应停止。
         """
-        moment = now or datetime.now(timezone.utc)
-        expires_at = moment + timedelta(seconds=max(1, lease_duration_seconds))
         with self._session_factory() as session:
-            # 取消和续租必须在同一 UPDATE 门禁中判断。先读再写会允许
-            # mark_canceled() 在两次操作之间提交，随后 heartbeat 又把已取消 Job
-            # 重新续租，导致恢复/迟到结果语义失真。
+            moment = self._lock_active_job_for_write(
+                session, job_id=job_id, attempt_token=attempt_token, moment=now
+            )
+            if moment is None:
+                return None
+            expires_at = moment + timedelta(seconds=max(1, lease_duration_seconds))
+            # 取消、续租和提交共享同一写锁；deadline 已按 UTC 精确验证。
             result = session.execute(
                 text(
                     """
@@ -1489,7 +1499,6 @@ class KnowledgeRepository:
                       AND canceled = 0
                       AND attempt_token = :token
                       AND lease_expires_at IS NOT NULL
-                      AND lease_expires_at > :moment
                     """
                 ),
                 {
@@ -1534,8 +1543,9 @@ class KnowledgeRepository:
         为 True 时 ``retry_count`` 加 1（用于 Brief 重试计数）。
         """
 
-        moment = now or datetime.now(timezone.utc)
         with self._session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            moment = _as_utc_datetime(now) or datetime.now(timezone.utc)
             row = session.get(KnowledgeJob, job_id)
             if row is None:
                 return False, None
@@ -1563,11 +1573,10 @@ class KnowledgeRepository:
             else:
                 # lease 到期后即使旧 token 仍相同也不能提交，避免恢复线程尚未
                 # 重置 Job 时迟到结果写入正式状态。
-                eligible_where = (
-                    "status = 'running' AND canceled = 0 "
-                    "AND lease_expires_at IS NOT NULL "
-                    "AND lease_expires_at > :moment"
-                )
+                expiry = _as_utc_datetime(row.lease_expires_at)
+                if expiry is None or expiry <= moment:
+                    return False, None
+                eligible_where = "status = 'running' AND canceled = 0"
             retry_expression = "retry_count + 1" if increment_retry else "retry_count"
             result = session.execute(
                 text(
@@ -1689,9 +1698,11 @@ class KnowledgeRepository:
 
         返回被恢复的 job_id 列表，便于日志与测试。
         """
-        moment = now or datetime.now(timezone.utc)
         recovered: list[int] = []
         with self._session_factory() as session:
+            # 先持有写锁，再读取/判断 expiry，避免并发 heartbeat 被恢复覆盖。
+            session.execute(text("BEGIN IMMEDIATE"))
+            moment = _as_utc_datetime(now) or datetime.now(timezone.utc)
             stale_conditions = [KnowledgeJob.status == "running"]
             if not requeue:
                 # 旧的诊断调用仍不主动恢复删除 Job；应用运行时的 requeue 路径会
@@ -1702,20 +1713,12 @@ class KnowledgeRepository:
                 # lease 过期发现；运行时恢复应把它安全终结为 canceled。
                 stale_conditions.append(
                     or_(
-                        and_(
-                            KnowledgeJob.lease_expires_at.is_not(None),
-                            KnowledgeJob.lease_expires_at < moment,
-                        ),
+                        KnowledgeJob.lease_expires_at.is_not(None),
                         KnowledgeJob.canceled.is_(True),
                     )
                 )
             else:
-                stale_conditions.extend(
-                    (
-                        KnowledgeJob.lease_expires_at.is_not(None),
-                        KnowledgeJob.lease_expires_at < moment,
-                    )
-                )
+                stale_conditions.append(KnowledgeJob.lease_expires_at.is_not(None))
             stale = (
                 select(KnowledgeJob)
                 .where(*stale_conditions)
@@ -1770,6 +1773,11 @@ class KnowledgeRepository:
                         terminal_source.updated_at = moment
 
             for row in session.scalars(stale):
+                expiry = _as_utc_datetime(row.lease_expires_at)
+                if not (requeue and row.canceled) and (
+                    expiry is None or expiry > moment
+                ):
+                    continue
                 if requeue and row.canceled:
                     row.status = "canceled"
                     row.stage = "canceled"
@@ -2446,15 +2454,14 @@ class KnowledgeRepository:
            ``bump_brief_attempt_retry`` 写入的最近一次预计重试时间，便于诊断与
            Spec §11.4 "重启后保留"，不在失败时清空。
         """
-        moment = datetime.now(timezone.utc)
         with self._session_factory() as session:
             with session.begin():
-                if not self._lock_active_job_for_write(
+                moment = self._lock_active_job_for_write(
                     session,
                     job_id=job_id,
                     attempt_token=attempt_token,
-                    moment=moment,
-                ):
+                )
+                if moment is None:
                     return False, None, None
                 attempt_row = session.get(KnowledgeBriefAttempt, attempt_id)
                 if attempt_row is None:
@@ -2555,15 +2562,14 @@ class KnowledgeRepository:
         4. Brief Job complete_job(succeeded)。
         5. Source ``brief_status=ready``、``active_brief_id=brief.id``、清空 error 字段。
         """
-        moment = datetime.now(timezone.utc)
         with self._session_factory() as session:
             with session.begin():
-                if not self._lock_active_job_for_write(
+                moment = self._lock_active_job_for_write(
                     session,
                     job_id=job_id,
                     attempt_token=attempt_token,
-                    moment=moment,
-                ):
+                )
+                if moment is None:
                     return False, None, None
                 attempt_row = session.get(KnowledgeBriefAttempt, attempt_id)
                 if attempt_row is None:
