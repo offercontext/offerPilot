@@ -17,8 +17,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import OperationalError
 
-import offerpilot.agent_runtime.journal as journal_module
 import offerpilot.chat_transport as transport_module
+from offerpilot.agent_runtime.budget import (
+    JOURNAL_DISPOSITION_BUDGET_SECONDS,
+    JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS,
+)
 from offerpilot.ai.types import Assistant, Message, ToolCall
 from offerpilot.ai.agent_contracts import PendingAction, StalePendingActionError
 from offerpilot.ai.tool_runtime.catalog import compile_tool_metadata_manifest
@@ -341,12 +344,32 @@ def _non_advancing_journal_clock():
     return 0.0
 
 
+class ProviderGapClock:
+    """Expose real provider waits to Journal without timing unrelated host work."""
+
+    def __init__(self):
+        self.elapsed = 0.0
+        self.sampled_values = set()
+
+    def __call__(self):
+        self.sampled_values.add(self.elapsed)
+        return self.elapsed
+
+    def wait(self, delay):
+        started = time.monotonic()
+        time.sleep(delay)
+        elapsed = time.monotonic() - started
+        self.elapsed += elapsed
+        return elapsed
+
+
 def _stable_journal_factory(
     data_dir,
     *,
     segment_budget_seconds=2.0,
     disposition_budget_seconds=0.5,
     clock=_non_advancing_journal_clock,
+    diagnostic_sink=None,
 ):
     repository = AgentRunRepository(journal_session_factory_for_data_dir(data_dir))
     key = load_or_create_journal_key(data_dir)
@@ -357,6 +380,7 @@ def _stable_journal_factory(
         clock=clock,
         segment_budget_seconds=segment_budget_seconds,
         disposition_budget_seconds=disposition_budget_seconds,
+        diagnostic_sink=diagnostic_sink,
     )
 
 
@@ -409,7 +433,8 @@ class SlowModel:
 class SlowFinalModel:
     """A real provider wall-time gap must not consume Journal active budget."""
 
-    def __init__(self, reply="stable slow reply", delay=2.05):
+    def __init__(self, journal_clock, reply="stable slow reply", delay=2.05):
+        self.journal_clock = journal_clock
         self.reply = reply
         self.delay = delay
         self.calls = 0
@@ -418,16 +443,15 @@ class SlowFinalModel:
     def complete(self, messages, tools):
         del messages, tools
         self.calls += 1
-        started = time.monotonic()
-        time.sleep(self.delay)
-        self.elapsed = time.monotonic() - started
+        self.elapsed = self.journal_clock.wait(self.delay)
         return Assistant(content=self.reply)
 
 
 class SlowReadThenFinalModel:
     """Wait before a read-tool turn, then finish on the next provider call."""
 
-    def __init__(self, reply="stable read reply", delay=2.05):
+    def __init__(self, journal_clock, reply="stable read reply", delay=2.05):
+        self.journal_clock = journal_clock
         self.reply = reply
         self.delay = delay
         self.calls = 0
@@ -437,9 +461,7 @@ class SlowReadThenFinalModel:
         del messages, tools
         self.calls += 1
         if self.calls == 1:
-            started = time.monotonic()
-            time.sleep(self.delay)
-            self.elapsed = time.monotonic() - started
+            self.elapsed = self.journal_clock.wait(self.delay)
             return Assistant(
                 tool_calls=[
                     ToolCall(
@@ -1131,20 +1153,22 @@ def test_shutdown_cleanup_continues_after_knowledge_stop_failure(tmp_path, monke
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
-def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeypatch, endpoint):
-    # This test isolates the provider wall-time gap from the independently tested
-    # 50 ms per-operation default; the 0.5 s cap remains far below the 3.05 s gap.
-    monkeypatch.setattr(journal_module, "JOURNAL_OPERATION_HARD_CAP_SECONDS", 0.5)
+def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, endpoint):
+    # Project the actual provider wait into Journal's injected clock. SQLite and
+    # host scheduling have separate hard-cap tests and must not decide this probe.
+    journal_clock = ProviderGapClock()
+    diagnostics = []
     session_factory_for_data_dir(tmp_path)
-    model = SlowFinalModel(reply="stable slow final", delay=3.05)
+    model = SlowFinalModel(journal_clock, reply="stable slow final", delay=3.05)
     client = TestClient(
         create_app(
             data_dir=tmp_path,
             run_recorder_factory=_stable_journal_factory(
                 tmp_path,
-                segment_budget_seconds=3.0,
-                disposition_budget_seconds=0.5,
-                clock=time.monotonic,
+                segment_budget_seconds=JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS,
+                disposition_budget_seconds=JOURNAL_DISPOSITION_BUDGET_SECONDS,
+                clock=journal_clock,
+                diagnostic_sink=diagnostics.append,
             ),
             chat_model=model,
             title_model=ScriptedModel([Assistant(content="title")]),
@@ -1160,6 +1184,9 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
 
     assert elapsed >= 2.0
     assert model.elapsed >= 2.0
+    assert journal_clock.sampled_values == {0.0, model.elapsed}
+    assert journal_clock() == model.elapsed
+    assert journal_clock() > JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         events = _parse_sse_events(response.text)
@@ -1186,7 +1213,7 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
     )
     assert len(runs) == 1
     assert runs[0].status == "completed"
-    assert runs[0].recording_status == "healthy"
+    assert runs[0].recording_status == "healthy", diagnostics
     assert [event.event_type for event in events] == [
         "run.started",
         "segment.started",
@@ -1214,11 +1241,10 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
 
 @pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
 def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
-    tmp_path, monkeypatch, endpoint
+    tmp_path, endpoint
 ):
-    # Keep the real monotonic clock and provider delay while isolating Journal
-    # operation scheduling jitter from the separate hard-cap unit contract.
-    monkeypatch.setattr(journal_module, "JOURNAL_OPERATION_HARD_CAP_SECONDS", 0.5)
+    journal_clock = ProviderGapClock()
+    diagnostics = []
     seed = TestClient(create_app(data_dir=tmp_path))
     application = seed.post(
         "/api/applications",
@@ -1229,15 +1255,16 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
         },
     ).json()
     seed.close()
-    model = SlowReadThenFinalModel(reply="stable read final", delay=3.05)
+    model = SlowReadThenFinalModel(journal_clock, reply="stable read final", delay=3.05)
     client = TestClient(
         create_app(
             data_dir=tmp_path,
             run_recorder_factory=_stable_journal_factory(
                 tmp_path,
-                segment_budget_seconds=3.0,
-                disposition_budget_seconds=0.5,
-                clock=time.monotonic,
+                segment_budget_seconds=JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS,
+                disposition_budget_seconds=JOURNAL_DISPOSITION_BUDGET_SECONDS,
+                clock=journal_clock,
+                diagnostic_sink=diagnostics.append,
             ),
             chat_model=model,
             title_model=ScriptedModel([Assistant(content="title")]),
@@ -1253,6 +1280,9 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
 
     assert elapsed >= 2.0
     assert model.elapsed >= 2.0
+    assert journal_clock.sampled_values == {0.0, model.elapsed}
+    assert journal_clock() == model.elapsed
+    assert journal_clock() > JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         transport_events = _parse_sse_events(response.text)
@@ -1309,7 +1339,7 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
     )
     assert len(runs) == 1
     assert runs[0].status == "completed"
-    assert runs[0].recording_status == "healthy"
+    assert runs[0].recording_status == "healthy", diagnostics
     event_types = [event.event_type for event in events]
     assert event_types.count("model.requested") == 2
     assert event_types.count("model.completed") == 2
@@ -3573,11 +3603,16 @@ def test_stable_journal_clock_contract_keeps_real_time_probes_explicit():
     assert inspect.signature(_stable_journal_factory).parameters["clock"].default is (
         _non_advancing_journal_clock
     )
-    for probe in (
-        test_journal_active_budget_ignores_slow_final_provider_gap,
-        test_journal_active_budget_ignores_slow_provider_before_read_then_final,
-    ):
-        assert "clock=time.monotonic" in inspect.getsource(probe)
+    clock = ProviderGapClock()
+    assert clock() == 0.0
+    first_gap = clock.wait(0.01)
+    assert first_gap >= 0.01
+    assert clock() == first_gap
+    time.sleep(0.01)
+    assert clock() == first_gap
+    second_gap = clock.wait(0.01)
+    assert second_gap >= 0.01
+    assert clock() == first_gap + second_gap
 
 
 def _checked_turn_identity(payload, *, required=False):

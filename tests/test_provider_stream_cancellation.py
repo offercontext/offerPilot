@@ -1,10 +1,12 @@
 """Real localhost HTTP transport cancellation; no paid model or credentials."""
 from __future__ import annotations
 
+import errno
 import json
 import select
 import socket
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from http.client import HTTPConnection
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
 from time import monotonic, sleep
@@ -55,7 +57,9 @@ def streaming_provider(mode):
                     self.end_headers()
                 self.wfile.write(b'data: [DONE]\n\n')
                 self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
+            # Winsock can report an established connection's closure as 10053
+            # (ConnectionAbortedError), not only a peer reset or broken pipe.
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 disconnected.set()
 
     server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -68,6 +72,72 @@ def streaming_provider(mode):
         server.shutdown()
         server.server_close()
         thread.join(2)
+
+
+@pytest.mark.parametrize(("error", "records_disconnect"), [
+    pytest.param(None, True, id="eof"),
+    pytest.param(ConnectionAbortedError(10053, "synthetic Windows abort"), True,
+                 id="windows-abort-10053"),
+    pytest.param(ConnectionResetError(10054, "synthetic Windows reset"), True,
+                 id="windows-reset-10054"),
+    pytest.param(BrokenPipeError(errno.EPIPE, "synthetic broken pipe"), True, id="broken-pipe"),
+    pytest.param(TimeoutError(10060, "synthetic Windows timeout"), False, id="timeout-10060"),
+    pytest.param(BlockingIOError(10035, "synthetic Windows would-block"), False,
+                 id="would-block-10035"),
+    pytest.param(OSError(errno.EINVAL, "synthetic invalid argument"), False, id="invalid-argument"),
+    pytest.param(OSError(errno.EBADF, "synthetic bad descriptor"), False, id="bad-descriptor"),
+    pytest.param(ConnectionRefusedError(errno.ECONNREFUSED, "synthetic refusal"), False,
+                 id="connection-refused"),
+])
+def test_streaming_provider_records_only_disconnect_errors(monkeypatch, error, records_disconnect):
+    native_recv = socket.socket.recv
+    native_finish_request = ThreadingHTTPServer.finish_request
+    peer_closed, handler_finished = Event(), Event()
+    handler_errors = []
+
+    def recv(connection, size, flags=0):
+        if flags != socket.MSG_PEEK:
+            return native_recv(connection, size, flags)
+        try:
+            data = native_recv(connection, size, flags)
+        except (ConnectionAbortedError, ConnectionResetError):
+            data = b""
+        if data == b"":
+            # Translate only after real loopback transport closure is observed.
+            # Exercise Winsock's typed abort/reset on every platform.
+            peer_closed.set()
+            if error is not None:
+                raise error
+        return data
+
+    def finish_request(server, request, client_address):
+        try:
+            native_finish_request(server, request, client_address)
+        except OSError as exc:
+            handler_errors.append(exc)
+            raise
+        finally:
+            handler_finished.set()
+
+    monkeypatch.setattr(socket.socket, "recv", recv)
+    monkeypatch.setattr(ThreadingHTTPServer, "finish_request", finish_request)
+    monkeypatch.setattr(ThreadingHTTPServer, "handle_error", lambda *_args: None)
+    with streaming_provider("delayed_headers") as (port, entered, disconnected, release, counters):
+        with closing(HTTPConnection("127.0.0.1", port, timeout=2)) as client:
+            client.request("POST", "/v1/chat/completions", body=json.dumps({"stream": True}))
+            assert entered.wait(2)
+            assert not disconnected.is_set()
+        assert peer_closed.wait(2), "fixture never observed the real client closing"
+        if records_disconnect:
+            assert disconnected.wait(2), "fixture lost the transport disconnect signal"
+            assert not handler_errors
+        else:
+            assert handler_finished.wait(2)
+            # BaseHTTPRequestHandler itself handles request read timeouts.
+            assert handler_errors == ([] if isinstance(error, TimeoutError) else [error])
+            assert not disconnected.is_set()
+        assert counters["requests"] == 1
+        assert not release.is_set(), "cleanup must not supply the disconnect evidence"
 
 
 @pytest.mark.parametrize("mode", ["continuous", "silent", "delayed_headers"])
@@ -99,6 +169,7 @@ def test_interrupt_closes_actual_provider_even_without_next_chunk(tmp_path, mode
                     while counters["frames"] < 2 and monotonic() < deadline:
                         sleep(0.01)
                     assert counters["frames"] >= 2
+                assert not disconnected.is_set(), "provider disconnected before Stop"
                 started = monotonic()
                 command = {"command_id": str(uuid4()), "expected_generation": turn["execution_generation"]}
                 response = client.post(f"{endpoint}/{turn['turn_id']}/interrupt", json=command)
