@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "purpose": "story-cleanup-timeout-offline",
+  "product_sha": "6781e90070511625697b9df5aea84d916e2c0a5e",
+  "helper_sha": "7beae3490ca5069e2674a1fae78f7e9a17c2e3ca",
+  "failure_run": 37854627125,
+  "failure_job": 113576298827
+}
