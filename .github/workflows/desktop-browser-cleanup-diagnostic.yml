@@ -1,4 +1,4 @@
-name: Bounded offline Story cleanup diagnosis
+name: Bounded offline Story cleanup control
 
 # Bootstrap with [skip ci]; only a subsequent request-only push activates this.
 # This is diagnostic evidence, never installer or full-release validation.
@@ -17,7 +17,7 @@ defaults:
     shell: pwsh
 jobs:
   diagnose:
-    name: Pinned failure and synthetic process trees
+    name: Reviewed assertion and four cleanup races
     if: ${{ github.repository == 'offercontext/offerPilot' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && github.run_attempt == 1 }}
     runs-on: windows-2022
     timeout-minutes: 12
@@ -28,6 +28,7 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
       - name: Verify the exact diagnostic request before dependency setup
+        id: request
         run: |
           $ErrorActionPreference = 'Stop'
           $requestPath = 'desktop/browser-cleanup-diagnostic/request.json'
@@ -35,7 +36,7 @@ jobs:
           $keys = @($request.PSObject.Properties.Name | Sort-Object)
           $expectedKeys = @('failure_job', 'failure_run', 'helper_sha', 'product_sha', 'purpose', 'schema_version')
           if (($keys -join ',') -cne ($expectedKeys -join ',')) { throw 'Unexpected diagnostic request fields' }
-          if ($request.schema_version -ne 1 -or $request.purpose -cne 'story-cleanup-timeout-offline' -or $request.product_sha -cne '6781e90070511625697b9df5aea84d916e2c0a5e' -or $request.failure_run -ne 37854627125 -or $request.failure_job -ne 113576298827) { throw 'Unexpected diagnostic scope' }
+          if ($request.schema_version -ne 1 -or $request.purpose -cne 'story-cleanup-warning-control-offline' -or $request.product_sha -cne '6781e90070511625697b9df5aea84d916e2c0a5e' -or $request.failure_run -ne 37854627125 -or $request.failure_job -ne 113576298827) { throw 'Unexpected diagnostic scope' }
           $head = git rev-parse HEAD
           if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'Wrong activation revision' }
           $parent = git rev-parse HEAD~1
@@ -46,15 +47,21 @@ jobs:
           if ($event.forced -or $event.deleted -or $event.before -cne $parent -or $event.after -cne $head) { throw 'Expected a single linear activation push' }
           $changed = @(git diff --name-only $parent HEAD)
           if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -cne $requestPath) { throw 'Activation may only change the diagnostic request' }
+          "helper_sha=$parent" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
       - uses: actions/checkout@v4
         with:
-          ref: 6781e90070511625697b9df5aea84d916e2c0a5e
+          ref: ${{ steps.request.outputs.helper_sha }}
           path: .cleanup-product
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           architecture: x64
+      - name: Reject runtime changes before installing source dependencies
+        run: |
+          python desktop/browser-cleanup-diagnostic/run.py --repo .cleanup-product --expected-source-sha "${{ steps.request.outputs.helper_sha }}" --verify-source-only
+          if ($LASTEXITCODE -ne 0) { throw 'Reviewed source differs from the permitted test-only control' }
       - uses: astral-sh/setup-uv@v6
         with:
           version: "0.12.19"
@@ -70,15 +77,15 @@ jobs:
         run: |
           uv sync --frozen
           if ($LASTEXITCODE -ne 0) { throw 'Pinned Python dependency installation failed' }
-      - name: Collect one bounded offline failure diagnosis
+      - name: Verify exactly five bounded offline control cases
         run: |
-          & .\.cleanup-product\.venv\Scripts\python.exe desktop/browser-cleanup-diagnostic/run.py --repo .cleanup-product --evidence desktop/browser-cleanup-diagnostic/evidence
+          & .\.cleanup-product\.venv\Scripts\python.exe desktop/browser-cleanup-diagnostic/run.py --repo .cleanup-product --expected-source-sha "${{ steps.request.outputs.helper_sha }}" --evidence desktop/browser-cleanup-diagnostic/evidence
           if ($LASTEXITCODE -ne 0) { throw 'Diagnostic evidence was incomplete; inspect the artifact' }
       - name: Preserve diagnostic evidence even on failure
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
-          name: story-cleanup-diagnostic-6781e900-${{ github.sha }}-${{ github.run_attempt }}
+          name: story-cleanup-control-6781e900-${{ github.sha }}-${{ github.run_attempt }}
           path: desktop/browser-cleanup-diagnostic/evidence/
           if-no-files-found: warn
           retention-days: 7

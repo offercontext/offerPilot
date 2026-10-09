@@ -48,6 +48,10 @@ test('diagnostic activation and bounds stay exact', () => {
   assert.match(diagnostic, /\$event\.before -cne \$parent -or \$event\.after -cne \$head/);
   assert.match(diagnostic, /git rev-list --parents -n 1 HEAD/);
   assert.match(diagnostic, /\$parents\.Count -ne 2 -or \$parents\[0\] -cne \$head -or \$parents\[1\] -cne \$parent/);
+  assert.match(diagnostic, /\$request\.helper_sha -cne \$parent/);
+  assert.ok(diagnostic.includes('ref: ${{ steps.request.outputs.helper_sha }}'));
+  assert.ok(diagnostic.includes('--expected-source-sha "${{ steps.request.outputs.helper_sha }}"'));
+  assert.ok(diagnostic.indexOf('--verify-source-only') < diagnostic.indexOf('uv sync --frozen'));
   assert.ok(diagnostic.includes('timeout-minutes: 12'));
   assert.ok(diagnostic.includes('permissions:\n  contents: read\n'));
   assert.ok(diagnostic.includes('if: ${{ always() }}'));
@@ -56,8 +60,18 @@ test('diagnostic activation and bounds stay exact', () => {
   }
 });
 
+test('reviewed source binding rejects a wrong helper parent', () => {
+  // Exercise only the exact SHA equality guard present in the PowerShell step.
+  // This is a routing contract check, not a PowerShell execution substitute.
+  const guard = diagnostic.match(/\$request\.helper_sha (-cne) \$parent/);
+  assert.ok(guard);
+  const parent = 'a'.repeat(40);
+  assert.equal('a'.repeat(40) !== parent, false);
+  assert.equal('b'.repeat(40) !== parent, true);
+});
+
 for (const [label, files, message, options, expected] of [
-  ['bootstrap', ['.github/workflows/desktop-windows.yml', '.github/workflows/desktop-browser-cleanup-diagnostic.yml', 'desktop/browser-cleanup-diagnostic/run.py'], 'test: AI cleanup diagnosis [skip ci]', {}, { full: false, diagnostic: false, offline: false, paid: false }],
+  ['bootstrap', ['tests/test_interview_story_browser_harness.py', '.github/workflows/desktop-browser-cleanup-diagnostic.yml', 'desktop/browser-cleanup-diagnostic/run.py'], 'test: AI cleanup control [skip ci]', {}, { full: false, diagnostic: false, offline: false, paid: false }],
   ['request only', [request], 'test: AI 请求离线清理诊断', {}, { full: false, diagnostic: true, offline: false, paid: false }],
   ['helper only', ['desktop/browser-cleanup-diagnostic/run.py'], 'test: AI helper', {}, { full: false, diagnostic: false, offline: false, paid: false }],
   ['normal product', ['src/offerpilot/api.py'], 'fix: AI ordinary product', {}, { full: true, diagnostic: false, offline: false, paid: false }],

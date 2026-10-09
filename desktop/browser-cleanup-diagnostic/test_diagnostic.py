@@ -123,27 +123,75 @@ def test_subprocess_offline_bootstrap_blocks_external_sockets_or_exits_closed(
         assert records[0]["ppid"] == os.getpid()
 
 
-@pytest.mark.parametrize("fault", (None, "collection-error", "no-stage", "wrong-case", "wrong-order"))
-def test_evidence_requires_real_target_execution_and_expected_synthetic_results(
+@pytest.mark.parametrize("fault", (None, "collection-error", "assertion-failed", "no-stage", "wrong-case", "extra-case"))
+def test_evidence_requires_exact_five_control_cases_to_pass(
     tmp_path: Path, fault: str | None,
 ) -> None:
-    normal = {"visits": [424201, 424202], "stopped": [424202, 424201], "failure": ""}
-    if fault == "wrong-order":
-        normal["stopped"] = [424201, 424202]
-    (tmp_path / "synthetic-tree.stdout.log").write_text(json.dumps(normal))
-    (tmp_path / "synthetic-cycle.stdout.log").write_text(json.dumps({
-        "visits": [424201, 424202] * 4 + [424201],
-        "failure": "Synthetic graph visit limit reached",
-    }))
+    race_names = [node.split("::")[1] for node in _MODULE.RACE_NODE_IDS]
+    if fault == "extra-case":
+        race_names.append("unapproved_case")
+    race_xml = ''.join(f'<testcase name="{name}" />' for name in race_names)
+    (tmp_path / "stop-tree-races.xml").write_text(f'<testsuites><testsuite>{race_xml}</testsuite></testsuites>')
     case = "other_case" if fault == "wrong-case" else _MODULE.NODE_ID.split("::")[1]
+    failure = '<failure message="sentinel missing" />' if fault == "assertion-failed" else ''
     (tmp_path / "failing-node.xml").write_text(
-        f'<testsuites><testsuite tests="1"><testcase name="{case}" /></testsuite></testsuites>'
+        f'<testsuites><testsuite tests="1"><testcase name="{case}">{failure}</testcase></testsuite></testsuites>'
     )
-    stages = ["harness.begin"] if fault == "no-stage" else ["harness.begin", "chromium.begin"]
+    stages = ["harness.begin"] if fault == "no-stage" else ["harness.begin", "chromium.begin", "finally.exit failures=0"]
     (tmp_path / "harness-cleanup.jsonl").write_text(
         "\n".join(json.dumps({"stage": stage}) for stage in stages)
     )
     (tmp_path / "offline-guard.jsonl").write_text(json.dumps({"early": True}))
-    results = [{"returncode": 0, "timed_out": False} for _ in range(3)]
-    results[-1]["returncode"] = 2 if fault == "collection-error" else 1
+    results = [{"returncode": 0, "timed_out": False} for _ in range(2)]
+    if fault == "collection-error":
+        results[-1]["returncode"] = 2
+    if fault == "assertion-failed":
+        results[-1]["returncode"] = 1
     assert bool(_MODULE.evidence_errors(tmp_path, results)) is (fault is not None)
+
+
+@pytest.mark.parametrize("fault", (None, "wrong-source", "dirty", "runtime", "renamed-runtime", "extra-test"))
+def test_control_source_rejects_changes_outside_exact_reviewed_test_and_helpers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fault: str | None,
+) -> None:
+    expected = "a" * 40
+    paths = [_MODULE.TEST_RELATIVE, "desktop/browser-cleanup-diagnostic/run.py"]
+    if fault in ("runtime", "renamed-runtime"):
+        paths.append("src/offerpilot/api.py")
+    if fault == "extra-test":
+        paths.append("tests/test_other.py")
+    def git(command, **kwargs):
+        assert kwargs["timeout"] == 10
+        if command[1] == "rev-parse":
+            output = "b" * 40 if fault == "wrong-source" else expected
+        elif command[1] == "status":
+            output = " M tests/test_interview_story_browser_harness.py" if fault == "dirty" else ""
+        else:
+            assert command == ["git", "diff", "--no-renames", "--name-only", _MODULE.PRODUCT_SHA, expected, "--"]
+            output = "\n".join(paths)
+        return subprocess.CompletedProcess(command, 0, stdout=output)
+    monkeypatch.setattr(_MODULE.subprocess, "run", git)
+    if fault is None:
+        assert _MODULE.verify_source(tmp_path, expected) == (expected, paths)
+    else:
+        with pytest.raises(RuntimeError):
+            _MODULE.verify_source(tmp_path, expected)
+
+
+@pytest.mark.parametrize("extra_case", (False, True))
+def test_pytest_plugin_admits_only_its_exact_race_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, extra_case: bool,
+) -> None:
+    from types import SimpleNamespace
+    environment = _MODULE.prepare_offline_environment(_REPO, tmp_path, _REPO / _MODULE.HARNESS_RELATIVE)
+    namespace: dict = {}
+    exec((tmp_path / "bootstrap/story_cleanup_probe_plugin.py").read_text(), namespace)
+    monkeypatch.setenv("STORY_DIAGNOSTIC_MODE", "races")
+    monkeypatch.setenv("STORY_DIAGNOSTIC_HARNESS", environment["STORY_DIAGNOSTIC_HARNESS"])
+    items = [SimpleNamespace(nodeid=node) for node in _MODULE.RACE_NODE_IDS]
+    if extra_case:
+        items.append(SimpleNamespace(nodeid="tests/test_other.py::test_unapproved"))
+        with pytest.raises(RuntimeError, match="exactly its approved test cases"):
+            namespace["pytest_collection_modifyitems"](items)
+    else:
+        namespace["pytest_collection_modifyitems"](items)
