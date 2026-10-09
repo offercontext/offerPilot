@@ -17,6 +17,8 @@ with optional AI assistance for preparation and review.
 | Offer comparison | Compare compensation, benefits and response deadlines |
 | Salary negotiation preparation | Prepare questions and communication drafts |
 
+New to AI agents? Start with [how an interview gets recorded](docs/learn/01-record-an-interview.md), or browse the [learning path](docs/learn/README.md). These tutorials are in Chinese and require no coding or installation to read.
+
 ## Getting started
 
 Run OfferPilot locally with Docker or from source.

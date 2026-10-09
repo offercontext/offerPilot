@@ -4,6 +4,26 @@
 
 本篇追踪 `ModelSurfaceProjector`。源码基线见[进阶入口](README.md)，预算数字仅说明该版本的实现，不是某个模型的实际计费 token 或推荐参数。
 
+## 先看模型输入具体长什么样
+
+下面是一份**完全虚构、字段经过简化的输入样例**：查询已经返回，模型准备判断下一步。它不是实际提示词，也不是可直接发送给 Provider 的完整协议请求。
+
+```json
+{
+  "messages": [
+    {"role": "system", "content": "依据已有记录回答；写入需要先形成待确认建议。"},
+    {"role": "user", "content": "为云岚数据测试开发新增 2026-10-15 北京时间 15:00 的线上面试，60 分钟。"},
+    {"role": "assistant", "tool_calls": [{"id": "read-1", "name": "list_applications", "arguments": {}}]},
+    {"role": "tool", "tool_call_id": "read-1", "content": "[{\"id\": 1, \"company\": \"云岚数据\", \"position\": \"测试开发\"}]"}
+  ],
+  "tool_names": ["list_applications", "create_application_event"]
+}
+```
+
+程序规则、用户请求、助手的查询调用和对应工具结果一起构成了输入。最后的 `tool_names` 只帮助读者认识可见功能；真实请求还要带完整工具契约，不能只列名字。
+
+如果删掉 `read-1` 的结果，模型就失去了刚查到的记录；如果只留结果、删掉调用，则破坏了消息关联。上下文投影要在容量范围内保留这些关系。下面再看它怎样装配和计量。
+
 ## 把模型输入当作一次明确产物
 
 OfferPilot 使用 `FrozenModelSurface` 表达一次准备好的模型输入：消息、工具契约、输入指纹及审计信息。这里的 surface 可以理解为“这一次真正交给模型看的完整内容”。
@@ -104,6 +124,14 @@ python -m pytest -q tests/test_context_projector.py::test_projection_mandatory_o
 ### 实际输入清单长什么样
 
 下面是同一次新增面试请求中，第 2 个模型步的真实 `agent_context_snapshots` 选取字段。通过只读 SQL 导出后原样排版；产品没有因此新增一个“上下文面板”。
+
+| 先看什么 | 本次记录怎样解释 |
+| --- | --- |
+| 来源状态 | `ready`、`disabled` 和 `not_applicable` 含义不同，不能当作都已提供 |
+| 工具与大小 | 9 个可见工具；消息 4,323、工具 4,700，共 9,023 个保守单位 |
+| 是否截断 | `truncated=false`，只说明这份快照，没有证明超预算时的行为 |
+
+这张清单没有完整提示词；前面的虚构输入样例负责说明结构，下面的真实记录负责说明这一次采集到了什么。
 
 ![实际上下文清单：贡献者状态、九个工具、输入估算与是否截断](../images/runtime-20261008/13-context-manifest.jpg)
 

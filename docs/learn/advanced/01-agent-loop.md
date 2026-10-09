@@ -2,7 +2,7 @@
 
 入门篇已经说明“模型提出动作，程序执行”。现在往下走一层：执行结果怎么回到模型？模型一次提出两个工具调用怎么办？等待确认为什么会让这次循环返回？
 
-本篇需要能读懂简单的 Python 条件和循环，不要求先熟悉 OfferPilot 的全部目录。源码基线与图的性质见[进阶入口](README.md)。前半篇的对话和消息表是教学示例；“从真实运行记录看一次循环”使用独立采集的实际记录。
+本篇需要能读懂简单的 Python 条件和循环，不要求先熟悉 OfferPilot 的全部目录。源码基线与图的性质见[进阶入口](README.md)。对话和消息表是教学示例；“对照一条不完整的真实运行记录”使用独立采集的实际记录。
 
 ## 先区分三个“轮次”
 
@@ -28,12 +28,17 @@ for step in range(max_model_steps):
     check_task_is_active()
     assistant = model.complete(messages, visible_tools)
     check_task_is_active()
-    messages.append(assistant)
+    selected = select_calls(assistant.tool_calls)
+    messages.append(assistant_message(
+        content=assistant.content,
+        tool_calls=selected,
+        provider_blocks=assistant.provider_blocks,
+    ))
 
-    if not assistant.tool_calls:
+    if not selected:
         return final_answer(assistant.content)
 
-    for call in select_calls(assistant.tool_calls):
+    for call in selected:
         prepared = validate_and_prepare(call)
         if prepared.needs_confirmation:
             save_pending(prepared)
@@ -44,7 +49,9 @@ for step in range(max_model_steps):
 raise ModelStepLimitReached()
 ```
 
-这里有两个容易漏掉的动作：**把助手提出的调用加入消息序列，再把对应的工具结果加入消息序列**。如果只执行工具、不把结果交回去，下一次模型调用就不知道程序查到了什么。
+这里的 `assistant_message()` 是教学构造器，不是仓库接口。先筛选，再把**选中的调用**加入助手消息；执行后，把对应工具结果加入消息序列。如果模型提出“查询 A + 写入 B”，本轮只选择 A，就不能把未选择的 B 留在消息里，造成下一轮缺少 B 的结果。
+
+待确认的写调用会暂停本段循环；确认恢复时再补齐该调用对应的结果。不能在它仍未处理时，直接带着不完整的工具消息开始下一轮模型调用。
 
 ## OfferPilot 的主循环
 
@@ -132,9 +139,30 @@ python -m pytest -q tests/agent_loop/test_runner.py::test_write_tool_pauses_befo
 
 第一项断言写 executor 尚未调用而 Pending 已产生；第二项断言两个读取按顺序执行，工具结果保留各自 ID。这检查的是程序控制流，不能据此声称真实模型一定会选择正确工具。
 
-### 从真实运行记录看一次循环
+## 先串起一条完整链路
+
+下面是**完整顺序的教学示意，不是补写的日志**。假设模型先查询，再提出待确认新增，批准后直接收尾：
+
+| 阶段 | 模型提出什么 | 程序留下什么、接下来做什么 |
+| --- | --- | --- |
+| 第 1 个模型步 | 查询投递 `read-1` | 保存选中的调用，执行查询，追加相同 ID 的工具结果 |
+| 第 2 个模型步 | 新增日程 `write-1` | 保存建议与 Pending，等待确认；日程仍为 0 |
+| 用户确认 | 不是新一次模型建议 | 核对原操作与原参数，执行已批准写入 |
+| 保存完成 | 可以直接收尾 | 写入日程、记录 `write-1` 的结果并交付回执 |
+
+这里没有“让模型重新猜一遍写参数”这一步。读者可以先在[最小实验](../examples/README.md)中观察这个顺序，再回来看工程实现的身份与事务控制。
+
+### 对照一条不完整的真实运行记录
 
 本次请求为云岚数据测试开发岗位新增面试日程。下面的输出来自隔离数据库中的真实 Run / Segment；能看到第 1 个模型步之后，`list_applications` 开始并完成，随后出现第 2 个模型步的上下文快照，最后 `create_application_event` 被提出并等待确认。
+
+先看顺序和状态，不必先逐字符比较 UUID：
+
+| 图中信息 | 怎么读 |
+| --- | --- |
+| 模型步 1、查询开始与完成 | 至少能确认这部分过程被记录下来 |
+| 模型步 2 的上下文快照、写建议与等待确认 | 能关联后续建议，但中间的模型请求与完成事件缺失 |
+| `recording_status=degraded` | 这是一条不完整诊断，不能当成正常完整轨迹 |
 
 ![真实 Agent Loop 记录，含模型步、查询工具、写建议及工具调用 ID](../images/runtime-20261008/12-agent-loop.jpg)
 

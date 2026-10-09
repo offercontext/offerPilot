@@ -18,7 +18,7 @@ offer comparison and salary negotiation preparation.
 
 [快速开始](#快速开始)｜[用户指南](docs/product-manual/产品说明书.md)｜[常见问题](#常见问题)
 
-第一次接触 Agent？从[一场面试是怎么记下来的](docs/learn/README.md)看起，无需写代码或安装项目。
+第一次接触 Agent？先看[一场面试是怎么记下来的](docs/learn/01-record-an-interview.md)，无需写代码或安装项目。其他主题见[完整学习路线](docs/learn/README.md)。
 
 ## 主要功能
 

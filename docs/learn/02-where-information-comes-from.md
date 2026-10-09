@@ -106,4 +106,6 @@ flowchart TD
 
 </details>
 
-[上一篇：你说“帮我记一场面试”，AI 到底做了什么？](01-record-an-interview.md) · [下一篇：为什么修改记录前，还要问我一次？](03-why-confirm-before-saving.md) · [返回学习入口](README.md)
+短路线第 2 站 · 接着读：[06 继续、等待与收尾](06-how-a-task-continues-and-stops.md)；想展开确认细节，也可以按完整目录继续。
+
+[上一篇：你说“帮我记一场面试”，AI 到底做了什么？](01-record-an-interview.md) · [下一篇：为什么保存记录前，还要问我一次？](03-why-confirm-before-saving.md) · [返回学习入口](README.md)

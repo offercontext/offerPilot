@@ -106,11 +106,27 @@ python -m pytest -q tests/test_agent_run_journal.py::test_active_work_budget_ign
 
 ### 日志不完整，但业务确实已经保存
 
-新增面试这次运行提供了一个具体对照：[运行日志截图](../images/runtime-20261008/12-agent-loop.jpg)里的 Run 仍显示 `waiting_confirmation`，且 `recording_status=degraded`，只留下前 14 条事件。与此同时，操作账本已经提交，同一 Turn 的第 2 代执行完成，日程接口和页面也能查到保存结果。
+先独立判断下面这组真实证据：日程保存了吗？需要重跑新增来补齐日志吗？能据此认定日志降级的原因吗？
+
+| 已取得的证据 | 原值摘要 |
+| --- | --- |
+| Journal Run | `waiting_confirmation`，`recording_status=degraded`，只有 14 个事件 |
+| 写操作账本 | 原操作 `committed`，交付 `completed` |
+| 同一 Turn | 第 2 代执行 `completed` |
+| 日程接口与日历 | 同一目标，2026-10-15 北京时间 15:00，60 分钟 |
 
 ![实际业务结果与操作账本核对，包含提交、拒绝和停止三类结果](../images/runtime-20261008/14-state-and-business.jpg)
 
-因此不能用这条不完整的 Run 状态否定已经提交的业务事实，也不能伪造缺失的 Segment 或工具完成事件。另一次“新增日程”被误解为“添加复盘”的错误建议也保留在[入门第 11 篇](../11-how-to-follow-an-execution.md)。这是少量真实案例的证据，尚不是模型质量评估集或完整可靠性验收。[来源、字段与未覆盖范围](../images/runtime-20261008/README.md)。
+<details>
+<summary>展开判断与依据</summary>
+
+业务结果已经保存。不能让不完整的 Run 状态覆盖操作账本、执行记录和实际日程，也不能为了补日志重跑新增。记录缺失并不证明某个 executor 从未执行。
+
+这些材料只表明这一次日志降级，不能单独解释根因、发生频率或系统总体可靠性；要继续调查记录器预算和缺失事件，也不能将猜测补成真实轨迹。[日志截图](../images/runtime-20261008/12-agent-loop.jpg)与[原始选取字段](../images/runtime-20261008/evidence.json)可供核对。
+
+</details>
+
+另一次“新增日程”被误解为“添加复盘”的反例见[入门第 11 篇](../11-how-to-follow-an-execution.md)。这是少量真实案例，尚不是模型质量评估集或完整可靠性验收。[来源与未覆盖范围](../images/runtime-20261008/README.md)。
 
 ## 对照源码
 
