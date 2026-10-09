@@ -11,7 +11,8 @@ const originalRuns = files => !files.every(file => original.on.push['paths-ignor
 test('exact three AI helper exclusions preserve all product and original-workflow routes', () => {
   assert.deepEqual(original.on.push['paths-ignore'], ['desktop/installed-ui/**', 'desktop/layout-retry/**',
     '.github/workflows/desktop-layout-retry.yml', '.github/workflows/desktop-installed-ui.yml',
-    'docs/architecture/desktop-installed-ui-validation.md', ...narrow]);
+    'docs/architecture/desktop-installed-ui-validation.md', ...narrow,
+    'desktop/browser-cleanup-diagnostic/**', '.github/workflows/desktop-browser-cleanup-diagnostic.yml']);
   for (const file of ['desktop/real-ai-validation/run.mjs', ...narrow.slice(1)]) assert.equal(originalRuns([file]), false);
   for (const file of ['desktop/main.cjs', 'desktop/package.json', 'desktop/package-lock.json', 'src/offerpilot/api.py',
     'web/src/App.tsx', 'uv.lock', 'scripts/release-gate.ps1', '.github/workflows/desktop-windows.yml']) {
