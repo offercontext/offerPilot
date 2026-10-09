@@ -138,6 +138,7 @@ describe('real credential deletion confirmation', () => {
     secure.disconnectRealJobMail.mockImplementation(async () => { capability.configured = false; capability.deletion_pending = false; status.connection!.status = 'disconnected'; return status; });
     await render(<JobMailSettings />); await click(button('断开邮箱')); await click(consent('我明确同意停止邮箱检查')); await click(button('确认断开并删除凭据'));
     expect(host.textContent).toContain('本机凭据删除已确认'); expect(host.textContent).toContain('已确认业务记录保留');
+    expect([...host.querySelectorAll('button')].some((node) => node.textContent === '删除本机邮箱凭据')).toBe(false);
   });
   it('still requests stop and deletion when the native vault is unavailable', async () => {
     capability.available = false; capability.credential_input_allowed = false; capability.reason = 'secure_store_unavailable';

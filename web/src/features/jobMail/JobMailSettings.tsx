@@ -37,7 +37,7 @@ export default function JobMailSettings() {
   const connected = connection?.status === 'connected';
   const realReadingUnavailable = !query.isError && connected && connection.provider === 'qq' && query.data?.capabilities.real_connection !== true;
   const running = query.data?.run?.status === 'running';
-  const realCredential = connection?.provider === 'qq' || secureQuery.data?.configured === true || secureQuery.data?.deletion_pending === true;
+  const realCredential = (connected && connection.provider === 'qq') || secureQuery.data?.configured === true || secureQuery.data?.deletion_pending === true;
   const deletionPending = secureQuery.data?.deletion_pending === true;
   const realSetupAllowed = !secureQuery.isError && canEnterMailCredential(secureQuery.data, window.location);
   useEffect(() => {
