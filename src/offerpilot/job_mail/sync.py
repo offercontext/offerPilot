@@ -262,9 +262,10 @@ class JobMailSyncService:
                         return
                     cursor = json.loads(fenced[1].cursor_json).get(folder, {"uidvalidity": "", "uid": 0})
                     since = fenced[1].start_at
+                    until = fenced[0].started_at
                     session.commit()
                 try:
-                    batch = self.transport.read(folder, cursor["uidvalidity"], cursor["uid"], limit=50, since=since)
+                    batch = self.transport.read(folder, cursor["uidvalidity"], cursor["uid"], limit=50, since=since, until=until)
                 except TransportUnavailable as exc:
                     self._folder_failed(run_id, folder, str(exc))
                     continue

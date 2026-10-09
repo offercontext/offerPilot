@@ -28,7 +28,8 @@ class MailTransport(Protocol):
     def folders(self) -> list[str]: ...
     def baseline(self, folder: str) -> tuple[str, int]: ...
     def read(self, folder: str, uidvalidity: str, after_uid: int,
-             *, limit: int = 50, since: datetime | None = None) -> FolderBatch: ...
+             *, limit: int = 50, since: datetime | None = None,
+             until: datetime | None = None) -> FolderBatch: ...
 
 
 class DisabledTransport:
@@ -39,7 +40,8 @@ class DisabledTransport:
         raise TransportUnavailable("secure_connection_unavailable")
 
     def read(self, folder: str, uidvalidity: str, after_uid: int,
-             *, limit: int = 50, since: datetime | None = None) -> FolderBatch:
+             *, limit: int = 50, since: datetime | None = None,
+             until: datetime | None = None) -> FolderBatch:
         raise TransportUnavailable("secure_connection_unavailable")
 
 
@@ -146,7 +148,8 @@ class QQIMAPTransport:
             self._close(client)
 
     def read(self, folder: str, uidvalidity: str, after_uid: int,
-             *, limit: int = 50, since: datetime | None = None) -> FolderBatch:
+             *, limit: int = 50, since: datetime | None = None,
+             until: datetime | None = None) -> FolderBatch:
         client = self._open()
         try:
             validity, highest = self._select(client, folder)
@@ -174,6 +177,11 @@ class QQIMAPTransport:
                 if not date:
                     raise TransportUnavailable("message_date_missing")
                 received = datetime.strptime(date.group(1).decode("ascii"), "%d-%b-%Y %H:%M:%S %z")
+                upper = until.replace(tzinfo=timezone.utc) if until and until.tzinfo is None else until
+                if upper is not None and received > upper:
+                    # Preserve this UID for the next run. A manual sync must
+                    # not expand its scope as newer mail arrives during work.
+                    break
                 if since is not None and received < cutoff:
                     last = uid
                     continue
@@ -216,7 +224,8 @@ class FakeIMAPTransport:
                                 if m.folder == folder and m.uidvalidity == generation), default=0)
 
     def read(self, folder: str, uidvalidity: str, after_uid: int,
-             *, limit: int = 50, since: datetime | None = None) -> FolderBatch:
+             *, limit: int = 50, since: datetime | None = None,
+             until: datetime | None = None) -> FolderBatch:
         self.read_calls.append(folder)
         generation, _ = self.baseline(folder)
         after = after_uid if generation == uidvalidity else 0
@@ -224,6 +233,12 @@ class FakeIMAPTransport:
                        and m.uidvalidity == generation and m.uid > after), key=lambda m: m.uid)
         selected = rows[:limit]
         cutoff = since.replace(tzinfo=timezone.utc) if since and since.tzinfo is None else since
-        visible = [m for m in selected if cutoff is None or datetime.fromisoformat(m.received_at) >= cutoff]
-        return FolderBatch(generation, visible, selected[-1].uid if selected else after,
-                           len(rows) > len(selected))
+        upper = until.replace(tzinfo=timezone.utc) if until and until.tzinfo is None else until
+        admitted: list[ParsedMail] = []
+        for message in selected:
+            if upper is not None and datetime.fromisoformat(message.received_at) > upper:
+                break
+            admitted.append(message)
+        visible = [m for m in admitted if cutoff is None or datetime.fromisoformat(m.received_at) >= cutoff]
+        return FolderBatch(generation, visible, admitted[-1].uid if admitted else after,
+                           len(rows) > len(admitted))

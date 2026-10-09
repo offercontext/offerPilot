@@ -333,3 +333,25 @@ def test_cancelled_but_live_worker_does_not_spawn_another(setup):
         service.start_sync()
     assert error.value.code == "worker_still_stopping"
     release.set()
+
+
+def test_run_cutoff_does_not_expand_when_mail_arrives_in_later_folder(setup):
+    sessions, transport, service = setup
+    transport.generations['Recruitment'] = '1'
+    connect(service, ['INBOX', 'Recruitment'])
+    original = transport.read
+    def add_late_mail(folder, *args, **kwargs):
+        if folder == 'INBOX' and not transport.messages:
+            transport.messages.append(mail(1, 'Recruitment'))
+        return original(folder, *args, **kwargs)
+    transport.read = add_late_mail
+    service.start_sync()
+    first = wait(service)
+    assert first['run']['progress']['candidates'] == 0
+    assert first['run']['progress']['deferred'] == 1
+    with sessions() as session:
+        connection = session.scalar(select(JobMailConnection))
+        assert json.loads(connection.cursor_json)['Recruitment']['uid'] == 0
+    unthrottle(sessions)
+    service.start_sync()
+    assert wait(service)['run']['progress']['candidates'] == 1

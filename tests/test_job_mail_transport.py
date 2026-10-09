@@ -87,3 +87,20 @@ def test_vault_plaintext_backend_rejected(monkeypatch):
     monkeypatch.setattr("importlib.import_module", lambda name: Keyring())
     with pytest.raises(TransportUnavailable, match="secure_store_unavailable"):
         OSVault()
+
+
+def test_fixed_run_cutoff_does_not_fetch_newer_mail_body(monkeypatch):
+    protocols = []
+    def factory(*args, **kwargs):
+        protocol = FakeProtocol(*args, **kwargs)
+        protocols.append(protocol)
+        return protocol
+    monkeypatch.setattr('imaplib.IMAP4_SSL', factory)
+    transport = QQIMAPTransport('synthetic@qq.com', 'opaque-reference', enabled=True, vault=Vault())
+    batch = transport.read('INBOX', '1', 0,
+        since=datetime(2026, 10, 9, 12, tzinfo=timezone.utc),
+        until=datetime(2026, 10, 9, 14, tzinfo=timezone.utc))
+    assert batch.messages == []
+    assert batch.last_uid == 1
+    assert batch.has_more
+    assert not any('BODY.PEEK[]' in str(command) for command in protocols[0].commands)
