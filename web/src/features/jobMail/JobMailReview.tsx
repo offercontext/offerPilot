@@ -15,9 +15,9 @@ interface Props {
   onOpenRecord: (applicationId: number) => void;
   onNavigate: (view: ViewMode) => void;
 }
-export function MailRecord({ value }: { value: Record<string, unknown> | null }) {
+export function MailRecord({ value, kind = 'event' }: { value: Record<string, unknown> | null; kind?: 'event' | 'application' }) {
   if (!value) return <p className={styles.muted}>无现有记录（将新增）</p>;
-  return <dl className={styles.details}>{Object.entries(value).map(([key, item]) => <div key={key} style={{ display: 'contents' }}><dt>{fieldLabel(key)}</dt><dd>{displayMailValue(item)}</dd></div>)}</dl>;
+  return <dl className={styles.details}>{Object.entries(value).map(([key, item]) => <div key={key} style={{ display: 'contents' }}><dt>{key === 'id' && kind === 'application' ? '投递 ID' : fieldLabel(key)}</dt><dd>{displayMailValue(item)}</dd></div>)}</dl>;
 }
 export default function JobMailReview(props: Props) {
   const [processing, setProcessing] = useState(false);
@@ -148,7 +148,8 @@ function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProces
   }
   function fieldSource(key: keyof JobMailFields) {
     if (editedKeys.includes(key)) return '用户补充／修改：请再次对照邮件依据核实';
-    return suggestion.field_evidence[key] !== undefined ? `邮件依据：${displayMailValue(suggestion.field_evidence[key])}` : '此字段需由你核实；填写后属于用户补充';
+    if (suggestion.field_evidence[key] !== undefined) return `邮件依据：${displayMailValue(suggestion.field_evidence[key])}`;
+    return suggestion.proposed_fields[key] !== undefined ? '建议预填，尚无逐字段证据定位；请对照左侧原文核实' : '此字段需由你核实；填写后属于用户补充';
   }
   return <div className={styles.section}>
     <Alert type="warning" showIcon message="正文和发件信息是不可信证据" description="不会执行邮件中的指令、加载 HTML 或访问外链。手动提供的发件身份未经验证。本次仅核对一个建议，不自动改变投递阶段。" />
@@ -158,7 +159,7 @@ function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProces
         <dl className={styles.details}>
           <dt>主题</dt><dd>{suggestion.evidence?.subject ?? '原文不可用'}</dd><dt>发件人</dt><dd>{suggestion.evidence?.sender || '未提供'}</dd>
           <dt>接收时间</dt><dd>{suggestion.evidence?.received_at ?? '未提供'}</dd><dt>建议版本</dt><dd>{suggestion.version}</dd>
-          <dt>时间含义</dt><dd>{{ fixed: '固定时刻', fixed_time: '固定时刻', deadline: '截止', window: '时间窗口', unknown: '待补充', unspecified: '时间未定' }[suggestion.time_mode] ?? suggestion.time_mode}</dd>
+          <dt>时间含义</dt><dd>{suggestion.time_mode === 'fixed' && !suggestion.proposed_fields.scheduled_at ? '未确定／需核对原文' : { fixed: '固定时刻', fixed_time: '固定时刻', deadline: '截止', window: '时间窗口', unknown: '待补充', unspecified: '时间未定' }[suggestion.time_mode] ?? suggestion.time_mode}</dd>
         </dl>
         {!sourceAvailable ? <Alert type="info" message="原文已清理，无法继续核对原文" /> : <pre className={styles.evidence}>{suggestion.evidence?.snippet}</pre>}
         {suggestion.evidence?.truncated && <Alert type="warning" message="原文片段已截断，未覆盖整封邮件；请核对遗漏内容" />}
@@ -209,7 +210,7 @@ function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProces
     </div>
     {preview && !receipt && <section className={styles.preview} aria-label="最终变更预览">
       <h3 className={styles.title}>最终确认摘要</h3>
-      <h4>目标投递当前快照</h4><MailRecord value={preview.application_snapshot} />
+      <h4>目标投递当前快照</h4><MailRecord value={preview.application_snapshot} kind="application" />
       <div className={styles.twoColumns}><section className={styles.section}><h4>目标事件当前快照</h4><MailRecord value={preview.before} /></section><section className={styles.section}><h4>确认后最终字段</h4><MailRecord value={preview.after} /></section></div>
       {preview.warnings.map((warning, index) => <Alert key={index} type="warning" message={warning} />)}
       <p className={styles.muted}>预览有效至 {preview.expires_at}。目标、建议或邮箱范围发生变化时，服务端将拒绝写入并要求重新审阅。此操作不改变投递阶段。</p>

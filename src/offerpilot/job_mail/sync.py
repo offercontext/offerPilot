@@ -43,6 +43,7 @@ class JobMailSyncService:
         self._stopped = threading.Event()
         self._threads: list[threading.Thread] = []
         self._thread_lock = threading.Lock()
+        self.secure_setup: Any = None
 
     def _connection(self, session: Session) -> JobMailConnection | None:
         return session.scalar(select(JobMailConnection).where(
@@ -87,16 +88,22 @@ class JobMailSyncService:
                     JobMailSyncRun.connection_id == connection.id).order_by(
                     JobMailSyncRun.started_at.desc(), JobMailSyncRun.id.desc()).limit(1))
             synthetic = isinstance(self.transport, FakeIMAPTransport)
-            return {"capabilities": {"real_connection": False, "ai_recognition": False,
+            real_available = bool(connection and connection.provider == "qq" and connection.status == "connected"
+                                  and self.secure_setup is not None and self.secure_setup.enabled
+                                  and not isinstance(self.transport, DisabledTransport))
+            notice = "识别默认离线规则；QQ连接由本机安全配置页管理，外部AI尚未开放。后端停止时不检查邮件。"
+            if connection and connection.provider == "qq" and connection.status == "connected" and not real_available:
+                notice = "已保存QQ配置，但本次后端未开启本机安全入口或原生安全库不可用；不会读取邮件。"
+            return {"capabilities": {"real_connection": real_available, "ai_recognition": False,
                                       "synthetic_connection": synthetic},
                     "connection": summary, "run": self._run(run),
                     "budget": {"limit": DAILY_LIMIT, "used": used,
                                "remaining": max(0, DAILY_LIMIT - used)},
                     "execution_location": "本地/自托管后端",
-                    "available_folders": self.transport.folders() if synthetic else [],
+                    "available_folders": self.transport.folders() if synthetic else self.secure_setup.catalog() if self.secure_setup else [],
                     "recognition_mode": "offline_rules",
                     "retention": {"pending_days": 90, "processed_days": 30},
-                    "notice": "当前为离线规则提议；真实QQ连接与外部AI尚未开放。后端停止时不检查邮件。"}
+                    "notice": notice}
 
     @staticmethod
     def _folders(value: Any) -> list[str]:
@@ -156,20 +163,39 @@ class JobMailSyncService:
         if interval is not None and (type(interval) is not int or not 5 <= interval <= 1440):
             raise JobMailError("invalid_interval", "同步间隔须为5至1440分钟", 422)
         with self.sessions() as session:
-            _transaction(session)
             connection = self._connection(session)
             if connection is None or connection.status != "connected":
                 raise JobMailError("not_connected", "请先连接邮箱", 409)
-            if "folders" in payload:
-                folders = self._folders(payload["folders"])
-                if any(f not in self.transport.folders() for f in folders):
-                    raise JobMailError("invalid_folders", "文件夹不可用", 422)
+            if connection.provider == "qq" and (self.secure_setup is None or not self.secure_setup.enabled):
+                raise JobMailError("local_setup_not_enabled", "真实邮箱只能由本机安全运行实例控制", 409)
+            expected = (connection.id, connection.scope_version)
+            old_cursors = json.loads(connection.cursor_json)
+            is_real = connection.provider == "qq"
+            transport = self.transport
+        folders = self._folders(payload["folders"]) if "folders" in payload else None
+        new_cursors: dict[str, Any] = {}
+        if folders is not None:
+            catalog = self.secure_setup.catalog() if is_real and self.secure_setup else self.transport.folders()
+            if any(folder not in catalog for folder in folders):
+                raise JobMailError("invalid_folders", "只能选择连接测试发现的目录；新目录请重新测试", 422)
+            # Never hold a SQLite writer transaction while contacting IMAP/vault.
+            for folder in folders:
+                if folder not in old_cursors:
+                    validity, latest = transport.baseline(folder)
+                    new_cursors[folder] = {"uidvalidity": validity, "uid": latest}
+        changed_scope = False
+        with self.sessions() as session:
+            _transaction(session)
+            connection = self._connection(session)
+            if connection is None or connection.status != "connected" or (connection.id, connection.scope_version) != expected:
+                raise JobMailError("mail_scope_changed", "邮箱范围已变化，请重新确认设置", 409)
+            if is_real and (self._stopped.is_set() or self.secure_setup is None or not self.secure_setup.enabled):
+                raise JobMailError("local_setup_not_enabled", "本机安全运行实例已停止", 409)
+            if folders is not None:
                 if folders != json.loads(connection.folders_json):
+                    changed_scope = True
                     cursors = json.loads(connection.cursor_json)
-                    for folder in folders:
-                        if folder not in cursors:
-                            validity, latest = self.transport.baseline(folder)
-                            cursors[folder] = {"uidvalidity": validity, "uid": latest}
+                    cursors.update(new_cursors)
                     connection.cursor_json = json.dumps({f: cursors[f] for f in folders})
                     connection.folders_json = json.dumps(folders)
                     old_scope = connection.scope_version
@@ -183,15 +209,25 @@ class JobMailSyncService:
             connection.next_run_at = (_now() + timedelta(minutes=connection.interval_minutes)
                                       if connection.sync_mode == "automatic" else None)
             session.commit()
+        if changed_scope and is_real:
+            from .transport import QQIMAPTransport
+            if isinstance(transport, QQIMAPTransport):
+                transport.cancel()
+            if self.secure_setup is not None:
+                self.secure_setup.rebuild_transport()
         return self.status()
 
     def start_sync(self, *, trigger: str = "manual") -> dict[str, Any]:
+        if self._stopped.is_set():
+            raise JobMailError("backend_stopped", "后端已停止，不能启动同步", 409)
         now = _now()
         with self.sessions() as session:
             _transaction(session)
             connection = self._connection(session)
             if connection is None or connection.status != "connected":
                 raise JobMailError("not_connected", "邮箱未连接", 409)
+            if connection.provider == "qq" and (self.secure_setup is None or not self.secure_setup.enabled):
+                raise JobMailError("local_setup_not_enabled", "真实邮箱需要显式开启本机安全运行入口", 409)
             active = session.scalar(select(JobMailSyncRun).where(
                 JobMailSyncRun.connection_id == connection.id, JobMailSyncRun.status == "running"))
             if active:
@@ -224,10 +260,11 @@ class JobMailSyncService:
             connection.not_before_at = now + timedelta(seconds=60)
             if connection.sync_mode == "automatic":
                 connection.next_run_at = now + timedelta(minutes=connection.interval_minutes)
+            transport = self.transport
             session.commit()
             result = self._run(run) or {}
             run_id = run.id
-        thread = threading.Thread(target=self._execute, args=(run_id,), daemon=True,
+        thread = threading.Thread(target=self._execute, args=(run_id, transport), daemon=True,
                                   name="offerpilot-mail-sync")
         with self._thread_lock:
             self._threads = [t for t in self._threads if t.is_alive()]
@@ -247,7 +284,7 @@ class JobMailSyncService:
         run.lease_until = _now() + timedelta(seconds=90)
         return run, connection
 
-    def _execute(self, run_id: str) -> None:
+    def _execute(self, run_id: str, transport: MailTransport) -> None:
         try:
             with self.sessions() as session:
                 fenced = self._fenced(session, run_id)
@@ -265,7 +302,7 @@ class JobMailSyncService:
                     until = fenced[0].started_at
                     session.commit()
                 try:
-                    batch = self.transport.read(folder, cursor["uidvalidity"], cursor["uid"], limit=50, since=since, until=until)
+                    batch = transport.read(folder, cursor["uidvalidity"], cursor["uid"], limit=50, since=since, until=until)
                 except TransportUnavailable as exc:
                     self._folder_failed(run_id, folder, str(exc))
                     continue
@@ -457,20 +494,35 @@ class JobMailSyncService:
             run.finished_at = _now()
 
     def cancel_sync(self, run_id: str) -> dict[str, Any]:
+        cancelled = False
         with self.sessions() as session:
             _transaction(session)
             connection = self._connection(session)
             run = session.get(JobMailSyncRun, run_id)
             if connection is None or run is None or run.connection_id != connection.id:
                 raise JobMailError("run_not_found", "同步记录不存在", 404)
+            if connection.provider == "qq" and (self.secure_setup is None or not self.secure_setup.enabled):
+                raise JobMailError("local_setup_not_enabled", "真实邮箱只能由本机安全运行实例控制", 409)
             if run.status == "running":
+                cancelled = True
                 run.cancel_requested = True
                 run.status = "cancelled"
                 run.finished_at = _now()
+            transport = self.transport
             session.commit()
-            return self._run(run) or {}
+            result = self._run(run) or {}
+        from .transport import QQIMAPTransport
+        if cancelled and isinstance(transport, QQIMAPTransport):
+            transport.cancel()
+            if self.secure_setup is not None:
+                self.secure_setup.rebuild_transport()
+        return result
 
     def disconnect(self) -> dict[str, Any]:
+        with self.sessions() as session:
+            connection = self._connection(session)
+            if connection and (connection.provider == "qq" or connection.credential_ref):
+                raise JobMailError("secure_consent_required", "真实邮箱须通过本机安全页确认删除凭据", 409)
         with self.sessions() as session:
             _transaction(session)
             connection = self._connection(session)
@@ -519,6 +571,7 @@ class JobMailSyncService:
         with self.sessions() as session:
             connection = self._connection(session)
             due = bool(connection and connection.status == "connected"
+                       and (connection.provider != "qq" or self.secure_setup is not None and self.secure_setup.enabled)
                        and connection.sync_mode == "automatic" and connection.next_run_at
                        and connection.next_run_at <= _now())
         if due:
@@ -529,6 +582,9 @@ class JobMailSyncService:
 
     def shutdown(self) -> None:
         self._stopped.set()
+        from .transport import QQIMAPTransport
+        if isinstance(self.transport, QQIMAPTransport):
+            self.transport.cancel()
         with self.sessions() as session:
             _transaction(session)
             for run in session.scalars(select(JobMailSyncRun).where(

@@ -175,6 +175,8 @@ def recognize(mail: ParsedMail) -> list[Candidate]:
         reason = "邮件被截断、包含多个时间或转发引用；请逐项人工核对。"
     if mode != "fixed":
         reason = "截止、窗口或时间待定本批不写入日程，不会虚构时长或午夜。"
+    if action == "manual_only" and mode == "fixed" and scheduled is None:
+        mode = "unknown"
     return [Candidate(action, event_type, subtype, mode, scheduled, minutes,
                       _label(text, "地点|location"), _label(text, "公司|company"),
                       _label(text, "岗位|position"), evidence, reason)]

@@ -1,6 +1,6 @@
 # ADR-0013：求职邮件的有界同步与独立审阅
 
-- Status: Implemented, synthetic validation in progress; real mailbox activation blocked
+- Status: Synthetic review flow validated; local credential setup under validation; real mailbox not validated
 - 日期：2026-10-09
 - Decider：用户确认在独立分支实施产品方案 v0.2，默认手动同步
 - 依据：master `5b9605bab343c4f95ede2c0c61ecd47bb7d923a1`、产品确认稿 v0.2、[ADR-0012](0012-bound-local-proactive-jobs.md)
@@ -49,12 +49,26 @@ ApplicationEvent 要求具体开始时间和正时长；创建事件不改变投
 
 ## Security and activation gate
 
-真实 QQ 与外部 AI 默认关闭，当前 UI 不收授权码，不调用真实服务。
+真实 QQ 与外部 AI 默认关闭；普通启动和未满足安全能力的页面不收授权码。
 QQ 适配只允许 `imap.qq.com:993`、验证 TLS、只读 SELECT 与 BODY.PEEK，
 不支持 SMTP、任意 host、移动/删除/标已读；读取正文前核对日期范围。
 OS vault 仅允许 Windows Credential Manager、macOS Keychain、Linux Secret Service；
-不可用不降为明文。该适配尚待安全输入/凭据写入与删除流程、认证部署、
-QQ 文件夹编码/身份、真实邮箱联调，不得宣称实邮箱可用或全验收完成。
+不可用不降为明文。安全入口仅由 CLI 的显式本地配置参数在字面 loopback 绑定时开启，
+禁用代理头解释；任意 create_app 默认关闭，反向代理与远程云输入不在支持范围。
+真实配置和恢复前必须取得同一 SQLite 路径的原生 OS 排他锁，持有至运行及凭据操作结束；
+锁不可用或被另一进程持有则禁用真实能力，不用存在性文件软锁降级，也不修改其他实例的清理意图。
+本机用户先明确开始短期会话，再亲自输入并确认仅登录/LIST，最后另行选择目录与确认
+保存到原生库。短期 token 置于请求体并绑定 HttpOnly/SameSite cookie，不放 URL；
+凭据请求在读取 JSON 前检查同源、loopback 与大小上限。临时秘密只保存在短寿命内存中。
+
+凭据写入与数据库提交之间保留非秘密操作意图；补偿删除失败保留可重试的引用，
+不得把未知删除显示为已清理。断开先撤销读取范围、停计划与当前任务，再关闭已登录
+IMAP 会话并清理凭据；逐封读取前核对取消状态。已有真实连接也只有显式本地启动
+才允许恢复读取，普通启动不自动恢复。目录支持 modified UTF-7 和 LIST 结构解析，
+选择绑定本次目录发现，未选择目录不读取。
+
+上述安全配置及取消／清理行为使用合成 vault、假 IMAP 与故障注入验证；仍待受支持
+主机系统库和用户授权的真实 QQ 联调。不得宣称实邮箱可用或全验收完成。
 真实候选片段发送外部模型仍须另获数据与具体目标授权。
 
 ## Consequences
@@ -63,6 +77,7 @@ QQ 文件夹编码/身份、真实邮箱联调，不得宣称实邮箱可用或�
 严格范围撤回可能令旧建议需要重新读取或手动导入，界面应说明原因。
 本批不提供跨设备托管、附件/OCR、全文归档、自动发信或自动接受 Offer。
 尚无真实邮箱与真实模型质量指标；合成样本通过不能推导真实识别率。
+当前关闭审阅窗口保留建议，但未提交的字段编辑不保存；尚不提供保存待补充草稿。
 
 ## Alternatives considered
 

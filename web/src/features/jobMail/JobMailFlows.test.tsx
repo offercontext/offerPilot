@@ -7,6 +7,11 @@ import type { JobMailPreview, JobMailReceipt, JobMailStatus, JobMailSuggestion }
 import { readMailRecovery } from './jobMailModel';
 const api = vi.hoisted(() => ({ getJobMailStatus: vi.fn(), updateJobMailSettings: vi.fn(), syncJobMail: vi.fn(), cancelJobMailSync: vi.fn(), disconnectJobMail: vi.fn(), connectSyntheticJobMail: vi.fn(), getJobMailSuggestion: vi.fn(), previewJobMail: vi.fn(), confirmJobMail: vi.fn(), getJobMailReceipt: vi.fn(), ignoreJobMail: vi.fn(), importJobMail: vi.fn() }));
 vi.mock('@/services/jobMail', () => ({ ...api, JOB_MAIL_QUERY_KEY: ['job-mail'], JOB_MAIL_STATUS_KEY: ['job-mail', 'status'] }));
+vi.mock('@/services/jobMailSecureSetup', () => ({
+  JOB_MAIL_SECURE_CAPABILITY_KEY: ['job-mail', 'secure-setup', 'capability'],
+  getJobMailSecureCapability: async () => ({ available: false, reason: 'secure_store_unavailable', backend: null, local_only: true, credential_input_allowed: false, configured: false, deletion_pending: false }),
+  startJobMailSecureSetup: vi.fn(), testJobMailSecureSetup: vi.fn(), saveJobMailSecureSetup: vi.fn(), cancelJobMailSecureSetup: vi.fn(), disconnectRealJobMail: vi.fn(),
+}));
 vi.mock('@/services/applications', () => ({ listApplications: async () => [{ id: 7, company_name: '星河科技', position_name: '工程师', status: 'applied' }, { id: 8, company_name: '远山科技', position_name: '工程师', status: 'applied' }] }));
 vi.mock('@/services/events', () => ({ listEvents: async () => [{ id: 12, application_id: 7, event_type: 'interview', scheduled_at: '2026-10-15T07:00:00Z', duration_minutes: 45, notes: '用户原有备注', location: '原有地点', remind_at: '2026-10-15T06:00:00Z' }] }));
 vi.mock('antd', () => ({
@@ -55,8 +60,8 @@ afterEach(async () => { await act(async () => root.unmount()); client.clear(); c
 
 describe('job mail settings in StrictMode', () => {
   it('fails closed for real connection and never requests a credential', async () => {
-    await render(<JobMailSettings />); expect(container.textContent).toContain('真实 QQ 邮箱连接尚待'); expect(container.querySelector('input[type="password"]')).toBeNull(); expect(container.textContent).not.toContain('连接合成测试邮箱');
-    await click(button('连接 QQ 邮箱说明')); expect(container.textContent).toContain('这里不收集授权码'); await click(button('知道了')); expect(api.connectSyntheticJobMail).not.toHaveBeenCalled();
+    await render(<JobMailSettings />); expect(container.textContent).toContain('真实 QQ 邮箱连接须通过'); expect(container.querySelector('input[type="password"]')).toBeNull(); expect(container.textContent).not.toContain('连接合成测试邮箱');
+    await click(button('连接 QQ 邮箱说明')); expect(container.textContent).toContain('本机原生凭据库不可用'); await click(button('关闭并释放临时会话')); expect(api.connectSyntheticJobMail).not.toHaveBeenCalled();
   });
   it('defaults manual, validates 5–1440 minutes, and preserves immediate sync', async () => {
     status = structuredClone(connectedStatus); await render(<JobMailSettings />);
@@ -96,6 +101,7 @@ describe('mandatory mail review in StrictMode', () => {
   });
   it('requires server preview and all checkboxes before one confirmation, then exposes receipt', async () => {
     await render(review()); await click(button('预览最终变更')); expect(container.textContent).toContain('最终确认摘要'); expect(button('确认加入日程').disabled).toBe(true);
+    expect(container.querySelector('[aria-label="最终变更预览"] dl dt')?.textContent).toBe('投递 ID');
     await checkPreview(); const work = deferred<JobMailReceipt>(); api.confirmJobMail.mockReturnValue(work.promise); const confirm = button('确认加入日程'); await act(async () => { confirm.click(); confirm.click(); });
     expect(api.confirmJobMail).toHaveBeenCalledTimes(1); expect(api.confirmJobMail).toHaveBeenCalledWith(suggestionId, { ...api.previewJobMail.mock.calls[0][1], preview_token: 'token-for-exact-preview', explicit_confirmation: true });
     await act(async () => work.resolve(receipt)); await flush(); expect(container.textContent).toContain('已确认写入'); expect(readMailRecovery()).toEqual({}); await click(button('查看记录')); expect(openRecord).toHaveBeenCalledWith(7);

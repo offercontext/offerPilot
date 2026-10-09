@@ -1,7 +1,10 @@
 """Read-only fixed-host IMAP transport; credentials never enter business storage."""
 from __future__ import annotations
 
+import base64
+import binascii
 import importlib
+import threading
 import imaplib
 import re
 import ssl
@@ -14,6 +17,10 @@ from .extraction import MAX_RAW_BYTES, ParsedMail, parse_mail
 
 class TransportUnavailable(RuntimeError):
     pass
+
+
+class SecretReader(Protocol):
+    def get(self, reference: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -46,40 +53,135 @@ class DisabledTransport:
 
 
 class OSVault:
-    """Only audited OS stores; no plaintext/file/chainer fallback.
-
-    The host must install/configure keyring separately. This interface never
-    accepts a password through the mail/chat API. Setup is a user-controlled
-    secure handoff; unavailable stores block persistent mailbox connections.
-    """
+    """Pin one explicitly approved native backend; never follow global fallbacks."""
     _ALLOWED = {"keyring.backends.Windows", "keyring.backends.macOS",
                 "keyring.backends.SecretService"}
 
     def __init__(self) -> None:
         try:
-            self._keyring: Any = importlib.import_module("keyring")
-            backend = self._keyring.get_keyring()
-            if backend.__class__.__module__ not in self._ALLOWED:
+            keyring = importlib.import_module("keyring")
+            backend = keyring.get_keyring()
+            if backend.__class__.__module__ not in self._ALLOWED or backend.priority <= 0:
                 raise TransportUnavailable("secure_store_unavailable")
-        except TransportUnavailable:
-            raise
+            self._backend: Any = backend
+            self.backend_name = backend.__class__.__module__
         except Exception:
             raise TransportUnavailable("secure_store_unavailable") from None
 
     def get(self, reference: str) -> str:
         try:
-            value = self._keyring.get_password("OfferPilot.job-mail", reference)
+            value = self._backend.get_password("OfferPilot.job-mail", reference)
         except Exception:
             raise TransportUnavailable("secure_store_unavailable") from None
         if not isinstance(value, str) or not value:
             raise TransportUnavailable("credential_missing")
         return value
 
+    def set(self, reference: str, secret: str) -> None:
+        try:
+            self._backend.set_password("OfferPilot.job-mail", reference, secret)
+        except Exception:
+            raise TransportUnavailable("credential_write_failed") from None
+
     def delete(self, reference: str) -> None:
         try:
-            self._keyring.delete_password("OfferPilot.job-mail", reference)
+            # Missing after an interrupted delete is already a successful cleanup.
+            if self._backend.get_password("OfferPilot.job-mail", reference) is None:
+                return
+            self._backend.delete_password("OfferPilot.job-mail", reference)
+            if self._backend.get_password("OfferPilot.job-mail", reference) is not None:
+                raise TransportUnavailable("credential_removal_failed")
         except Exception:
             raise TransportUnavailable("credential_removal_failed") from None
+
+
+def encode_mailbox(name: str) -> bytes:
+    """IMAP modified UTF-7; retain the exact decoded mailbox identity."""
+    output: list[str] = []
+    pending: list[str] = []
+    def flush() -> None:
+        if pending:
+            encoded = base64.b64encode("".join(pending).encode("utf-16-be")).decode("ascii")
+            output.append("&" + encoded.rstrip("=").replace("/", ",") + "-")
+            pending.clear()
+    for char in name:
+        if " " <= char <= "~":
+            flush()
+            output.append("&-" if char == "&" else char)
+        else:
+            pending.append(char)
+    flush()
+    return "".join(output).encode("ascii")
+
+
+def decode_mailbox(raw: bytes) -> str:
+    try:
+        text = raw.decode("ascii")
+        output: list[str] = []
+        at = 0
+        while at < len(text):
+            if text[at] != "&":
+                if not " " <= text[at] <= "~":
+                    raise ValueError("invalid mailbox")
+                output.append(text[at])
+                at += 1
+                continue
+            end = text.index("-", at)
+            part = text[at + 1:end]
+            if not part:
+                output.append("&")
+            else:
+                encoded = part.replace(",", "/")
+                encoded += "=" * (-len(encoded) % 4)
+                decoded = base64.b64decode(encoded, validate=True).decode("utf-16-be")
+                if any(" " <= char <= "~" for char in decoded):
+                    raise ValueError("noncanonical mailbox")
+                output.append(decoded)
+            at = end + 1
+        result = "".join(output)
+        if not result or len(result) > 500 or any(c in result for c in "\r\n\x00"):
+            raise ValueError("invalid mailbox")
+        if encode_mailbox(result) != raw:
+            raise ValueError("noncanonical mailbox")
+        return result
+    except (ValueError, UnicodeError, binascii.Error):
+        raise TransportUnavailable("folder_discovery_invalid") from None
+
+
+def parse_folder_list(row: object) -> dict[str, Any]:
+    literal: bytes | None = None
+    if isinstance(row, tuple) and len(row) == 2 and isinstance(row[0], bytes) and isinstance(row[1], bytes):
+        prefix, literal = row
+    elif isinstance(row, bytes):
+        prefix = row
+    else:
+        raise TransportUnavailable("folder_discovery_invalid")
+    match = re.fullmatch(rb'\(([^)]*)\)\s+(NIL|"(?:[^"\\]|\\.)*")\s+(.+)', prefix)
+    if match is None:
+        raise TransportUnavailable("folder_discovery_invalid")
+    flags = match.group(1).decode("ascii").split()
+    name = match.group(3)
+    if literal is not None:
+        length = re.fullmatch(rb'\{(\d+)\}', name)
+        if length is None or int(length.group(1)) != len(literal):
+            raise TransportUnavailable("folder_discovery_invalid")
+        raw_name = literal
+    elif re.fullmatch(rb'"(?:[^"\\]|\\["\\])*"', name):
+        raw_name = re.sub(rb'\\(["\\])', rb'\1', name[1:-1])
+    elif re.fullmatch(rb'[^\x00-\x20(){}"\\\x7f]+', name):
+        raw_name = name
+    else:
+        raise TransportUnavailable("folder_discovery_invalid")
+    display = decode_mailbox(raw_name)
+    special = [flag for flag in flags if flag.lower() in {
+        "\\sent", "\\drafts", "\\junk", "\\trash", "\\all", "\\archive", "\\flagged"}]
+    excluded = any(flag.lower() in {"\\sent", "\\drafts", "\\junk", "\\trash", "\\all"} for flag in special)
+    excluded = excluded or display.casefold() in {
+        "sent", "sent messages", "drafts", "junk", "spam", "trash", "deleted messages",
+        "已发送", "草稿箱", "垃圾箱", "已删除", "垃圾邮件", "草稿"}
+    return {"id": "imap:" + base64.urlsafe_b64encode(raw_name).decode("ascii"),
+            "name": display, "selectable": "\\noselect" not in {flag.lower() for flag in flags},
+            "excluded_by_default": excluded, "special_use": special}
 
 
 class QQIMAPTransport:
@@ -90,19 +192,38 @@ class QQIMAPTransport:
     request. Runtime activation remains disabled by the first-batch API.
     """
     def __init__(self, address: str, credential_ref: str, *, enabled: bool = False,
-                 vault: OSVault | None = None) -> None:
+                 vault: SecretReader | None = None) -> None:
         if not enabled or not re.fullmatch(r"[^\s@]+@qq\.com", address, re.I):
             raise TransportUnavailable("real_mail_not_enabled")
         self._address = address
         self._reference = credential_ref
         self._vault = vault or OSVault()
+        self._cancelled = threading.Event()
+        self._active_lock = threading.Lock()
+        self._active: set[imaplib.IMAP4_SSL] = set()
 
     def _open(self) -> imaplib.IMAP4_SSL:
         client: imaplib.IMAP4_SSL | None = None
         try:
+            self._check_cancelled()
             client = imaplib.IMAP4_SSL("imap.qq.com", 993,
                                       ssl_context=ssl.create_default_context(), timeout=20)
-            client.login(self._address, self._vault.get(self._reference))
+            with self._active_lock:
+                self._active.add(client)
+            self._check_cancelled()
+            client.debug = 0  # IMAP debug must never print the LOGIN credential.
+            # imaplib still retains complete commands in its diagnostic ring
+            # even with debug=0. Disable that instance's ring before LOGIN.
+            setattr(client, "_log", lambda *args: None)
+            command_log = getattr(client, "_cmd_log", None)
+            if isinstance(command_log, dict):
+                command_log.clear()
+            secret = self._vault.get(self._reference)
+            if not secret or any(ord(char) < 32 or ord(char) == 127 for char in secret):
+                raise TransportUnavailable("invalid_credential")
+            self._check_cancelled()
+            client.login(self._address, secret)
+            self._check_cancelled()
             return client
         except Exception:
             if client is not None:
@@ -110,8 +231,23 @@ class QQIMAPTransport:
             # Provider errors may include addresses, identifiers or credentials.
             raise TransportUnavailable("mail_connection_failed") from None
 
-    @staticmethod
-    def _close(client: imaplib.IMAP4_SSL) -> None:
+    def _check_cancelled(self) -> None:
+        if self._cancelled.is_set():
+            raise TransportUnavailable("mail_cancelled")
+
+    def cancel(self) -> None:
+        self._cancelled.set()
+        with self._active_lock:
+            clients = list(self._active)
+        for client in clients:
+            try:
+                client.shutdown()
+            except Exception:
+                pass
+
+    def _close(self, client: imaplib.IMAP4_SSL) -> None:
+        with self._active_lock:
+            self._active.discard(client)
         try:
             client.logout()
         except Exception:
@@ -121,7 +257,8 @@ class QQIMAPTransport:
     def _select(client: imaplib.IMAP4_SSL, folder: str) -> tuple[str, int]:
         if not folder or any(c in folder for c in '\r\n\x00'):
             raise TransportUnavailable("invalid_folder")
-        quoted = '"' + folder.replace('\\', '\\\\').replace('"', '\\"') + '"'
+        wire = encode_mailbox(folder).decode("ascii")
+        quoted = '"' + wire.replace('\\', '\\\\').replace('"', '\\"') + '"'
         status, _ = client.select(quoted, readonly=True)
         if status != "OK":
             raise TransportUnavailable("folder_unavailable")
@@ -135,15 +272,35 @@ class QQIMAPTransport:
             raise TransportUnavailable("folder_identity_unavailable")
         return validity, max(0, int(next_uid) - 1)
 
+    def discover(self) -> list[dict[str, Any]]:
+        client = self._open()
+        try:
+            self._check_cancelled()
+            status, rows = client.list('""', '"*"')
+            self._check_cancelled()
+            if status != "OK" or not isinstance(rows, list) or len(rows) > 500:
+                raise TransportUnavailable("folder_discovery_failed")
+            folders = [parse_folder_list(row) for row in rows if row not in (None, b"", b")")]
+            if len({folder["id"] for folder in folders}) != len(folders):
+                raise TransportUnavailable("folder_discovery_invalid")
+            return folders
+        except TransportUnavailable:
+            raise
+        except Exception:
+            raise TransportUnavailable("folder_discovery_failed") from None
+        finally:
+            self._close(client)
+
     def folders(self) -> list[str]:
-        # Modified UTF-7 folder discovery requires a later authenticated QQ
-        # integration check. Never silently select every returned directory.
-        raise TransportUnavailable("folder_discovery_requires_validation")
+        return [folder["name"] for folder in self.discover() if folder["selectable"]]
 
     def baseline(self, folder: str) -> tuple[str, int]:
         client = self._open()
         try:
-            return self._select(client, folder)
+            self._check_cancelled()
+            result = self._select(client, folder)
+            self._check_cancelled()
+            return result
         finally:
             self._close(client)
 
@@ -152,6 +309,7 @@ class QQIMAPTransport:
              until: datetime | None = None) -> FolderBatch:
         client = self._open()
         try:
+            self._check_cancelled()
             validity, highest = self._select(client, folder)
             after = after_uid if validity == uidvalidity else 0
             criteria = ["UID", f"{after + 1}:*"]
@@ -160,7 +318,9 @@ class QQIMAPTransport:
                 # IMAP SINCE has day precision. Verify the exact INTERNALDATE
                 # before fetching BODY, so the earlier same-day mail is not read.
                 criteria.extend(["SINCE", cutoff.strftime("%d-%b-%Y")])
+            self._check_cancelled()
             status, result = client.uid("search", *criteria)
+            self._check_cancelled()
             if status != "OK":
                 raise TransportUnavailable("folder_search_failed")
             ids = sorted(int(item) for item in (result[0] or b"").split()
@@ -168,6 +328,7 @@ class QQIMAPTransport:
             messages: list[ParsedMail] = []
             last = after
             for uid in ids[:max(1, min(limit, 50))]:
+                self._check_cancelled()
                 status, size_result = client.uid("fetch", str(uid), "(RFC822.SIZE INTERNALDATE)")
                 size_text = b" ".join(item for item in size_result if isinstance(item, bytes))
                 size_match = re.search(rb"RFC822.SIZE (\d+)", size_text)
@@ -187,7 +348,9 @@ class QQIMAPTransport:
                     continue
                 if int(size_match.group(1)) > MAX_RAW_BYTES:
                     raise TransportUnavailable("message_too_large")
+                self._check_cancelled()
                 status, data = client.uid("fetch", str(uid), "(INTERNALDATE BODY.PEEK[])")
+                self._check_cancelled()
                 if status != "OK":
                     raise TransportUnavailable("message_fetch_failed")
                 literal = next((item for item in data if isinstance(item, tuple)), None)

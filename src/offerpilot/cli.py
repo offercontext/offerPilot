@@ -206,14 +206,22 @@ def analyze_command(
 def start(
     port: Optional[int] = typer.Option(None, "--port", "-p", help="local server port"),
     host: str = typer.Option("127.0.0.1", "--host", help="server bind host"),
+    enable_local_mail_setup: bool = typer.Option(False, "--enable-local-mail-setup",
+        help="Enable user-only mail credential setup on literal loopback; no reverse proxy"),
 ) -> None:
+    if enable_local_mail_setup and host not in {"127.0.0.1", "::1"}:
+        raise typer.BadParameter("--enable-local-mail-setup requires --host 127.0.0.1 or ::1; reverse proxies are unsupported")
     data_dir = resolve_data_dir()
     cfg = load_config(data_dir)
     resolved_port = port if port is not None else cfg.local_port
     session_factory_for_data_dir(data_dir)
     append_log_entry(data_dir, "INFO", f"server starting on port {resolved_port}")
     typer.echo(f"OfferPilot running at http://localhost:{resolved_port}")
-    uvicorn.run(create_app(data_dir=data_dir), host=host, port=resolved_port)
+    if enable_local_mail_setup:
+        uvicorn.run(create_app(data_dir=data_dir, job_mail_local_setup_enabled=True),
+                    host=host, port=resolved_port, proxy_headers=False)
+    else:
+        uvicorn.run(create_app(data_dir=data_dir), host=host, port=resolved_port)
 
 
 @app.command()

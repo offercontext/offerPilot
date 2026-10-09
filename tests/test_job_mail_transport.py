@@ -104,3 +104,79 @@ def test_fixed_run_cutoff_does_not_fetch_newer_mail_body(monkeypatch):
     assert batch.last_uid == 1
     assert batch.has_more
     assert not any('BODY.PEEK[]' in str(command) for command in protocols[0].commands)
+
+
+@pytest.mark.parametrize("folder", ["收件箱", 'Candidates & Hiring/"Team"', "项目😀"])
+def test_modified_utf7_roundtrip_and_readonly_quoted_wire_folder(folder):
+    from offerpilot.job_mail.transport import decode_mailbox, encode_mailbox
+    assert decode_mailbox(encode_mailbox(folder)) == folder
+    protocol = FakeProtocol("imap.qq.com", 993, __import__("ssl").create_default_context(), 20)
+    QQIMAPTransport._select(protocol, folder)
+    expected = '"' + encode_mailbox(folder).decode().replace('\\', '\\\\').replace('"', '\\"') + '"'
+    assert protocol.commands == [("select", expected, True)]
+
+
+def test_list_parses_literals_noselect_special_use_nil_and_escaped_quotes():
+    from offerpilot.job_mail.transport import encode_mailbox, parse_folder_list
+    wire = encode_mailbox("招聘 & 面试")
+    literal = parse_folder_list((b'(\\HasNoChildren) NIL {' + str(len(wire)).encode() + b'}', wire))
+    assert literal["name"] == "招聘 & 面试" and literal["selectable"]
+    assert literal["id"] != literal["name"]
+    assert parse_folder_list(b'(\\NoSelect) "/" "Parent"')["selectable"] is False
+    sent = parse_folder_list(b'(\\Sent) "/" "Sent Items"')
+    assert sent["excluded_by_default"] and sent["special_use"] == ["\\Sent"]
+    assert parse_folder_list(b'() "/" "Team \\"A\\""')["name"] == 'Team "A"'
+
+
+@pytest.mark.parametrize("row", [b'garbage', b'() NIL "&bad-"', b'() NIL "bad\rname"',
+                                (b'() NIL {3}', b'four'), b'() NIL "unfinished'])
+def test_invalid_list_is_rejected(row):
+    from offerpilot.job_mail.transport import parse_folder_list
+    with pytest.raises(TransportUnavailable):
+        parse_folder_list(row)
+
+
+def test_vault_control_characters_never_reach_login(monkeypatch):
+    logins = []
+    class UnsafeVault:
+        def get(self, reference):
+            return "fake\r\nA STORE 1 +FLAGS \\Deleted"
+    class NoLogin(FakeProtocol):
+        def login(self, *args):
+            logins.append(args)
+    monkeypatch.setattr("imaplib.IMAP4_SSL", NoLogin)
+    transport = QQIMAPTransport("synthetic@qq.com", "opaque-reference", enabled=True, vault=UnsafeVault())
+    with pytest.raises(TransportUnavailable):
+        transport.read("INBOX", "1", 0)
+    assert logins == []
+
+
+def test_stdlib_login_never_retains_plaintext_in_diagnostic_ring(monkeypatch):
+    import imaplib
+    class MemoryProtocol(imaplib.IMAP4):
+        def __init__(self, *args, **kwargs):
+            self.state = "NONAUTH"
+            self.literal = None
+            self.tagged_commands = {}
+            self.untagged_responses = {}
+            self.continuation_response = None
+            self.is_readonly = False
+            self.tagpre = b"MOCK"
+            self.tagnum = 0
+            self._encoding = "ascii"
+            self._cmd_log = {}
+            self._cmd_log_idx = 0
+            self._cmd_log_len = 10
+            self.debug = 0
+        def send(self, data):
+            assert b"synthetic-test-code" in data
+        def _command_complete(self, name, tag):
+            return "OK", [b"logged in"]
+        def logout(self):
+            pass
+    monkeypatch.setattr("imaplib.IMAP4_SSL", MemoryProtocol)
+    transport = QQIMAPTransport("synthetic@qq.com", "opaque-reference", enabled=True, vault=Vault())
+    client = transport._open()
+    assert client.state == "AUTH"
+    assert client._cmd_log == {}
+    transport._close(client)

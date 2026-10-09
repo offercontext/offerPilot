@@ -94,7 +94,7 @@ export interface JobMailConnection {
   id: string;
   email_masked: string;
   provider: 'qq' | 'synthetic';
-  status: 'connected' | 'disconnected';
+  status: 'connected' | 'disconnected' | 'credential_delete_pending';
   folders: string[];
   scope_version: number;
   sync_mode: 'manual' | 'automatic';
@@ -107,7 +107,7 @@ export interface JobMailConnection {
   not_before_at: string | null;
 }
 export interface JobMailStatus {
-  capabilities: { real_connection: false; ai_recognition: false; synthetic_connection: boolean };
+  capabilities: { real_connection: boolean; ai_recognition: false; synthetic_connection: boolean };
   connection: JobMailConnection | null;
   run: JobMailRun | null;
   budget: { limit: number; used: number; remaining: number };

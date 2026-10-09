@@ -143,3 +143,16 @@ class JobMailExtractionAttempt(Base):
     payload_json: Mapped[str] = mapped_column(Text, default="{}", server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class JobMailCredentialOperation(Base):
+    """Non-secret recovery intent; a crash can never lose the vault cleanup handle."""
+    __tablename__ = "job_mail_credential_operations"
+    __table_args__ = (Index("idx_job_mail_credential_scope_state", "scope_id", "state"),)
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    scope_id: Mapped[str] = mapped_column(String, nullable=False)
+    credential_ref: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    state: Mapped[str] = mapped_column(String, nullable=False)
+    catalog_json: Mapped[str] = mapped_column(Text, default="[]", server_default="[]")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.current_timestamp())

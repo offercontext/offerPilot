@@ -56,6 +56,8 @@ try {
   await settings.getByLabel('同步间隔', { exact: true }).fill('30');
   await settings.getByRole('button', { name: '保存同步方式' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).connection.sync_mode === 'automatic');
+  await settings.getByRole('switch', { name: '自动同步' }).scrollIntoViewIfNeeded();
+  await snap('02b-optional-automatic-interval');
   await settings.getByRole('switch', { name: '自动同步' }).click();
   await settings.getByRole('button', { name: '保存同步方式' }).click();
   await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).connection.sync_mode === 'manual');
@@ -70,7 +72,13 @@ try {
   await dialog.getByLabel('目标投递', { exact: true }).selectOption(String(app.id));
   await dialog.getByRole('button', { name: '预览最终变更' }).click();
   await dialog.getByRole('heading', { name: '最终确认摘要' }).waitFor();
-  await snap('04-exact-confirmation-preview', dialog);
+  // The long modal scrolls inside its overlay. A bounding-box screenshot of
+  // the entire dialog clips the scrolled content and pads with blank pixels.
+  // Capture two real viewport states rather than altering the application CSS.
+  await dialog.getByRole('heading', { name: '最终确认摘要' }).evaluate(element => element.scrollIntoView({ block: 'start' }));
+  await snap('04-exact-confirmation-preview');
+  await dialog.getByRole('button', { name: '确认加入日程' }).scrollIntoViewIfNeeded();
+  await snap('04b-explicit-field-confirmations');
   assert.equal((await api('/application-events')).length, 0);
   assert.equal(await dialog.getByRole('button', { name: '确认加入日程' }).isEnabled(), false);
   const boxes = dialog.locator('input[type=checkbox]');
@@ -97,15 +105,64 @@ try {
   await inbox.getByRole('button', { name: /【合成样本】取消通知/ }).click();
   await page.getByText('此类建议需要人工处理', { exact: true }).waitFor();
   await page.setViewportSize({ width: 430, height: 932 });
-  await snap('06-mobile-manual-only-cancellation', page.getByRole('dialog'));
+  await page.getByRole('heading', { name: '需要人工处理', exact: true }).scrollIntoViewIfNeeded();
+  await snap('06-mobile-manual-only-cancellation');
+  await page.getByRole('button', { name: '暂不处理，保留待核对', exact: true }).scrollIntoViewIfNeeded();
+  await snap('06b-mobile-dismissal-controls');
   assert.equal((await api('/application-events')).length, 1);
   assert.equal(await page.getByRole('button', { name: '确认加入日程' }).count(), 0);
   assert.deepEqual(blocked, []);
   checks.push('Cancellation/injection is manual-only and never loads external resources; mobile review verified');
+  await page.setViewportSize({ width: 1440, height: 1100 });
+  await page.goto(base + '/?view=settings');
+  await settings.getByRole('button', { name: '断开邮箱', exact: true }).click();
+  await page.getByRole('dialog', { name: '断开求职邮箱？' }).getByRole('button', { name: '确认断开', exact: true }).click();
+  await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).connection.status === 'disconnected');
+  await settings.getByRole('button', { name: '安全配置 QQ 邮箱', exact: true }).click();
+  const secure = page.getByRole('dialog', { name: '安全配置 QQ 邮箱', exact: true });
+  await secure.getByLabel(/开始一个短期安全配置会话/).check();
+  await secure.getByRole('button', { name: '开始安全配置', exact: true }).click();
+  // The fixture injects an in-memory vault and a socket-free QQ double.
+  // Never screenshot credential entry, even though this value is synthetic.
+  await secure.getByLabel('QQ 邮箱地址', { exact: true }).fill('fixture@qq.com');
+  await secure.getByLabel('QQ 邮箱授权码', { exact: true }).fill('synthetic-browser-fixture-only');
+  assert.equal(await secure.getByRole('button', { name: '确认仅验证登录与目录' }).isEnabled(), false);
+  await secure.getByLabel(/我同意现在使用上述授权码/).check();
+  await secure.getByRole('button', { name: '确认仅验证登录与目录' }).click();
+  await secure.getByRole('heading', { name: '明确选择读取目录' }).waitFor();
+  assert.equal(await secure.locator('input[type=password]').count(), 0);
+  assert.equal(await secure.locator('input[type=checkbox]:checked').count(), 0);
+  await secure.getByLabel('求职通知', { exact: true }).check();
+  assert.equal(await secure.getByRole('button', { name: '确认保存凭据与范围' }).isEnabled(), false);
+  await snap('07-synthetic-vault-folder-confirmation', secure);
+  await secure.getByLabel(/我明确同意把此授权码保存到本机原生凭据库/).check();
+  await secure.getByRole('button', { name: '确认保存凭据与范围' }).click();
+  await secure.getByText('QQ 邮箱已安全配置，当前为手动模式', { exact: true }).waitFor();
+  await snap('08-synthetic-vault-manual-connection', secure);
+  const realShape = await api('/job-mail/status');
+  assert.equal(realShape.connection.provider, 'qq');
+  assert.equal(realShape.connection.sync_mode, 'manual');
+  assert.deepEqual(realShape.connection.folders, ['求职通知']);
+  await secure.getByRole('button', { name: /^完\s*成$/ }).click();
+  await settings.getByRole('button', { name: '断开邮箱', exact: true }).click();
+  const deletion = page.getByRole('dialog', { name: '断开求职邮箱？' });
+  assert.equal(await deletion.getByRole('button', { name: '确认断开并删除凭据' }).isEnabled(), false);
+  await deletion.getByLabel(/我明确同意停止邮箱检查并删除/).check();
+  await deletion.getByRole('button', { name: '确认断开并删除凭据' }).click();
+  await settings.getByText(/邮箱已断开且本机凭据删除已确认/).waitFor();
+  const removed = await api('/job-mail/secure-setup/status');
+  assert.equal(removed.configured, false);
+  assert.equal(removed.deletion_pending, false);
+  assert.deepEqual(await api('/job-mail/fixture-safety'), { synthetic_only: true, body_read_attempts: 0, vault_entries: 0 });
+  assert.equal((await api('/application-events')).length, 1);
+  assert.deepEqual(blocked, []);
+  await snap('09-synthetic-vault-deletion-receipt', settings);
+  checks.push('Synthetic vault setup requires separate test/save consent, explicit Chinese folder scope, manual mode, and confirmed deletion; no IMAP body or native vault use');
   assert.deepEqual(pageErrors, []);
   await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, externalRequests: blocked, pageErrors, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
+  await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));
   await snap('failure');
   console.error(error);
   process.exitCode = 1;

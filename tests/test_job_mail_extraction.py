@@ -37,9 +37,9 @@ def test_fifty_synthetic_invites_keep_exact_evidence(index):
     ("测评请在10月15日前完成", "deadline"),
     ("笔试15至17日任选时间", "window"),
     ("面试时间另行通知", "unknown"),
-    ("面试已取消", "fixed"),
-    ("面试改期至明天", "fixed"),
-    ("收到录用通知 offer", "fixed"),
+    ("面试已取消", "unknown"),
+    ("面试改期至明天", "unknown"),
+    ("收到录用通知 offer", "unknown"),
 ])
 def test_unsupported_notices_cannot_apply(body, mode):
     item = recognize(message(body))[0]
@@ -147,3 +147,13 @@ def test_model_cannot_override_deterministic_cancellation_guard():
             "evidence": {"notice": {"quote": body, "start": 0, "end": len(body)}}, "reason": "模型误分类"}
     result = engine({"items": [item]}).extract(message(body))
     assert result[0].action == "manual_only"
+
+
+@pytest.mark.parametrize("body", ["面试取消，请勿参加", "恭喜收到Offer录用通知", "面试时间另行通知"])
+def test_manual_notices_without_explicit_time_are_not_marked_fixed(body):
+    mail = ParsedMail(1, "1", "INBOX", "<manual>", "2026-10-09T10:00:00Z",
+                      "hr@example.test", "通知", body, "manual")
+    result = recognize(mail)[0]
+    assert result.action == "manual_only"
+    assert result.scheduled_at is None
+    assert result.time_mode == "unknown"

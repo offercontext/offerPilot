@@ -7,11 +7,16 @@ import {
 } from '@/services/jobMail';
 import { mailErrorText } from './jobMailModel';
 import JobMailImport from './JobMailImport';
+import JobMailSecureSetup from './JobMailSecureSetup';
+import { cancelJobMailSecureSetup, disconnectRealJobMail, getJobMailSecureCapability, JOB_MAIL_SECURE_CAPABILITY_KEY, startJobMailSecureSetup } from '@/services/jobMailSecureSetup';
+import { canEnterMailCredential, isLoopbackSetupPage, mailSecureCapabilityReason, mailSecureSetupErrorText } from './secureSetupModel';
 import styles from './jobMail.module.css';
 
 export default function JobMailSettings() {
   const queryClient = useQueryClient();
   const query = useQuery({ queryKey: JOB_MAIL_STATUS_KEY, queryFn: getJobMailStatus, retry: false, refetchInterval: 5_000 });
+  const secureQuery = useQuery({ queryKey: JOB_MAIL_SECURE_CAPABILITY_KEY, queryFn: getJobMailSecureCapability, retry: false, refetchInterval: 15_000 });
+  const [deleteConsent, setDeleteConsent] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [connectionInfo, setConnectionInfo] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
@@ -31,6 +36,9 @@ export default function JobMailSettings() {
   const connection = query.data?.connection;
   const connected = connection?.status === 'connected';
   const running = query.data?.run?.status === 'running';
+  const realCredential = connection?.provider === 'qq' || secureQuery.data?.configured === true || secureQuery.data?.deletion_pending === true;
+  const deletionPending = secureQuery.data?.deletion_pending === true;
+  const realSetupAllowed = !secureQuery.isError && canEnterMailCredential(secureQuery.data, window.location);
   useEffect(() => {
     if (!dirty) { setAutomatic(connection?.sync_mode === 'automatic'); setIntervalMinutes(connection?.interval_minutes ?? 15); }
   }, [connection?.sync_mode, connection?.interval_minutes, dirty]);
@@ -49,8 +57,8 @@ export default function JobMailSettings() {
       if (live.current) { setNotice(success); setDirty(false); setScopeOpen(false); setDisconnectOpen(false); }
       await queryClient.invalidateQueries({ queryKey: JOB_MAIL_QUERY_KEY });
     } catch (err) {
-      if (live.current) setError(mailErrorText(err, '操作未确认成功。请刷新状态后再操作；不会自动重试。'));
-      await queryClient.invalidateQueries({ queryKey: JOB_MAIL_STATUS_KEY });
+      if (live.current) setError(name === 'disconnect-real' ? mailSecureSetupErrorText(err) : mailErrorText(err, '操作未确认成功。请刷新状态后再操作；不会自动重试。'));
+      await queryClient.invalidateQueries({ queryKey: JOB_MAIL_QUERY_KEY });
     } finally { lock.current = false; if (live.current) setBusy(''); }
   }
   function openScope() { setFolders(connected ? connection.folders : []); setBackfill(false); setScopeOpen(true); }
@@ -63,12 +71,32 @@ export default function JobMailSettings() {
     if (connected) void runAction('scope', () => updateJobMailSettings({ sync_mode: connection.sync_mode, interval_minutes: connection.interval_minutes, folders }), '读取范围已保存。新目录不会自动纳入。');
     else void runAction('connect', () => connectSyntheticJobMail({ provider: 'synthetic', email: 'demo@qq.com', folders, backfill_days: backfill ? 7 : 0 }), '合成测试邮箱已连接，默认手动；尚未读取正文，请按需立即同步。');
   }
+  function openDisconnect() { setDeleteConsent(false); setDisconnectOpen(true); }
+  async function disconnectReal() {
+    if (!deleteConsent || !isLoopbackSetupPage(window.location) || secureQuery.isError || !secureQuery.data) return;
+    await runAction('disconnect-real', async () => {
+      const session = await startJobMailSecureSetup('disconnect');
+      try {
+        if (!session.setup_token || !Number.isFinite(Date.parse(session.expires_at)) || Date.parse(session.expires_at) <= Date.now()) throw new Error('invalid session');
+        const result = await disconnectRealJobMail(session.setup_token);
+        if (result.connection?.status === 'connected') throw new Error('deletion unconfirmed');
+        // A success response is not enough to claim deletion if status still reports pending.
+        const capability = await getJobMailSecureCapability();
+        if (capability.configured || capability.deletion_pending) throw new Error('deletion unconfirmed');
+        return result;
+      } finally {
+        if (session.setup_token) await cancelJobMailSecureSetup(session.setup_token).catch(() => undefined);
+      }
+    }, '邮箱已断开且本机凭据删除已确认；已确认业务记录保留。QQ 侧撤销授权码仍需你操作。');
+  }
   const unavailable = !!busy || query.isError || !query.data;
   const run = query.data?.run;
   const runLabels = { running: '运行中', completed: '本次已完成', failed: '本次失败', cancelled: '已取消本次', interrupted: '已中断' };
   return <section className={styles.panel} aria-labelledby="job-mail-settings-title">
     <div className={styles.heading}><div><h3 className={styles.title} id="job-mail-settings-title">求职邮箱</h3><p className={styles.muted}>默认手动检查，邮件建议必须逐项核对确认。</p></div><span className={styles.status}>{connected ? connection.provider === 'synthetic' ? '合成测试连接' : '已连接' : '未连接'}</span></div>
-    <Alert type="info" showIcon message="第一批：手动文本与测试邮箱流程可用" description="真实 QQ 邮箱连接尚待凭据安全存储、部署安全配置及联调，当前不会建立真实连接。AI 识别当前不可用；仅使用安全规则提出建议，不调用模型。不承诺识别完整或实时。" />
+    <Alert type="info" showIcon message="求职邮件：安全连接与逐项确认" description="真实 QQ 邮箱连接须通过本机原生凭据库和本地安全访问检查。你亲自验证后，还需另行确认保存凭据与读取范围，默认手动。AI 识别当前不可用；仅使用安全规则提出建议，不调用模型。" />
+    <div className={styles.stat}><span className={styles.muted}>原生凭据能力</span><span>{secureQuery.isError ? '读取失败，暂不接收授权码' : secureQuery.data?.configured ? '已配置' : secureQuery.data?.available ? '支持库可用' : '当前不可用或尚未确认'}</span><span className={styles.muted}>{mailSecureCapabilityReason(secureQuery.isError ? undefined : secureQuery.data)}</span></div>
+    {deletionPending && <Alert type="error" showIcon message="本机凭据仍待删除" description="检查已停止，但凭据删除尚未成功，不能视为已清理。已确认业务事件保留。" action={<Button disabled={!!busy} onClick={openDisconnect}>重试删除凭据</Button>} />}
     {query.isPending ? <Skeleton active paragraph={{ rows: 3 }} /> : query.isError || !query.data ? <Alert type="error" showIcon message="邮箱状态读取失败" description="无法判断是否检查成功，这不代表没有新邮件。" action={<Button onClick={() => void query.refetch()}>重试</Button>} /> : <>
       <div className={styles.stats}>
         <div className={styles.stat}><span className={styles.muted}>邮件检查运行在</span><span>{query.data.execution_location}</span></div>
@@ -90,7 +118,7 @@ export default function JobMailSettings() {
           <Button type="primary" disabled={unavailable || running || waitSeconds > 0} loading={busy === 'sync'} onClick={() => void runAction('sync', syncJobMail, '已请求手动同步，请查看任务状态。')}>{running ? '正在同步' : waitSeconds > 0 ? `${waitSeconds} 秒后可同步` : '立即同步'}</Button>
           {running && run && <Button disabled={unavailable} loading={busy === 'cancel'} onClick={() => void runAction('cancel', () => cancelJobMailSync(run.id), '已请求取消本次；自动开关和未来计划保持原状。')}>取消本次</Button>}
           <Button disabled={unavailable || running} onClick={openScope}>调整读取范围</Button>
-          <Button danger disabled={unavailable} onClick={() => setDisconnectOpen(true)}>断开邮箱</Button>
+          <Button danger disabled={unavailable} onClick={openDisconnect}>断开邮箱</Button>
         </div>
         <div className={styles.form}>
           <div className={styles.actions}><Switch aria-label="自动同步" checked={automatic} disabled={unavailable} onChange={(checked) => { setAutomatic(checked); setDirty(true); setNotice(''); }} /><span>自动同步（可选，保存后生效）</span></div>
@@ -108,14 +136,13 @@ export default function JobMailSettings() {
     </>}
     <div className={styles.actions}>
       <Button onClick={() => setImportOpen(true)}>粘贴单封邮件</Button>
-      <Button onClick={() => setConnectionInfo(true)}>连接 QQ 邮箱说明</Button>
+      <Button onClick={() => setConnectionInfo(true)}>{realSetupAllowed ? '安全配置 QQ 邮箱' : '连接 QQ 邮箱说明'}</Button>
+      {!connected && realCredential && !deletionPending && <Button danger disabled={unavailable} onClick={openDisconnect}>删除本机邮箱凭据</Button>}
       {!connected && query.data?.capabilities.synthetic_connection && <Button disabled={unavailable} onClick={openScope}>连接合成测试邮箱</Button>}
     </div>
     {notice && <Alert type="success" showIcon message={notice} />}{error && <Alert type="error" showIcon message={error} />}
-    <details className={styles.muted}><summary>数据、安全与保留说明</summary><p>目录限制是产品读取范围，通常不是授权码的服务端权限隔离。授权码可能具备收发邮件能力，不能称为天然只读。授权码不得放进聊天、代码仓库、诊断或日志。</p><p>数据保存在后端所在主机。当前只处理你提交的文本或测试数据，不发送给模型；未开放附件、图片 OCR 或外链读取。待确认片段最长保留 90 天，已处理片段 30 天后清理；清理后只保留结构化历史并标明原文不可用。</p></details>
-    <Modal open={connectionInfo} title="连接 QQ 邮箱前须知" onCancel={() => setConnectionInfo(false)} footer={<Button onClick={() => setConnectionInfo(false)}>知道了</Button>}>
-      <div className={styles.section}><Alert type="warning" showIcon message="当前版本暂未开放真实邮箱连接" description="在受保护的凭据存储、远程部署安全门槛和 QQ 联调完成前，连接入口保持关闭。这里不收集授权码。" /><p>后续连接只允许 QQ 官方 IMAP、TLS 证书校验及明确勾选目录。新建目录不会自动纳入，连接后默认手动。</p><p>已选目录可能包含私人邮件；筛选招聘邮件并不意味着不会读取其他正文。检查发生在 OfferPilot 后端所在设备，关机或停止服务时无法继续。</p><p>请使用“粘贴单封邮件”替代入口，不要把 QQ 密码或邮箱授权码发送到聊天。</p></div>
-    </Modal>
+    <details className={styles.muted}><summary>数据、安全与保留说明</summary><p>目录限制是产品读取范围，通常不是授权码的服务端权限隔离。授权码可能具备收发邮件能力，不能称为天然只读。授权码不得放进聊天、代码仓库、诊断或日志。</p><p>数据保存在后端所在主机。只处理你提交的文本或明确选定范围内的邮件，不发送给模型；未开放附件、图片 OCR 或外链读取。待确认片段最长保留 90 天，已处理片段 30 天后清理；清理后只保留结构化历史并标明原文不可用。</p></details>
+    {connectionInfo && <JobMailSecureSetup onClose={() => setConnectionInfo(false)} />}
     <Modal open={scopeOpen} title={connected ? '核对新的读取范围' : '连接合成测试邮箱'} onCancel={() => setScopeOpen(false)} footer={null} closable={!busy} maskClosable={!busy} keyboard={!busy}>
       <div className={styles.form}>
         <Alert type="info" message={connected ? '仅保存明确选中的目录' : '仅限后端显式注入的合成测试环境，不访问真实 QQ 邮箱'} description="未选目录不读取，新目录不会自动纳入。保存连接不会读取正文。" />
@@ -126,7 +153,7 @@ export default function JobMailSettings() {
       </div>
     </Modal>
     <Modal open={disconnectOpen} title="断开求职邮箱？" onCancel={() => setDisconnectOpen(false)} footer={null} closable={!busy} maskClosable={!busy} keyboard={!busy}>
-      <div className={styles.form}><p>断开将停止本次及未来检查，重连前不能手动或自动同步。已确认的业务记录保留。断开本地连接不等于在 QQ 撤销授权码；QQ 侧撤销需你自行操作。</p><div className={styles.actions}><Button danger loading={busy === 'disconnect'} disabled={unavailable} onClick={() => void runAction('disconnect', disconnectJobMail, '已断开邮箱，停止检查；已确认记录保留。')}>确认断开</Button><Button disabled={!!busy} onClick={() => setDisconnectOpen(false)}>保留连接</Button></div></div>
+      <div className={styles.form}><p>断开将停止本次及未来检查，重连前不能手动或自动同步。已确认的业务记录保留。断开本地连接不等于在 QQ 撤销授权码；QQ 侧撤销需你自行操作。</p>{realCredential && <><label className={styles.check}><input type="checkbox" checked={deleteConsent} disabled={!!busy} onChange={(event) => setDeleteConsent(event.target.checked)} />我明确同意停止邮箱检查并删除本机系统凭据库中的此邮箱授权码；保留已确认的投递和业务事件</label><p className={styles.muted}>删除失败时会保留“待删除”状态，可重试；不会提前显示已删除。此操作仅支持后端所在设备的本地回环页面。</p></>}<div className={styles.actions}>{realCredential ? <Button danger loading={busy === 'disconnect-real'} disabled={unavailable || !deleteConsent || !isLoopbackSetupPage(window.location) || secureQuery.isError || !secureQuery.data} onClick={() => void disconnectReal()}>确认断开并删除凭据</Button> : <Button danger loading={busy === 'disconnect'} disabled={unavailable} onClick={() => void runAction('disconnect', disconnectJobMail, '已断开邮箱，停止检查；已确认记录保留。')}>确认断开</Button>}<Button disabled={!!busy} onClick={() => setDisconnectOpen(false)}>保留连接</Button></div></div>
     </Modal>
     {importOpen && <JobMailImport onClose={() => setImportOpen(false)} />}
   </section>;

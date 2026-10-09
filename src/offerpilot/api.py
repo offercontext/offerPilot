@@ -1252,6 +1252,7 @@ def create_app(
     run_recorder_factory: RunRecorderFactory | None = None,
     job_mail_transport: MailTransport | None = None,
     job_mail_extractor: Extractor | None = None,
+    job_mail_local_setup_enabled: bool = False,
 ) -> FastAPI:
     resolved_data_dir = data_dir or resolve_data_dir()
     resolved_static_dir = static_dir or _find_static_dir()
@@ -1455,6 +1456,7 @@ def create_app(
     # they share this app's authenticated workspace Session factory.
     job_mail_runtime = register_job_mail_routes(
         app, session_factory, transport=job_mail_transport, extractor=job_mail_extractor,
+        local_setup_enabled=job_mail_local_setup_enabled,
     )
     register_memory_routes(app, session_factory)
     register_context_policy_routes(app, session_factory)

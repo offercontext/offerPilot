@@ -35,11 +35,11 @@ jobs:
       - name: Backend safety and existing domain regression
         run: |
           uv run pytest -q tests/test_job_mail*.py tests/test_application_events_repository.py tests/test_events_api.py tests/test_calendar_api.py tests/test_auth_api.py tests/test_event_lifecycle_v1.py
-          uv run ruff check src/offerpilot/job_mail src/offerpilot/api.py src/offerpilot/db.py tests/test_job_mail*.py tests/fixtures/job_mail_app.py
-          uv run mypy src/offerpilot/job_mail src/offerpilot/api.py src/offerpilot/db.py --follow-imports=silent
+          uv run ruff check src/offerpilot/job_mail src/offerpilot/api.py src/offerpilot/cli.py src/offerpilot/db.py tests/test_job_mail*.py tests/fixtures/job_mail_app.py
+          uv run mypy src/offerpilot/job_mail src/offerpilot/api.py src/offerpilot/cli.py src/offerpilot/db.py --follow-imports=silent
       - name: Frontend regression and production build
         run: |
-          npm test --prefix web -- src/features/jobMail src/services/jobMail.test.ts src/layout/AppShell.test.ts src/components/SettingsView.test.ts src/features/reminders src/features/dashboard
+          npm test --prefix web -- src/features/jobMail src/services/jobMail.test.ts src/services/jobMailSecureSetup.test.ts src/layout/AppShell.test.ts src/components/SettingsView.test.ts src/features/reminders src/features/dashboard
           npm run build --prefix web
       - name: Install isolated browser harness
         run: |
@@ -73,3 +73,18 @@ jobs:
             artifacts/job-mail-browser/result.json
           if-no-files-found: ignore
           retention-days: 7
+  windows-native-lock:
+    needs: synthetic-acceptance
+    runs-on: windows-latest
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated test runner
+        run: python -m pip install pytest==9.1.1
+      - name: Verify native lock exclusion and crash release
+        run: python -m pytest --noconftest -q tests/test_job_mail_process_lock.py
