@@ -2,39 +2,23 @@
   "repository": "offercontext/offerPilot",
   "branch": "feat/20261005-windows-desktop-validation",
   "productBaseline": {
-    "commit": "02e6b8002c8424203b08537e7770d678de4b89c2",
-    "tree": "c15c0fa9a34c54414d6ab12b0157fc0d923fe427"
+    "commit": "0256ba7069b52587982fd3fb203b5624dbd9e921",
+    "tree": "6167e764edceed52ed7c880beabf13ab145de798"
   },
-  "waitForRunTerminal": 37898762562,
-  "reason": "汇总修正本轮完整 Windows 验证暴露的三类测试问题：Provider 等待预算测试隔离真实主机调度耗时；本地 HTTP fixture 精确识别 Windows 10053 已终止连接；故事提交未知故障精确绑定目标线程、Session 和事务，避免后台提交抢先消耗故障。产品源码、预算、取消行为及幂等契约不变，保留全部旧测试节点和失败关闭断言。",
+  "waitForRunTerminal": 37937318594,
+  "reason": "完成 test_chat_api.py 与 conftest 的真实节点分片隔离复审后更新审查锁。复核全局状态、动态 fixture 获取、fixture scopes、xunit、monkeypatch 和线程生命周期，独立审查无阻断；保留源码变化必须重新审查的门禁及运行时 scope guards。产品源码、锁文件、分片算法和全部6769节点不变。",
   "previousFullGate": {
-    "run": 37898762562,
-    "commit": "02e6b8002c8424203b08537e7770d678de4b89c2",
+    "run": 37937318594,
+    "commit": "0256ba7069b52587982fd3fb203b5624dbd9e921",
     "outcome": "failed",
-    "nodes": 6754,
-    "passed": 6738,
+    "nodes": 6769,
+    "passed": 6755,
     "skipped": 13,
-    "failed": 3,
-    "scope": "全部12组及后置已终态，aggregate与逐组证据一致；full-regression在分组失败前置检查退出，完整release阶段未执行，独立package成功不替代。"
+    "failed": 1,
+    "scope": "全部12组及后置已终态。唯一失败为节点分片源码审查digest未同步；前一轮三项原失败节点及新增15回归全部通过。full-regression在分组失败前置检查退出，完整release阶段未执行，独立package成功不替代。"
   },
-  "repairedTests": [
-    {
-      "path": "tests/test_chat_api.py",
-      "reason": "两族慢Provider探针只将真实Provider等待投影到注入时钟，仍检测把等待误计入活跃预算；业务与完整Journal断言保留。原CI具体超预算操作未知，本地尾延迟确定性复现相同失效机制。"
-    },
-    {
-      "path": "tests/test_provider_stream_cancellation.py",
-      "reason": "仅额外接受ConnectionAbortedError，排除timeout、would-block及其它OSError；Stop前连接必须仍存活，保留真实socket关闭和原限时。10053本身不证明终止触发者。"
-    },
-    {
-      "path": "tests/test_interview_story_product_actions.py",
-      "reason": "真实后台scheduler提交不再消耗目标故障；仍要求200重放投影、原提交次数及零重复写入。原runner没有事务身份日志，本地竞争顺序复现同一机制。"
-    }
-  ],
   "localEvidence": {
-    "journal": "523相关回归通过，5个mutation用例被检测，独立审查通过。",
-    "provider": "74相关回归通过；最终文件22通过，5类mutation被检测，独立审查通过。",
-    "story": "早先加载快照131广回归通过，最终14个受影响节点复验通过；6类mutation被检测，独立审查通过。组合验证不冒称最终快照单次全文件执行。"
+    "isolation": "40个分片合同通过，23个针对性chat节点通过；390个真实fixture closure核验；5类源码漂移mutation被拒绝；LF/CRLF相同内容均通过，独立审查通过。"
   },
   "requiredAcceptance": [
     "本请求提交通过普通Windows manifest、全部12 shards、full-regression、package和validation-status，并生成新的EXE。",
@@ -44,9 +28,19 @@
   ],
   "testCollection": {
     "expectedNodes": 6769,
-    "previousNodes": 6754,
+    "previousNodes": 6769,
     "removedNodes": 0,
-    "addedNodes": 15,
-    "addedCoverage": "9个精确socket异常分类，6个提交未知恢复竞争顺序。"
+    "addedNodes": 0
+  },
+  "isolationReview": {
+    "reviewedSources": [
+      "tests/test_chat_api.py",
+      "tests/conftest.py"
+    ],
+    "changedTest": "tests/test_complete_pytest_shards.py",
+    "chatNormalizedSha256": "f3d640bcfa619bd0030b22bb24aec127fdcefb339c973d54b8a379823f2b8205",
+    "conftestNormalizedSha256": "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
+    "finding": "ProviderGapClock、model、diagnostic list为每测试实例；legacy spy每次初始化；共享catalog/golden仅只读；fixture无跨测试可变状态，390个chat节点真实fixture closure满足scope guard。",
+    "derivedAudit": "反查本轮三份测试与conftest的新旧7个摘要，唯一需更新的是本隔离审查锁；其它派生清单和节点集合不变，历史报告不改写。"
   }
 }

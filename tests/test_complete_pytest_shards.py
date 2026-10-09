@@ -264,10 +264,17 @@ def test_reviewed_chat_module_spreads_without_splitting_other_modules():
 def test_node_split_source_change_requires_a_new_isolation_review():
     # This is an audit gate, not runtime caching. Review globals, dynamic fixture
     # acquisition and fixture scopes again before updating either digest.
+    # Re-reviewed after 0256ba70: ProviderGapClock, models and diagnostic lists
+    # belong to each test; only its provider worker advances that clock, before
+    # the completed HTTP/SSE response is inspected. Database/key paths are local.
+    # Existing catalog/golden globals are read-only; the legacy spy resets its
+    # slots per invocation and exposes its callback only via function monkeypatch.
+    # Neither module has xunit/shared fixture state or dynamic fixture requests;
+    # conftest's app_client remains function-scoped. Keep the runtime scope guards.
     # Normalize only checkout CRLF so the same reviewed source works on Windows.
     reviewed = {
         "tests/test_chat_api.py":
-            "ba80c0cf9185b5bfe3c606f1d6adbf0df90a9868c7ac5177640145fb1eb22eff",
+            "f3d640bcfa619bd0030b22bb24aec127fdcefb339c973d54b8a379823f2b8205",
         "tests/conftest.py":
             "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
     }
