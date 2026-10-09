@@ -69,6 +69,9 @@ from offerpilot.reliability.trace import (
     record_mock_interview_trace,
 )
 from offerpilot.ai.client import ConfiguredAIClient
+from offerpilot.job_mail.api import job_mail_origin_guard_response, register_job_mail_routes
+from offerpilot.job_mail.transport import MailTransport
+from offerpilot.job_mail.model_adapter import Extractor
 from offerpilot.confirmed_memory.api import register_memory_routes
 from offerpilot.context_sources.api import register_context_policy_routes
 from offerpilot.context_sources.readiness_api import register_readiness_context_routes
@@ -1247,6 +1250,8 @@ def create_app(
     static_dir: Optional[Path] = None,
     *,
     run_recorder_factory: RunRecorderFactory | None = None,
+    job_mail_transport: MailTransport | None = None,
+    job_mail_extractor: Extractor | None = None,
 ) -> FastAPI:
     resolved_data_dir = data_dir or resolve_data_dir()
     resolved_static_dir = static_dir or _find_static_dir()
@@ -1448,6 +1453,9 @@ def create_app(
 
     # P4 context management routes are registered at the composition root so
     # they share this app's authenticated workspace Session factory.
+    job_mail_runtime = register_job_mail_routes(
+        app, session_factory, transport=job_mail_transport, extractor=job_mail_extractor,
+    )
     register_memory_routes(app, session_factory)
     register_context_policy_routes(app, session_factory)
     register_readiness_context_routes(app, session_factory)
@@ -1482,11 +1490,17 @@ def create_app(
                     )
                     + "\n"
                 )
+        mail_origin_response = job_mail_origin_guard_response(request)
         if request.method == "OPTIONS":
-            response = Response(status_code=200)
+            response = mail_origin_response if mail_origin_response is not None else Response(status_code=200)
         else:
             auth_response = _auth_guard_response(request, resolved_data_dir)
-            response = auth_response if auth_response is not None else await call_next(request)
+            if auth_response is not None:
+                response = auth_response
+            elif mail_origin_response is not None:
+                response = mail_origin_response
+            else:
+                response = await call_next(request)
         origin = request.headers.get("origin")
         same_origin = f"{request.url.scheme}://{request.url.netloc}"
         if origin == same_origin:
@@ -1504,6 +1518,9 @@ def create_app(
         request: Request,
         exc: RequestValidationError,
     ) -> JSONResponse:
+        if request.url.path.startswith("/api/job-mail/"):
+            # Mail and credentials must not be echoed in validation diagnostics.
+            return error_response(422, "邮件请求字段无效，请检查必填字段、时间与确认内容", code="job_mail_invalid_payload")
         errors = exc.errors()
         if errors and all(
             err.get("type") == "int_parsing"
@@ -1657,6 +1674,7 @@ def create_app(
     def _start_knowledge_worker() -> None:
         knowledge_runtime.start()
         proactive_runtime.start()
+        job_mail_runtime.start()
 
     @app.on_event("shutdown")
     def _stop_knowledge_worker() -> None:
@@ -1670,6 +1688,7 @@ def create_app(
                 if first_error is None:
                     first_error = error
 
+        attempt_cleanup(job_mail_runtime.stop)
         attempt_cleanup(proactive_runtime.stop)
         attempt_cleanup(runtime_manager.close)
         attempt_cleanup(turn_control_registry.close)

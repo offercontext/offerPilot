@@ -1,3 +1,4 @@
+import JobMailInbox from '@/features/jobMail/JobMailInbox';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Input, Select } from 'antd';
@@ -150,6 +151,7 @@ export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
 
   return (
     <div className={styles.wrap}>
+      <JobMailInbox onNavigate={onNavigate} onOpenDetailById={onOpenDetailById} />
       <div className={styles.toolbar}>
         <Input.Search
           allowClear

@@ -1,3 +1,4 @@
+import JobMailSettings from '@/features/jobMail/JobMailSettings';
 import ContextPolicySettings from './ContextPolicySettings';
 import ConfirmedMemorySettings from './ConfirmedMemorySettings';
 import ProactiveSettings from './ProactiveSettings';
@@ -177,6 +178,7 @@ export default function SettingsView({
         </div>
       </section>
 
+      <JobMailSettings />
       <ContextPolicySettings />
       <ConfirmedMemorySettings />
       <ProactiveSettings />

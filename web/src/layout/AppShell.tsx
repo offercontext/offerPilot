@@ -1,3 +1,4 @@
+import { getJobMailPendingCount, JOB_MAIL_COUNT_KEY } from '@/services/jobMail';
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1149,6 +1150,7 @@ function AppShellContent() {
   );
   const { addAttachment: addAttachmentToKey, createNewDraftWithAttachment } = usePilotAttachmentStore();
 
+  const { data: mailPendingCount = 0 } = useQuery({ queryKey: JOB_MAIL_COUNT_KEY, queryFn: getJobMailPendingCount, retry: false, refetchInterval: 30_000 });
   const { data: applications = [], isLoading, isError: appsError } = useQuery({
     queryKey: ['applications'],
     queryFn: () => listApplications(),
@@ -2649,7 +2651,7 @@ function AppShellContent() {
         <Sidebar
           view={view}
           onChange={navigateToView}
-          reminderCount={actions.length}
+          reminderCount={actions.length + mailPendingCount}
         />
       ) : null}
       <Layout

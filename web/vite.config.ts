@@ -13,6 +13,12 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
+      // Mail writes compare Origin with Host. Preserve the browser authority
+      // only for this guarded API; keep the existing proxy behavior elsewhere.
+      '^/api/job-mail(?:/|$)': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+      },
       '/api': {
         target: 'http://localhost:8080',
         changeOrigin: true,

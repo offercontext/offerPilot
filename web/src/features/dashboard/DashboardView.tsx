@@ -1,3 +1,4 @@
+import JobMailPendingSummary from '@/features/jobMail/JobMailPendingSummary';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Collapse, Empty } from 'antd';
@@ -271,6 +272,7 @@ export default function DashboardView({
         )}
       </section>
 
+      <JobMailPendingSummary onOpen={() => onNavigate('reminders')} />
       <section className={styles.todaySecondary} aria-labelledby="today-secondary-title">
         <div className={styles.sectionHeaderLine}>
           <h2 id="today-secondary-title" className={styles.sectionHeading}>今日其他待办</h2>

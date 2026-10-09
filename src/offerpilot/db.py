@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from offerpilot.models import Base
+from offerpilot.job_mail import models as _job_mail_models  # noqa: F401
 # Import feature model modules before ``Base.metadata.create_all`` so their
 # tables are registered on the shared declarative metadata.  These imports are
 # intentionally kept here (the database composition root) rather than relying
@@ -74,6 +75,7 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    _record_migration(engine, "0033_job_mail_review", "Add isolated mail evidence, proposals, previews and atomic receipts")
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
         _ensure_column(engine, "pilot_executions", "runtime_epoch", "TEXT"),
