@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "purpose": "story-cleanup-timeout-offline",
+  "purpose": "story-cleanup-warning-control-offline",
   "product_sha": "6781e90070511625697b9df5aea84d916e2c0a5e",
-  "helper_sha": "7beae3490ca5069e2674a1fae78f7e9a17c2e3ca",
+  "helper_sha": "3bc9f4db22d72ccde62caee366f07705be9df25d",
   "failure_run": 37854627125,
   "failure_job": 113576298827
 }
