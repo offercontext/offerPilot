@@ -2,88 +2,181 @@
   "repository": "offercontext/offerPilot",
   "branch": "feat/20261005-windows-desktop-validation",
   "productBaseline": {
-    "commit": "ea57d3c8d53aba00cc1f074be999738a6fd442ee",
-    "tree": "11b5e679584b2524581d14115ef94f996ba5962d"
+    "commit": "5e0ab198954460ecb267ee47489cf564bd52d841",
+    "tree": "f772df16b0b086c1fd4257289b58ab4f3420459a"
   },
   "candidateSource": {
-    "commit": "4ca4854b2bfb7f78b80eed0e9a1dba81929a5300",
-    "tree": "77a4f81e4368257d84694fd6a8163efd3c4efe95",
-    "scope": "此已验证源码提交仅含下述三份测试文件；本次请求提交只更新本JSON。下一轮manifest、artifact及EXE须绑定最终请求提交的实际github.sha，不混用源码提交或旧包身份。"
-  },
-  "waitForRunTerminal": 38015237281,
-  "previousFullGate": {
-    "run": 38015237281,
-    "attempt": 2,
-    "url": "https://github.com/offercontext/offerPilot/actions/runs/38015237281",
-    "commit": "ea57d3c8d53aba00cc1f074be999738a6fd442ee",
-    "outcome": "failed",
-    "terminalShards": 12,
-    "successfulShards": 9,
-    "failedShards": 3,
-    "nodes": 6770,
-    "passed": 6754,
-    "skipped": 13,
-    "failed": 3,
-    "missingNodes": 0,
-    "duplicateNodes": 0,
-    "evidence": "全部12组及后置job已终态；重新读取官方manifest、12份shard ZIP和原始日志，来源/分片/执行节点逐项核对得到6770个唯一节点，无缺失或重复；最终aggregate包内manifest及12份shard JSON与对应单组artifacts内容逐字节一致。13个skip节点和理由保持不变，逐项单独披露，不计为通过。",
-    "failedNodes": [
-      "tests/test_chat_api.py::test_stable_journal_clock_contract_keeps_real_time_probes_explicit",
-      "tests/test_chat_api.py::test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuation[/api/chat/confirm]",
-      "tests/test_pilot_runtime_extraction_gate.py::test_canary_private_values_do_not_enter_journal_trace_sse_or_error_log_payloads"
+    "files": [
+      {
+        "path": "web/src/components/ChatPanel/model.test.ts",
+        "reviewedCommit": "7aa9ecba9dd44064e8900921d255005a5cd78025",
+        "blob": "64284557bdeb206796fe1c4033893d83689e2ea0",
+        "sha256": "06706731372b052458b04023ed048e1f8d7fc42dff38556876bf3ea2c68e1f6c"
+      },
+      {
+        "path": "web/src/features/reviewReadiness/reviewReadinessNegativeFixtures.test.ts",
+        "reviewedCommit": "97f9d220f4a769d5424ee2bd135e36468aefced3",
+        "blob": "2dd72eb7a17c07a9804a7cc49f628269998bd7aa",
+        "sha256": "4c0cf79690fe73ac7f5d9cbae34b7566f4288aee95ef2b6e2683268bbbf44848"
+      }
     ],
+    "scope": "最终请求提交基于上述5e0ab198快照，仅修改两份已审测试文件及本JSON。下一轮manifest、artifact及EXE必须绑定最终提交的实际github.sha；不合入仅用于前端预检的新工作流，也不混用预检提交、源码修复提交或旧包身份。"
+  },
+  "waitForRunTerminal": 38058328369,
+  "previousFullGate": {
+    "run": 38058328369,
+    "attempt": 1,
+    "url": "https://github.com/offercontext/offerPilot/actions/runs/38058328369",
+    "commit": "5e0ab198954460ecb267ee47489cf564bd52d841",
+    "outcome": "failed",
+    "allJobsTerminal": true,
+    "terminalAt": "2026-10-10T19:57:37Z",
+    "pytest": {
+      "terminalShards": 12,
+      "successfulShards": 12,
+      "nodes": 6771,
+      "passed": 6758,
+      "skipped": 13,
+      "failed": 0,
+      "missingNodes": 0,
+      "duplicateNodes": 0,
+      "watchedNodesPassed": 30,
+      "evidence": "官方manifest、12份shard证据及aggregate均已逐项核验。aggregate artifact 11680777108通过ZIP CRC及run/commit身份检查；包内manifest和12份shard JSON与单组artifacts逐字节一致。本地aggregate复算与远端相同；全部旧节点及13个skip节点/理由保留，skip不计为通过。"
+    },
     "postGate": {
       "fullRegressionJob": "failed",
-      "releaseGateExecuted": false,
-      "remainingReleasePhases": "NOT RUN",
-      "reason": "2026-10-10 13:54:03 UTC的后置步骤在SHARD_RESULT前置检查抛错，未调用release-gate.ps1；因此该job中的aggregate、ruff、mypy、前端测试/构建、CLI/HTTP smoke、local verify及install gate均未执行。独立package结果不能替代这些阶段或整体通过。"
-    }
+      "releaseGateExecuted": true,
+      "ruff": "passed",
+      "mypy": {
+        "result": "passed",
+        "sourceFiles": 205
+      },
+      "frontend": {
+        "tests": 2614,
+        "passed": 2612,
+        "failed": 2,
+        "files": 268,
+        "failedCases": [
+          {
+            "file": "web/src/components/ChatPanel/model.test.ts",
+            "line": 104,
+            "column": 71,
+            "suite": "evidence selection",
+            "test": "formats embedded valid timestamps without changing invalid metadata",
+            "actual": "scheduled 2026-07-10 01:05",
+            "expected": "scheduled 2026-07-10 09:05"
+          },
+          {
+            "file": "web/src/features/reviewReadiness/reviewReadinessNegativeFixtures.test.ts",
+            "line": 8812,
+            "column": 46,
+            "suite": "review readiness negative fixture gate",
+            "test": "keeps the production audit within its bounded performance baseline",
+            "actual_duration_ms": 44440.3649,
+            "required_duration_ms_less_than": 30000
+          }
+        ]
+      },
+      "notRun": [
+        "frontend build",
+        "real CLI/HTTP smoke",
+        "local verify",
+        "install gate"
+      ],
+      "reason": "release-gate.ps1已执行严格pytest aggregate、ruff及完整mypy，随后前端两项断言失败。其后的前端build、真实CLI/HTTP smoke、local verify和install gate未执行。独立package成功不替代完整验收。"
+    },
+    "knownLimit": "此前180秒Chromium清理超时未再出现且根因仍未知；相关节点本轮通过不能宣称该历史根因已修复。"
   },
-  "reason": "将三项已独立审查的测试夹具修复合并后请求普通Windows完整验收。保留真实host超时/取消、迟写fencing、Pending/HITL、真实SQLite和隐私边界，避免将主机调度/I/O耗时误作这些测试的业务断言。产品代码、Journal生产预算、默认配置、锁文件和BUGS均未改变。",
+  "reason": "修复上一轮普通Windows完整门禁的两项前端测试失败后重新请求完整验收：时间断言按既有本地时区展示契约计算，审计夹具消除重复语法树扫描并保留30秒性能上限。全部原测试保留，只新增两项审计回归；产品代码、生产预算、默认配置、锁文件、现有工作流、验收helper及BUGS均未改变。",
   "repairedTests": {
     "files": [
-      "tests/test_chat_api.py",
-      "tests/test_complete_pytest_shards.py",
-      "tests/test_pilot_runtime_extraction_gate.py"
+      "web/src/components/ChatPanel/model.test.ts",
+      "web/src/features/reviewReadiness/reviewReadinessNegativeFixtures.test.ts"
     ],
     "repairs": [
       {
-        "name": "ProviderGapClock短等待计量",
-        "sourceCommit": "e2d574161a610f41d21b466a1a5a52cac1448b35",
-        "change": "仅测试计时器以perf_counter测量显式provider等待，保留真实sleep和原实时时钟契约；新增粗粒度monotonic回归。",
-        "evidence": "原Windows节点的短间隔为0.0；新增回归通过并拒绝恢复旧monotonic实现，模块time绑定在测试后恢复。",
-        "limit": "该修复不修改产品时钟或预算；本地受控时钟及Linux验证不代替新的Windows执行。"
+        "name": "证据时间本地展示断言",
+        "sourceCommit": "7aa9ecba9dd44064e8900921d255005a5cd78025",
+        "change": "以原生Date本地日历字段及显式UTC时刻构造独立预期，覆盖正负偏移跨日、毫秒与无偏移时间；保留无效元数据断言，不复用生产Day.js格式器。",
+        "evidence": "旧断言在UTC重现01:05与09:05偏差，在Asia/Shanghai通过；修复后的model/layout在两时区各143项通过，build通过，6类错误格式化变异被拒绝。"
       },
       {
-        "name": "确认超时阶段与迟到worker完成",
-        "sourceCommit": "741390403d217324a334721bb6b67bb45a785f16",
-        "change": "3个旧fake-host测试迁移到既有真实Future helper；业务阶段进入后触发真实Future timeout，在finally释放并等Agent thunk完成，重试仅恢复executor。保留迟写、Pending/undo、无链式continuation、恰好一次重试及generation+1断言。",
-        "evidence": "受控5.25秒延迟重现旧fixture在handler前失败；修复后返回409且迟到worker被fence。迟写及continuation变异均被既有断言拒绝。",
-        "limit": "原Windows响应body/status及handler前确切阻塞点未被记录，不能宣称重现其全部根因；完成事件证明Agent thunk结束，不等于显式join操作系统线程。"
-      },
-      {
-        "name": "隐私canary真实Journal路径",
-        "sourceCommit": "72e2e5797fd6df66d86407014ecdb895be72c55c",
-        "change": "隐私测试显式注入函数内稳定clock，移除10/2秒测试预算扩张；保留真实recorder/SQLite，增加空diagnostics、2个append、1个disposition及completed/healthy断言。",
-        "evidence": "60ms真实SQL延迟在旧fixture重现journal_budget_exhausted，修复后保持1个真实run及6个事件；4类泄露、Null recorder和恢复真实clock的负控均被拒绝。481项相关测试通过，67个节点保持。",
-        "limit": "segment预算扩大不能改变既有50ms单操作上限；产品预算和SQLite deadline契约未变。原runner具体CPU调度、存储或锁竞争原因仍未知。"
+        "name": "审计语法树索引复用",
+        "sourceCommit": "97f9d220f4a769d5424ee2bd135e36468aefced3",
+        "change": "按不可变SourceFile对象建立WeakMap成员路径索引，一次保留全部查询根和缺失根；7种运行时函数类型保持完全相同的SyntaxKind判定。新增重复扫描/同路径不同AST隔离及类型签名排除回归。",
+        "evidence": "原134项测试正文、30秒阈值、计时范围、生产扫描范围及检测器均保持；533次旧审计输入与输出逐项一致，生产AST访问减少36.73%。三套相关测试178项及build通过，3项负控均被拒绝。",
+        "limit": "本地CPU剖析支持重复扫描开销，但不宣称还原旧Windows runner具体CPU/I/O分布。"
       }
     ]
   },
+  "windowsFrontendPreflight": {
+    "run": 38083682483,
+    "attempt": 1,
+    "url": "https://github.com/offercontext/offerPilot/actions/runs/38083682483",
+    "commit": "5b5aeee880939205a8aa292efb4c849b868313df",
+    "tree": "f7e78ff175b76c9d4d9627999d82358cc016e464",
+    "branch": "feat/20261010-windows-frontend-preflight",
+    "outcome": "passed",
+    "artifact": 11681318724,
+    "artifactSha256": "1493fec72f26b0a80d93a5bd48abc0e1a2d92852850d6ad95111667d4e15b042",
+    "purpose": "在普通完整门禁重跑前，以相同两份测试修复源码检验Windows全前端并发下的时区与审计性能；预检专用工作流不进入本次候选。",
+    "environment": {
+      "runner": "windows-2022",
+      "node": "22.23.3",
+      "npm": "10.9.9",
+      "timezone": "UTC",
+      "workers": "原配置min 1/max 4未改"
+    },
+    "frontend": {
+      "files": 268,
+      "tests": 2616,
+      "passed": 2616,
+      "failed": 0,
+      "skipped": 0,
+      "todo": 0,
+      "durationSeconds": 337.86,
+      "identityEvidence": "Windows JSON和JUnit按文件、完整case名称及重复计数逐项相等；与本地收集2616项身份集合相等，无缺项或新增未知case。"
+    },
+    "performance": {
+      "case": "keeps the production audit within its bounded performance baseline",
+      "reportedCaseDurationMs": 18013.438400000003,
+      "unchangedInnerThresholdMs": 30000,
+      "result": "passed",
+      "measurementNote": "18013.4384ms为Vitest报告的整个case时长，包含断言开销；内部生产audit仍受原30000ms断言约束，不把case时长冒充单独内层计时。"
+    },
+    "build": {
+      "command": "npm run build",
+      "includes": "tsc -b && vite build",
+      "exitCode": 0,
+      "viteBuildSeconds": 12.39
+    },
+    "lockEvidence": "Windows工作区锁文件SHA256 421854268d4a11a44f0b7f343d60d44670f157fed2384553d6d6e4a49eeab2a0，Git LF源文件SHA256 8e2dcf1e00c78214b5ce60967a2d929a4b0bef6944cf9104d1d72aa5666ac5cf；逐字节证明差异仅为LF转CRLF，依赖内容未改。",
+    "limit": "此结果是不同提交上的前端预检证据，不是跨提交完整门禁等价认证；未执行Python完整门禁、打包或最终同包UI验收。最终请求提交仍须重新通过全部普通Windows阶段并生成新EXE。"
+  },
   "localEvidence": {
-    "integratedTests": "4ca4854b：目标canary+40个分片门禁41项通过，三份测试文件ruff及diff检查通过；完整收集6771节点。前一源码0bc3ce2a的2 helper+6确认host节点全部通过，相关源码逐字节未再变化。",
-    "review": "三项修复均有独审；整合文件逐字节匹配各已审修复，chat/gate/helper/conftest在第三项整合后未变。合并独审无阻断。",
-    "reuse": "未重复执行已审canary的481项长族或已恢复同源时钟修复的80项Journal长族；记录继承验证，不宣称新增执行。原80项重置前raw日志已丢失，恢复的是已审源码字节与验证记录。",
-    "recordOnlyValidation": "本请求JSON不参与测试节点收集或工作流模式选择；只验证JSON、diff、实际YAML路由和普通提交分类，不重跑长回归。"
+    "sourceIntegration": "两份测试文件逐字节等于各已审提交；除此及本JSON外，所有跟踪文件与5e0ab198相同。保留既有后端三项夹具修复及其隔离审查。",
+    "reuse": "引用两项修复的已完成局部回归、负控和独审，以及本轮Windows全前端2616项/build证据；不把继承验证称为本候选新执行。",
+    "recordOnlyValidation": "核验JSON、diff、两修复blob、未改源码与锁文件、实际YAML普通完整路由及纯函数AI分类；后端源码/配置/收集入口逐字节未改，不重复本地完整Python收集或长回归。最终提交的普通Windows完整验收仍必需。"
   },
   "testCollection": {
     "expectedNodes": 6771,
-    "previousNodes": 6770,
+    "previousNodes": 6771,
     "removedNodes": 0,
-    "addedNodes": 1,
-    "addedNode": "tests/test_chat_api.py::test_provider_gap_clock_measures_short_waits_with_coarse_monotonic",
-    "preservation": "全部原6770节点保留；4ca4854b与0bc3ce2a的6771节点列表及12组分配完全一致。与上一轮新恢复的官方manifest进行跨平台比较时，仅显式映射AF_INET6参数值；不改实际节点ID或运行门禁。",
-    "skipPolicy": "上一轮13个skip不得算作pass；下一轮按实际节点及理由分别核验并披露。当前YAML未传--allowed-skips，不把该记录伪装成已执行的固定skip allowlist。"
+    "addedNodes": 0,
+    "preservation": "Python源码、测试、conftest、收集入口和依赖均与已执行6771节点的5e0ab198逐字节相同；预期保留全部6771节点，最终仍以新run实际manifest逐项核验，不将旧run直接计为新run通过。",
+    "frontend": {
+      "previousTests": 2614,
+      "expectedTests": 2616,
+      "files": 268,
+      "removedTests": 0,
+      "addedTests": 2,
+      "addedCases": [
+        "review readiness negative fixture gate > classifies runtime functions without treating type signatures as executable",
+        "review readiness negative fixture gate > isolates member paths by syntax tree while retaining every queried root"
+      ],
+      "preservation": "本地基线/整合收集逐项核对：保留全部旧2614项，Windows预检实际执行2616项；原审计134项正文逐字节保留。"
+    },
+    "skipPolicy": "前一轮13个skip节点及理由分别披露；新run继续按实际证据核验，skip不算pass。当前YAML未传--allowed-skips，本记录不声称已执行固定skip allowlist。"
   },
   "isolationReview": {
     "reviewedSources": [
@@ -102,7 +195,7 @@
   "workflowRouting": {
     "workflow": ".github/workflows/desktop-windows.yml",
     "mode": "ordinary-full",
-    "activation": "push仅由上述validation分支触发，本JSON不在paths-ignore中；workflow_dispatch也可手动触发，需明确选择最终请求提交所在ref。本JSON是请求记录，不是工作流输入。普通test提交不带build: AI [windows-package-only] 前缀。仅本地提交不会启动CI。",
+    "activation": "push仅由上述validation分支触发，这三份文件均不在paths-ignore中；本JSON是请求记录，不是工作流输入。最终test提交不带build: AI [windows-package-only]前缀，必须走ordinary-full。仅本地提交不会启动CI。",
     "shards": 12,
     "maxParallel": 2,
     "failFast": false,
@@ -115,11 +208,12 @@
       "validation-status"
     ],
     "postGate": "manifest和全部shards成功后，执行release-gate.ps1 -Install -PytestEvidence pytest-evidence，先严格核完整pytest证据，再执行ruff/mypy、前端测试构建、CLI/HTTP smoke、local verify和install gate；最终状态要求package及full-regression均成功。",
-    "paidModelCalls": "本次工作流不传-RealAi；本请求、提交和普通完整CI均不启动或扩大付费模型验收。"
+    "paidModelCalls": "本次工作流不传-RealAi；本请求、提交和普通完整CI均不启动或扩大付费模型验收。",
+    "aiRouting": "相对于5e0ab198的精确三文件范围不触及real-ai helper/workflow/docs，纯classifyPush返回offline=false；最终提交标题不匹配受保护real-AI请求前缀。预期只运行secret-free route，offline、preflight及paid jobs均跳过；推送后仍核验真实jobs，不读取provider凭据。"
   },
   "requiredAcceptance": [
     "最终请求提交必须通过新一轮普通manifest、全部12 shards、完整后置release gate、独立package和validation-status；失败、超时、取消、跳过或仅安装包产物均不构成完整通过。",
     "按最终请求提交、完整门禁run/attempt、artifact及EXE SHA256固定新包，再对同一EXE完成免费non-AI及全部7项MOCK；不得用旧run或旧包结果替代。",
-    "同包免费验收全部通过后，任何后续受限live仍须重新核验当日官方价格、既有累计费用、专用凭据及原有独立人工审批条件；累计10元预算不重置。本记录不启动付费调用，也不授权额外付费或其它验收动作。"
+    "同包免费验收全部通过后，任何后续受限live仍须按实际执行日重新核验官方价格（跨UTC日期必须重查）、既有累计费用、专用凭据及原有独立人工审批条件；累计10元预算不重置。本记录不启动付费调用，也不授权额外付费或其它验收动作。"
   ]
 }

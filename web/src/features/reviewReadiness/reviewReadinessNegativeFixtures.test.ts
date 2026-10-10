@@ -172,14 +172,18 @@ type RuntimeFunctionLike =
   | ts.GetAccessorDeclaration
   | ts.SetAccessorDeclaration;
 
+const RUNTIME_FUNCTION_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.FunctionDeclaration,
+  ts.SyntaxKind.FunctionExpression,
+  ts.SyntaxKind.ArrowFunction,
+  ts.SyntaxKind.MethodDeclaration,
+  ts.SyntaxKind.Constructor,
+  ts.SyntaxKind.GetAccessor,
+  ts.SyntaxKind.SetAccessor,
+]);
+
 function isRuntimeFunctionLike(node: ts.Node): node is RuntimeFunctionLike {
-  return ts.isFunctionDeclaration(node)
-    || ts.isFunctionExpression(node)
-    || ts.isArrowFunction(node)
-    || ts.isMethodDeclaration(node)
-    || ts.isConstructorDeclaration(node)
-    || ts.isGetAccessorDeclaration(node)
-    || ts.isSetAccessorDeclaration(node);
+  return RUNTIME_FUNCTION_KINDS.has(node.kind);
 }
 
 function expressionContainsIdentifier(
@@ -355,8 +359,13 @@ function namespaceExportResolution(
   return null;
 }
 
+// Member paths depend only on this immutable syntax tree, not the queried root.
+const usedMemberPathsCache = new WeakMap<ts.SourceFile, Map<string, string[]>>();
+
 function usedMemberPaths(sourceFile: ts.SourceFile, root: string): string[] {
-  const paths = new Set<string>();
+  const cached = usedMemberPathsCache.get(sourceFile);
+  if (cached) return cached.get(root) ?? [];
+  const pathsByRoot = new Map<string, Set<string>>();
   const strings = new Map<string, string>();
   let changed = true;
   while (changed) {
@@ -382,11 +391,15 @@ function usedMemberPaths(sourceFile: ts.SourceFile, root: string): string[] {
       members.unshift(name);
       current = current.expression;
     }
-    if (ts.isIdentifier(current) && current.text === root && members.length > 0) {
+    if (ts.isIdentifier(current) && members.length > 0) {
+      const paths = pathsByRoot.get(current.text) ?? new Set<string>();
       paths.add(members.join('.'));
+      pathsByRoot.set(current.text, paths);
     }
   });
-  return [...paths];
+  const paths = new Map([...pathsByRoot].map(([name, members]) => [name, [...members]]));
+  usedMemberPathsCache.set(sourceFile, paths);
+  return paths.get(root) ?? [];
 }
 
 function hasDefaultModifier(node: ts.Node): boolean {
@@ -6246,6 +6259,55 @@ function auditProductionOnce(): { violations: string[]; durationMs: number } {
 }
 
 describe('review readiness negative fixture gate', () => {
+  it('classifies runtime functions without treating type signatures as executable', () => {
+    const sourceFile = parse('web/src/runtimeFunctions.ts', `
+      function declaration() {}
+      const expression = function() {};
+      const arrow = () => 1;
+      class Owner {
+        constructor() {}
+        method() {}
+        get value() { return 1; }
+        set value(input) {}
+      }
+      type Callable = () => void;
+      interface Contract { method(): void; }
+    `);
+    const kinds: ts.SyntaxKind[] = [];
+    walk(sourceFile, (node) => {
+      if (isRuntimeFunctionLike(node)) kinds.push(node.kind);
+    });
+    expect(kinds).toEqual([
+      ts.SyntaxKind.FunctionDeclaration, ts.SyntaxKind.FunctionExpression,
+      ts.SyntaxKind.ArrowFunction, ts.SyntaxKind.Constructor,
+      ts.SyntaxKind.MethodDeclaration, ts.SyntaxKind.GetAccessor, ts.SyntaxKind.SetAccessor,
+    ]);
+  });
+
+  it('isolates member paths by syntax tree while retaining every queried root', () => {
+    const path = 'web/src/facades/shared.ts';
+    let rootTraversals = 0;
+    const sourceFile = new Proxy(parse(path, `
+      const PROPERTY = NEXT; const NEXT = 'feedback';
+      benign.any(); readiness[PROPERTY].load();
+    `), {
+      get(target, property, receiver) {
+        if (property === 'statements') rootTraversals++;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(usedMemberPaths(sourceFile, 'missing')).toEqual([]);
+    const indexingTraversals = rootTraversals;
+    expect(indexingTraversals).toBeGreaterThan(0);
+    expect(usedMemberPaths(sourceFile, 'benign')).toEqual(['any']);
+    expect(usedMemberPaths(sourceFile, 'readiness')).toEqual(['feedback.load', 'feedback']);
+    expect(usedMemberPaths(parse('web/src/facades/other.ts', `readiness.safe();`), 'readiness')).toEqual(['safe']);
+    expect(usedMemberPaths(parse(path, `readiness.changed();`), 'readiness')).toEqual(['changed']);
+    expect(usedMemberPaths(sourceFile, 'readiness')).toEqual(['feedback.load', 'feedback']);
+    expect(usedMemberPaths(sourceFile, 'stillMissing')).toEqual([]);
+    expect(rootTraversals).toBe(indexingTraversals);
+  });
+
   it('rejects direct, aliased, spread, helper, and call-chain domain CRUD', () => {
     const fixtures = [
       `import { updateInterviewNote } from '@/services/notes'; updateInterviewNote(1, input);`,
