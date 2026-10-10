@@ -79,7 +79,7 @@ class ConfirmRequest(ReviewRequest):
     @classmethod
     def user_confirmation_required(cls, value: bool) -> bool:
         if value is not True:
-            raise ValueError("邮件业务变更必须逐项明确确认")
+            raise ValueError("邮件业务变更必须由用户明确确认")
         return value
 
 

@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JobMailPreview, JobMailReceipt, JobMailStatus, JobMailSuggestion } from '@/types/jobMail';
-import { readMailRecovery } from './jobMailModel';
+import { mergeMailFields, readMailRecovery } from './jobMailModel';
 const api = vi.hoisted(() => ({ getJobMailStatus: vi.fn(), updateJobMailSettings: vi.fn(), syncJobMail: vi.fn(), cancelJobMailSync: vi.fn(), disconnectJobMail: vi.fn(), connectSyntheticJobMail: vi.fn(), getJobMailSuggestion: vi.fn(), previewJobMail: vi.fn(), confirmJobMail: vi.fn(), getJobMailReceipt: vi.fn(), ignoreJobMail: vi.fn(), importJobMail: vi.fn() }));
 vi.mock('@/services/jobMail', () => ({ ...api, JOB_MAIL_QUERY_KEY: ['job-mail'], JOB_MAIL_STATUS_KEY: ['job-mail', 'status'] }));
 vi.mock('@/services/jobMailSecureSetup', () => ({
@@ -13,7 +13,7 @@ vi.mock('@/services/jobMailSecureSetup', () => ({
   startJobMailSecureSetup: vi.fn(), testJobMailSecureSetup: vi.fn(), saveJobMailSecureSetup: vi.fn(), cancelJobMailSecureSetup: vi.fn(), disconnectRealJobMail: vi.fn(),
 }));
 vi.mock('@/services/applications', () => ({ listApplications: async () => [{ id: 7, company_name: '星河科技', position_name: '工程师', status: 'applied' }, { id: 8, company_name: '远山科技', position_name: '工程师', status: 'applied' }] }));
-vi.mock('@/services/events', () => ({ listEvents: async () => [{ id: 12, application_id: 7, event_type: 'interview', scheduled_at: '2026-10-15T07:00:00Z', duration_minutes: 45, notes: '用户原有备注', location: '原有地点', remind_at: '2026-10-15T06:00:00Z' }] }));
+vi.mock('@/services/events', () => ({ listEvents: async () => existingEvents }));
 vi.mock('antd', () => ({
   Alert: ({ message, description, action }: { message: ReactNode; description?: ReactNode; action?: ReactNode }) => <div role="status">{message}{description}{action}</div>,
   Button: ({ children, onClick, disabled, loading }: { children?: ReactNode; onClick?: () => void; disabled?: boolean; loading?: boolean }) => <button disabled={disabled || loading} onClick={onClick}>{children}</button>,
@@ -24,6 +24,7 @@ vi.mock('antd', () => ({
 const { default: JobMailSettings } = await import('./JobMailSettings');
 const { default: JobMailReview } = await import('./JobMailReview');
 const { default: JobMailImport } = await import('./JobMailImport');
+const existingEvents = [12, 13].map((id) => ({ id, application_id: 7, event_type: 'interview' as const, scheduled_at: '2026-10-15T07:00:00Z', duration_minutes: 45, notes: '用户原有备注', location: '原有地点', remind_at: '2026-10-15T06:00:00Z' }));
 const suggestionId = '12345678-1234-4123-8123-123456789012';
 const baseSuggestion: JobMailSuggestion = {
   id: suggestionId, version: 1, status: 'pending', action: 'create_event', reason: '请核对邀请时间', time_mode: 'fixed',
@@ -42,7 +43,6 @@ async function render(element: ReactNode) { await act(async () => { root.render(
 async function click(element: HTMLElement) { await act(async () => element.click()); await flush(); }
 async function change(input: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) { await act(async () => { const prototype = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype; Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event(input instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })); }); }
 function review() { return <JobMailReview suggestionId={suggestionId} onClose={close} onOpenRecord={openRecord} onNavigate={navigate} />; }
-async function checkPreview() { for (const box of container.querySelectorAll<HTMLInputElement>('[aria-label="最终变更预览"] input[type="checkbox"]')) await click(box); }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((res) => { resolve = res; }); return { promise, resolve }; }
 beforeEach(() => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -50,13 +50,18 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container);
   api.getJobMailStatus.mockImplementation(async () => structuredClone(status)); api.getJobMailSuggestion.mockImplementation(async () => structuredClone(suggestion));
-  api.previewJobMail.mockImplementation(async (_id, input) => ({ preview_token: 'token-for-exact-preview', operation_id: input.operation_id, suggestion_id: suggestionId, suggestion_version: 1, action: suggestion.action, application_id: input.application_id, application_snapshot: { id: input.application_id, company_name: '星河科技', position_name: '工程师', status: 'applied', updated_at: '2026-10-09T00:00:00Z' }, target_event_id: input.target_event_id ?? null, edited_fields: input.edited_fields, before: {}, after: { ...input.edited_fields, application_id: input.application_id }, changes: Object.entries(input.edited_fields).map(([field, after]) => ({ field, before: null, after })), scope_version: null, expires_at: '2030-01-01T00:00:00Z', warnings: ['不改变投递阶段'] }));
+  api.previewJobMail.mockImplementation(async (_id, input) => {
+    const existing = existingEvents.find((event) => event.id === input.target_event_id);
+    const before: Record<string, unknown> = existing ?? {};
+    const after: Record<string, unknown> = { ...mergeMailFields(suggestion.proposed_fields, input.edited_fields, existing), application_id: input.application_id };
+    return { preview_token: 'token-for-exact-preview', operation_id: input.operation_id, suggestion_id: suggestionId, suggestion_version: 1, action: suggestion.action, application_id: input.application_id, application_snapshot: { id: input.application_id, company_name: '星河科技', position_name: '工程师', status: 'applied', updated_at: '2026-10-09T00:00:00Z' }, target_event_id: input.target_event_id ?? null, edited_fields: input.edited_fields, before, after, changes: Object.entries(after).filter(([field, value]) => value !== before[field]).map(([field, after]) => ({ field, before: before[field], after })), scope_version: null, expires_at: '2030-01-01T00:00:00Z', warnings: ['不改变投递阶段'] };
+  });
   api.confirmJobMail.mockResolvedValue(receipt); api.getJobMailReceipt.mockResolvedValue(receipt);
   api.updateJobMailSettings.mockImplementation(async (input) => { status.connection = { ...status.connection!, ...input }; return status; });
   api.syncJobMail.mockResolvedValue({ id: 'run-id', status: 'running' }); api.cancelJobMailSync.mockResolvedValue({});
   api.disconnectJobMail.mockImplementation(async () => { status.connection!.status = 'disconnected'; return status; }); api.connectSyntheticJobMail.mockResolvedValue(connectedStatus); api.importJobMail.mockResolvedValue({ items: [suggestion], deduplicated: false }); api.ignoreJobMail.mockResolvedValue({ ...suggestion, status: 'ignored' });
 });
-afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); client.clear(); container.remove(); vi.restoreAllMocks(); });
 
 describe('job mail settings in StrictMode', () => {
   it('fails closed for real connection and never requests a credential', async () => {
@@ -96,25 +101,57 @@ describe('job mail settings in StrictMode', () => {
 describe('mandatory mail review in StrictMode', () => {
   it('renders only text and cannot confirm on opening or when duration is missing', async () => {
     delete suggestion.proposed_fields.duration_minutes; await render(review()); expect(container.textContent).toContain('<img src="https://malicious.test/track" />'); expect(container.querySelector('img')).toBeNull(); expect(container.querySelector('a[href]')).toBeNull();
+    expect(container.querySelector('[aria-label="时长"]')?.getAttribute('aria-invalid')).toBe('true');
+    expect(container.querySelector('#mail-duration_minutes-hint')?.textContent).toContain('正整数');
     await click(button('预览最终变更')); expect(api.previewJobMail).not.toHaveBeenCalled(); expect(container.textContent).toContain('不会默认补成 60 分钟');
     await click(button('暂不处理，保留待核对')); expect(close).toHaveBeenCalledTimes(1); expect(api.ignoreJobMail).not.toHaveBeenCalled(); expect(api.confirmJobMail).not.toHaveBeenCalled();
   });
-  it('requires server preview and all checkboxes before one confirmation, then exposes receipt', async () => {
-    await render(review()); await click(button('预览最终变更')); expect(container.textContent).toContain('最终确认摘要'); expect(button('确认加入日程').disabled).toBe(true);
-    expect(container.querySelector('[aria-label="最终变更预览"] dl dt')?.textContent).toBe('投递 ID');
+  it('requires server preview and one explicit confirmation without field checkboxes, then exposes receipt', async () => {
+    await render(review()); expect(api.confirmJobMail).not.toHaveBeenCalled(); expect(container.querySelector('[aria-label="邮件原文依据"]')?.hasAttribute('open')).toBe(false);
+    await click(button('预览最终变更')); expect(container.textContent).toContain('最终确认摘要'); expect(button('确认加入日程').disabled).toBe(false);
+    expect(api.confirmJobMail).not.toHaveBeenCalled(); expect(container.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(container.querySelector('[aria-label="最终变更预览"] details')?.hasAttribute('open')).toBe(false);
+    expect(container.querySelector('[aria-label="最终变更预览"] dl')?.textContent).toContain('2026-10-15 07:00:00 (UTC)');
     expect(container.textContent).toContain('无现有记录（将新增）');
-    await checkPreview(); const work = deferred<JobMailReceipt>(); api.confirmJobMail.mockReturnValue(work.promise); const confirm = button('确认加入日程'); await act(async () => { confirm.click(); confirm.click(); });
+    const work = deferred<JobMailReceipt>(); api.confirmJobMail.mockReturnValue(work.promise); const confirm = button('确认加入日程'); await act(async () => { confirm.click(); confirm.click(); });
     expect(api.confirmJobMail).toHaveBeenCalledTimes(1); expect(api.confirmJobMail).toHaveBeenCalledWith(suggestionId, { ...api.previewJobMail.mock.calls[0][1], preview_token: 'token-for-exact-preview', explicit_confirmation: true });
     await act(async () => work.resolve(receipt)); await flush(); expect(container.textContent).toContain('已确认写入'); expect(readMailRecovery()).toEqual({}); await click(button('查看记录')); expect(openRecord).toHaveBeenCalledWith(7);
   });
-  it('invalidates all acknowledgement after edits or changing the target', async () => {
-    await render(review()); await click(button('预览最终变更')); await checkPreview(); await change(container.querySelector('[aria-label="地点"]')!, '新地点'); expect(container.textContent).not.toContain('最终确认摘要');
-    await click(button('预览最终变更')); expect(button('确认加入日程').disabled).toBe(true); await change(container.querySelector('[aria-label="目标投递"]')!, '8'); expect(container.textContent).not.toContain('最终确认摘要'); expect(api.confirmJobMail).not.toHaveBeenCalled();
+  it('invalidates the server preview after edits or changing the application', async () => {
+    await render(review()); await click(button('预览最终变更')); await change(container.querySelector('[aria-label="地点"]')!, '新地点'); expect(container.textContent).not.toContain('最终确认摘要');
+    await click(button('预览最终变更')); expect(button('确认加入日程').disabled).toBe(false); await change(container.querySelector('[aria-label="目标投递"]')!, '8'); expect(container.textContent).not.toContain('最终确认摘要'); expect(api.confirmJobMail).not.toHaveBeenCalled();
+  });
+  it('invalidates the server preview when changing the target event', async () => {
+    suggestion.action = 'update_event'; suggestion.target_event_id = null;
+    await render(review()); await change(container.querySelector('[aria-label="目标事件"]')!, '12'); await click(button('预览最终变更'));
+    expect(button('确认更新此事件').disabled).toBe(false);
+    await change(container.querySelector('[aria-label="目标事件"]')!, '13');
+    expect(container.textContent).not.toContain('最终确认摘要'); expect(api.confirmJobMail).not.toHaveBeenCalled();
+    await click(button('预览最终变更')); expect(api.previewJobMail.mock.calls[1][1].target_event_id).toBe(13);
+  });
+  it('does not treat proposal placeholders as user clears, but previews explicit clears visibly', async () => {
+    suggestion.action = 'update_event'; suggestion.target_event_id = 12;
+    suggestion.proposed_fields = { notes: '', location: '', remind_at: null };
+    await render(review());
+    expect((container.querySelector('[aria-label="备注"]') as HTMLTextAreaElement).value).toBe('用户原有备注');
+    expect((container.querySelector('[aria-label="地点"]') as HTMLInputElement).value).toBe('原有地点');
+    expect((container.querySelector('[aria-label="提醒时间"]') as HTMLInputElement).value).toBe('2026-10-15T06:00:00Z');
+    await click(button('预览最终变更')); expect(api.previewJobMail.mock.calls[0][1].edited_fields).toEqual({});
+    await change(container.querySelector('[aria-label="备注"]')!, '');
+    await change(container.querySelector('[aria-label="地点"]')!, '');
+    await change(container.querySelector('[aria-label="提醒时间"]')!, '');
+    expect(container.textContent).not.toContain('最终确认摘要');
+    await click(button('预览最终变更'));
+    expect(api.previewJobMail.mock.calls[1][1].edited_fields).toEqual({ notes: '', location: '', remind_at: null });
+    const summary = container.querySelector('[aria-label="最终变更预览"] dl')!;
+    expect(summary.textContent).toContain('移除提醒'); expect(summary.textContent).toContain('备注清空'); expect(summary.textContent).toContain('地点／会议链接清空');
+    expect(summary.closest('details')).toBeNull(); expect(api.confirmJobMail).not.toHaveBeenCalled();
   });
   it('does not submit unchanged notes/location when updating and shows reminder removal', async () => {
     suggestion.action = 'update_event'; suggestion.target_event_id = 12; suggestion.proposed_fields = { scheduled_at: '2026-10-16T07:00:00Z' };
-    api.previewJobMail.mockImplementation(async (_id, input) => ({ preview_token: 'token', operation_id: input.operation_id, suggestion_id: suggestionId, suggestion_version: 1, action: 'update_event', application_id: 7, application_snapshot: { id: 7, company_name: '星河科技', position_name: '工程师', status: 'applied', updated_at: '2026-10-09T00:00:00Z' }, target_event_id: 12, edited_fields: input.edited_fields, before: { remind_at: '2026-10-15T06:00:00Z', notes: '用户原有备注' }, after: { remind_at: null, notes: '用户原有备注' }, changes: [{ field: 'remind_at', before: '2026-10-15T06:00:00Z', after: null }], scope_version: 1, expires_at: '2030-01-01T00:00:00Z', warnings: ['开始时间变化后，旧提醒将清除'] }));
-    await render(review()); await click(button('预览最终变更')); expect(api.previewJobMail.mock.calls[0][1].edited_fields).toEqual({ scheduled_at: '2026-10-16T07:00:00Z' }); expect(container.textContent).toContain('用户原有备注'); expect(container.textContent).toContain('旧提醒将清除');
+    api.previewJobMail.mockImplementation(async (_id, input) => ({ preview_token: 'token', operation_id: input.operation_id, suggestion_id: suggestionId, suggestion_version: 1, action: 'update_event', application_id: 7, application_snapshot: { id: 7, company_name: '星河科技', position_name: '工程师', status: 'applied', updated_at: '2026-10-09T00:00:00Z' }, target_event_id: 12, edited_fields: input.edited_fields, before: existingEvents[0], after: { ...existingEvents[0], scheduled_at: suggestion.proposed_fields.scheduled_at, remind_at: null }, changes: [{ field: 'remind_at', before: '2026-10-15T06:00:00Z', after: null }], scope_version: 1, expires_at: '2030-01-01T00:00:00Z', warnings: ['开始时间变化后，旧提醒将清除'] }));
+    await render(review()); await click(button('预览最终变更')); expect(api.previewJobMail.mock.calls[0][1].edited_fields).toEqual({}); expect(container.textContent).toContain('用户原有备注'); expect(container.textContent).toContain('旧提醒将清除');
+    const summary = container.querySelector('[aria-label="最终变更预览"] dl')!; expect(summary.textContent).toContain('移除提醒'); expect(summary.closest('details')).toBeNull();
   });
   it('fails closed for cleared evidence or an incomplete server preview', async () => {
     suggestion.evidence = null; await render(review()); expect(container.textContent).toContain('原文已清理'); expect(button('预览最终变更').disabled).toBe(true);
@@ -123,15 +160,45 @@ describe('mandatory mail review in StrictMode', () => {
     expect(container.textContent).toContain('预览缺少完整目标快照'); expect(api.confirmJobMail).not.toHaveBeenCalled();
   });
   it('cannot promote unsupported proposals into writable actions', async () => {
-    suggestion.status = 'manual_required'; suggestion.action = 'manual_only'; suggestion.time_mode = 'deadline'; await render(review()); expect(container.textContent).toContain('此类建议需要人工处理'); expect(container.textContent).not.toContain('预览最终变更'); expect(api.previewJobMail).not.toHaveBeenCalled();
+    suggestion.status = 'manual_required'; suggestion.action = 'manual_only'; suggestion.time_mode = 'deadline'; await render(review()); expect(container.textContent).toContain('此类建议需要人工处理'); expect(container.textContent).not.toContain('预览最终变更'); expect(api.previewJobMail).not.toHaveBeenCalled(); expect(container.querySelector('[aria-label="邮件原文依据"]')?.hasAttribute('open')).toBe(true);
   });
   it('recovers ambiguous submissions by original operation id after reopen without replaying', async () => {
-    api.confirmJobMail.mockRejectedValue(new Error('timeout')); await render(review()); await click(button('预览最终变更')); await checkPreview(); await click(button('确认加入日程'));
+    api.confirmJobMail.mockRejectedValue(new Error('timeout')); await render(review()); await click(button('预览最终变更')); await click(button('确认加入日程'));
     const operation = api.previewJobMail.mock.calls[0][1].operation_id; expect(readMailRecovery()).toEqual({ [suggestionId]: operation }); expect(container.textContent).toContain('提交结果未知');
     await render(null); await render(review()); expect(button('预览最终变更').disabled).toBe(true); await click(button('核对回执')); expect(api.getJobMailReceipt).toHaveBeenCalledWith(operation); expect(api.confirmJobMail).toHaveBeenCalledTimes(1); expect(container.textContent).toContain('已确认写入');
   });
+  it('keeps an unknown submission blocked when the original receipt is not yet found', async () => {
+    api.confirmJobMail.mockRejectedValue(new Error('timeout')); api.getJobMailReceipt.mockRejectedValue({ response: { status: 404 } });
+    await render(review()); await click(button('预览最终变更')); await click(button('确认加入日程'));
+    const operation = api.previewJobMail.mock.calls[0][1].operation_id;
+    await click(button('核对回执'));
+    expect(container.textContent).toContain('不能据此判定未写入'); expect(button('预览最终变更').disabled).toBe(true); expect(button('确认加入日程').disabled).toBe(true);
+    expect(readMailRecovery()).toEqual({ [suggestionId]: operation }); expect(api.confirmJobMail).toHaveBeenCalledTimes(1);
+    await click(button('核对回执')); expect(api.getJobMailReceipt).toHaveBeenNthCalledWith(2, operation); expect(api.confirmJobMail).toHaveBeenCalledTimes(1);
+  });
+  it('rejects expired previews without writing and requires a fresh preview', async () => {
+    const createPreview = api.previewJobMail.getMockImplementation()!;
+    api.previewJobMail.mockImplementation(async (...args) => ({ ...await createPreview(...args), expires_at: '2000-01-01T00:00:00Z' }));
+    await render(review()); await click(button('预览最终变更')); await click(button('确认加入日程'));
+    expect(container.textContent).toContain('预览已过期'); expect(container.textContent).not.toContain('最终确认摘要');
+    expect(api.confirmJobMail).not.toHaveBeenCalled(); expect(readMailRecovery()).toEqual({}); expect(button('预览最终变更').disabled).toBe(false);
+  });
+  it('does not confirm when recovery identity cannot be persisted', async () => {
+    await render(review()); await click(button('预览最终变更'));
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    await click(button('确认加入日程'));
+    expect(container.textContent).toContain('浏览器无法保存操作恢复标识'); expect(api.confirmJobMail).not.toHaveBeenCalled();
+  });
+  it('locks repeated preview clicks without creating a write', async () => {
+    const work = deferred<JobMailPreview>(); const createPreview = api.previewJobMail.getMockImplementation()!;
+    api.previewJobMail.mockReturnValue(work.promise); await render(review());
+    const previewButton = button('预览最终变更'); await act(async () => { previewButton.click(); previewButton.click(); });
+    expect(api.previewJobMail).toHaveBeenCalledTimes(1); expect((container.querySelector('[aria-label="地点"]') as HTMLInputElement).disabled).toBe(true);
+    await act(async () => work.resolve(await createPreview(...api.previewJobMail.mock.calls[0]))); await flush();
+    expect(button('确认加入日程').disabled).toBe(false); expect(api.confirmJobMail).not.toHaveBeenCalled();
+  });
   it('drops stale confirmation and does not resurrect a dismissed in-flight preview', async () => {
-    api.confirmJobMail.mockRejectedValue({ response: { status: 409 } }); await render(review()); await click(button('预览最终变更')); await checkPreview(); await click(button('确认加入日程'));
+    api.confirmJobMail.mockRejectedValue({ response: { status: 409 } }); await render(review()); await click(button('预览最终变更')); await click(button('确认加入日程'));
     expect(container.textContent).toContain('已变化'); expect(container.textContent).not.toContain('最终确认摘要'); expect(readMailRecovery()).toEqual({});
     const work = deferred<JobMailPreview>(); api.previewJobMail.mockReturnValue(work.promise); await click(button('预览最终变更')); await render(null); await act(async () => work.resolve({} as JobMailPreview)); await flush(); expect(container.querySelector('[role="dialog"]')).toBeNull();
   });

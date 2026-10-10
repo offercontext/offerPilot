@@ -123,11 +123,14 @@ def test_receipt_key_reuse_with_different_fields_is_rejected(setup):
     assert _counts(sessions) == (1, 1)
 
 
-def test_update_preserves_omitted_fields_and_same_id_and_discloses_old_reminder(setup):
+@pytest.mark.parametrize("reminder_placeholder", [{}, {"remind_at": None}, {"remind_at": ""}])
+def test_update_preserves_omitted_fields_and_same_id_and_discloses_old_reminder(
+        setup, reminder_placeholder):
     sessions, service, _ids = setup
     target = _event(setup, remind_at=datetime(2026, 10, 20, 9))
     item = _ingest(setup, action="update_event", fields={
         "scheduled_at": "2026-10-21T10:00:00Z", "location": "", "notes": None,
+        **reminder_placeholder,
     })
     request = _request(setup, item, target_event_id=target.id)
     preview = service.preview(item["id"], request)
@@ -140,6 +143,23 @@ def test_update_preserves_omitted_fields_and_same_id_and_discloses_old_reminder(
     result = service.confirm(item["id"], _confirm(request, preview))
     assert result["application_event_id"] == target.id
     assert _counts(sessions) == (1, 1)
+
+
+
+@pytest.mark.parametrize("reminder_edit", [None, "2026-10-21T09:30:00Z"])
+def test_explicit_reminder_edit_wins_over_empty_proposal_on_time_change(setup, reminder_edit):
+    _sessions, service, _ids = setup
+    target = _event(setup, remind_at=datetime(2026, 10, 20, 9))
+    item = _ingest(setup, action="update_event", fields={
+        "scheduled_at": "2026-10-21T10:00:00Z", "remind_at": "",
+    })
+    request = _request(setup, item, target_event_id=target.id,
+                       edited_fields={"remind_at": reminder_edit})
+    preview = service.preview(item["id"], request)
+    assert preview["after"]["remind_at"] == reminder_edit
+    assert len(preview["warnings"]) == 1
+    result = service.confirm(item["id"], _confirm(request, preview))
+    assert result["after"]["remind_at"] == reminder_edit
 
 
 def test_same_time_with_different_offset_does_not_clear_reminder(setup):

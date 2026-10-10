@@ -70,19 +70,37 @@ try {
   await inbox.getByRole('button', { name: /【合成样本】面试邀请/ }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('目标投递', { exact: true }).selectOption(String(app.id));
+  assert.equal(await dialog.locator('input[type=checkbox]').count(), 0);
+  await snap('04a-editable-mail-form');
+  await dialog.getByLabel('时长', { exact: true }).fill('');
+  assert.equal(await dialog.getByLabel('时长', { exact: true }).getAttribute('aria-invalid'), 'true');
+  await dialog.getByRole('button', { name: '预览最终变更' }).click();
+  assert.equal(await dialog.getByRole('heading', { name: '最终确认摘要' }).count(), 0);
+  assert.equal((await api('/application-events')).length, 0);
+  await snap('04c-missing-duration-inline-validation');
+  await dialog.getByLabel('时长', { exact: true }).fill('45');
+  const evidence = dialog.locator('details[aria-label="邮件原文依据"]');
+  await evidence.locator(':scope > summary').click();
+  assert.equal(await evidence.locator('pre').isVisible(), true);
+  await evidence.locator(':scope > summary').click();
   await dialog.getByRole('button', { name: '预览最终变更' }).click();
   await dialog.getByRole('heading', { name: '最终确认摘要' }).waitFor();
-  // The long modal scrolls inside its overlay. A bounding-box screenshot of
-  // the entire dialog clips the scrolled content and pads with blank pixels.
-  // Capture two real viewport states rather than altering the application CSS.
+  assert.equal((await api('/application-events')).length, 0);
+  // Editing any field invalidates the server preview, even without checkboxes.
+  await dialog.getByLabel('地点', { exact: true }).fill('合成会议室 B');
+  assert.equal(await dialog.getByRole('button', { name: '确认加入日程' }).count(), 0);
+  await dialog.getByRole('button', { name: '预览最终变更' }).click();
+  await dialog.getByRole('heading', { name: '最终确认摘要' }).waitFor();
   await dialog.getByRole('heading', { name: '最终确认摘要' }).evaluate(element => element.scrollIntoView({ block: 'start' }));
   await snap('04-exact-confirmation-preview');
+  assert.equal(await dialog.locator('input[type=checkbox]').count(), 0);
+  assert.equal(await dialog.getByRole('button', { name: '确认加入日程' }).isEnabled(), true);
+  await page.setViewportSize({ width: 430, height: 932 });
   await dialog.getByRole('button', { name: '确认加入日程' }).scrollIntoViewIfNeeded();
-  await snap('04b-explicit-field-confirmations');
+  await snap('04b-mobile-single-confirmation');
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), 'Mobile review must not overflow horizontally');
   assert.equal((await api('/application-events')).length, 0);
-  assert.equal(await dialog.getByRole('button', { name: '确认加入日程' }).isEnabled(), false);
-  const boxes = dialog.locator('input[type=checkbox]');
-  for (let i = 0; i < await boxes.count(); i++) await boxes.nth(i).check();
+  await page.setViewportSize({ width: 1440, height: 1100 });
   await dialog.getByRole('button', { name: '确认加入日程' }).click();
   await dialog.getByText('已确认写入', { exact: true }).waitFor();
   await snap('05-atomic-write-receipt', dialog);
@@ -90,8 +108,9 @@ try {
   assert.equal(events.length, 1);
   assert.equal(events[0].application_id, app.id);
   assert.equal(events[0].duration_minutes, 45);
+  assert.equal(events[0].location, '合成会议室 B');
   assert.equal((await api('/applications/' + app.id)).status, app.status);
-  checks.push('No event until exact preview + explicit field confirmation; one event and unchanged application stage');
+  checks.push('Editable form has no field checkboxes; edits invalidate preview; one explicit confirmation creates one event and preserves application stage');
   await page.goto(base + '/?view=reminders');
   await page.getByRole('button', { name: '粘贴邮件', exact: true }).click();
   const paste = page.getByRole('dialog', { name: '粘贴单封邮件' });
@@ -156,6 +175,7 @@ try {
   assert.deepEqual(await api('/job-mail/fixture-safety'), { synthetic_only: true, body_read_attempts: 0, vault_entries: 0 });
   assert.equal((await api('/application-events')).length, 1);
   assert.deepEqual(blocked, []);
+  await deletion.waitFor({ state: 'hidden' });
   await snap('09-synthetic-vault-deletion-receipt', settings);
   checks.push('Synthetic vault setup requires separate test/save consent, explicit Chinese folder scope, manual mode, and confirmed deletion; no IMAP body or native vault use');
   assert.deepEqual(pageErrors, []);

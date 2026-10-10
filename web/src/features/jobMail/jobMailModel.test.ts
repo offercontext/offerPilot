@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
-import { displayMailValue, isDefiniteMailRejection, readMailRecovery, saveMailRecovery, validateMailFields } from './jobMailModel';
+import { displayMailField, displayMailTime, displayMailValue, isDefiniteMailRejection, mailFieldErrors, mergeMailFields, readMailRecovery, saveMailRecovery, validateMailFields } from './jobMailModel';
 const suggestionId = '12345678-1234-4123-8123-123456789012';
 const operationId = '98765432-1234-4123-8123-123456789012';
 beforeEach(() => sessionStorage.clear());
@@ -31,5 +31,22 @@ describe('mail review safety model', () => {
   it('preserves malicious-looking evidence as text and unknown values as unknown', () => {
     expect(displayMailValue('<script>run()</script>')).toBe('<script>run()</script>');
     expect(displayMailValue(null)).toBe('未提供');
+  });
+  it('makes times readable without changing timezone or fractional precision', () => {
+    expect(displayMailTime('2026-10-15T15:00:12.123456+08:00')).toBe('2026-10-15 15:00:12.123456 (UTC+08:00)');
+    expect(displayMailTime('2026-10-15T07:00:00Z')).toBe('2026-10-15 07:00:00 (UTC)');
+    expect(displayMailTime('2026-10-15T07:00')).toBe('2026-10-15T07:00');
+    expect(displayMailTime('待定')).toBe('待定');
+    expect(displayMailField('event_type', 'interview')).toBe('面试');
+    expect(displayMailField('subtype', 'assessment')).toBe('测评');
+    expect(displayMailField('duration_minutes', 45)).toBe('45 分钟');
+  });
+  it('surfaces each missing required field without inventing a value', () => {
+    expect(Object.keys(mailFieldErrors({}))).toEqual(['event_type', 'scheduled_at', 'duration_minutes']);
+  });
+  it('preserves existing data for empty proposals but keeps explicit user clears', () => {
+    const existing = { notes: '原有备注', location: '原有地点', remind_at: '2026-10-15T06:00:00Z' };
+    expect(mergeMailFields({ notes: '', location: '', remind_at: null }, {}, existing)).toEqual(existing);
+    expect(mergeMailFields({ notes: '', location: '', remind_at: null }, { notes: '', remind_at: null }, existing)).toEqual({ ...existing, notes: '', remind_at: null });
   });
 });

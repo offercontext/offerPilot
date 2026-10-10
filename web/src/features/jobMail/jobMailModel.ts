@@ -1,4 +1,5 @@
 import type { JobMailFields, JobMailSuggestion } from '@/types/jobMail';
+import { EVENT_TYPE_LABELS } from '@/types/event';
 
 export const MAIL_FIELD_LABELS: Record<string, string> = {
   id: '事件 ID', application_id: '投递 ID', event_type: '事件类型', subtype: '子类型',
@@ -13,19 +14,41 @@ export function displayMailValue(value: unknown): string {
   if (typeof value === 'object') return JSON.stringify(value);
   return String(value);
 }
+// Keep the source's wall time, offset and precision; never infer the browser's timezone.
+export function displayMailTime(value: unknown): string {
+  if (typeof value !== 'string') return displayMailValue(value);
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  return match ? `${match[1]} ${match[2]} (${match[3] === 'Z' ? 'UTC' : `UTC${match[3]}`})` : displayMailValue(value);
+}
+export function displayMailField(field: string, value: unknown): string {
+  if (['scheduled_at', 'remind_at', 'created_at', 'updated_at', 'received_at'].includes(field)) return displayMailTime(value);
+  if (field === 'event_type' && typeof value === 'string') return EVENT_TYPE_LABELS[value as keyof typeof EVENT_TYPE_LABELS] ?? value;
+  if (field === 'subtype' && value === 'assessment') return '测评';
+  if (field === 'duration_minutes' && typeof value === 'number') return `${value} 分钟`;
+  return displayMailValue(value);
+}
+export function mergeMailFields(proposed: JobMailFields, edited: JobMailFields, existing?: JobMailFields): JobMailFields {
+  // Match the server: proposal placeholders must not become explicit user clears.
+  const populated = Object.fromEntries(Object.entries(proposed).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+  return { ...existing, ...populated, ...edited };
+}
 export function mailStatusLabel(status: JobMailSuggestion['status']): string {
   return { pending: '待确认', manual_required: '待补充／人工处理', applied: '已处理', ignored: '已忽略' }[status];
 }
 export function mailActionLabel(action: JobMailSuggestion['action']): string {
   return { create_event: '新增安排', update_event: '更新已有安排', manual_only: '需要人工处理' }[action];
 }
-export function validateMailFields(fields: JobMailFields): string | null {
-  if (!fields.event_type || !['interview', 'written_test', 'custom'].includes(fields.event_type)) return '首批仅支持完整时间的面试、笔试／测评或自定义事件。';
+export function mailFieldErrors(fields: JobMailFields): Partial<Record<keyof JobMailFields, string>> {
+  const errors: Partial<Record<keyof JobMailFields, string>> = {};
+  if (!fields.event_type || !['interview', 'written_test', 'custom'].includes(fields.event_type)) errors.event_type = '首批仅支持完整时间的面试、笔试／测评或自定义事件。';
   if (!fields.scheduled_at || !/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(fields.scheduled_at) || !Number.isFinite(Date.parse(fields.scheduled_at))) {
-    return '请填写明确年份、日期、时间及时区，例如 2026-10-15T15:00:00+08:00。';
+    errors.scheduled_at = '请填写明确年份、日期、时间及时区，例如 2026-10-15T15:00:00+08:00。';
   }
-  if (!Number.isInteger(fields.duration_minutes) || (fields.duration_minutes ?? 0) <= 0) return '请核实并填写正整数时长；不会默认补成 60 分钟。';
-  return null;
+  if (!Number.isInteger(fields.duration_minutes) || (fields.duration_minutes ?? 0) <= 0) errors.duration_minutes = '请核实并填写正整数时长；不会默认补成 60 分钟。';
+  return errors;
+}
+export function validateMailFields(fields: JobMailFields): string | null {
+  return Object.values(mailFieldErrors(fields))[0] ?? null;
 }
 
 const RECOVERY_KEY = 'offerpilot:job-mail:pending-operations';

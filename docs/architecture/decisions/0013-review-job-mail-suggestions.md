@@ -1,7 +1,7 @@
 # ADR-0013：求职邮件的有界同步与独立审阅
 
 - Status: Synthetic review flow validated; local credential setup under validation; real mailbox not validated
-- 日期：2026-10-09
+- 日期：2026-10-09（2026-10-10 简化审阅交互）
 - Decider：用户确认在独立分支实施产品方案 v0.2，默认手动同步
 - 依据：master `5b9605bab343c4f95ede2c0c61ecd47bb7d923a1`、产品确认稿 v0.2、[ADR-0012](0012-bound-local-proactive-jobs.md)
 
@@ -35,6 +35,9 @@ ApplicationEvent 要求具体开始时间和正时长；创建事件不改变投
 只提供人工建议，不虚构时长/午夜，不改变投递阶段，不发送任何邮件。
 
 审阅是明确用户 API，不注册成 Agent 工具，不服从聊天自动批准。
+按用户反馈，界面使用预填可编辑表单，不要求逐字段勾选。生成预览不写业务；
+最终摘要展示明确目标及将写入的字段，用户最后一次确认才提交。原文与完整快照
+可按需展开；任一目标或字段编辑会作废预览，必须重新生成后才能确认。
 服务端预览绑定建议版本、最终编辑字段、目标投递/事件完整快照和范围版本；
 确认必须带明确批准、同一请求与预览 token。SQLite `BEGIN IMMEDIATE` 内再次校验，
 复用事务内事件 repository，原子写事件、建议状态及唯一操作回执。

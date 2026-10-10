@@ -191,7 +191,7 @@ def _resolve(
         after["id"] = target.id
         after["created_at"] = before["created_at"]
         if (before["scheduled_at"] != after["scheduled_at"] and before["remind_at"] is not None
-                and "remind_at" not in edits and "remind_at" not in proposed):
+                and "remind_at" not in edits and proposed.get("remind_at") in (None, "")):
             after["remind_at"] = None
             warnings.append("开始时间变化后，旧提醒将清除；请按新安排另设提醒。")
     if suggestion.action == "update_event" and all(before.get(key) == after.get(key) for key in EVENT_FIELDS):
