@@ -89,6 +89,7 @@ from offerpilot.repositories.applications import ApplicationsRepository
 from offerpilot.repositories.agent_runs import AgentRunRepository, JournalConflictError
 from offerpilot.repositories.chat import ChatRepository, ConversationScopeMutationSnapshot
 from offerpilot.pilot_runtime.service import PilotRuntime, _has_write_attempt, _write_outcome
+from tests._agent_timeout import timeout_after_signal
 
 _LEGACY_JD_EXECUTION_EVENTS: list[str] | None = None
 _LEGACY_JD_EXECUTION_ORIGINAL: Any = None
@@ -425,8 +426,13 @@ class FailAfterWriteModel:
 
 
 class SlowModel:
+    def __init__(self):
+        self.entered = Event()
+        self.release = Event()
+
     def complete(self, messages, tools):
-        time.sleep(0.2)
+        self.entered.set()
+        assert self.release.wait(20)
         return Assistant(content="late reply")
 
 
@@ -476,7 +482,7 @@ class SlowReadThenFinalModel:
         raise AssertionError("unexpected provider call")
 
 
-class SlowAfterPendingModel:
+class NoContinuationAfterPendingModel:
     def __init__(self, tool_call: ToolCall):
         self.tool_call = tool_call
         self.calls = 0
@@ -485,8 +491,7 @@ class SlowAfterPendingModel:
         self.calls += 1
         if self.calls == 1:
             return Assistant(tool_calls=[self.tool_call])
-        time.sleep(1.0)
-        return Assistant(content="late reply")
+        raise AssertionError("Rejecting a pending write must not call the provider again")
 
 
 class TimeoutAfterPendingModel:
@@ -5308,19 +5313,24 @@ def test_chat_returns_bad_gateway_when_model_fails(tmp_path):
 
 
 def test_chat_returns_recoverable_message_when_agent_times_out(tmp_path, monkeypatch):
-    import offerpilot.api as api_module
-
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 0.01)
-    client = TestClient(create_app(data_dir=tmp_path, chat_model=SlowModel()))
-
-    response = client.post("/api/chat", json={"message": "帮我总结最近复盘", "conversation_id": 0})
-
-    assert response.status_code == 200
+    model = SlowModel()
+    worker_done = timeout_after_signal(monkeypatch, model.entered)
+    client = TestClient(create_app(data_dir=tmp_path, chat_model=model))
+    try:
+        response = client.post("/api/chat", json={"message": "帮我总结最近复盘", "conversation_id": 0})
+        assert response.status_code == 200, response.text
+        assert model.entered.is_set()
+        assert not worker_done.is_set()
+    finally:
+        model.release.set()
+        assert worker_done.wait(20), "Timed-out Agent worker did not exit"
     assert response.json()["type"] == "message"
     assert response.json()["message"] == "这次处理时间过长，已停止。你可以重试或换一种问法。"
     stored = client.get(f"/api/chat/conversations/{response.json()['conversation_id']}").json()
     assert stored[-1]["role"] == "assistant"
     assert stored[-1]["content"] == "这次处理时间过长，已停止。你可以重试或换一种问法。"
+    assert [message["role"] for message in stored] == ["user", "assistant"]
+    assert all(message["content"] != "late reply" for message in stored)
 
 
 def test_chat_asks_followup_when_pending_event_missing_required_info(tmp_path):
@@ -8101,10 +8111,10 @@ def test_chat_confirm_rejection_provider_failure_records_cancellation_once(tmp_p
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
-def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, monkeypatch, endpoint):
-    import offerpilot.api as api_module
-
-    model = SlowAfterPendingModel(
+def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, endpoint):
+    # Retain the historical node ID. Ledger rejection is now provider-free,
+    # so the old short Agent deadline never exercised a timeout here.
+    model = NoContinuationAfterPendingModel(
         ToolCall(
             id="reject-timeout",
             name="update_application_status",
@@ -8112,8 +8122,6 @@ def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, monk
         )
     )
     app_client, client, application, pending = _create_status_confirmation(tmp_path, model)
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 0.25)
-
     response = client.post(
         endpoint,
         json={
@@ -8127,16 +8135,19 @@ def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, monk
         body = _parse_sse_events(response.text)[-1]["data"]["data"]["response"]
     else:
         body = response.json()
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert "已取消" in body["message"]
     assert "undo" not in body
     assert client.get("/api/chat/conversations").json()[0]["pending_action"] is None
     assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "interview"
+    stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+    assert all(message["content"] != "late reply" for message in stored)
+    assert sum(message["content"] == body["message"] for message in stored) == 1
+    assert model.calls == 1
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
 def test_chat_confirm_timeout_before_result_sink_keeps_pending(tmp_path, monkeypatch, endpoint):
-    import offerpilot.api as api_module
     import offerpilot.pilot_runtime.composition as composition_module
 
     model = ScriptedModel(
@@ -8153,24 +8164,31 @@ def test_chat_confirm_timeout_before_result_sink_keeps_pending(tmp_path, monkeyp
         ]
     )
     _, client, _, pending = _create_status_confirmation(tmp_path, model)
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 0.01)
-
+    execute_entered = Event()
+    release_execute = Event()
+    worker_done = timeout_after_signal(monkeypatch, execute_entered)
     original_execute = composition_module._AgentDriver.execute
 
     def late_execute(driver, invocation):
-        time.sleep(0.2)
+        execute_entered.set()
+        assert release_execute.wait(20)
         return original_execute(driver, invocation)
 
     monkeypatch.setattr(composition_module._AgentDriver, "execute", late_execute)
-    response = client.post(
-        endpoint,
-        json={
-            "conversation_id": pending["conversation_id"],
-            "approved": True,
-            "confirmation_token": pending["pending_action"]["confirmation_token"],
-        },
-    )
-    time.sleep(0.25)
+    try:
+        response = client.post(
+            endpoint,
+            json={
+                "conversation_id": pending["conversation_id"],
+                "approved": True,
+                "confirmation_token": pending["pending_action"]["confirmation_token"],
+            },
+        )
+        assert execute_entered.is_set()
+        assert not worker_done.is_set()
+    finally:
+        release_execute.set()
+        assert worker_done.wait(20), "Timed-out Agent worker did not exit"
 
     if endpoint.endswith("/stream"):
         assert _parse_sse_events(response.text)[-1]["event"] == "error"

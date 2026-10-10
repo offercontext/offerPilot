@@ -2,23 +2,23 @@
   "repository": "offercontext/offerPilot",
   "branch": "feat/20261005-windows-desktop-validation",
   "productBaseline": {
-    "commit": "0256ba7069b52587982fd3fb203b5624dbd9e921",
-    "tree": "6167e764edceed52ed7c880beabf13ab145de798"
+    "commit": "bec0142c437184c29882f07ab8e4f35277124a35",
+    "tree": "13698851964c1b8d2adc637c02bbf7bded252ce6"
   },
-  "waitForRunTerminal": 37937318594,
-  "reason": "完成 test_chat_api.py 与 conftest 的真实节点分片隔离复审后更新审查锁。复核全局状态、动态 fixture 获取、fixture scopes、xunit、monkeypatch 和线程生命周期，独立审查无阻断；保留源码变化必须重新审查的门禁及运行时 scope guards。产品源码、锁文件、分片算法和全部6769节点不变。",
+  "waitForRunTerminal": 37984895310,
+  "reason": "修正持久超时测试的阶段与线程结束验证：原50ms墙钟探针可在provider尚未进入时通过，不能证明迟到输出被拒绝。新测试在目标Event后调用真实Future超时并保留生产host取消路径，等待完整worker退出后复查持久回执及turn；同时核同族provider-free拒绝路径。产品代码、生产预算、超时与fencing语义不变。",
   "previousFullGate": {
-    "run": 37937318594,
-    "commit": "0256ba7069b52587982fd3fb203b5624dbd9e921",
+    "run": 37984895310,
+    "commit": "bec0142c437184c29882f07ab8e4f35277124a35",
     "outcome": "failed",
     "nodes": 6769,
     "passed": 6755,
     "skipped": 13,
     "failed": 1,
-    "scope": "全部12组及后置已终态。唯一失败为节点分片源码审查digest未同步；前一轮三项原失败节点及新增15回归全部通过。full-regression在分组失败前置检查退出，完整release阶段未执行，独立package成功不替代。"
+    "scope": "全部12组及后置已终态。唯一失败为durable timeout测试POST /api/chat预期200实际503；原日志未记录响应body，原现场原因未知。隔离审查锁及此前其它失败节点通过。full-regression因分组失败未进入完整release，独立package成功不替代。"
   },
   "localEvidence": {
-    "isolation": "40个分片合同通过，23个针对性chat节点通过；390个真实fixture closure核验；5类源码漂移mutation被拒绝；LF/CRLF相同内容均通过，独立审查通过。"
+    "durableTimeout": "61个control/lease/host、13个chat/HITL、40个完整分片门禁通过；3类业务mutation被检测，6类源码漂移被拒绝，独立审查通过。"
   },
   "requiredAcceptance": [
     "本请求提交通过普通Windows manifest、全部12 shards、full-regression、package和validation-status，并生成新的EXE。",
@@ -27,20 +27,36 @@
     "同包免费验收全通过后，重新核验当日官方价格及既有累计预算；只有满足专用凭据和独立人工审批条件才进行受限live，累计10元不重置。"
   ],
   "testCollection": {
-    "expectedNodes": 6769,
+    "expectedNodes": 6770,
     "previousNodes": 6769,
     "removedNodes": 0,
-    "addedNodes": 0
+    "addedNodes": 1,
+    "addedCoverage": "真实SQLite终态写入受阻时超时回执失败关闭。"
   },
   "isolationReview": {
     "reviewedSources": [
       "tests/test_chat_api.py",
-      "tests/conftest.py"
+      "tests/conftest.py",
+      "tests/_agent_timeout.py"
     ],
-    "changedTest": "tests/test_complete_pytest_shards.py",
-    "chatNormalizedSha256": "f3d640bcfa619bd0030b22bb24aec127fdcefb339c973d54b8a379823f2b8205",
-    "conftestNormalizedSha256": "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
-    "finding": "ProviderGapClock、model、diagnostic list为每测试实例；legacy spy每次初始化；共享catalog/golden仅只读；fixture无跨测试可变状态，390个chat节点真实fixture closure满足scope guard。",
-    "derivedAudit": "反查本轮三份测试与conftest的新旧7个摘要，唯一需更新的是本隔离审查锁；其它派生清单和节点集合不变，历史报告不改写。"
+    "changedAudit": "tests/test_complete_pytest_shards.py",
+    "normalizedSha256": {
+      "tests/test_chat_api.py": "a9e83c5a1b88467c623d294e4820363dd0f116181bb409548a3c46f32321ef5e",
+      "tests/conftest.py": "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
+      "tests/_agent_timeout.py": "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735"
+    },
+    "finding": "独立实际复核新增helper的Event、Future callback、executor subclass与deadline列表均每调用独立；function monkeypatch在worker退出后恢复。390个chat节点真实fixture closure通过，helper源码纳入强制复审摘要。",
+    "derivedAudit": "完整分片门禁40项通过，6类源码漂移仍拒绝；LF/CRLF等价。新请求同步6770节点统计与审查源列表，无删除节点。"
+  },
+  "repairedTests": {
+    "files": [
+      "tests/_agent_timeout.py",
+      "tests/test_chat_api.py",
+      "tests/test_pilot_control_api.py",
+      "tests/test_complete_pytest_shards.py"
+    ],
+    "positiveContract": "provider/工作阶段真实进入后触发host超时；超时回执与interrupted状态必须持久化；迟到worker退出后记录必须不变。",
+    "negativeContract": "独立SQLite writer阻塞真实终态写入时必须503/operation_failed，不能伪称超时回执已保存；该控制实验不宣称还原原Windows503原因。",
+    "relatedCoverage": "保留全部原节点；拒绝确认已是provider-free路径，原2个rejection_timeout节点改为明确验证仅原调用一次、取消记录恰好一次。"
   }
 }
