@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { waitForMailState } from './job-mail-browser-wait.mjs';
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const base = process.env.MAIL_FIXTURE_URL || 'http://127.0.0.1:38091';
 assert.equal(new URL(base).hostname, '127.0.0.1');
@@ -36,7 +37,23 @@ async function snap(name, locator) {
   await (locator || page).screenshot({ path: path.join(output, name + '.png'), ...(locator ? {} : { fullPage: true }) });
 }
 const checks = [];
+let waitDiagnostic;
 try {
+  // Observe the installed, pinned Playwright version in the actual browser.
+  // The blank-page predicate has no product state or network side effects.
+  const legacy = await page.waitForFunction(async () => {
+    globalThis.__mailAsyncWaitCalls = (globalThis.__mailAsyncWaitCalls || 0) + 1;
+    return globalThis.__mailAsyncWaitCalls >= 3;
+  }, undefined, { timeout: 3000 });
+  const legacyResult = await legacy.jsonValue();
+  const legacyCalls = await page.evaluate(() => globalThis.__mailAsyncWaitCalls);
+  let explicitCalls = 0;
+  const explicitResult = await waitForMailState(async () => ++explicitCalls, async value => value >= 3, { timeoutMs: 1000, pollMs: 1 });
+  assert.equal(explicitResult, 3);
+  assert.equal(explicitCalls, 3);
+  waitDiagnostic = { legacyResult, legacyCalls, explicitResult, explicitCalls };
+  console.log(JSON.stringify({ waitDiagnostic }));
+
   const app = await api('/applications', { method: 'POST', data: { company_name: '合成星河科技', position_name: '后端工程师' } });
   await page.goto(base + '/?view=settings');
   await page.getByRole('heading', { name: '求职邮箱', exact: true }).waitFor();
@@ -55,20 +72,22 @@ try {
   assert.equal((await api('/job-mail/suggestions')).total, 0);
   checks.push('Connection is manual, no body read, explicit folder only');
   await settings.getByRole('button', { name: '立即同步', exact: true }).click();
-  await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).run?.status === 'completed');
-  const synced = await api('/job-mail/status');
+  const synced = await waitForMailState(() => api('/job-mail/status'), state => {
+    if (['failed', 'cancelled', 'interrupted'].includes(state.run?.status)) throw new Error(`Synthetic sync ended: ${state.run.status}`);
+    return state.run?.status === 'completed';
+  });
   assert.deepEqual(synced.connection.folders, ['INBOX']);
   assert.equal(synced.run.progress.candidates, 1);
   assert.equal((await api('/application-events')).length, 0);
   await settings.getByRole('switch', { name: '自动同步' }).click();
   await settings.getByLabel('同步间隔', { exact: true }).fill('30');
   await settings.getByRole('button', { name: '保存同步方式' }).click();
-  await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).connection.sync_mode === 'automatic');
+  await waitForMailState(() => api('/job-mail/status'), state => state.connection.sync_mode === 'automatic');
   await settings.getByRole('switch', { name: '自动同步' }).scrollIntoViewIfNeeded();
   await snap('02b-optional-automatic-interval');
   await settings.getByRole('switch', { name: '自动同步' }).click();
   await settings.getByRole('button', { name: '保存同步方式' }).click();
-  await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).connection.sync_mode === 'manual');
+  await waitForMailState(() => api('/job-mail/status'), state => state.connection.sync_mode === 'manual');
   assert.equal((await api('/job-mail/status')).connection.next_run_at, null);
   checks.push('Automatic interval saves and turning automatic off preserves connection/manual mode');
   await page.goto(base + '/?view=reminders');
@@ -144,7 +163,7 @@ try {
   await page.goto(base + '/?view=settings');
   await settings.getByRole('button', { name: '断开邮箱', exact: true }).click();
   await page.getByRole('dialog', { name: '断开求职邮箱？' }).getByRole('button', { name: '确认断开', exact: true }).click();
-  await page.waitForFunction(async () => (await (await fetch('/api/job-mail/status')).json()).connection.status === 'disconnected');
+  await waitForMailState(() => api('/job-mail/status'), state => state.connection.status === 'disconnected');
   await settings.getByRole('button', { name: '安全配置 QQ 邮箱', exact: true }).click();
   const secure = page.getByRole('dialog', { name: '安全配置 QQ 邮箱', exact: true });
   await secure.getByLabel(/开始一个短期安全配置会话/).check();
@@ -187,7 +206,7 @@ try {
   await snap('09-synthetic-vault-deletion-receipt', settings);
   checks.push('Synthetic vault setup requires separate test/save consent, explicit Chinese folder scope, manual mode, and confirmed deletion; no IMAP body or native vault use');
   assert.deepEqual(pageErrors, []);
-  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, externalRequests: blocked, pageErrors, syntheticOnly: true }, null, 2));
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));

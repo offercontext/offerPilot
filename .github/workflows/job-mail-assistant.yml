@@ -41,6 +41,7 @@ jobs:
         run: |
           npm test --prefix web -- src/features/jobMail src/services/jobMail.test.ts src/services/jobMailSecureSetup.test.ts src/layout/AppShell.test.ts src/components/SettingsView.test.ts src/features/reminders src/features/dashboard
           npm run build --prefix web
+          node --test scripts/job-mail-browser-wait.test.mjs
       - name: Install isolated browser harness
         run: |
           sudo apt-get update
