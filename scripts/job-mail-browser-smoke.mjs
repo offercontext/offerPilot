@@ -26,7 +26,15 @@ async function api(endpoint, options = {}) {
   assert.ok(response.ok(), `${endpoint}: ${response.status()} ${await response.text()}`);
   return response.json();
 }
-async function snap(name, locator) { await page.evaluate(() => document.fonts.ready); await (locator || page).screenshot({ path: path.join(output, name + '.png'), ...(locator ? {} : { fullPage: true }) }); }
+async function snap(name, locator) {
+  await page.evaluate(() => document.fonts.ready);
+  // Observe natural modal motion completion; never finish/cancel animations or
+  // alter product styles to manufacture a stable screenshot.
+  await page.waitForFunction(() => [...document.querySelectorAll('.ant-modal, .ant-modal-mask, .ant-modal-content')]
+    .every(element => element.getAnimations().every(animation => animation.playState !== 'running')), undefined, { timeout: 3000 });
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await (locator || page).screenshot({ path: path.join(output, name + '.png'), ...(locator ? {} : { fullPage: true }) });
+}
 const checks = [];
 try {
   const app = await api('/applications', { method: 'POST', data: { company_name: '合成星河科技', position_name: '后端工程师' } });
