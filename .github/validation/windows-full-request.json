@@ -2,36 +2,88 @@
   "repository": "offercontext/offerPilot",
   "branch": "feat/20261005-windows-desktop-validation",
   "productBaseline": {
-    "commit": "bec0142c437184c29882f07ab8e4f35277124a35",
-    "tree": "13698851964c1b8d2adc637c02bbf7bded252ce6"
+    "commit": "ea57d3c8d53aba00cc1f074be999738a6fd442ee",
+    "tree": "11b5e679584b2524581d14115ef94f996ba5962d"
   },
-  "waitForRunTerminal": 37984895310,
-  "reason": "修正持久超时测试的阶段与线程结束验证：原50ms墙钟探针可在provider尚未进入时通过，不能证明迟到输出被拒绝。新测试在目标Event后调用真实Future超时并保留生产host取消路径，等待完整worker退出后复查持久回执及turn；同时核同族provider-free拒绝路径。产品代码、生产预算、超时与fencing语义不变。",
+  "candidateSource": {
+    "commit": "4ca4854b2bfb7f78b80eed0e9a1dba81929a5300",
+    "tree": "77a4f81e4368257d84694fd6a8163efd3c4efe95",
+    "scope": "此已验证源码提交仅含下述三份测试文件；本次请求提交只更新本JSON。下一轮manifest、artifact及EXE须绑定最终请求提交的实际github.sha，不混用源码提交或旧包身份。"
+  },
+  "waitForRunTerminal": 38015237281,
   "previousFullGate": {
-    "run": 37984895310,
-    "commit": "bec0142c437184c29882f07ab8e4f35277124a35",
+    "run": 38015237281,
+    "attempt": 2,
+    "url": "https://github.com/offercontext/offerPilot/actions/runs/38015237281",
+    "commit": "ea57d3c8d53aba00cc1f074be999738a6fd442ee",
     "outcome": "failed",
-    "nodes": 6769,
-    "passed": 6755,
+    "terminalShards": 12,
+    "successfulShards": 9,
+    "failedShards": 3,
+    "nodes": 6770,
+    "passed": 6754,
     "skipped": 13,
-    "failed": 1,
-    "scope": "全部12组及后置已终态。唯一失败为durable timeout测试POST /api/chat预期200实际503；原日志未记录响应body，原现场原因未知。隔离审查锁及此前其它失败节点通过。full-regression因分组失败未进入完整release，独立package成功不替代。"
+    "failed": 3,
+    "missingNodes": 0,
+    "duplicateNodes": 0,
+    "evidence": "全部12组及后置job已终态；重新读取官方manifest、12份shard ZIP和原始日志，来源/分片/执行节点逐项核对得到6770个唯一节点，无缺失或重复；最终aggregate包内manifest及12份shard JSON与对应单组artifacts内容逐字节一致。13个skip节点和理由保持不变，逐项单独披露，不计为通过。",
+    "failedNodes": [
+      "tests/test_chat_api.py::test_stable_journal_clock_contract_keeps_real_time_probes_explicit",
+      "tests/test_chat_api.py::test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuation[/api/chat/confirm]",
+      "tests/test_pilot_runtime_extraction_gate.py::test_canary_private_values_do_not_enter_journal_trace_sse_or_error_log_payloads"
+    ],
+    "postGate": {
+      "fullRegressionJob": "failed",
+      "releaseGateExecuted": false,
+      "remainingReleasePhases": "NOT RUN",
+      "reason": "2026-10-10 13:54:03 UTC的后置步骤在SHARD_RESULT前置检查抛错，未调用release-gate.ps1；因此该job中的aggregate、ruff、mypy、前端测试/构建、CLI/HTTP smoke、local verify及install gate均未执行。独立package结果不能替代这些阶段或整体通过。"
+    }
+  },
+  "reason": "将三项已独立审查的测试夹具修复合并后请求普通Windows完整验收。保留真实host超时/取消、迟写fencing、Pending/HITL、真实SQLite和隐私边界，避免将主机调度/I/O耗时误作这些测试的业务断言。产品代码、Journal生产预算、默认配置、锁文件和BUGS均未改变。",
+  "repairedTests": {
+    "files": [
+      "tests/test_chat_api.py",
+      "tests/test_complete_pytest_shards.py",
+      "tests/test_pilot_runtime_extraction_gate.py"
+    ],
+    "repairs": [
+      {
+        "name": "ProviderGapClock短等待计量",
+        "sourceCommit": "e2d574161a610f41d21b466a1a5a52cac1448b35",
+        "change": "仅测试计时器以perf_counter测量显式provider等待，保留真实sleep和原实时时钟契约；新增粗粒度monotonic回归。",
+        "evidence": "原Windows节点的短间隔为0.0；新增回归通过并拒绝恢复旧monotonic实现，模块time绑定在测试后恢复。",
+        "limit": "该修复不修改产品时钟或预算；本地受控时钟及Linux验证不代替新的Windows执行。"
+      },
+      {
+        "name": "确认超时阶段与迟到worker完成",
+        "sourceCommit": "741390403d217324a334721bb6b67bb45a785f16",
+        "change": "3个旧fake-host测试迁移到既有真实Future helper；业务阶段进入后触发真实Future timeout，在finally释放并等Agent thunk完成，重试仅恢复executor。保留迟写、Pending/undo、无链式continuation、恰好一次重试及generation+1断言。",
+        "evidence": "受控5.25秒延迟重现旧fixture在handler前失败；修复后返回409且迟到worker被fence。迟写及continuation变异均被既有断言拒绝。",
+        "limit": "原Windows响应body/status及handler前确切阻塞点未被记录，不能宣称重现其全部根因；完成事件证明Agent thunk结束，不等于显式join操作系统线程。"
+      },
+      {
+        "name": "隐私canary真实Journal路径",
+        "sourceCommit": "72e2e5797fd6df66d86407014ecdb895be72c55c",
+        "change": "隐私测试显式注入函数内稳定clock，移除10/2秒测试预算扩张；保留真实recorder/SQLite，增加空diagnostics、2个append、1个disposition及completed/healthy断言。",
+        "evidence": "60ms真实SQL延迟在旧fixture重现journal_budget_exhausted，修复后保持1个真实run及6个事件；4类泄露、Null recorder和恢复真实clock的负控均被拒绝。481项相关测试通过，67个节点保持。",
+        "limit": "segment预算扩大不能改变既有50ms单操作上限；产品预算和SQLite deadline契约未变。原runner具体CPU调度、存储或锁竞争原因仍未知。"
+      }
+    ]
   },
   "localEvidence": {
-    "durableTimeout": "61个control/lease/host、13个chat/HITL、40个完整分片门禁通过；3类业务mutation被检测，6类源码漂移被拒绝，独立审查通过。"
+    "integratedTests": "4ca4854b：目标canary+40个分片门禁41项通过，三份测试文件ruff及diff检查通过；完整收集6771节点。前一源码0bc3ce2a的2 helper+6确认host节点全部通过，相关源码逐字节未再变化。",
+    "review": "三项修复均有独审；整合文件逐字节匹配各已审修复，chat/gate/helper/conftest在第三项整合后未变。合并独审无阻断。",
+    "reuse": "未重复执行已审canary的481项长族或已恢复同源时钟修复的80项Journal长族；记录继承验证，不宣称新增执行。原80项重置前raw日志已丢失，恢复的是已审源码字节与验证记录。",
+    "recordOnlyValidation": "本请求JSON不参与测试节点收集或工作流模式选择；只验证JSON、diff、实际YAML路由和普通提交分类，不重跑长回归。"
   },
-  "requiredAcceptance": [
-    "本请求提交通过普通Windows manifest、全部12 shards、full-regression、package和validation-status，并生成新的EXE。",
-    "原180秒浏览器清理超时未复现且根因仍未知，不跳过原节点或完整门禁；本轮该节点与此前heartbeat、seq、数据库初始化失败节点均通过。",
-    "按本请求提交、完整门禁run、artifact和EXE SHA256重新固定最终包，再对同一EXE完成免费non-AI及全部7项MOCK。",
-    "同包免费验收全通过后，重新核验当日官方价格及既有累计预算；只有满足专用凭据和独立人工审批条件才进行受限live，累计10元不重置。"
-  ],
   "testCollection": {
-    "expectedNodes": 6770,
-    "previousNodes": 6769,
+    "expectedNodes": 6771,
+    "previousNodes": 6770,
     "removedNodes": 0,
     "addedNodes": 1,
-    "addedCoverage": "真实SQLite终态写入受阻时超时回执失败关闭。"
+    "addedNode": "tests/test_chat_api.py::test_provider_gap_clock_measures_short_waits_with_coarse_monotonic",
+    "preservation": "全部原6770节点保留；4ca4854b与0bc3ce2a的6771节点列表及12组分配完全一致。与上一轮新恢复的官方manifest进行跨平台比较时，仅显式映射AF_INET6参数值；不改实际节点ID或运行门禁。",
+    "skipPolicy": "上一轮13个skip不得算作pass；下一轮按实际节点及理由分别核验并披露。当前YAML未传--allowed-skips，不把该记录伪装成已执行的固定skip allowlist。"
   },
   "isolationReview": {
     "reviewedSources": [
@@ -41,22 +93,33 @@
     ],
     "changedAudit": "tests/test_complete_pytest_shards.py",
     "normalizedSha256": {
-      "tests/test_chat_api.py": "a9e83c5a1b88467c623d294e4820363dd0f116181bb409548a3c46f32321ef5e",
+      "tests/test_chat_api.py": "dc0d709b149ff3ea8a6918bfd0e087d8c2400a3e183bf4cef1475209a4910d54",
       "tests/conftest.py": "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
       "tests/_agent_timeout.py": "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735"
     },
-    "finding": "独立实际复核新增helper的Event、Future callback、executor subclass与deadline列表均每调用独立；function monkeypatch在worker退出后恢复。390个chat节点真实fixture closure通过，helper源码纳入强制复审摘要。",
-    "derivedAudit": "完整分片门禁40项通过，6类源码漂移仍拒绝；LF/CRLF等价。新请求同步6770节点统计与审查源列表，无删除节点。"
+    "finding": "全模块全局变量、fixture、线程及恢复路径独审完成；177个旧chat函数签名及参数化保留，新增1个函数；391个实际chat节点fixture closure通过。仅pytest内建tmp_path_factory为session scope；自定义可变状态在函数内，保留动态fixture与scope运行时门禁。canary仍按整个文件分片，不扩大node-split范围。"
   },
-  "repairedTests": {
-    "files": [
-      "tests/_agent_timeout.py",
-      "tests/test_chat_api.py",
-      "tests/test_pilot_control_api.py",
-      "tests/test_complete_pytest_shards.py"
+  "workflowRouting": {
+    "workflow": ".github/workflows/desktop-windows.yml",
+    "mode": "ordinary-full",
+    "activation": "push仅由上述validation分支触发，本JSON不在paths-ignore中；workflow_dispatch也可手动触发，需明确选择最终请求提交所在ref。本JSON是请求记录，不是工作流输入。普通test提交不带build: AI [windows-package-only] 前缀。仅本地提交不会启动CI。",
+    "shards": 12,
+    "maxParallel": 2,
+    "failFast": false,
+    "shardTimeoutMinutes": 120,
+    "requiredJobs": [
+      "pytest-manifest",
+      "pytest-shards",
+      "full-regression",
+      "validation-package",
+      "validation-status"
     ],
-    "positiveContract": "provider/工作阶段真实进入后触发host超时；超时回执与interrupted状态必须持久化；迟到worker退出后记录必须不变。",
-    "negativeContract": "独立SQLite writer阻塞真实终态写入时必须503/operation_failed，不能伪称超时回执已保存；该控制实验不宣称还原原Windows503原因。",
-    "relatedCoverage": "保留全部原节点；拒绝确认已是provider-free路径，原2个rejection_timeout节点改为明确验证仅原调用一次、取消记录恰好一次。"
-  }
+    "postGate": "manifest和全部shards成功后，执行release-gate.ps1 -Install -PytestEvidence pytest-evidence，先严格核完整pytest证据，再执行ruff/mypy、前端测试构建、CLI/HTTP smoke、local verify和install gate；最终状态要求package及full-regression均成功。",
+    "paidModelCalls": "本次工作流不传-RealAi；本请求、提交和普通完整CI均不启动或扩大付费模型验收。"
+  },
+  "requiredAcceptance": [
+    "最终请求提交必须通过新一轮普通manifest、全部12 shards、完整后置release gate、独立package和validation-status；失败、超时、取消、跳过或仅安装包产物均不构成完整通过。",
+    "按最终请求提交、完整门禁run/attempt、artifact及EXE SHA256固定新包，再对同一EXE完成免费non-AI及全部7项MOCK；不得用旧run或旧包结果替代。",
+    "同包免费验收全部通过后，任何后续受限live仍须重新核验当日官方价格、既有累计费用、专用凭据及原有独立人工审批条件；累计10元预算不重置。本记录不启动付费调用，也不授权额外付费或其它验收动作。"
+  ]
 }

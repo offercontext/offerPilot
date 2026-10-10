@@ -5162,12 +5162,14 @@ def test_canary_private_values_do_not_enter_journal_trace_sse_or_error_log_paylo
             run_started=run_started,
             segment_started=segment_started,
         )
+        # Exercise the real recorder/SQLite privacy path independently of host
+        # latency. Raising the segment budget does not raise the 50 ms operation
+        # cap; active-work and real SQLite deadline tests cover that contract.
         recorder = RunRecorderFactory(
             spy_journal,
             key=key,
             enabled=True,
-            segment_budget_seconds=10.0,
-            disposition_budget_seconds=2.0,
+            clock=lambda: 0.0,
         ).start_run(command)
         assert recorder.run_id == run_id, getattr(recorder, "diagnostics", None)
         with pytest.raises(JournalEventValidationError):
@@ -5223,6 +5225,7 @@ def test_canary_private_values_do_not_enter_journal_trace_sse_or_error_log_paylo
             )
         )
         recorder.finish(TerminalDisposition(status="completed"))
+        assert recorder.diagnostics == []
         trace = trace_module.reconstruct_agent_run(
             spy_journal,
             run_id,
@@ -5260,8 +5263,10 @@ def test_canary_private_values_do_not_enter_journal_trace_sse_or_error_log_paylo
         )
         assert sentinel not in serialized
         assert captured_traces == [trace]
-        assert spy_journal.appended
+        assert len(spy_journal.appended) == 2
         assert all(sentinel not in repr(item) for item in spy_journal.appended)
+        assert len(spy_journal.dispositions) == 1
+        assert all(sentinel not in repr(item) for item in spy_journal.dispositions)
         assert captured_log_calls
         assert all(sentinel not in message for _, _, message in captured_log_calls)
         assert all(sentinel not in encoded for _, encoded in captured_sse)
@@ -5275,6 +5280,8 @@ def test_canary_private_values_do_not_enter_journal_trace_sse_or_error_log_paylo
             "args_summary",
         }
         assert trace.segments and trace.segments[0].tools
+        assert trace.lifecycle_status == "completed"
+        assert trace.recording_status == "healthy"
     finally:
         session.close()
         session_factory.kw["bind"].dispose()

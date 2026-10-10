@@ -274,11 +274,16 @@ def test_node_split_source_change_requires_a_new_isolation_review():
     # Re-reviewed timeout probes: each call owns its Events, real Future callback
     # and executor subclass; function monkeypatch restores the transport after
     # the changed tests release and observe their Agent worker's completion.
+    # The remaining confirmation probes now share that real-Future helper;
+    # retries restore only the executor after the timed-out worker has exited.
+    # Re-reviewed short provider waits: perf_counter adds no shared state. The
+    # coarse-clock regression owns its clock/iterator/list and function monkeypatch
+    # restores only this module's time binding; process-wide time is untouched.
     # Include the shared helper, since its state is part of chat node isolation.
     # Normalize only checkout CRLF so the same reviewed source works on Windows.
     reviewed = {
         "tests/test_chat_api.py":
-            "a9e83c5a1b88467c623d294e4820363dd0f116181bb409548a3c46f32321ef5e",
+            "dc0d709b149ff3ea8a6918bfd0e087d8c2400a3e183bf4cef1475209a4910d54",
         "tests/_agent_timeout.py":
             "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735",
         "tests/conftest.py":
