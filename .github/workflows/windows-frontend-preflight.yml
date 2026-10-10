@@ -1,0 +1,122 @@
+name: Bounded Windows frontend preflight
+
+# Full frontend contention check only. This does not certify the release gate.
+# A separate branch prevents the existing package, Python and AI workflows firing.
+on:
+  push:
+    branches: [feat/20261010-windows-frontend-preflight]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: pwsh
+
+env:
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+jobs:
+  frontend:
+    name: Full frontend tests and build on Windows
+    if: ${{ github.repository == 'offercontext/offerPilot' && github.ref == 'refs/heads/feat/20261010-windows-frontend-preflight' }}
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          # Existing frontend source gates require historical Git ranges.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Record source, runtime and clock evidence
+        run: |
+          New-Item -ItemType Directory -Force frontend-preflight-evidence | Out-Null
+          $source = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $source -ne $env:GITHUB_SHA) { throw 'Unexpected source checkout' }
+          $nodeVersion = node --version
+          if ($LASTEXITCODE -ne 0) { throw 'Node version unavailable' }
+          $npmVersion = npm.cmd --version
+          if ($LASTEXITCODE -ne 0) { throw 'npm version unavailable' }
+          @{
+            scope = 'Frontend preflight only; full release gate NOT RUN'
+            sourceSha = $source
+            runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+            startedUtc = [DateTime]::UtcNow.ToString('o')
+            localClock = [DateTimeOffset]::Now.ToString('o')
+            windowsTimeZone = (Get-TimeZone).Id
+            processTZ = $env:TZ
+            nodeVersion = $nodeVersion
+            npmVersion = $npmVersion
+            os = [Environment]::OSVersion.VersionString
+            lockSha256 = (Get-FileHash web/package-lock.json -Algorithm SHA256).Hash.ToLowerInvariant()
+            workers = 'Unchanged web/vitest.config.ts: min 1, max 4'
+            network = 'Existing test mocks; no provider credentials or provider validation'
+          } | ConvertTo-Json | Set-Content -Encoding utf8 frontend-preflight-evidence/runtime.json
+          node -e "console.log(JSON.stringify({now:new Date().toISOString(),local:new Date().toString(),timeZone:Intl.DateTimeFormat().resolvedOptions().timeZone,offsetMinutes:new Date().getTimezoneOffset(),versions:process.versions},null,2))" > frontend-preflight-evidence/node-clock.json
+          if ($LASTEXITCODE -ne 0) { throw 'Node clock capture failed' }
+      - name: Install frozen frontend dependencies
+        run: |
+          npm.cmd ci --prefix web 2>&1 | Tee-Object -FilePath frontend-preflight-evidence/install.log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) { exit $code }
+      - name: Run the complete release-gate frontend suite
+        working-directory: web
+        run: |
+          # Same npm test and four-worker configuration as release-gate.ps1.
+          # Only reporting is added: no file/name filters, shards, bail or timeouts.
+          npm.cmd test -- --reporter=default --reporter=junit --reporter=json --outputFile.junit=../frontend-preflight-evidence/junit.xml --outputFile.json=../frontend-preflight-evidence/tests.json 2>&1 | Tee-Object -FilePath ../frontend-preflight-evidence/tests.log
+          $code = $LASTEXITCODE
+          $code | Set-Content ../frontend-preflight-evidence/test-exit-code.txt
+          if ($code -ne 0) { exit $code }
+      - name: Build the frontend as in the release gate
+        working-directory: web
+        run: |
+          npm.cmd run build 2>&1 | Tee-Object -FilePath ../frontend-preflight-evidence/build.log
+          $code = $LASTEXITCODE
+          $code | Set-Content ../frontend-preflight-evidence/build-exit-code.txt
+          if ($code -ne 0) { exit $code }
+      - name: Retain performance outcome and verify complete test execution
+        if: ${{ always() }}
+        run: |
+          New-Item -ItemType Directory -Force frontend-preflight-evidence | Out-Null
+          [DateTime]::UtcNow.ToString('o') | Set-Content frontend-preflight-evidence/finished-utc.txt
+          if (-not (Test-Path frontend-preflight-evidence/tests.json)) {
+            'Test JSON unavailable; frontend preflight did not complete.' | Set-Content frontend-preflight-evidence/incomplete.txt
+            throw 'Full frontend test evidence missing'
+          }
+          $report = Get-Content -Raw frontend-preflight-evidence/tests.json | ConvertFrom-Json
+          $audit = @($report.testResults | ForEach-Object { $_.assertionResults } | Where-Object {
+            $_.title -eq 'keeps the production audit within its bounded performance baseline'
+          })
+          @{
+            sourceSha = $env:GITHUB_SHA
+            thresholdMs = 30000
+            timingNote = 'Vitest test duration includes the unchanged audit assertion; the inner audit threshold remains 30000 ms.'
+            performanceTests = $audit
+            totalTests = $report.numTotalTests
+            passedTests = $report.numPassedTests
+            failedTests = $report.numFailedTests
+            pendingTests = $report.numPendingTests
+            todoTests = $report.numTodoTests
+          } | ConvertTo-Json -Depth 15 | Set-Content -Encoding utf8 frontend-preflight-evidence/performance.json
+          # The base ran 2614 tests; the reviewed audit patch adds two regressions.
+          if ($report.numTotalTests -ne 2616 -or $report.numPassedTests -ne 2616 -or
+              $report.numFailedTests -ne 0 -or $report.numPendingTests -ne 0 -or $report.numTodoTests -ne 0 -or
+              $audit.Count -ne 1 -or $audit[0].status -ne 'passed') {
+            throw 'Expected all 2616 frontend tests and the unchanged performance assertion to pass'
+          }
+      - name: Upload raw frontend evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-frontend-preflight-${{ github.sha }}-${{ github.run_attempt }}
+          path: frontend-preflight-evidence/
+          if-no-files-found: error
+          retention-days: 7
