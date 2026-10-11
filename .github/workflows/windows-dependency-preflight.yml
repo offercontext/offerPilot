@@ -1,0 +1,110 @@
+name: Bounded Windows frozen dependency preflight
+
+# This branch-only probe is installation evidence, never a regression or release pass.
+on:
+  push:
+    branches: [test/20261011-windows-dependency-preflight]
+    paths: ['.github/workflows/windows-dependency-preflight.yml']
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: pwsh
+env:
+  LITELLM_LOCAL_MODEL_COST_MAP: "True"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+jobs:
+  frozen-dependencies:
+    if: ${{ github.repository == 'offercontext/offerPilot' && github.ref == 'refs/heads/test/20261011-windows-dependency-preflight' && github.run_attempt == 1 }}
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ae98002d73f3477b5d72de4f8ca2dc841856ecd5
+          persist-credentials: false
+      - name: Record exact source and original dependency hashes
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force preflight-evidence | Out-Null
+          $source = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $source -cne 'ae98002d73f3477b5d72de4f8ca2dc841856ecd5') { throw 'Unexpected product source' }
+          @(
+            'DEPENDENCY INSTALLATION ONLY. No pytest, release gate, EXE/frontend build or provider calls.',
+            "Product source SHA: $source",
+            "Workflow script SHA: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            'OS: windows-2022; Python: 3.12.10 x64; uv: 0.12.19',
+            'Command: uv sync --frozen; original indexes, lock and network timeout defaults.',
+            'uv sync includes the original editable project build. No installer packaging or publication.',
+            'A timeout or missing exit-code evidence is not success.'
+          ) | Set-Content -Encoding utf8 preflight-evidence/scope.txt
+          $expected = @{
+            'uv.lock' = @('2602689f72bd0d25bd5fc431a7c2c649993d843b0ca30e18c0550a8ff5d6103d', '456ac277ffbb355ca96fc68b54d05b104f42fd96b5a0b258decab35ff30456f8')
+            'pyproject.toml' = @('60a0f1dba38afb63fa5529c365e6604002c4233e24778621a69a5ac9f5129683', '9df66c499709e32af93c7978148972c6b20f2af304a918c6ea4b58845c41219e')
+          }
+          foreach ($file in @('uv.lock', 'pyproject.toml')) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+            "$hash  $file" | Add-Content preflight-evidence/hashes-before.txt
+            if ($hash -cnotin $expected[$file]) { throw "Unexpected original dependency file: $file" }
+            $representation = if ($hash -ceq $expected[$file][0]) { 'LF' } else { 'CRLF' }
+            "$file representation: $representation" | Add-Content preflight-evidence/scope.txt
+          }
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.10"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+          enable-cache: false
+      - name: Install frozen dependencies once and record exit code
+        timeout-minutes: 5
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pythonVersion = python --version
+          if ($LASTEXITCODE -ne 0 -or $pythonVersion -cne 'Python 3.12.10') { throw 'Unexpected Python version' }
+          $uvVersion = uv --version
+          if ($LASTEXITCODE -ne 0 -or $uvVersion -cnotmatch '^uv 0\.12\.19(?: |$)') { throw 'Unexpected uv version' }
+          @($pythonVersion, $uvVersion) | Set-Content preflight-evidence/versions.txt
+          $stdout = Join-Path $env:RUNNER_TEMP 'frozen-preflight-stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'frozen-preflight-stderr.log'
+          $process = Start-Process -FilePath (Get-Command uv).Source -ArgumentList @('sync', '--frozen') -NoNewWindow -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $process.ExitCode | Set-Content preflight-evidence/exit-code.txt
+          if ($process.ExitCode -ne 0) { throw "Frozen dependency installation failed: exit $($process.ExitCode)" }
+      - name: Preserve short installation logs after success, failure or timeout
+        if: ${{ always() }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force preflight-evidence | Out-Null
+          foreach ($stream in @('stdout', 'stderr')) {
+            $log = Join-Path $env:RUNNER_TEMP "frozen-preflight-$stream.log"
+            if (Test-Path -LiteralPath $log) {
+              Get-Content -LiteralPath $log -Tail 100 | ForEach-Object { $_.Substring(0, [Math]::Min(1000, $_.Length)) } | Set-Content "preflight-evidence/$stream-tail.txt"
+            }
+          }
+      - name: Verify dependency files stayed unchanged
+        if: ${{ always() }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($file in @('uv.lock', 'pyproject.toml')) {
+            $hash = (Get-FileHash -Algorithm SHA256 $file).Hash.ToLowerInvariant()
+            "$hash  $file" | Add-Content preflight-evidence/hashes-after.txt
+          }
+          $before = Get-Content preflight-evidence/hashes-before.txt -Raw
+          $after = Get-Content preflight-evidence/hashes-after.txt -Raw
+          if ($before -cne $after) { throw 'Frozen dependency files changed' }
+          git diff --exit-code -- uv.lock pyproject.toml
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency source diff detected' }
+          if (-not (Test-Path preflight-evidence/exit-code.txt)) { throw 'No completed installation exit code' }
+          if ((Get-Content preflight-evidence/exit-code.txt -Raw).Trim() -cne '0') { throw 'Installation did not succeed' }
+      - name: Preserve bounded evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frozen-dependencies-ae98002-${{ github.sha }}-${{ github.run_attempt }}
+          path: preflight-evidence/
+          if-no-files-found: error
+          retention-days: 7
