@@ -7553,6 +7553,16 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_external_reports.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "estimated_seconds": null,
+      "level": "test"
     }
   },
   "safety_baseline": "tests/selection-safety-v1.json"

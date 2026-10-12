@@ -25,6 +25,20 @@ def save(path: Path | None, report: dict[str, Any]) -> None:
         atomic_json(path, report)
 
 
+@app.command("import-external")
+def import_external(
+    receipt: Path = typer.Option(..., "--receipt"), output: Path = typer.Option(..., "--output")
+) -> None:
+    from offerpilot.evaluation.core_external import import_external as import_check
+
+    try:
+        result = import_check(receipt, output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(dict(kind=result.kind, verdict=result.verdict, release_eligible=False)))
+    raise typer.Exit({"pass": 0, "fail": 1, "incomplete": 3}[result.verdict])
+
+
 @app.command("review-pack")
 def review_pack(
     run: list[Path] = typer.Option(..., "--run"),

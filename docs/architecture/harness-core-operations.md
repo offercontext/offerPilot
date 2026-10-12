@@ -34,6 +34,10 @@ real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入�
 
 E07 在模型屏障释放前从实际 cursor 建立重连，随后释放模型并接收同一 turn/generation 的实际数据帧；不能等回答完成再重连，因为产品有界缓冲可合法淘汰早期 cursor。重连使用 API 的 `after` 参数，并核对原 cursor 和新事件序号；订阅控制帧不能证明恢复。有界 subscriber 若发送 resync，保留该信号并 GET 原生 snapshot，核对同一 Turn/generation、有效 cursor 及覆盖已接收事件的高水位；不能重新 POST。确定性 E07 将正常回复均匀分为 300 段输出（短于 300 字符时逐字），在原产品 512 事件预算内覆盖 256 事件缓冲淘汰风险；[续流预检 suite](../../evals/suites/harness-core-stream-preflight-v1.json)单独运行此项，不替代完整分母。
 
+外部检查用 `oc eval import-external --receipt <receipt.json> --output <新结果.json>` 零网络导入，类型为独立 ExternalCheckResult，不能合入 trial 分母或直接成为 release 证明。receipt schema 2 的字段为 kind=external-check-receipt、check_id UUID、check（oc-verify/knowledge-acceptance）、command 原 argv、exit_code、execution_complete、带时区 started_at/finished_at、mode、report {path,sha256}、report_capture（stdout/file）、code {checkout,commit,diff_hash,lock_hash,files_hash}、data_definition/data_files/data_manifest、model 和 metric_definitions。代码、报告及数据引用实际回读校验；Knowledge 的 --report 必须与报告引用一致，data_files 必须覆盖实际 --fixtures-dir（未指定时为该 checkout 的默认 fixture）完整目录及 manifest/queries。oc verify 缺原生数据标识时，额外 data_manifest 须是 schema 1、kind=external-data-snapshot，绑定相同 check_id/check/definition/files；无法捕获则数据快照 incomplete。真实模式的 model 须绑定 profile {path,sha256}/profile_hash、actual_models 与 evidence（含 id/model、非负 prompt_tokens/completion_tokens usage 的原供应商 JSON 响应）。不支持此证据形状的旧真实报告保持缺模型快照，不能推测 served version。
+
+现有 oc verify stdout 文本及 Knowledge 安全 JSON 可回读；没有 --report 时须明确声明 stdout 捕获，file 捕获须绑定实际 --report。Knowledge metric 原值与定义分别保留。缺运行/数据/模型/定义证据为 incomplete，原非零退出或明确失败优先 fail；没有原文的安全报告，质量始终 unknown。旧工具没有统一的运行 receipt 时由维护者附加实际捕获的元数据，不能为缺失信息补“通过”。receipt 为本地 attestation，不能认证外部进程或作者；此 importer 不执行 command、不调用模型、不复制报告原文，不修改外部工具既有行为。快照读取清除 Git 环境路由，并禁用 external diff、textconv、fsmonitor 与所有注册的 clean/process/smudge filter；支持的信任范围仍是本地可信操作者，不承诺对并发恶意文件修改的 OS 隔离。
+
 ## 3 比较与 Gate
 
 ```text

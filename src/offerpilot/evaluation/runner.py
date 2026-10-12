@@ -44,7 +44,32 @@ def process_tree(argv: list[str], **kwargs: Any) -> Any:
 
 
 def git(checkout: Path, *args: str) -> bytes:
-    return subprocess.check_output(["git", *args], cwd=checkout, stderr=subprocess.PIPE)
+    # Snapshot reads must not invoke fsmonitor, diff/textconv, or clean filters.
+    # Preserve normal user EOL configuration, while dropping ambient Git routing.
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    prefix = ["git", "--no-pager", "-c", "core.fsmonitor=false", "-c", "diff.external="]
+    try:
+        try:
+            keys = subprocess.check_output(
+                prefix + ["config", "--null", "--name-only", "--get-regexp", r"^filter\..*\.(clean|smudge|process|required)$"],
+                cwd=checkout, env=env, stderr=subprocess.PIPE, timeout=30,
+            ).split(b"\0")
+        except subprocess.CalledProcessError as exc:
+            if exc.returncode != 1:
+                raise
+            keys = []
+        for raw in keys:
+            if raw:
+                key = os.fsdecode(raw)
+                prefix += ["-c", key + ("=false" if key.endswith(".required") else "=")]
+        if args and args[0] == "diff":
+            args = (args[0], "--no-ext-diff", "--no-textconv", *args[1:])
+        return subprocess.check_output(
+            prefix + list(args), cwd=checkout, env=env, stderr=subprocess.PIPE, timeout=30
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise ValueError("Git snapshot read unavailable") from exc
 
 
 def snapshot(checkout: Path) -> dict[str, Any]:
