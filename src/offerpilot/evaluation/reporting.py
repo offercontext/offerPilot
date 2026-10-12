@@ -30,6 +30,10 @@ def aggregate(manifest: RunManifest, results: list[TrialResult]) -> dict[str, An
             if (result.case_id, result.case_version) != (p.case_id, p.case_version):
                 raise ValueError("result case binding differs from plan")
             rules = {r.rule_id: r for r in result.rules}
+            invalid = [name for name in p.required_rules if name in rules and (
+                not rules[name].required or rules[name].status == "not_applicable")]
+            if invalid:
+                raise ValueError("result downgraded planned required rules")
             missing = [name for name in p.required_rules if name not in rules]
             if missing:
                 added = [RuleResult(rule_id=name, status="unknown", reason_code="missing_rule")

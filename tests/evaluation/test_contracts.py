@@ -18,7 +18,7 @@ def plan(rule_ids: list[str] | None = None) -> PlannedTrial:
 
 
 def manifest(p: PlannedTrial) -> RunManifest:
-    return RunManifest(run_id=p.run_id, suite_id="harness-p0-v1", suite_hash="c" * 64,
+    return RunManifest(run_id=p.run_id, plan_kind="diagnostic", suite_id="harness-p0-v1", suite_hash="c" * 64,
                        config_hash="d" * 64, evaluator_hash="e" * 64,
                        variants={"candidate": {}}, environment={}, planned_trials=[p])
 
@@ -52,3 +52,5 @@ def test_duplicate_trial_and_unknown_field() -> None:
         PlannedTrial.model_validate({**p.model_dump(), "surprise": 1})
     with pytest.raises(ValidationError):
         PlannedTrial.model_validate({**p.model_dump(), "repeat_index": True})
+    with pytest.raises(ValidationError, match="suite x variants"):
+        RunManifest.model_validate({**m.model_dump(), "plan_kind": "p0"})

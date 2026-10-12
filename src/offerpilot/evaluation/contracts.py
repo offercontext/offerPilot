@@ -134,6 +134,7 @@ class VariantConfig(Contract):
 class RunManifest(Contract):
     schema_version: Literal[1] = 1
     run_id: UUID
+    plan_kind: Literal["p0", "diagnostic"] = "p0"
     parent_run_id: UUID | None = None
     suite_id: str
     suite_hash: Hash
@@ -162,6 +163,13 @@ class RunManifest(Contract):
             if p.execution_item_id in bindings and bindings[p.execution_item_id] != binding:
                 raise ValueError("execution item has conflicting binding")
             bindings[p.execution_item_id] = binding
+        if self.plan_kind == "p0":
+            expected = {(v, item, "deterministic", 1) for v in self.variants for item in (
+                "E01.runtime_read", "E04.runtime_edit", "E06.legacy_saved")}
+            actual = {(p.variant_id, p.execution_item_id, p.mode, p.repeat_index)
+                      for p in self.planned_trials}
+            if actual != expected:
+                raise ValueError("P0 plan must contain suite x variants x repeats")
         return self
 
 
@@ -176,6 +184,7 @@ class ApprovalEvidence(Contract):
     turn_id: str | None
     generation: int | None
     received_seq: int | None = None
+    decision_seq: int | None = None
 
 
 class ObservationCoverage(Contract):
@@ -222,6 +231,7 @@ class EvidenceBundle(Contract):
     coverage: ObservationCoverage | None = None
     files: dict[str, dict[str, Any]] = Field(default_factory=dict)
     fragment_errors: dict[str, str] = Field(default_factory=dict)
+    fragment_hashes: dict[str, Hash] = Field(default_factory=dict)
 
 
 class RuleResult(Contract):

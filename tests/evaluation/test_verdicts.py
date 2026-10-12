@@ -40,3 +40,7 @@ def test_required_rule_cannot_be_downgraded() -> None:
         "r": lambda _: RuleResult(rule_id="r", required=False, status="not_applicable",
                                    reason_code="disabled")})
     assert r.verdict == "incomplete"
+    forged = r.model_copy(update={"rules": [RuleResult(rule_id="r", required=False,
+                    status="not_applicable", reason_code="disabled")], "verdict": "pass", "unknowns": []})
+    with pytest.raises(ValueError, match="downgraded"):
+        aggregate(manifest(p), [forged])
