@@ -276,6 +276,21 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
     if rule == "stream.same_generation":
         if "disconnect_state" not in f:
             return None, "disconnect_not_observed"
+        if "http" not in e:
+            return None, "initial_submit_observation_missing"
+        submits = [
+            value
+            for value in e["http"]
+            if value.get("method") == "POST" and value.get("path") == "/api/pilot/runtime/v1/turns"
+        ]
+        one_submit = (
+            len(submits) == 1
+            and bool(submits[0].get("body", {}).get("request_id"))
+            and submits[0].get("response", {}).get("request_id") == submits[0]["body"]["request_id"]
+            and submits[0].get("response", {}).get("turn_id") == f.get("turn_id")
+            and submits[0].get("response", {}).get("execution_generation") == f.get("generation")
+            and submits[0].get("status") in {200, 202}
+        )
         errors = f.get("reattachment_errors", [])
         resync = f.get("reattachment_resync_snapshot", {})
         recovered = (
@@ -286,7 +301,7 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             and type(resync.get("high_watermark")) is int
             and resync["high_watermark"] >= max(f.get("reattached_event_sequences") or [0])
         )
-        return type(f.get("generation")) is int and f["generation"] >= 1 and bool(
+        return one_submit and type(f.get("generation")) is int and f["generation"] >= 1 and bool(
             f.get("turn_id")
         ) and f.get("disconnect_state") == "running" and f.get("reattached") is True and len(
             f.get("submit_ids", [])

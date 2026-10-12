@@ -50,6 +50,8 @@ def test_missing_is_unknown_keeps_full_denominator(tmp_path, monkeypatch):
         "resync_wrong_turn",
         "resync_wrong_generation",
         "resync_stale_snapshot",
+        "duplicate_actual_post",
+        "wrong_submit_response",
     ],
 )
 def test_stream_success_requires_live_reattach_and_actual_generation_frames(mutation):
@@ -68,6 +70,15 @@ def test_stream_success_requires_live_reattach_and_actual_generation_frames(muta
         reattached_turns=["turn"],
         reattachment_errors=[],
     )
+    http = [
+        dict(
+            method="POST",
+            path="/api/pilot/runtime/v1/turns",
+            status=202,
+            body=dict(request_id="request"),
+            response=dict(request_id="request", turn_id="turn", execution_generation=1),
+        )
+    ]
     if mutation == "late_attach":
         facts["reattached_before_release"] = False
     elif mutation == "wrong_generation":
@@ -83,6 +94,10 @@ def test_stream_success_requires_live_reattach_and_actual_generation_frames(muta
         facts["reattach_after"] = None
     elif mutation == "replayed_old_frame":
         facts["reattached_event_sequences"] = [3, 5]
+    elif mutation == "duplicate_actual_post":
+        http.append(copy.deepcopy(http[0]))
+    elif mutation == "wrong_submit_response":
+        http[0]["response"]["turn_id"] = "other"
     elif mutation.startswith("resync_"):
         facts["reattachment_errors"] = ["runtime_resync_required"]
         facts["reattachment_resync_snapshot"] = dict(
@@ -94,9 +109,9 @@ def test_stream_success_requires_live_reattach_and_actual_generation_frames(muta
             facts["reattachment_resync_snapshot"]["execution_generation"] = 2
         elif mutation == "resync_stale_snapshot":
             facts["reattachment_resync_snapshot"]["high_watermark"] = 4
-    assert grade_rule("stream.same_generation", "E07.runtime_reattach", dict(facts=facts))[0] == (
-        mutation in {"none", "resync_recovered"}
-    )
+    assert grade_rule(
+        "stream.same_generation", "E07.runtime_reattach", dict(facts=facts, http=http)
+    )[0] == (mutation in {"none", "resync_recovered"})
 
 
 @pytest.mark.parametrize(
