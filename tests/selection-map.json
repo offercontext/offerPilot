@@ -7462,6 +7462,58 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_governance.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_baselines.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_adjudication.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_product_budget_probe.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
     }
   }
 }

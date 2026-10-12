@@ -74,6 +74,23 @@ def create_plan(
                     variant_id=v.variant_id, checkout=v.checkout, interpreter=v.interpreter
                 )
             ),
+            "prompt_or_tool_surface": digest(
+                {
+                    str(p.relative_to(Path(v.checkout))): file_hash(p)
+                    for pattern in (
+                        "src/offerpilot/ai/*.py",
+                        "src/offerpilot/ai/tool_specs/*.py",
+                        "src/offerpilot/pilot_runtime/composition.py",
+                    )
+                    for p in Path(v.checkout).glob(pattern)
+                }
+            ),
+            "context_policy": digest(
+                {
+                    str(p.relative_to(Path(v.checkout))): file_hash(p)
+                    for p in Path(v.checkout).glob("src/offerpilot/context_sources/**/*.py")
+                }
+            ),
         }
         for v in variants
     }
