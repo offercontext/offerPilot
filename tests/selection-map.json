@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "modules": [
     {
       "id": "agent_loop",
@@ -1070,7 +1070,7 @@
       "modules": [
         "applications"
       ],
-      "priority": "p0",
+      "priority": "p1",
       "surface": "backend",
       "requires": [],
       "risk_tags": [
@@ -4334,7 +4334,7 @@
       "modules": [
         "frontend"
       ],
-      "priority": "p0",
+      "priority": "p2",
       "surface": "frontend",
       "requires": [],
       "risk_tags": [
@@ -6804,7 +6804,7 @@
       "modules": [
         "frontend"
       ],
-      "priority": "p0",
+      "priority": "p1",
       "surface": "frontend",
       "requires": [],
       "risk_tags": [
@@ -7554,5 +7554,6 @@
       "level": "test",
       "estimated_seconds": null
     }
-  }
+  },
+  "safety_baseline": "tests/selection-safety-v1.json"
 }

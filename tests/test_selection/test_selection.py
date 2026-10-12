@@ -10,12 +10,40 @@ import time
 import pytest
 
 from scripts.test_selection.core import (
-    SelectionError, changed_paths, impact, load_mapping, plan, select, snapshot,
+    SelectionError, changed_paths, impact, load_mapping, plan, select, snapshot, validate_safety,
 )
 from scripts.test_selection.execution import check_plan, execute, reconcile_frontend, cli_command
 from scripts.test_selection.core import reconcile_backend
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "downgraded", "unclassified", "duplicate", "none"])
+def test_fixed_safety_baseline_rejects_missing_or_downgraded_identity(tmp_path, monkeypatch, mutation):
+    from scripts.test_selection import core
+    (tmp_path / "tests").mkdir()
+    baseline = dict(schema_version=1, baseline_id="selection-safety-v1", tests=[dict(id="critical", reason="auth/HITL")])
+    if mutation == "duplicate":
+        baseline["tests"] *= 2
+    monkeypatch.setattr(core, "SAFETY_BASELINE_HASH", core.digest(baseline))
+    (tmp_path / "tests/selection-safety-v1.json").write_text(json.dumps(baseline), encoding="utf-8")
+    catalog = [] if mutation == "missing" else [dict(id="critical", priority="p2" if mutation == "downgraded" else "p0", modules=[] if mutation == "unclassified" else ["authority"])]
+    mapping = dict(schema_version=2, safety_baseline="tests/selection-safety-v1.json")
+    if mutation == "none":
+        assert validate_safety(tmp_path, mapping, catalog)["required_ids"] == ["critical"]
+    else:
+        with pytest.raises(SelectionError):
+            validate_safety(tmp_path, mapping, catalog)
+
+
+def test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version(tmp_path):
+    (tmp_path / "tests").mkdir()
+    baseline = json.loads((ROOT / "tests/selection-safety-v1.json").read_bytes())
+    catalog = [dict(id=r["id"], priority="p0", modules=["authority"]) for r in baseline["tests"]]
+    baseline["tests"] = baseline["tests"][1:]
+    (tmp_path / "tests/selection-safety-v1.json").write_text(json.dumps(baseline), encoding="utf-8")
+    with pytest.raises(SelectionError, match="fixed safety baseline changed"):
+        validate_safety(tmp_path, dict(schema_version=2, safety_baseline="tests/selection-safety-v1.json"), catalog)
 
 
 def git(root: Path, *args: str) -> None:

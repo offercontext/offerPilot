@@ -19,6 +19,9 @@ class SelectionError(ValueError):
     pass
 
 
+SAFETY_BASELINE_HASH = "75038332adbe43c7abb9514ba84f2e6f49a5e1e79635ad56bdf391c9be32106d"
+
+
 def digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False,
                                      separators=(",", ":")).encode()).hexdigest()
@@ -75,8 +78,16 @@ def changed_paths(root: Path, base: str) -> tuple[str, str, list[dict[str, Any]]
 
 def load_mapping(root: Path) -> dict[str, Any]:
     mapping = json.loads((root / "tests/selection-map.json").read_bytes())
-    if set(mapping) != {"schema_version", "modules", "risk_rules", "test_metadata"} or mapping["schema_version"] != 1:
+    fields = {"schema_version", "modules", "risk_rules", "test_metadata"}
+    version = mapping.get("schema_version")
+    if version == 2:
+        fields.add("safety_baseline")
+    if set(mapping) != fields or version not in {1, 2}:
         raise SelectionError("invalid selection mapping schema")
+    if version == 1 and (root / "src/offerpilot").is_dir():
+        raise SelectionError("OfferPilot mapping requires the fixed safety baseline")
+    if version == 2 and mapping["safety_baseline"] != "tests/selection-safety-v1.json":
+        raise SelectionError("unregistered safety baseline")
     modules = mapping["modules"]
     if not isinstance(modules, list) or not isinstance(mapping["test_metadata"], dict) or not isinstance(mapping["risk_rules"], list):
         raise SelectionError("invalid mapping container types")
@@ -132,6 +143,33 @@ def load_mapping(root: Path) -> dict[str, Any]:
     return cast(dict[str, Any], mapping)
 
 
+def validate_safety(root: Path, mapping: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if mapping["schema_version"] == 1:
+        return None
+    path = root / mapping["safety_baseline"]
+    if not path.is_file() or path.is_symlink():
+        raise SelectionError("fixed safety baseline unavailable")
+    baseline = json.loads(path.read_bytes())
+    if digest(baseline) != SAFETY_BASELINE_HASH:
+        raise SelectionError("fixed safety baseline changed; register and review a new baseline version")
+    if (set(baseline) != {"schema_version", "baseline_id", "tests"}
+            or baseline["schema_version"] != 1 or baseline["baseline_id"] != "selection-safety-v1"
+            or not isinstance(baseline["tests"], list) or not baseline["tests"]):
+        raise SelectionError("invalid safety baseline")
+    rows = {r["id"]: r for r in catalog}
+    seen = set()
+    for entry in baseline["tests"]:
+        if (not isinstance(entry, dict) or set(entry) != {"id", "reason"}
+                or not isinstance(entry["id"], str) or not isinstance(entry["reason"], str)
+                or not entry["reason"] or entry["id"] in seen):
+            raise SelectionError("invalid or duplicate safety identity")
+        seen.add(entry["id"])
+        actual = rows.get(entry["id"])
+        if not actual or actual.get("priority") != "p0" or not actual.get("modules"):
+            raise SelectionError("safety test renamed, missing, unclassified or downgraded: " + entry["id"])
+    return {"baseline_id": baseline["baseline_id"], "hash": file_hash(path), "required_ids": sorted(seen)}
+
+
 def runtime_environment(root: Path) -> dict[str, Any]:
     env: dict[str, Any] = {"python": sys.version, "executable": sys.executable,
                           "platform": platform.platform(), "dependencies": sorted(
@@ -180,6 +218,7 @@ def collect(root: Path, mapping: dict[str, Any]) -> list[dict[str, Any]]:
     ids = [r["id"] for r in catalog]
     if len(ids) != len(set(ids)):
         raise SelectionError("duplicate catalog ID")
+    validate_safety(root, mapping, catalog)
     return cast(list[dict[str, Any]], catalog)
 
 
@@ -287,7 +326,7 @@ def plan(root: Path, base: str, profile: str, output: Path,
     risk_rules = [r for m in [mapping, *([old_map] if old_map else [])] for r in m["risk_rules"]]
     risks = [r for r in risk_rules if any(fnmatchcase(p, pattern) for p in paths for pattern in r["paths"])]
     selection_controls = {"tests/selection-map.json", "tests/conftest.py", "scripts/select_tests.py",
-                          "scripts/windows-pytest-groups.ps1", "scripts/windows-vitest-groups.ps1"}
+                          "scripts/windows-pytest-groups.ps1", "scripts/windows-vitest-groups.ps1", "tests/selection-safety-v1.json"}
     force_full = any(r["expand"] == "full" for r in risks) or any(
         p in selection_controls or p.startswith("scripts/test_selection/") for p in paths)
     if force_full:
@@ -327,6 +366,7 @@ def plan(root: Path, base: str, profile: str, output: Path,
                 or len({Path(v["checkout"]).resolve() for v in harness}) != 2):
             raise SelectionError("Harness candidate must be current root and baseline a distinct checkout")
     value = {"schema_version": 1, "plan_id": str(uuid4()), "profile": profile,
+             "safety_baseline": validate_safety(root, mapping, catalog) if catalog else None,
              "base_ref": base, "base_commit": base_commit, "merge_base": merge,
              "head": before["head"], "snapshot": before, "worktree_fingerprint": digest(before),
              "mapping_hash": file_hash(root / "tests/selection-map.json"),
