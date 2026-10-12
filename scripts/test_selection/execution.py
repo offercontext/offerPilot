@@ -220,7 +220,7 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                                  or set(manifest.variants) != {"baseline", "candidate"} or not bindings_match):
                     code = 2
                 rows.append({"check": "harness_reconciliation", "code": code,
-                             "status": "passed" if code == 0 else "failed" if code == 1 else "error",
+                             "status": "passed" if code == 0 else "failed" if code == 1 else "blocked" if code == 3 else "error",
                              "planned": checked["planned"], "counts": checked["counts"], "bindings_match": bindings_match})
             except OSError:
                 rows.append({"check": "harness_reconciliation", "code": 3, "status": "blocked",
