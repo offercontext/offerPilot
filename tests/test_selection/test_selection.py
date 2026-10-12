@@ -305,7 +305,8 @@ def test_registered_cli_really_invokes_validate() -> None:
     assert result.returncode == 0 and "3 required deterministic execution items" in result.stdout
 
 
-def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("harness_exit", [0, 3])
+def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path, monkeypatch, harness_exit) -> None:
     root, baseline = tmp_path / "candidate", tmp_path / "baseline"
     root.mkdir()
     baseline.mkdir()
@@ -327,10 +328,10 @@ def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path,
     value["plan_hash"] = digest({k: v for k, v in value.items() if k != "plan_hash"})
     (output / "selection-plan.json").write_text(json.dumps(value), encoding="utf-8")
     class NoopProcess:
-        def __init__(self, *args, **kwargs):
-            pass
+        def __init__(self, argv, **kwargs):
+            self.is_harness = "eval" in argv
         def wait(self, timeout):
-            return 0
+            return harness_exit if self.is_harness else 0
         def close(self):
             pass
     monkeypatch.setattr("scripts.test_selection.execution.ProcessTree", NoopProcess)

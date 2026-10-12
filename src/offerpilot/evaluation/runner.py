@@ -404,7 +404,8 @@ def run_trial(plan: PlannedTrial, spec: CaseSpec, variant: VariantConfig, privat
                 coverage = coverage.model_copy(update={"epochs": [1, epoch]})
                 driver = handshake(subject)
                 facts["replays"] = [driver.request("POST", path, confirm), driver.request("POST", path, confirm)]
-                facts["terminal_pending"] = None
+                facts["terminal_pending"] = next((r.get("pending_action") for r in facts["replays"]
+                                                   if r.get("pending_action") is not None), None)
         facts["driver_completed"] = True
         observer.marker(private / "data.db", "driver_finished", {"terminal_received": True})
     except Exception as exc:

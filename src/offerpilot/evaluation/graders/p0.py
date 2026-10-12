@@ -184,6 +184,10 @@ def saved_receipt(e: EvidenceBundle) -> RuleResult:
     ok = (assistant is not None and sorted(m["role"] for m in messages or []) == ["assistant", "tool"]
           and before["messages"] == messages and all(r.get("message") == assistant["content"]
                                                      for r in responses)
+          and all(r.get("operation_id") == old_op["id"]
+                  and r.get("conversation_id") == old_op["conversation_id"]
+                  and r.get("write_status") == "committed" and r.get("replayed") is True
+                  and r.get("pending_action") is None for r in responses)
           and all(op.get(k) == old_op.get(k) for k in (
               "id", "status", "terminal_payload_sha256", "confirmation_strategy_fingerprint")))
     return result("recovery.saved_receipt", ok, "stable_original_delivery")

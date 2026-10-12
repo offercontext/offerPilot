@@ -40,6 +40,8 @@ def test_legal_http_case(tmp_path: Path, item: str) -> None:
                for h in evidence.facts["handshakes"])
     if item == "E06.legacy_saved":
         assert len(evidence.facts["replays"]) == 2
+        assert evidence.facts["terminal_pending"] is None
+        assert all(r.get("pending_action") is None for r in evidence.facts["replays"])
         assert not [c for c in evidence.calls if c["epoch"] == 2]
 
 

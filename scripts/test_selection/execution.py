@@ -99,6 +99,8 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                     returncode = tree.wait(timeout)
                     code = 0 if returncode == 0 else 1 if returncode == 1 or (
                         name in {"content_diff", "committed_content_diff"} and returncode == 2) else 2
+                    if name == "harness_p0" and returncode == 3:
+                        code = 3
                 except (subprocess.TimeoutExpired, TimeoutError):
                     diagnostics.append("timeout")
                     if getattr(getattr(tree, "process", None), "returncode", None) == 1:
@@ -207,12 +209,19 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                 manifest, trials = read_run(output / "harness-p0")
                 checked = aggregate(manifest, trials)
                 code = checked["exit_code"]
+                bindings_match = all(
+                    Path(manifest.variants[v["variant_id"]]["checkout"]).resolve() == Path(v["checkout"]).resolve()
+                    and Path(manifest.variants[v["variant_id"]]["interpreter"]).resolve() == Path(v["interpreter"]).resolve()
+                    and manifest.variants[v["variant_id"]]["commit"] == value["harness_snapshots"][v["variant_id"]]["head"]
+                    and manifest.variants[v["variant_id"]]["files_hash"] == digest({
+                        name: record["hash"] for name, record in value["harness_snapshots"][v["variant_id"]]["files"].items()})
+                    for v in value["harness_variants"])
                 if not code and (manifest.plan_kind != "p0" or checked["planned"] != 6
-                                 or set(manifest.variants) != {"baseline", "candidate"}):
+                                 or set(manifest.variants) != {"baseline", "candidate"} or not bindings_match):
                     code = 2
                 rows.append({"check": "harness_reconciliation", "code": code,
                              "status": "passed" if code == 0 else "failed" if code == 1 else "error",
-                             "planned": checked["planned"], "counts": checked["counts"]})
+                             "planned": checked["planned"], "counts": checked["counts"], "bindings_match": bindings_match})
             except OSError:
                 rows.append({"check": "harness_reconciliation", "code": 3, "status": "blocked",
                              "reason": "missing_harness_report"})
