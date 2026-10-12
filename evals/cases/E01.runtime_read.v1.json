@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "case_id": "E01",
+  "case_version": 1,
+  "execution_item_id": "E01.runtime_read",
+  "coverage_kind": "task",
+  "adapter": "runtime-v1",
+  "fixture_id": "synthetic-interviews-v1",
+  "action_id": "E01.runtime_read",
+  "model_id": "interviews-v1",
+  "fault_id": "none",
+  "required_rules": [
+    "query.exact_result",
+    "query.no_write_proposal",
+    "business.zero_committed_dml",
+    "scope.expected_application",
+    "evidence.required_complete"
+  ],
+  "product_budget": {
+    "policy": "observe_current"
+  },
+  "evaluator_limits": {
+    "wall_seconds": 180,
+    "model_calls": 6,
+    "tool_attempts": 12,
+    "script_replies": 4,
+    "startup_seconds": 30,
+    "shutdown_seconds": 30
+  }
+}
