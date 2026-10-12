@@ -9,6 +9,9 @@ from offerpilot.evaluation.graders.p0 import instant
 
 
 def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, str]:
+    from offerpilot.evaluation.core_registry import REGISTERED_ITEMS
+
+    item = REGISTERED_ITEMS[item].get("action", item)
     f = e.get("facts", {})
     obs = e.get("observed", {})
     deltas = obs.get("deltas", [])
@@ -352,6 +355,43 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
                 and f.get("deadline_model_barriers", 0) >= 2
             )
         return same, "absolute_admission_deadline"
+    if rule in {"source.withdrawn_unit", "source.unrelated_preserved"}:
+        aliases = f.get("aliases", {})
+        after = [
+            v
+            for v in e.get("input_observations", [])
+            if v.get("seq", 0) > f.get("withdraw_control_seq", float("inf"))
+        ]
+        selections = [v for v in after if v.get("category") == "sources"]
+        final = [v for v in after if v.get("category") == "final_input"]
+        if not selections or not final:
+            return None, "post_withdraw_source_evidence_missing"
+        selected = [
+            unit
+            for v in selections
+            for s in v.get("sources", [])
+            if s["kind"] == "confirmed_memory"
+            for unit in json.loads(s["content"])
+        ]
+        wire_units = [
+            r.get("unit_identity", {})
+            for v in final
+            for o in v.get("observations", [])
+            if o["kind"] == "confirmed_memory"
+            for r in o["ranges"]
+        ]
+        if rule == "source.withdrawn_unit":
+            return not any(
+                u.get("id") == aliases["memory_id"] for u in selected + wire_units
+            ), "withdrawn_unit_absent_from_new_source_identity"
+        untouched = aliases["untouched_memory_id"]
+        before = [r for r in e["initial"]["confirmed_memories"] if r["id"] == untouched]
+        current = [r for r in obs["snapshot"]["confirmed_memories"] if r["id"] == untouched]
+        return bool(before) and before == current and any(
+            u.get("id") == untouched for u in selected
+        ) and any(
+            u.get("id") == untouched for u in wire_units
+        ), "unrelated_memory_unchanged_and_retained"
     if rule.startswith("source."):
         sources = [v for v in e.get("input_observations", []) if v.get("category") == "sources"]
         inputs = [v for v in e.get("input_observations", []) if v.get("category") == "final_input"]

@@ -84,7 +84,9 @@ class ScriptModel:
             raise AssertionError("recovery called model")
         if self.title:
             return Assistant(content="合成核心评估")
-        item = self.channel.config["trial_key"]["execution_item_id"]
+        item = self.channel.config.get(
+            "action_id", self.channel.config["trial_key"]["execution_item_id"]
+        )
         texts = [m.content for m in messages if m.role == "user"]
         if item == "E08.runtime_deadline" or item == "E07.runtime_reattach":
             if self.calls == 1 or item == "E08.runtime_deadline":
@@ -286,9 +288,10 @@ def serve(channel: Channel) -> None:
             else None
         )
         ports = {port}
-        if config["trial_key"]["mode"] == "deterministic" and config["trial_key"][
-            "execution_item_id"
-        ].startswith(("E09.", "E10.")):
+        action_id = config.get("action_id", config["trial_key"]["execution_item_id"])
+        if config["trial_key"]["mode"] == "deterministic" and action_id.startswith(
+            ("E09.", "E10.")
+        ):
             from scripts.evaluation_subject.core_loopback import start_provider
 
             provider_server, endpoint = start_provider(channel, model)
@@ -296,7 +299,7 @@ def serve(channel: Channel) -> None:
         from offerpilot.config import Config, AIProviderProfile, save_config
 
         if config["epoch"] == 1:
-            aliases = prepare(data, ROOT, config["trial_key"]["execution_item_id"])
+            aliases = prepare(data, ROOT, action_id, config["trial_key"]["execution_item_id"])
             save_config(
                 data,
                 Config(
@@ -417,9 +420,7 @@ def serve(channel: Channel) -> None:
             if m and getattr(m, "execute_prepared", None) is original_tool:
                 setattr(m, "execute_prepared", tool)
         limits: dict[str, Any] = dict(config.get("provider_profile") or {})
-        if config["trial_key"]["mode"] == "real" or config["trial_key"][
-            "execution_item_id"
-        ].startswith(("E09.", "E10.")):
+        if config["trial_key"]["mode"] == "real" or action_id.startswith(("E09.", "E10.")):
             if config["trial_key"]["mode"] == "deterministic":
                 key = "eval-fake-key"
                 limits = {
@@ -666,6 +667,28 @@ def serve(channel: Channel) -> None:
                             "request_hash": __import__("hashlib").sha256(body).hexdigest(),
                         },
                     )
+                    if (
+                        config["fault"] == "unapproved_compensation"
+                        and config["epoch"] == 1
+                        and scope["path"] in {"/api/chat", "/api/pilot/runtime/v1/turns"}
+                        and not getattr(self, "negative_done", False)
+                    ):
+                        self.negative_done = True
+                        with observer.connect(data / "data.db") as c:
+                            original = c.execute(
+                                "SELECT notes FROM application_events WHERE id=?",
+                                (aliases["technical_interview"],),
+                            ).fetchone()[0]
+                            c.execute(
+                                "UPDATE application_events SET notes='unauthorized-canary' WHERE id=?",
+                                (aliases["technical_interview"],),
+                            )
+                        with observer.connect(data / "data.db") as c:
+                            c.execute(
+                                "UPDATE application_events SET notes=? WHERE id=?",
+                                (original, aliases["technical_interview"]),
+                            )
+                        channel.witness("committed_write_then_compensate")
                     if (
                         scope["path"].endswith("/confirm")
                         and config["fault"] == "wrong_target"

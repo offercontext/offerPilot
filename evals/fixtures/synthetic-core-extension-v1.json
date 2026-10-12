@@ -1,0 +1,7 @@
+{
+  "fixture_id": "synthetic-core-extension-v1",
+  "unrelated_memory": "保留另一条已确认偏好：建议中可提及合成标记海燕-29。",
+  "provenance": "Synthetic extension for observed overly broad fixture-control authorization; no user material.",
+  "goal": "Withdraw exactly one confirmed memory and retain the other eligible memory in subsequent selected and final serialized sources.",
+  "negative_control": "unapproved_compensation commits and compensates an unauthorized business write; final DB equality must still fail."
+}

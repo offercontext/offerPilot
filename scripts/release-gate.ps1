@@ -2,7 +2,19 @@ param(
     [switch]$RealAi,
     [switch]$Docker,
     [switch]$Install,
-    [int]$Port = 18765
+    [int]$Port = 18765,
+    [string]$EvalSuite,
+    [string]$EvalPolicy,
+    [string]$EvalVariants,
+    [string]$EvalOutput,
+    [string]$EvalBaselineId,
+    [string]$EvalBaselineStore,
+    [string]$EvalReview,
+    [string]$EvalExperiment,
+    [string]$EvalProviderProfile,
+    [string]$EvalGrant,
+    [string[]]$EvalReuse,
+    [double]$EvalTimeoutSeconds = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -10,6 +22,18 @@ $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
 Push-Location $Repo
 try {
+    $evalValues = @($EvalSuite, $EvalPolicy, $EvalVariants, $EvalOutput, $EvalBaselineId, $EvalBaselineStore, $EvalReview, $EvalExperiment)
+    if (($evalValues | Where-Object { $_ }).Count -or $EvalProviderProfile -or $EvalGrant -or $EvalReuse -or $EvalTimeoutSeconds) {
+        if ($EvalTimeoutSeconds -lt 0 -or [double]::IsNaN($EvalTimeoutSeconds) -or [double]::IsInfinity($EvalTimeoutSeconds)) { throw "Positive finite eval timeout required." }
+        if (($evalValues | Where-Object { -not $_ }).Count) { throw "Complete evaluation parameters are required before release checks." }
+        $evalArgs = @('--suite', $EvalSuite, '--policy', $EvalPolicy, '--variants', $EvalVariants, '--output', $EvalOutput, '--baseline-id', $EvalBaselineId, '--baseline-store', $EvalBaselineStore, '--review', $EvalReview, '--experiment', $EvalExperiment)
+        if ($EvalProviderProfile) { $evalArgs += @('--provider-profile', $EvalProviderProfile) }
+        if ($EvalGrant) { $evalArgs += @('--grant', $EvalGrant) }
+        foreach ($run in $EvalReuse) { $evalArgs += @('--reuse', $run) }
+        uv run oc eval release-preflight @evalArgs
+        if ($LASTEXITCODE -ne 0) { throw "Evaluation preflight failed (exit $LASTEXITCODE)." }
+        if (-not (Test-Path -LiteralPath (Join-Path $EvalOutput 'release-preflight.json') -PathType Leaf)) { throw "Evaluation preflight artifact missing." }
+    }
     uv run pytest -q
     if ($LASTEXITCODE -ne 0) { throw "pytest failed (exit $LASTEXITCODE)." }
     uv run ruff check .
@@ -51,6 +75,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Docker smoke failed (exit $LASTEXITCODE)." }
     }
 
+    if ($EvalSuite) {
+        $preflight = Join-Path $EvalOutput 'release-preflight.json'
+        $executeArgs = @('--preflight', $preflight)
+        if ($EvalTimeoutSeconds -ne 0) { $executeArgs += @('--timeout-seconds', $EvalTimeoutSeconds) }
+        uv run oc eval release-execute @executeArgs
+        if ($LASTEXITCODE -ne 0) { throw "Evaluation gate failed (exit $LASTEXITCODE)." }
+        if (-not (Test-Path -LiteralPath (Join-Path $EvalOutput 'release-evaluation.json') -PathType Leaf)) { throw "Evaluation receipt missing." }
+        $receipt = uv run oc eval release-receipt --preflight $preflight
+        if ($LASTEXITCODE -ne 0 -or (($receipt -join "`n").Trim() -notmatch '^EVAL_ENFORCE_VERIFIED [a-f0-9]{64}$')) { throw "Evaluation enforce verification missing." }
+    }
     Write-Host "Release gate passed"
 }
 finally {

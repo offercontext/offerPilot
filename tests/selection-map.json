@@ -7514,6 +7514,45 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_extensions.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_review.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
     }
   }
 }

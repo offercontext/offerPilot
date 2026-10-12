@@ -113,28 +113,61 @@ FAULTS = {
     "stale_source",
     "injection_write",
 }
+EXTENSION_ITEMS: dict[str, dict[str, Any]] = {
+    "E11.memory_withdraw_scope": dict(
+        real=True,
+        action="E09.memory_withdraw",
+        profile="context_sources.v1",
+        rules=[
+            "source.selected",
+            "source.final_input",
+            "source.withdrawn_unit",
+            "source.unrelated_preserved",
+        ],
+    )
+}
+REGISTERED_ITEMS = ITEMS | EXTENSION_ITEMS
+
+
+def suite_items(suite_id: str) -> set[str]:
+    return {
+        "harness-core-v1": set(ITEMS),
+        "harness-core-preflight-v1": {"E01.runtime_read"},
+        "harness-extension-v1": set(EXTENSION_ITEMS),
+    }.get(suite_id, set())
+
+
 ALL_RULES = (
-    set(BASE_RULES) | {r for v in ITEMS.values() for r in v["rules"]} | {"quality.supported"}
+    set(BASE_RULES)
+    | {r for v in ITEMS.values() for r in v["rules"]}
+    | {"quality.supported"}
+    | {r for v in EXTENSION_ITEMS.values() for r in v["rules"]}
 )
 
 
 def required_rules(item: str, mode: str = "deterministic") -> list[str]:
-    value = [*BASE_RULES, *ITEMS[item]["rules"]]
-    if mode == "real" and item.startswith(("E09.", "E10.")):
+    value = [*BASE_RULES, *REGISTERED_ITEMS[item]["rules"]]
+    if mode == "real" and REGISTERED_ITEMS[item].get("profile") == "context_sources.v1":
         value.append("quality.supported")
     return value
 
 
 def case_definition(item: str) -> dict[str, Any]:
-    data = ITEMS[item]
+    data = REGISTERED_ITEMS[item]
     case = item.split(".")[0]
     return dict(
         schema_version=2,
         case_id=case,
-        case_version=3 if case in {"E01", "E04", "E06", "E08"} else 2,
+        case_version=1
+        if item in EXTENSION_ITEMS
+        else 3
+        if case in {"E01", "E04", "E06", "E08"}
+        else 2,
         execution_item_id=item,
-        fixture_id="synthetic-core-v1",
-        action_id=item,
+        fixture_id="synthetic-core-extension-v1"
+        if item in EXTENSION_ITEMS
+        else "synthetic-core-v1",
+        action_id=data.get("action", item),
         model_id="core-script-v1",
         grader_id="core-v1",
         supported_modes=["deterministic", "real"] if data["real"] else ["deterministic"],

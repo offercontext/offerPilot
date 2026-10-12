@@ -105,7 +105,18 @@ def create_plan(
             case_id=spec.case_id,
             case_version=spec.case_version,
             spec_hash=digest(spec.model_dump(mode="json")),
-            fixture_hash=file_hash(ROOT / "evals/fixtures/synthetic-core-v1.json"),
+            fixture_hash=file_hash(ROOT / "evals/fixtures/synthetic-core-v1.json")
+            if spec.fixture_id == "synthetic-core-v1"
+            else digest(
+                {
+                    name: file_hash(ROOT / "evals/fixtures" / name)
+                    for name in (
+                        "synthetic-interviews-v1.json",
+                        "synthetic-core-v1.json",
+                        "synthetic-core-extension-v1.json",
+                    )
+                }
+            ),
             coverage_kind=spec.coverage_kind,
             required_rules=required_rules(item, mode),
         )

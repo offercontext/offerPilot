@@ -78,6 +78,7 @@ def run_trial(
         "token": token,
         "limits": spec.evaluator_limits.model_dump(),
         "fault": variant.fault,
+        "action_id": spec.action_id,
         "fault_profile": spec.fault_profile,
         "coverage_profile": spec.coverage_profile,
         "required_capabilities": spec.required_capabilities,
@@ -129,11 +130,14 @@ def run_trial(
 
     try:
         subject = start(1)
-        prepared = subject.wait("prepared", spec.evaluator_limits.startup_seconds)
+        prepared = subject.wait(
+            "prepared",
+            max(0, spec.evaluator_limits.startup_seconds - (time.monotonic() - subject.started)),
+        )
         e["initial"] = prepared["initial"]
         f["aliases"] = prepared["aliases"]
         driver = handshake(subject)
-        subject, driver = drive(plan.execution_item_id, driver, subject, private, e, restart)
+        subject, driver = drive(spec.action_id, driver, subject, private, e, restart)
         observer.marker(private / "data.db", "driver_finished", {"terminal_received": True})
     except Exception as exc:
         status = (

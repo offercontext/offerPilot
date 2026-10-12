@@ -54,7 +54,11 @@ def gate(request, tmp_path):
                 f'command="{command} $*"\n'
                 'printf "%s\\n" "$command" >> "$GATE_LOG"\n'
                 'if [[ "$command" == "$GATE_FAIL" ]]; then exit 7; fi\n'
-                'if [[ "$command" == "curl "* ]]; then '
+                'if [[ "$command" == "uv run oc eval release-execute "* && "${GATE_EVAL_FAIL:-0}" != 0 ]]; then exit "$GATE_EVAL_FAIL"; fi\n'
+                'if [[ "$command" == "uv run oc eval release-receipt "* && "${GATE_EVAL_RECEIPT:-0}" == 1 ]]; then printf "%s\\n" "EVAL_ENFORCE_VERIFIED '
+                + "a" * 64
+                + '"; fi\n'
+                + 'if [[ "$command" == "curl "* ]]; then '
                 "printf '%s\\n' '{\"status\":\"ok\"}' '<div id=\"root\"></div>'; fi\n"
                 'if [[ "$command" == "npm run build" && "${GATE_NO_ARTIFACT:-}" != 1 ]]; '
                 "then mkdir -p dist; printf '<div id=\"root\"></div>' > dist/index.html; fi\n",
@@ -68,7 +72,8 @@ def gate(request, tmp_path):
             (bin_dir / f"{command}.cmd").write_text(
                 "@echo off\n"
                 f'echo {command} %*>>"%GATE_LOG%"\n'
-                f'if "{command} %*"=="%GATE_FAIL%" exit /b 7\n'
+                + ('if "%~1 %~2 %~3"=="run oc eval" goto eval_stub\n' if command == "uv" else "")
+                + f'if "{command} %*"=="%GATE_FAIL%" exit /b 7\n'
                 + (
                     'if "%*"=="run build" if not "%GATE_NO_ARTIFACT%"=="1" '
                     "(if not exist dist mkdir dist)\n"
@@ -83,13 +88,23 @@ def gate(request, tmp_path):
                     if command == "uv"
                     else ""
                 )
-                + "exit /b 0\n",
+                + "exit /b 0\n"
+                + (
+                    ':eval_stub\nif "%~4"=="release-execute" if not "%GATE_EVAL_FAIL%"=="0" exit /b %GATE_EVAL_FAIL%\nif "%~4"=="release-receipt" if "%GATE_EVAL_RECEIPT%"=="1" echo EVAL_ENFORCE_VERIFIED '
+                    + "a" * 64
+                    + "\nexit /b 0\n"
+                    if command == "uv"
+                    else ""
+                ),
                 encoding="utf-8",
             )
         launcher = repo / "launch.ps1"
         launcher.write_text(
             r"""param([string]$Target, [int]$Port = 18765, [switch]$SkipBuild,
-    [switch]$RealAi, [switch]$Install, [switch]$Docker)
+    [switch]$RealAi, [switch]$Install, [switch]$Docker,
+    [string]$EvalSuite, [string]$EvalPolicy, [string]$EvalVariants, [string]$EvalOutput,
+    [string]$EvalBaselineId, [string]$EvalBaselineStore, [string]$EvalReview,
+    [string]$EvalExperiment, [string]$EvalProviderProfile, [string]$EvalGrant)
 $ErrorActionPreference = 'Stop'
 function Start-Process {
     Add-Content $env:GATE_LOG 'server start'
@@ -129,8 +144,19 @@ finally { Set-Content $env:GATE_RESTORED_DATA $env:OFFERPILOT_DATA }
         env["GATE_CLEANUP_LOG"] = str(repo / "cleanup.log")
         env["GATE_RESTORED_DATA"] = str(repo / "restored-data.txt")
 
-    def run(script="release-gate", *, fail="", args=(), artifact=True, cleanup_fail=False):
+    def run(
+        script="release-gate",
+        *,
+        fail="",
+        args=(),
+        artifact=True,
+        cleanup_fail=False,
+        eval_fail=0,
+        eval_receipt=False,
+    ):
         env["GATE_FAIL"] = fail
+        env["GATE_EVAL_FAIL"] = str(eval_fail)
+        env["GATE_EVAL_RECEIPT"] = "1" if eval_receipt else "0"
         env["GATE_CLEANUP_FAIL"] = "1" if cleanup_fail else "0"
         if not artifact:
             (repo / "web/dist/index.html").unlink(missing_ok=True)
@@ -178,6 +204,81 @@ def test_release_builds_once_and_retains_cli_smoke_and_local_verify(gate):
     assert "uv run oc verify --profile local --static-dir web/dist" in calls
     assert not any("real-ai" in call or call.startswith("docker ") for call in calls)
     assert "Release gate passed" in result.stdout
+
+
+def eval_arguments(shell, repo):
+    names = [
+        "suite",
+        "policy",
+        "variants",
+        "output",
+        "baseline-id",
+        "baseline-store",
+        "review",
+        "experiment",
+    ]
+    return [
+        value
+        for name in names
+        for value in [
+            "--eval-" + name
+            if shell == "bash"
+            else "-Eval" + "".join(p.title() for p in name.split("-")),
+            str(repo / ("eval-" + name)),
+        ]
+    ]
+
+
+def test_release_eval_missing_parameters_stops_before_product_checks(gate):
+    shell, run, _ = gate
+    result, calls = run(args=["--eval-suite" if shell == "bash" else "-EvalSuite", "missing.json"])
+    assert result.returncode != 0 and not calls
+    assert "Release gate passed" not in result.stdout
+
+
+def test_release_eval_zero_exit_without_preflight_artifact_is_rejected(gate):
+    shell, run, repo = gate
+    result, calls = run(args=eval_arguments(shell, repo))
+    assert result.returncode != 0
+    assert len(calls) == 1 and "release-preflight" in calls[0]
+    assert "Release gate passed" not in result.stdout
+
+
+def test_release_eval_zero_exit_without_final_receipt_is_rejected(gate):
+    shell, run, repo = gate
+    output = repo / "eval-output"
+    output.mkdir()
+    (output / "release-preflight.json").write_text('{"synthetic":true}')
+    result, calls = run(args=eval_arguments(shell, repo))
+    assert result.returncode != 0
+    assert any("release-execute" in c for c in calls)
+    assert "Release gate passed" not in result.stdout
+
+
+def test_release_eval_forged_receipt_without_enforce_confirmation_is_rejected(gate):
+    shell, run, repo = gate
+    output = repo / "eval-output"
+    output.mkdir()
+    for name in ["release-preflight.json", "release-evaluation.json"]:
+        (output / name).write_text('{"synthetic_forged":true}')
+    result, calls = run(args=eval_arguments(shell, repo))
+    assert result.returncode != 0
+    assert any("release-receipt" in c for c in calls)
+    assert "Release gate passed" not in result.stdout
+
+
+@pytest.mark.parametrize("code", [0, 1, 2, 3])
+def test_release_eval_propagates_each_exit_and_requires_enforce_confirmation(gate, code):
+    shell, run, repo = gate
+    output = repo / "eval-output"
+    output.mkdir()
+    for name in ["release-preflight.json", "release-evaluation.json"]:
+        (output / name).write_text('{"synthetic_orchestration_fixture":true}')
+    result, calls = run(args=eval_arguments(shell, repo), eval_fail=code, eval_receipt=True)
+    assert any("release-execute" in c for c in calls)
+    assert (result.returncode == 0) == (code == 0), result.stdout
+    assert ("Release gate passed" in result.stdout) == (code == 0)
+    assert any("release-receipt" in c for c in calls) == (code == 0)
 
 
 @pytest.mark.parametrize(

@@ -9,7 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 
-def prepare(data: Path, root: Path, item: str) -> dict[str, Any]:
+def prepare(data: Path, root: Path, item: str, execution_item: str | None = None) -> dict[str, Any]:
     from offerpilot.db import init_database
     from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
     from offerpilot.repositories.application_events import (
@@ -55,6 +55,22 @@ def prepare(data: Path, root: Path, item: str) -> dict[str, Any]:
             ),
         )
         aliases["memory_id"], aliases["memory_version"] = memory["id"], memory["current_version"]
+        if execution_item == "E11.memory_withdraw_scope":
+            extension = json.loads(
+                (root / "evals/fixtures/synthetic-core-extension-v1.json").read_bytes()
+            )
+            untouched = ConfirmedMemoryRepository(sessions).mutate(
+                None,
+                MemoryMutation(
+                    mutation_id=uuid4(),
+                    action="confirm",
+                    expected_version=0,
+                    confirmed=True,
+                    content=extension["unrelated_memory"],
+                ),
+            )
+            aliases["untouched_memory_id"] = untouched["id"]
+            aliases["untouched_memory_version"] = untouched["current_version"]
         with sessions() as s:
             s.add(
                 ContextContributorSettings(

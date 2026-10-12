@@ -19,7 +19,8 @@ from offerpilot.evaluation.contracts import (
 )
 from offerpilot.evaluation.core_registry import (
     FAULTS,
-    ITEMS,
+    REGISTERED_ITEMS,
+    suite_items,
     case_definition,
     required_rules,
 )
@@ -52,7 +53,7 @@ class CaseSpecV2(Contract):
     case_id: str
     case_version: Positive
     execution_item_id: str
-    fixture_id: Literal["synthetic-core-v1"]
+    fixture_id: Literal["synthetic-core-v1", "synthetic-core-extension-v1"]
     action_id: str
     model_id: Literal["core-script-v1"]
     grader_id: Literal["core-v1"]
@@ -73,7 +74,7 @@ class CaseSpecV2(Contract):
 
     @model_validator(mode="after")
     def registered(self) -> CaseSpecV2:
-        if self.execution_item_id not in ITEMS or self.model_dump(
+        if self.execution_item_id not in REGISTERED_ITEMS or self.model_dump(
             mode="json", exclude_none=True
         ) != case_definition(self.execution_item_id):
             raise ValueError("case differs from versioned registered contract")
@@ -88,7 +89,7 @@ class SuiteItemV2(Contract):
     @model_validator(mode="after")
     def registered(self) -> SuiteItemV2:
         if (
-            self.execution_item_id not in ITEMS
+            self.execution_item_id not in REGISTERED_ITEMS
             or self.spec_path
             != f"cases/{self.execution_item_id}.v{case_definition(self.execution_item_id)['case_version']}.json"
         ):
@@ -98,13 +99,13 @@ class SuiteItemV2(Contract):
 
 class SuiteV2(Contract):
     schema_version: Literal[2] = 2
-    suite_id: Literal["harness-core-v1", "harness-core-preflight-v1"]
+    suite_id: Literal["harness-core-v1", "harness-core-preflight-v1", "harness-extension-v1"]
     execution_items: list[SuiteItemV2]
 
     @model_validator(mode="after")
     def complete(self) -> SuiteV2:
         ids = [i.execution_item_id for i in self.execution_items]
-        expected = set(ITEMS) if self.suite_id == "harness-core-v1" else {"E01.runtime_read"}
+        expected = suite_items(self.suite_id)
         if len(ids) != len(set(ids)) or set(ids) != expected:
             raise ValueError("suite denominator differs from registered set")
         return self
@@ -211,18 +212,12 @@ class RunManifestV2(Contract):
             raise ValueError("missing, duplicate or reordered plan identities")
         if set(self.variants) not in ({"candidate"}, {"baseline", "candidate"}):
             raise ValueError("run variants require candidate")
-        expected_items = (
-            set(ITEMS)
-            if self.suite_id == "harness-core-v1"
-            else {"E01.runtime_read"}
-            if self.suite_id == "harness-core-preflight-v1"
-            else set()
-        )
+        expected_items = suite_items(self.suite_id)
         expected = {
             (i, v, n)
             for n in range(1, self.repeats + 1)
             for i in expected_items
-            if self.mode == "deterministic" or ITEMS[i]["real"]
+            if self.mode == "deterministic" or REGISTERED_ITEMS[i]["real"]
             for v in self.variants
         }
         actual = {(p.execution_item_id, p.variant_id, p.repeat_index) for p in self.planned_trials}
