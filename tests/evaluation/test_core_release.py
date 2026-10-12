@@ -9,6 +9,7 @@ from offerpilot.evaluation.core_governance import gate_core
 from offerpilot.evaluation.registry import digest, file_hash
 from tests.evaluation.test_core_governance import manifest as manifest
 from tests.evaluation.test_core_governance import policy, review, rows, experiment
+from tests.evaluation.test_core_governance import real_manifest
 
 
 def setup_release(manifest, tmp_path, monkeypatch):
@@ -72,6 +73,14 @@ def test_preflight_is_zero_network_and_checks_dirty_source(manifest, tmp_path, m
     monkeypatch.setattr(release, "snapshot", lambda *_: {"changed_dirty_diff": True})
     with pytest.raises(ValueError, match="source/environment changed"):
         release.read_preflight(path)
+
+
+def test_release_real_requirement_blocks_missing_profile_and_grant_before_execute(manifest, tmp_path, monkeypatch):
+    m = real_manifest(tmp_path)
+    _, _, args = setup_release(m, tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="required real mode needs profile and authorized grant"):
+        release.preflight(*args)
+    assert not args[3].exists()
 
 
 @pytest.mark.parametrize(
