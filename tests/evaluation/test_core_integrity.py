@@ -2,11 +2,13 @@ import copy
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 import pytest
 
 from offerpilot.evaluation.core_graders import grade_rule
 from offerpilot.evaluation.core_runner import aggregate, missing
+from offerpilot.evaluation.core_actions import delivery_lease_expiry, stream_cursor
 from offerpilot.evaluation import core_planning as planning
 from offerpilot.evaluation.runner import ROOT
 
@@ -90,6 +92,30 @@ def test_unreached_diagnostic_fault_can_never_produce_pass():
     assert grade_rule("evidence.required_complete", "E09.memory_withdraw", evidence)[0] is None
 
 
+def test_lease_uses_real_epoch_seconds_and_unobserved_expiry_is_unknown():
+    assert delivery_lease_expiry(1791829345) == datetime.fromtimestamp(1791829345, tz=timezone.utc)
+    with pytest.raises(ValueError):
+        delivery_lease_expiry("2026-10-13T00:00:00Z")
+    assert (
+        grade_rule(
+            "recovery.pending_then_expired",
+            "E06.legacy_missing",
+            {"facts": {"active_lease_pending": True}},
+        )[0]
+        is None
+    )
+
+
+def test_stream_cursor_reads_actual_runtime_data_frame():
+    assert (
+        stream_cursor('data: {"cursor":"signed-runtime-cursor","event_seq":2}')
+        == "signed-runtime-cursor"
+    )
+    assert stream_cursor("id: other-provider-cursor") == "other-provider-cursor"
+    assert stream_cursor('data: {"cursor":2}') is None
+    assert stream_cursor("data: [DONE]") is None
+
+
 @pytest.mark.parametrize(
     "mutation", ["other_memory", "extra_delta", "wrong_version", "bad_receipt"]
 )
@@ -135,3 +161,33 @@ sys.__stdout__.write(json.dumps({'blocked': blocked}))
     )
     assert completed.returncode == 0, completed.stderr.decode()
     assert json.loads(completed.stdout) == {"blocked": True}
+
+
+def test_script_reply_budget_includes_expected_error_and_restart():
+    import time
+    import httpx
+    from offerpilot.evaluation.core_actions import CoreHTTPDriver
+
+    counter = [0]
+    sent = []
+    observations = []
+    for epoch in range(2):
+        driver = CoreHTTPDriver(
+            "http://localhost", "synthetic", time.monotonic() + 30, observations, 8, counter
+        )
+        driver.client.close()
+
+        def response(request):
+            sent.append(request)
+            return httpx.Response(409, json={"error_code": "operation_delivery_pending"})
+
+        driver.client = httpx.Client(
+            base_url="http://localhost", transport=httpx.MockTransport(response)
+        )
+        for _ in range(4):
+            assert driver.request("POST", "/expected-error", {}, allowed=(409,))["error_code"]
+        if epoch == 1:
+            with pytest.raises(TimeoutError, match="script reply watchdog"):
+                driver.request("POST", "/expected-error", {}, allowed=(409,))
+        driver.close()
+    assert len(sent) == len(observations) == 8

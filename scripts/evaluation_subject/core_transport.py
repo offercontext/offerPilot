@@ -91,9 +91,27 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             channel.attempt("provider_send", blocked=True, input_bytes=len(body))
             raise ValueError("provider serialized input exceeds frozen cap")
         payload = json.loads(body)
+        allowed_fields = {
+            "model",
+            "messages",
+            "tools",
+            "tool_choice",
+            "response_format",
+            "stream",
+            "stream_options",
+            "max_tokens",
+            "temperature",
+            "thinking",
+            "n",
+        }
         if (
             payload.get("model") != limits["model"]
-            or payload.get("max_tokens", limits["max_output_tokens"]) > limits["max_output_tokens"]
+            or set(payload) - allowed_fields
+            or type(payload.get("max_tokens")) is not int
+            or not 0 < payload["max_tokens"] <= limits["max_output_tokens"]
+            or payload.get("n", 1) != 1
+            or payload.get("temperature", 0) != 0
+            or payload.get("thinking", {"type": "disabled"}) != {"type": "disabled"}
         ):
             raise ValueError("provider model/output cap changed")
         channel.attempt(
@@ -178,6 +196,11 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             },
             ack=True,
         )
+        if channel.config["trial_key"][
+            "execution_item_id"
+        ] == "E07.runtime_reattach" and not getattr(state, "stream_barrier_reached", False):
+            state.stream_barrier_reached = True
+            channel.emit("fault_reached", {"boundary": "http_before_send"}, ack=True)
         kwargs["follow_redirects"] = False
         try:
             SEND_PERMISSION.permitted = True

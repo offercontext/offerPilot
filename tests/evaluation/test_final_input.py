@@ -31,7 +31,10 @@ def test_final_wire_body_links_unicode_memory_units_without_opaque_copy(tmp_path
 
     class Channel:
         seq = 0
-        config = {"data_dir": str(tmp_path)}
+        config = {
+            "data_dir": str(tmp_path),
+            "trial_key": {"execution_item_id": "E09.memory_override"},
+        }
         events = []
 
         def emit(self, kind, payload, ack=False):
@@ -58,6 +61,15 @@ def test_final_wire_body_links_unicode_memory_units_without_opaque_copy(tmp_path
     )
     with httpx.Client(transport=httpx.MockTransport(response)) as client:
         client.post("https://provider.test/v1/chat/completions", json=payload)
+        for mutation in (
+            {"n": 2},
+            {"max_completion_tokens": 100000},
+            {"max_tokens": None},
+            {"temperature": 1},
+            {"extra_unbounded_field": True},
+        ):
+            with pytest.raises(ValueError):
+                client.post("https://provider.test/v1/chat/completions", json=payload | mutation)
         with pytest.raises(PermissionError):
             client.post("https://other.test/v1/chat/completions", json=payload)
     assert not SEND_PERMISSION.permitted

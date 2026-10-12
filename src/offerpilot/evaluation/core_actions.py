@@ -10,7 +10,7 @@ import time
 from typing import Any, Callable
 from uuid import uuid4
 
-from offerpilot.evaluation.adapters import HTTPDriver, ProductFailure
+from offerpilot.evaluation.adapters import DriverError, HTTPDriver, ProductFailure
 from offerpilot.evaluation.graders.p0 import instant
 from offerpilot.evaluation.registry import digest, file_hash
 from offerpilot.evaluation.reporting import atomic_json
@@ -18,6 +18,80 @@ from offerpilot.evaluation.runner import operation_facts
 from scripts.evaluation_subject import core_observer as observer
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted", "stopped", "result_unknown"}
+
+
+class CoreHTTPDriver(HTTPDriver):
+    def __init__(
+        self,
+        address: str,
+        token: str,
+        deadline: float,
+        observations: list[dict[str, Any]],
+        replies: int,
+        reply_counter: list[int] | None = None,
+    ) -> None:
+        super().__init__(address, token, deadline, observations)
+        self.max_replies = replies
+        self.reply_counter = reply_counter if reply_counter is not None else [0]
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        body: dict[str, Any] | None = None,
+        allowed: tuple[int, ...] = (200, 202),
+    ) -> dict[str, Any]:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("trial watchdog")
+        if method == "POST":
+            self.reply_counter[0] += 1
+            self.script_replies = self.reply_counter[0]
+            if self.reply_counter[0] > self.max_replies:
+                raise TimeoutError("script reply watchdog")
+        response = self.client.request(method, path, json=body, timeout=min(30, remaining))
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            self.observations.append(
+                dict(
+                    method=method,
+                    path=path,
+                    body=body,
+                    status=response.status_code,
+                    response=response.text[:524288],
+                )
+            )
+            if response.status_code not in allowed:
+                raise ProductFailure(f"HTTP {response.status_code} on {path}") from exc
+            raise DriverError("unhandled non-JSON response") from exc
+        self.observations.append(
+            dict(method=method, path=path, body=body, status=response.status_code, response=payload)
+        )
+        if response.status_code not in allowed:
+            raise ProductFailure(f"HTTP {response.status_code} on {path}")
+        if not isinstance(payload, dict):
+            raise DriverError("unhandled non-object response")
+        return payload
+
+
+def delivery_lease_expiry(value: Any) -> datetime:
+    if type(value) is not int:
+        raise ValueError("delivery lease must use the actual Unix-seconds contract")
+    return datetime.fromtimestamp(value, tz=timezone.utc)
+
+
+def stream_cursor(line: str) -> str | None:
+    if line.startswith("id:"):
+        return line[3:].strip() or None
+    if line.startswith("data:"):
+        try:
+            value = json.loads(line[5:])
+        except ValueError:
+            return None
+        if isinstance(value, dict) and isinstance(value.get("cursor"), str):
+            return value["cursor"] or None
+    return None
 
 
 def wait(driver: HTTPDriver, turn: str, states: set[str], facts: dict[str, Any]) -> dict[str, Any]:
@@ -33,12 +107,12 @@ def wait(driver: HTTPDriver, turn: str, states: set[str], facts: dict[str, Any])
 
 def drive(
     item: str,
-    driver: HTTPDriver,
+    driver: CoreHTTPDriver,
     subject: Any,
     private: Path,
     e: dict[str, Any],
-    restart: Callable[[], tuple[Any, HTTPDriver]],
-) -> tuple[Any, HTTPDriver]:
+    restart: Callable[[], tuple[Any, CoreHTTPDriver]],
+) -> tuple[Any, CoreHTTPDriver]:
     f = e["facts"]
     aliases = f["aliases"]
     data = private / "data.db"
@@ -91,14 +165,30 @@ def drive(
             captured = []
             for line in lines:
                 captured.append(line)
-                if line.startswith("id:"):
-                    f["disconnect_cursor"] = line[3:].strip()
-                    if subject.config["trial_key"]["mode"] == "real":
-                        break
-                if any(x.get("type") == "fault_reached" for x in subject.events):
+                cursor = stream_cursor(line)
+                if cursor:
+                    f["disconnect_cursor"] = cursor
+                if f.get("disconnect_cursor") and any(
+                    x.get("type") == "fault_reached" for x in subject.events
+                ):
                     break
             e["milestones"]["disconnected_sse"] = captured
         f["reattached"] = False
+        barrier = next(
+            v
+            for v in subject.events
+            if v.get("type") == "fault_reached"
+            and v.get("boundary") in {"model_entered", "http_before_send"}
+        )
+        f["disconnect_state"] = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")[
+            "state"
+        ]
+        observer.marker(
+            data,
+            "stream_disconnected_before_release",
+            {"control_seq": barrier["seq"], "state": f["disconnect_state"]},
+        )
+        subject.send({"command": "ack", "seq": barrier["seq"]})
     if item == "E08.runtime_deadline":
         second = driver.request(
             "POST", "/api/pilot/runtime/v1/turns", body | {"request_id": str(uuid4())}
@@ -106,8 +196,17 @@ def drive(
         queued = driver.request(
             "POST", "/api/pilot/runtime/v1/turns", body | {"request_id": str(uuid4())}
         )
+        f["queued_admission"] = queued
         f["queued_probe"] = wait(driver, queued["turn_id"], TERMINAL, {})
         f["queue_occupiers"] = [submitted["turn_id"], second["turn_id"]]
+        barriers = [
+            v
+            for v in subject.events
+            if v.get("type") == "fault_reached" and v.get("boundary") == "model_entered"
+        ]
+        f["deadline_model_barriers"] = len(barriers)
+        for barrier in barriers:
+            subject.send({"command": "ack", "seq": barrier["seq"]})
     current = submitted if legacy else wait(driver, turn, {"waiting_confirmation"}, f)
     response = current if legacy else current.get("terminal", {}).get("response", {})
     f.update(
@@ -198,7 +297,7 @@ def drive(
             response = current.get("terminal", {}).get("response", {})
             f.update(answer=response.get("message", ""), pending=response.get("pending_action"))
         f["terminal_state"] = current.get("state")
-        if f["terminal_state"] == "result_unknown" and item.startswith("E08."):
+        if f["terminal_state"] in {"result_unknown", "interrupted"} and item.startswith("E08."):
             f["termination_source"] = "product_budget"
         elif f["terminal_state"] != "completed":
             raise ProductFailure("unexpected product terminal")
@@ -219,19 +318,16 @@ def drive(
     operation = pending["operation_id"]
     f["operation_id"] = operation
     effective_time = (
-        "2026-10-14T16:00:00+08:00"
-        if item.startswith(("E04.", "E06."))
-        else "2026-10-14T15:00:00+08:00"
+        "2026-10-14T16:00:00+08:00" if item.startswith("E04.") else "2026-10-14T15:00:00+08:00"
     )
     confirm = {
         "conversation_id": conversation,
         "operation_id": operation,
         "confirmation_token": pending["confirmation_token"],
         "approved": item != "E03.runtime_reject",
-        "edited_args": {"scheduled_at": effective_time}
-        if item.startswith(("E04.", "E06."))
-        else {},
     }
+    if item.startswith("E04."):
+        confirm["edited_args"] = {"scheduled_at": effective_time}
     if turn:
         confirm["request_id"] = str(uuid4())
     atomic_json(private / "confirm-request.json", confirm)
@@ -285,23 +381,14 @@ def drive(
         subject, driver = restart()
         if legacy:
             if "missing" in item:
-                response = driver.client.post(path, json=confirm, timeout=30)
-                e["http"].append(
-                    {
-                        "method": "POST",
-                        "path": path,
-                        "body": confirm,
-                        "status": response.status_code,
-                        "response": response.json(),
-                    }
-                )
+                response = driver.request("POST", path, confirm, allowed=(200, 202, 409))
                 f["active_lease_pending"] = (
-                    response.json().get("error_code") == "operation_delivery_pending"
+                    response.get("error_code") == "operation_delivery_pending"
                 )
                 lease = premise["operation"].get("delivery_lease_expires_at")
                 if not lease:
                     raise ValueError("real product delivery lease absent")
-                expiry = datetime.fromisoformat(lease).replace(tzinfo=timezone.utc)
+                expiry = delivery_lease_expiry(lease)
                 while datetime.now(timezone.utc) <= expiry:
                     if time.monotonic() + 1 > driver.deadline:
                         raise TimeoutError("natural lease exceeds frozen allowance")
@@ -330,6 +417,12 @@ def drive(
             f["primary_barrier"] = any(
                 x.get("boundary") == "accepted_primary_tool" for x in subject.events
             )
+            for barrier in subject.events:
+                if (
+                    barrier.get("type") == "fault_reached"
+                    and barrier.get("boundary") == "accepted_primary_tool"
+                ):
+                    subject.send({"command": "ack", "seq": barrier["seq"]})
             time.sleep(3)
             f["late_state"] = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")["state"]
         elif item == "E05.runtime_replay":
@@ -339,18 +432,8 @@ def drive(
             ]
         elif item == "E05.runtime_conflict":
             changed = confirm | {"edited_args": {"scheduled_at": "2026-10-14T17:00:00+08:00"}}
-            r = driver.client.post(path, json=changed, timeout=30)
-            f["conflict_code"] = r.status_code
-            f["conflict_body"] = r.json()
-            e["http"].append(
-                {
-                    "method": "POST",
-                    "path": path,
-                    "body": changed,
-                    "status": r.status_code,
-                    "response": r.json(),
-                }
-            )
+            f["conflict_body"] = driver.request("POST", path, changed, allowed=(200, 202, 409))
+            f["conflict_code"] = e["http"][-1]["status"]
         elif terminal["state"] != "completed":
             raise ProductFailure("confirmation did not complete")
         f.update(operation_facts(data, operation, conversation))

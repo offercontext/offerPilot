@@ -24,6 +24,40 @@ from scripts.evaluation_subject.core_fixtures import prepare  # noqa: E402
 from scripts.evaluation_subject.core_transport import observe  # noqa: E402
 
 
+class CoreChannel(Channel):
+    def emit(self, kind: str, payload: dict[str, Any], *, ack: bool = False) -> None:
+        if (
+            kind != "fault_reached"
+            or not ack
+            or self.config["fault_profile"] not in {"executor_block", "model_block"}
+        ):
+            return super().emit(kind, payload, ack=ack)
+        from scripts.evaluation_subject.bootstrap import CONTROL, MAX_MESSAGE
+
+        with self.lock:
+            self.seq += 1
+            seq = self.seq
+            waiter = threading.Event()
+            self.pending[seq] = waiter
+            event = {
+                "schema_version": 1,
+                "trial_key": self.config["trial_key"],
+                "epoch": self.config["epoch"],
+                "seq": seq,
+                "type": kind,
+                **payload,
+            }
+            line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
+            if len(line.encode()) > MAX_MESSAGE:
+                raise ValueError("oversized control message")
+            CONTROL.write(line + "\n")
+            CONTROL.flush()
+        if not waiter.wait(max(0, min(90, self.deadline - time.monotonic()))):
+            raise RuntimeError("controlled fault release was not acknowledged")
+        with self.lock:
+            self.pending.pop(seq, None)
+
+
 class ScriptModel:
     def __init__(self, channel: Channel, title: bool = False) -> None:
         self.channel, self.calls, self.title = channel, 0, title
@@ -44,7 +78,8 @@ class ScriptModel:
                 self.channel.emit(
                     "fault_reached", {"boundary": "model_entered", "calls": self.calls}, ack=True
                 )
-                time.sleep(7 if "deadline" in item else 3)
+                if item != "E08.runtime_deadline":
+                    time.sleep(3)
         if item.startswith("E09."):
             return Assistant(content="已按本次要求调整。\n只保留两个短句。")
         if item.startswith("E10."):
@@ -322,7 +357,6 @@ def serve(channel: Channel) -> None:
                 and prepared.spec.name == "update_application_event"
             ):
                 channel.emit("fault_reached", {"boundary": "accepted_primary_tool"}, ack=True)
-                time.sleep(7)
             result = original_tool(*a, **kw)
             if prepared.spec.name == "list_application_events":
                 from offerpilot.ai.tool_runtime.rendering import render_compatibility
@@ -440,6 +474,32 @@ def serve(channel: Channel) -> None:
         from types import MethodType
 
         setattr(manager, "_worker_entry", MethodType(worker, manager))
+        for method in ("_finish_before_start_locked", "_finish_unknown_locked"):
+            original_finish = getattr(manager, method)
+
+            def finish_wrapper(original: Any, method_name: str) -> Any:
+                def finish(self: Any, handle: Any, message: str, *args: Any, **kwargs: Any) -> Any:
+                    result = original(handle, message, *args, **kwargs)
+                    if message in {"runtime deadline exhausted", "runtime budget exhausted"}:
+                        channel.emit(
+                            "model_observation",
+                            {
+                                "category": "budget_termination",
+                                "resource": "deadline" if "deadline" in message else "budget",
+                                "origin": "RuntimeExecutionManager",
+                                "method": method_name,
+                                "turn_id": handle.turn_id,
+                                "generation": handle.generation,
+                                "admitted_at": handle.budget.admitted_at,
+                                "deadline_at": handle.budget.deadline_at,
+                            },
+                            ack=True,
+                        )
+                    return result
+
+                return finish
+
+            setattr(manager, method, MethodType(finish_wrapper(original_finish, method), manager))
         if budget["policy"] == "configure":
             for name in (
                 "timeout_seconds",
@@ -649,7 +709,7 @@ def main() -> None:
         .decode()
         .strip()
     )
-    channel = Channel(config)
+    channel = CoreChannel(config)
     worker = threading.Thread(target=serve, args=(channel,))
     worker.start()
     for line in sys.stdin:

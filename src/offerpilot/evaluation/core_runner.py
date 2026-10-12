@@ -7,9 +7,9 @@ import secrets
 import time
 from typing import Any
 
-from offerpilot.evaluation.adapters import HTTPDriver, ProductFailure
+from offerpilot.evaluation.adapters import ProductFailure
 from offerpilot.evaluation.contracts import PlannedTrial
-from offerpilot.evaluation.core_actions import drive
+from offerpilot.evaluation.core_actions import CoreHTTPDriver, drive
 from offerpilot.evaluation.core_contracts import (
     CaseSpecV2,
     CoreVariant,
@@ -68,6 +68,7 @@ def run_trial(
     driver = None
     status = "completed"
     subjects = []
+    script_replies = [0]
     config = {
         "command": "prepare",
         "checkout": variant.checkout,
@@ -90,7 +91,7 @@ def run_trial(
         subjects.append(value)
         return value
 
-    def handshake(value: CoreSubject) -> HTTPDriver:
+    def handshake(value: CoreSubject) -> CoreHTTPDriver:
         ready = value.wait("ready", spec.evaluator_limits.startup_seconds)
         target = manifest.variants[plan.variant_id]
         if (
@@ -108,9 +109,16 @@ def run_trial(
         f.setdefault("handshakes", []).append(ready)
         f["budget_effective"] = ready["product_budget_effective"]
         f["budget_requested"] = spec.product_budget.model_dump(exclude_none=True)
-        return HTTPDriver(ready["address"], token, deadline, e["http"])
+        return CoreHTTPDriver(
+            ready["address"],
+            token,
+            deadline,
+            e["http"],
+            spec.evaluator_limits.script_replies,
+            script_replies,
+        )
 
-    def restart() -> tuple[CoreSubject, HTTPDriver]:
+    def restart() -> tuple[CoreSubject, CoreHTTPDriver]:
         epoch = observer.next_epoch(private / "data.db")
         value = start(epoch)
         return value, handshake(value)
@@ -290,17 +298,25 @@ def aggregate(manifest: RunManifestV2, results: list[TrialResultV2]) -> dict[str
     }
 
 
+def claim_grant(grant: Any, grant_path: Path, run_id: str) -> None:
+    import os
+
+    claims = (
+        Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "evaluation/grant-claims"
+    )
+    claims.mkdir(parents=True, exist_ok=True)
+    with (claims / (str(grant.grant_id) + ".json")).open("x", encoding="utf-8") as claim:
+        json.dump({"run_id": run_id, "grant_hash": file_hash(grant_path)}, claim)
+        claim.flush()
+        os.fsync(claim.fileno())
+
+
 def run_plan(path: Path, grant_path: Path | None = None) -> dict[str, Any]:
     manifest = read_plan(path)
     grant = validate_grant(manifest, grant_path)
     output = path.parent
     if grant and grant_path:
-        claims = grant_path.resolve().parent / "grant-claims"
-        claims.mkdir(exist_ok=True)
-        with (claims / (str(grant.grant_id) + ".json")).open("x", encoding="utf-8") as claim:
-            json.dump({"run_id": str(manifest.run_id), "grant_hash": file_hash(grant_path)}, claim)
-            claim.flush()
-            __import__("os").fsync(claim.fileno())
+        claim_grant(grant, grant_path, str(manifest.run_id))
     with (output / ".run-claim").open("x", encoding="utf-8") as f:
         f.write(str(manifest.run_id))
     atomic_json(output / "run-manifest.json", manifest.model_dump(mode="json"))

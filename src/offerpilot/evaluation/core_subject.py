@@ -170,7 +170,22 @@ class CoreSubject(Subject):
                         ):
                             raise TimeoutError("provider trial attempt cap exhausted")
                         self.ledger.reserve(event)
-                    if event["type"] not in {"error", "shutdown_complete"}:
+                    held_stream_barrier = (
+                        event["type"] == "fault_reached"
+                        and self.config["trial_key"]["execution_item_id"] == "E07.runtime_reattach"
+                        and event.get("boundary") in {"model_entered", "http_before_send"}
+                    )
+                    held_budget_barrier = (
+                        event["type"] == "fault_reached"
+                        and self.config["trial_key"]["execution_item_id"]
+                        in {"E08.runtime_unknown", "E08.runtime_deadline"}
+                        and event.get("boundary") in {"accepted_primary_tool", "model_entered"}
+                    )
+                    if (
+                        event["type"] not in {"error", "shutdown_complete"}
+                        and not held_stream_barrier
+                        and not held_budget_barrier
+                    ):
                         self.send({"command": "ack", "seq": seq})
                     self.messages.put(event)
         except Exception as exc:

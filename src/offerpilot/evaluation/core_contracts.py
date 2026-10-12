@@ -128,7 +128,7 @@ class ProviderRunProfile(Contract):
     endpoint: str
     model: str
     credential_ref: str
-    temperature: float = Field(default=0, ge=0, le=2, allow_inf_nan=False)
+    temperature: float = Field(default=0, ge=0, le=0, allow_inf_nan=False)
     max_input_bytes: Positive = 32000
     max_output_tokens: Positive = 2048
     timeout_seconds: Positive = 45

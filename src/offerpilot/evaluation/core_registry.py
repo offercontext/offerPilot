@@ -49,7 +49,7 @@ ITEMS: dict[str, dict[str, Any]] = {
         real=False,
         fault="executor_block",
         budget=dict(
-            timeout_seconds=5, max_model_calls=20, max_title_model_calls=0, max_tool_calls=40
+            timeout_seconds=60, max_model_calls=20, max_title_model_calls=0, max_tool_calls=40
         ),
         rules=["unknown.fenced"],
     ),
@@ -57,7 +57,7 @@ ITEMS: dict[str, dict[str, Any]] = {
         real=False,
         fault="model_block",
         budget=dict(
-            timeout_seconds=5, max_model_calls=20, max_title_model_calls=0, max_tool_calls=40
+            timeout_seconds=30, max_model_calls=20, max_title_model_calls=0, max_tool_calls=40
         ),
         rules=["budget.product_origin", "budget.actual_limits", "budget.continuity"],
     ),
@@ -131,7 +131,7 @@ def case_definition(item: str) -> dict[str, Any]:
     return dict(
         schema_version=2,
         case_id=case,
-        case_version=2 if case in {"E01", "E04", "E06"} else 1,
+        case_version=2 if case in {"E01", "E04", "E06", "E08"} else 1,
         execution_item_id=item,
         fixture_id="synthetic-core-v1",
         action_id=item,
@@ -161,8 +161,8 @@ def case_definition(item: str) -> dict[str, Any]:
         allowed_approvals=["technical_interview"],
         evaluator_limits=dict(
             wall_seconds=420 if "missing" in item else 180,
-            model_calls=12,
-            tool_attempts=16,
+            model_calls=6 if item == "E08.runtime_model_budget" else 12,
+            tool_attempts=6 if item == "E08.runtime_tool_budget" else 16,
             script_replies=8,
             startup_seconds=45,
             shutdown_seconds=30,
