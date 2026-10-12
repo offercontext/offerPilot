@@ -2,9 +2,11 @@
 
 日期：2026-10-12。状态：待实施；依据已通过评审的[体系设计](./harness-evaluation-design.md)，本文提供开发任务、接口、证据和验收约定，不代表实现已经通过验证。代码核对基线为 `5b9605bab343c4f95ede2c0c61ecd47bb7d923a1`，设计修订基线为 `60603143`。开工时记录实际代码快照并检查相关接缝变化，不自动以旧行号套用。
 
-长度说明：本文完整保留执行身份、观察器 PoC、子进程协议、三个执行项和交付验收，允许超过普通文档 300 行软上限，避免把相互依赖的施工契约拆散。
+长度说明：本文完整保留执行身份、观察器 PoC、子进程协议、三个执行项、交付验收及配套增量选测契约，允许超过普通文档 300 行软上限，避免把相互依赖的施工契约拆散。
 
 P0 的交付顺序固定为：结果与证据契约 → 提交观察器可行性 → E01、E04、`E06.legacy_saved` → 最小 A/B。先取得可信运行证据，再完善报告。本文中的新增模块、命令和 schema 均为待实现约定。
+
+配套的增量选测工程见 §19，分为 S1–S4，与 Harness T1–T7 分别验收。下文“阶段 P0/P1/P2”表示 Harness 交付顺序；`test_priority=p0/p1/p2` 表示测试失败后果，两者没有映射关系。选测工程不改变三个 P0 执行项的必需性，也不改变完整发布门禁。
 
 ## 1 交付范围和完成标准
 
@@ -322,6 +324,8 @@ P0 run/compare：0=请求的确定性检查满足要求；1=已证实必需规�
 
 T1 可先确定接口，T2 是关键路径。不要在 T2 结果未知时把大量工作投入题库、报告 UI 或平台。后续可以按已冻结接口分配开发，但不因分工省略统一集成与独立审查；不预设未经验证的人天。
 
+T1–T6 为新增测试记录覆盖模块、风险和所需环境，S2 再落实统一的可执行元数据。S1–S4 纳入本方案的配套开发任务，安排在 T2 之后，不作为观察器 PoC 的前置条件；自动选测未验收前继续执行 §18 的明确命令。Harness P0 完成与增量选测完成分别报告，不能用任一项完成代替另一项。
+
 ## 18 测试矩阵和执行命令
 
 | 新增测试文件 | 重点 |
@@ -351,7 +355,125 @@ uv run mypy src/offerpilot/evaluation scripts/evaluation_subject src/offerpilot/
 
 P0 没有前端改动时不默认重复前端测试/构建；没有真实模型就不调用供应商。触及安装/打包或依赖时补 install 检查；要作为发布候选时执行完整 release gate 及适用可选门禁。普通 P0 开发验收不自动等于发布验收。
 
-## 19 独立审查和交付清单
+§19 的自动选测上线后，日常迭代可生成增量计划；T7 交付验收仍执行本节受影响检查和三个必需 Harness 执行项。两 checkout 验收仍为六条 PlannedTrial，不按测试优先级裁剪，不把产品 pytest/Vitest 数量混入 Harness trial 分母。
+
+## 19 增量选测与测试优先级
+
+### 19.1 已有基础与交付边界
+
+[后端分组脚本](../../scripts/windows-pytest-groups.ps1)已有 agent/domain/knowledge/proposals/misc 五组和报告、跳过、重复及全量清单对账；[前端分组脚本](../../scripts/windows-vitest-groups.ps1)已有 components-core/chat/interview/offer/support、features/layout/lib/services/theme 十组，并校验测试清单和源码指纹。保留这些能力；分组是执行单元，不能直接充当完整的依赖关系。
+
+当前后端按文件名正则分组，`tests/agent_loop/test_confirmation.py`、`test_runner.py` 会落入 misc。S1 必须显式映射 `tests/agent_loop/**` 到 agent_loop，并修正旧 agent 分组对该目录的归属，验证全量聚合仍恰好覆盖一次。[pytest 配置](../../pyproject.toml)尚未注册统一优先级；现有两个脚本也没有根据 Git diff 自动选测。本节是待开发能力，代码事实仍以本文开头基线为准。
+
+增量入口负责仓库开发验证的选择、执行和证据对账，`oc eval` 负责产品行为评估；两者通过明确的必跑检查关联。不得把 [release-gate.sh](../../scripts/release-gate.sh) 或 [release-gate.ps1](../../scripts/release-gate.ps1) 改为默认只跑 p0，也不新增定时运行或真实模型费用授权。
+
+### 19.2 两个维度与运行策略
+
+模块范围描述“改动会影响谁”，`test_priority` 描述“行为失效后果”。二者独立；耗时、执行层级、真实模型、Docker、平台和凭据需求另存元数据，不因为慢或低概率而降低安全测试优先级。
+
+| test_priority | 定义 | 典型行为 |
+| --- | --- | --- |
+| p0 | 核心不可用、越权写入、数据损坏或关键恢复失效 | 批准前不得写、重放不得重复执行、权限、持久化/恢复、关键数据安全 |
+| p1 | 主要业务或常见异常处理失效 | 投递、面试、简历、Knowledge 主流程、常见失败和跨模块同步 |
+| p2 | 次要体验、低风险组合或扩展兼容性 | 次要展示、非安全边界组合、扩展格式；数据删除风险不归入此级 |
+
+必跑集合 = 直接验证改动的测试 ∪ 依赖影响范围内的相关回归 ∪ 对应运行面的核心 p0。直接和关联测试不再按优先级过滤；例如修改面试筛选逻辑时，其 p2 测试仍必跑。首版按模块保守扩展，不承诺函数级精度。
+
+| profile / 场景 | 选测与附加检查 |
+| --- | --- |
+| dev / 已确认纯文档、注释或静态素材 | 内容、链接、diff；仅路径与语义均能证明无运行影响时允许 checks_only，提示词/模板/行为素材不归入此类 |
+| dev / 普通局部逻辑 | 上述三项并集；frontend/backend/跨层按实际运行面选核心 p0，局部前端不机械启动全后端 |
+| merge / 普通 PR 合并 | 全局 p0 ∪ 直接和关联测试（含 p1/p2）；必要静态检查，不以变更行数缩减 |
+| dev 或 merge / 迁移、权限、HITL、恢复、所有权或共享契约 | 显式扩大失败/恢复和跨层回归，并按 AGENTS §7 独立审查；范围无法可靠确定时全量 |
+| full / 手工或已有定期回归入口 | 全量自动测试与适用检查；本方案不自动创建调度 |
+| 发布候选 | 仍执行完整 release gate 及适用 Docker/install/real-ai；增量成功不是发布通过 |
+
+运行面集合由映射计算，跨层 schema/API 改动同时纳入 backend/frontend/integration。计划另列 ruff、受影响 mypy、前端 build 和必要 smoke 等检查，不因“选到了 pytest/Vitest”而省略。所需真实模型、Docker 或凭据不可用时保留必跑项为 blocked，不能静默删除或自动发起未授权调用；新增全局 p0 也不能改变这条边界。
+
+### 19.3 模块映射和优先级元数据
+
+新增受版本控制的 `tests/selection-map.json`，唯一维护模块 ID、生产路径、测试路径与覆盖模块、运行面、依赖传播、共享基础设施扩展规则及前端文件优先级。覆盖关系允许多对多，物理执行按 ID 去重。`depends_on` 方向固定为“消费者依赖提供者”；提供者变更沿反向边递归选消费者，记录整条原因链，循环依赖使用 visited 集合闭包处理。
+
+| 规则 | 开发约定 |
+| --- | --- |
+| 路径与风险 | 使用仓库相对规范路径；规则可叠加取并集，不能 first-match 隐藏高风险。宽泛 `api.py`、共享模型/配置或未细分大文件按较大相关范围处理 |
+| backend 优先级 | 在 pyproject 注册 p0/p1/p2，pytest 收集时导出包含参数化 ID 的 nodeid、有效 marker 和模块。启用 `--strict-markers`；另写校验保证恰好一个有效优先级，不能把 strict 当作完整分类校验 |
+| frontend 优先级 | 首版按测试文件在统一映射中登记，执行整个文件；混合优先级取最严重一级。对账实际文件和 assertion ID，不用标题关键词或 grep 推测优先级，不要求先更换 Vitest |
+| 其他元数据 | `surface`、覆盖模块、risk_tags、执行层级、预计时长、requires（如 real_model/docker）与 priority 分开；前后端由采集器归一为 TestCatalog |
+| 过渡期缺分类 | 受影响范围内全部纳入；优先级未知在基线选择时保守按 p0 纳入（保留 unknown 标记，不能宣称已分类）。模块未知则扩大整个可判断运行面；连运行面也不明则全量 |
+| 错误与变更 | 多个冲突优先级、非法模块引用、失效精确路径或收集失败为配置错误。新增测试必须登记；映射、优先级、采集器及选测器改动本身触发全量对账和相应审查，不允许通过删映射制造更小计划 |
+
+pytest 支持自定义 marker、`-m` 选择和未知 marker 严格校验，具体配置按项目安装版本验证，参见 [pytest 官方说明](https://docs.pytest.org/en/stable/how-to/mark.html)。只有元数据完成并校验后，`uv run pytest -m p0` 才能表达有效的后端优先级集合；该命令仍不等于本次改动的完整必跑集合。
+
+### 19.4 从改动生成可解释计划
+
+入口建议为 `scripts/select_tests.py`，核心逻辑放 `scripts/test_selection/`；保持开发脚本边界，不让产品 Runtime 依赖选测配置。先生成不可变 SelectionPlan，再显式执行；计划是检查清单，不是测试通过证据。
+
+1. 调用者传入已存在的 base ref；解析为提交并计算与 HEAD 的 merge-base，记录两个 SHA，失败就报错，不静默换基线或联网。合并范围、暂存、未暂存及未跟踪非忽略文件取并集；使用 Git 的 NUL 分隔输出解析路径，包含新增、删除、重命名两端及复制目标。空格、中文文件名不能破坏解析。
+2. diff 来源分别对应 merge-base→HEAD、HEAD→index、index→worktree 和 `git ls-files --others --exclude-standard`。被删除/重命名路径同时参考 merge-base 的映射；映射有变化取新旧规则并集并扩大，不只读取当前存在的文件。记录内容、模式和集合指纹；tracked 文件即使现已被 ignore 仍不得漏掉。
+3. 除已证明可走 dev 内容检查或 no_changes 的分支外，收集当前测试目录生成 TestCatalog；backend 使用 pytest collection，frontend 首版使用文件清单并在执行后核对 assertion。收集错误不能退回“空集合成功”。变更测试文件至少选中自身仍存在的用例，并按其覆盖模块扩展；删除测试需说明替代覆盖或对应行为已移除的依据，未解决时不通过 merge。
+4. 按 §19.2 计算模块闭包、风险扩展和基线集合，合并必需静态/集成/Harness 检查；记录每项 direct/dependency/core_p0/risk_expansion/fallback 原因及对应路径。Harness T7 的三项验收作为固定 required check，不转成可被 p 级过滤的 pytest 节点。
+5. 未知代码路径先扩大整个已知运行面；不知运行面则全量，报告 fallback 及待补映射。dev 只有明确文档/注释等语义证据允许 checks_only，首版不能证明纯注释的代码仍按逻辑改动选测；dev 零 diff 是显式 no_changes 状态。merge/full 即使零 diff 仍执行各自基线/全集。普通代码改动最终为零测试、或预期基线为空，都报错，不用零选择伪装 checks_only。
+6. 固化计划 hash、仓库快照、锁文件、配置/映射/采集器 hash、实际 Python/Node/pytest/Vitest 环境及全部命令参数。执行前和完成后重算并校验；改变暂存、源码、测试、配置、依赖或计划后要求重生成，不沿用旧计划静默继续，执行中快照改变的报告不能通过。计划/日志只写已忽略的专用 artifact 目录或仓库外，防止输出使自身快照失效；不得借此排除普通源码和未知文件。
+
+| SelectionPlan 字段 | 含义 |
+| --- | --- |
+| `schema_version/plan_id/profile` | 版本、唯一身份、dev/merge/full；输出目录不可覆盖 |
+| `base_ref/base_commit/merge_base/head/worktree_fingerprint` | 真实来源及本地变更集合、路径/内容证据；不只记录 HEAD |
+| `catalog_hash/mapping_hash/environment` | 收集全集与元数据、依赖/工具和平台；可复核同一快照 |
+| `changes/affected_modules/impact_chains` | 改动类型、直接模块、依赖链和高风险扩展 |
+| `selected_tests/required_checks/reasons` | 冻结执行集合、附加检查及逐项选择依据；与 Harness PlannedTrial 分开 |
+| `unclassified/fallbacks/unselected_summary` | 缺分类、扩展原因与未选集合摘要/hash；能解释为何不跑某模块 |
+| `selection_status/selection_level` | ready/checks_only/no_changes/blocked；incremental/surface_full/full；不使用 pass 表示计划生成 |
+
+示例解释应能展示“修改面试回答持久化 → 面试模块及其实际依赖/消费者 → 提交校验、Attempt 推进、幂等/所有权、恢复与前端提交状态”，每条关联必须有映射证据。不能只输出测试数量，也不能将示例关系硬套到全部面试改动。
+
+### 19.5 执行、对账和失败传播
+
+以下均为待实现的开发命令，不替换现有 release gate：
+
+```powershell
+uv run python scripts/select_tests.py validate
+uv run python scripts/select_tests.py plan --base origin/master --profile dev --output artifacts/test-plans/dev-001
+uv run python scripts/select_tests.py execute --plan artifacts/test-plans/dev-001/selection-plan.json
+uv run python scripts/select_tests.py plan --base origin/master --profile merge --output artifacts/test-plans/merge-001
+```
+
+validate 核对配置、分类和收集清单；plan 产出 JSON 与人可读的选择原因；execute 校验快照后按注册检查生成 argv，不接受配置内任意 shell 命令。输出 selection-plan、执行日志、逐检查报告与 summary，分开 planned/executed/passed/failed/blocked/skipped。任一必需测试失败非零；超时、缺报告、收集失败、未完成或不允许跳过不能通过。
+
+复用现有脚本的报告解析、重复/跳过/清单检查，不降低其全量聚合要求。增量模式另以冻结的 selected manifest 对账；若复用组执行导致运行超集，执行前把超集加入计划并说明，不在执行后随意接纳额外测试。backend 对账 nodeid，frontend 对账文件和唯一 assertion ID，选中文件零 assertion 为错误；全量仍要求收集全集恰好覆盖一次。
+
+前端已有源码指纹验证；新入口必须给 backend 和附加检查补同等级的快照绑定。结果复用同时核对源码/测试/锁文件/配置、命令、平台和运行依赖、catalog/selection hash 及成功完成标记，只复用同快照兼容结果；不同选择集合的旧报告首版不裁剪复用。计划本身或未经验证的旧报告不能标成功，不把多个不同源码结果合成一次全绿。
+
+退出码约定：0=所请求操作完成（plan 的 0 仅表示计划生成；execute 的 0 才表示本计划检查满足要求）；1=已证实检查失败；2=配置/收集/快照/对账错误；3=环境、授权或执行不完整。已知失败优先 1，再 2、3，所有诊断保留。checks_only/no_changes 必须有明确依据并显示状态，不声称运行了测试；任何增量成功都不设置 release_eligible。
+
+### 19.6 开发任务与验收反例
+
+| 任务 | 必须交付 | 依赖与验收 |
+| --- | --- | --- |
+| S1 可靠模块映射 | 统一映射、跨层依赖/风险扩展；修正 agent_loop 旧分组 | T2 后安排；两份 agent_loop 测试被选中且全量无漏项/重复；未知路径保守扩大 |
+| S2 可执行优先级 | backend marker 注册与校验、frontend 文件元数据、TestCatalog | S1；错误/冲突分类失败，未分类保守纳入；核心安全不因慢降级 |
+| S3 解释选测计划 | Git diff 收集、闭包、三种 profile、SelectionPlan 与摘要 | S2；新增/删除/重命名/未提交均覆盖；P2 直接影响必跑；文档特例有证据 |
+| S4 执行与接入 | 快照校验、执行器、旧分组兼容、报告对账、失败传播 | S3；通过下表反例及独立审查后才可在日常/合并使用；完整发布入口保留 |
+
+新增测试集中到 `tests/test_selection/`，用临时 Git 仓库、微型 pytest/Vitest 套件和故障执行器验证实际输入输出。至少覆盖下列行为；单测过后还需对当前真实仓库做一次全量收集及选择/聚合核对，不能仅凭模拟目录宣称不漏测。
+
+| 验收 ID | 反例与必需结果 |
+| --- | --- |
+| S01 | Agent Loop 改动选中 test_confirmation/test_runner，不因旧 misc 归属漏掉 |
+| S02 | 直接影响 p2 仍选中；无关模块 p1/p2 不因优先级全选；dev 局部前端与 merge 全局 p0 范围不同 |
+| S03 | API/schema/恢复协议扩展到相关两端、失败和恢复路径；依赖链、多模块和循环闭包不漏项、不重复执行 |
+| S04 | 未知代码路径、未知模块/优先级按规则扩大；错误 marker、冲突分类、陈旧精确路径和未知 base 明确失败 |
+| S05 | 新增、删除、重命名两端、复制、中文/空格路径、暂存/未暂存/未跟踪均反映到计划；删除测试覆盖缺口阻断 merge |
+| S06 | dev 纯文档可 checks_only；提示词/模板或未能证明纯注释改动不能误入；dev 零 diff 显示 no_changes，merge/full 仍执行基线/全集，代码零测试报错 |
+| S07 | 收集失败、意外空组、重复/漏报告、跳过/todo、缺必需环境、超时和子进程非零均正确传播，已知失败不被覆盖 |
+| S08 | 执行前/中源码、锁文件、元数据、暂存或未跟踪集合改变使计划失效；输出不污染自身指纹，陈旧结果和不同快照拼接被拒绝 |
+| S09 | 临时仓库的实际行为回归被 plan→execute 捕获；两平台成功与失败传播一致；全量分组全集仍恰好执行一次 |
+| S10 | Harness P0 三项/两版本六 trial 不被 priority 裁剪；增量通过不能冒充完整 release gate 或授权真实模型调用 |
+
+S4 交付同时提供当前仓库分类完整度、fallback 清单、实际计划与执行报告、选中原因、未选范围、独立审查和修复回验；仅有测试数量减少或耗时下降不算验收通过。选测准确性和失败传播未过关时保留明确命令/扩大回归，不启用缩减执行。
+
+## 20 独立审查和交付清单
 
 独立审查重点是证据可信度：触发器是否覆盖声明路径；观察器是否可能阻止错误后仍判通过；批准与提交的顺序是否有因果依据；是否把记录行数当业务效果；崩溃后是否遗漏 WAL/迟到写；是否用候选包启动了基线；恢复是否偷改租约；已知失败是否被错误降级。
 
@@ -365,6 +487,8 @@ P0 没有前端改动时不默认重复前端测试/构建；没有真实模型�
 - 停机/重启/超时/清理的结果，未观测范围和 accepted risks。
 - 独立审查结论及问题修复后的受影响回验。
 
-未决工程风险集中在 T2 的观察完整性、插桩干扰以及跨版本 bootstrap；它们有明确探针和阻断条件。P0 完成后再按体系设计安排 P1/P2，不在本期以真实模型、自然租约或发布门禁扩大验收承诺。
+增量选测的审查另核对依赖传播方向、低优先级直接测试是否保留、未知范围是否扩大、删除/重命名与本地变更是否遗漏，以及快照/报告失败能否阻断；其 S1–S4 状态单列，不从 Harness 结果推导完成。
 
-本次交付仅为实施方案与设计字段同步；未修改产品代码、未执行观察器 PoC 或产品测试。破坏性变化：无。
+未决工程风险集中在 T2 的观察完整性、插桩干扰、跨版本 bootstrap，以及 S1–S4 的映射完备性与结果复用边界；它们有明确探针和阻断条件。Harness P0 完成后再按体系设计安排阶段 P1/P2，不在本期以真实模型、自然租约或发布门禁扩大验收承诺。
+
+本次交付仅为实施方案、配套增量选测设计与体系设计同步；未修改产品代码、分组脚本或 pytest/Vitest 配置，未执行观察器 PoC、选测器或产品测试。破坏性变化：无。
