@@ -12,7 +12,7 @@ import pytest
 from scripts.test_selection.core import (
     SelectionError, changed_paths, impact, load_mapping, plan, select, snapshot,
 )
-from scripts.test_selection.execution import check_plan, execute, reconcile_frontend
+from scripts.test_selection.execution import check_plan, execute, reconcile_frontend, cli_command
 from scripts.test_selection.core import reconcile_backend
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -297,3 +297,43 @@ def test_real_collection_rejects_conflicting_or_unknown_markers(tmp_path: Path, 
         f"import pytest\n@pytest.mark.{marker}\ndef test_value():\n    assert True\n", encoding="utf-8")
     with pytest.raises(SelectionError, match="collection failed"):
         plan(tmp_path, "HEAD", "dev", tmp_path / "artifacts/test-plans/marker-error")
+
+
+def test_registered_cli_really_invokes_validate() -> None:
+    result = subprocess.run(cli_command("eval", "validate", "--suite",
+        str(ROOT / "evals/suites/harness-p0-v1.json")), cwd=ROOT, capture_output=True, text=True, timeout=90)
+    assert result.returncode == 0 and "3 required deterministic execution items" in result.stdout
+
+
+def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path, monkeypatch) -> None:
+    root, baseline = tmp_path / "candidate", tmp_path / "baseline"
+    root.mkdir()
+    baseline.mkdir()
+    miniature(root)
+    miniature(baseline)
+    ignore = root / ".gitignore"
+    ignore.write_text(ignore.read_text() + "web/dist/\n", encoding="utf-8")
+    git(root, "add", ".gitignore")
+    git(root, "commit", "-m", "test: 忽略静态资源")
+    (root / "web/dist").mkdir(parents=True)
+    (root / "web/dist/index.html").write_text("fixture", encoding="utf-8")
+    config = tmp_path / "variants.json"
+    config.write_text(json.dumps([{"variant_id": name, "checkout": str(path), "interpreter": sys.executable}
+                                  for name, path in (("baseline", baseline), ("candidate", root))]), encoding="utf-8")
+    output = root / "artifacts/test-plans/noop-cli"
+    value = plan(root, "HEAD", "dev", output, config)
+    value["required_checks"] = ["harness_p0", "local_smoke"]
+    from scripts.test_selection.core import digest
+    value["plan_hash"] = digest({k: v for k, v in value.items() if k != "plan_hash"})
+    (output / "selection-plan.json").write_text(json.dumps(value), encoding="utf-8")
+    class NoopProcess:
+        def __init__(self, *args, **kwargs):
+            pass
+        def wait(self, timeout):
+            return 0
+        def close(self):
+            pass
+    monkeypatch.setattr("scripts.test_selection.execution.ProcessTree", NoopProcess)
+    report = execute(root, output / "selection-plan.json")
+    assert report["exit_code"] == 3
+    assert {c.get("reason") for c in report["checks"]} >= {"missing_harness_report", "smoke_completion_missing"}

@@ -16,6 +16,11 @@ from scripts.test_selection.core import (
 )
 
 
+def cli_command(*args: str) -> list[str]:
+    # offerpilot.cli defines the console app but has no __main__ invocation.
+    return [sys.executable, "-c", "from offerpilot.cli import app; app()", *args]
+
+
 def check_plan(root: Path, value: dict[str, Any]) -> None:
     hashed = {k: v for k, v in value.items() if k != "plan_hash"}
     if digest(hashed) != value.get("plan_hash"):
@@ -92,7 +97,8 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                 tree = ProcessTree(argv, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT)
                 try:
                     returncode = tree.wait(timeout)
-                    code = 0 if returncode == 0 else 1 if returncode == 1 else 2
+                    code = 0 if returncode == 0 else 1 if returncode == 1 or (
+                        name in {"content_diff", "committed_content_diff"} and returncode == 2) else 2
                 except (subprocess.TimeoutExpired, TimeoutError):
                     diagnostics.append("timeout")
                     if getattr(getattr(tree, "process", None), "returncode", None) == 1:
@@ -157,7 +163,7 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
             report_path = output / "frontend-report.json"
             argv = ["npm.cmd" if os.name == "nt" else "npm", "test", "--", "--reporter=json",
                     "--pool=forks", "--maxWorkers=1", "--minWorkers=1",
-                    "--outputFile=" + str(report_path.resolve()), *[str(Path(p).relative_to("web")) for p in frontend]]
+                    "--outputFile=" + str(report_path.resolve()), *[Path(p).relative_to("web").as_posix() for p in frontend]]
             command("frontend", argv, root / "web")
             reconcile("frontend", report_path, frontend)
     for check in value["required_checks"]:
@@ -180,8 +186,11 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
             if not (root / "web/dist/index.html").is_file():
                 rows.append({"check": check, "code": 3, "status": "blocked", "reason": "static_assets_missing"})
             else:
-                command(check, [sys.executable, "-m", "offerpilot.cli", "verify", "--profile", "local",
-                               "--static-dir", str(root / "web/dist")], root)
+                code = command(check, cli_command("verify", "--profile", "local",
+                               "--static-dir", str(root / "web/dist")), root)
+                if code == 0 and "Verify local passed" not in (output / "local_smoke.log").read_text(errors="replace"):
+                    rows.append({"check": "local_smoke_completion", "code": 3, "status": "blocked",
+                                 "reason": "smoke_completion_missing"})
         elif check == "harness_p0":
             if not value.get("harness_variants"):
                 rows.append({"check": check, "code": 3, "status": "blocked",
@@ -189,9 +198,27 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                 continue
             variants_path = output / "harness-variants.json"
             variants_path.write_text(json.dumps(value["harness_variants"]), encoding="utf-8")
-            command(check, [sys.executable, "-m", "offerpilot.cli", "eval", "run", "--suite",
+            command(check, cli_command("eval", "run", "--suite",
                 str(root / "evals/suites/harness-p0-v1.json"), "--variants", str(variants_path.resolve()),
-                "--output", str((output / "harness-p0").resolve())], root)
+                "--output", str((output / "harness-p0").resolve())), root)
+            try:
+                from offerpilot.evaluation.compare import read_run
+                from offerpilot.evaluation.reporting import aggregate
+                manifest, trials = read_run(output / "harness-p0")
+                checked = aggregate(manifest, trials)
+                code = checked["exit_code"]
+                if not code and (manifest.plan_kind != "p0" or checked["planned"] != 6
+                                 or set(manifest.variants) != {"baseline", "candidate"}):
+                    code = 2
+                rows.append({"check": "harness_reconciliation", "code": code,
+                             "status": "passed" if code == 0 else "failed" if code == 1 else "error",
+                             "planned": checked["planned"], "counts": checked["counts"]})
+            except OSError:
+                rows.append({"check": "harness_reconciliation", "code": 3, "status": "blocked",
+                             "reason": "missing_harness_report"})
+            except (ValueError, KeyError, TypeError):
+                rows.append({"check": "harness_reconciliation", "code": 2, "status": "error",
+                             "reason": "invalid_harness_report"})
         elif check == "independent_review":
             try:
                 review = json.loads(review_evidence.read_bytes()) if review_evidence else {}
