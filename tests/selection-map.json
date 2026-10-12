@@ -7384,6 +7384,84 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_contracts.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_context_observer.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_run_budget.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_planning.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_integrity.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_final_input.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
     }
   }
 }

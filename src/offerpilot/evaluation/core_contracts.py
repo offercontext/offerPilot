@@ -237,6 +237,16 @@ class RunManifestV2(Contract):
             self.provider_profile is not None and self.provider_profile_hash is not None
         ):
             raise ValueError("provider profile disagrees with mode")
+        from offerpilot.evaluation.registry import digest
+
+        if self.provider_profile and self.provider_profile_hash != digest(
+            self.provider_profile.model_dump(mode="json")
+        ):
+            raise ValueError("provider profile hash mismatch")
+        if self.network_policy != (
+            "approved-provider-only" if self.provider_profile else "trial-loopback"
+        ):
+            raise ValueError("network policy differs from mode")
         return self
 
 

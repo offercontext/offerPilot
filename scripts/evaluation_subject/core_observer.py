@@ -173,7 +173,10 @@ def read(path: Path) -> dict[str, Any]:
         ]
         snapshots = {
             t: [
-                dict(r)
+                {
+                    k: {"$blob_hex": v.hex().upper()} if isinstance(v, bytes) else v
+                    for k, v in dict(r).items()
+                }
                 for r in conn.execute(
                     f"SELECT * FROM {quote(t)} ORDER BY {','.join(quote(k) for k in keys)}"
                 )
