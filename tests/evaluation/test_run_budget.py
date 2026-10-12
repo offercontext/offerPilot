@@ -26,6 +26,9 @@ def test_fee_reservation_blocks_before_ack_and_unknown_usage_is_not_refunded(tmp
 
 
 def test_copied_grant_cannot_be_consumed_from_a_second_directory(tmp_path, monkeypatch):
+    from offerpilot.evaluation import core_runner
+
+    monkeypatch.setattr(core_runner, "authority_home", lambda: tmp_path / "native-account")
     monkeypatch.setenv("CODEX_HOME", str(tmp_path / "global-state"))
     paths = []
     for folder in ("first", "copy"):
@@ -35,8 +38,18 @@ def test_copied_grant_cannot_be_consumed_from_a_second_directory(tmp_path, monke
         paths.append(p)
     grant = SimpleNamespace(grant_id=uuid4())
     claim_grant(grant, paths[0], "run-one")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "different-codex-home"))
     with pytest.raises(FileExistsError):
         claim_grant(grant, paths[1], "run-two")
+
+
+def test_native_authority_does_not_change_with_caller_home_variables(tmp_path, monkeypatch):
+    from offerpilot.evaluation.core_runner import authority_home
+
+    original = authority_home()
+    for name in ("CODEX_HOME", "HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"):
+        monkeypatch.setenv(name, str(tmp_path / "untrusted-home"))
+    assert authority_home() == original
 
 
 def test_grant_expiration_is_checked_before_every_send(tmp_path):

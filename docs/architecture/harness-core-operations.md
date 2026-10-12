@@ -26,7 +26,7 @@ oc eval run --plan <目录/run-plan.json> --grant <grant.json>
 
 plan 不启动产品或发模型请求。目录不可覆盖，建议使用 ignored `artifacts/harness/`；私有合成请求、回答、数据库和证据留在本地，不进 Git。
 
-real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入字节/输出 token/尝试数/超时、禁用 fallback、CNY 峰值价格及出处时间。grant 精确绑定 profile/suite hash、variants、repeat、期限、最大请求和金额及已有人工授权引用。每次 HTTP send 前按实际请求字节和最大输出预留费用并 fsync；请求额度、费用或期限用尽会在 send ACK 前阻断。usage 缺失保留全部预留，不退款。grant 在全局 Codex 配置目录独占认领，复制文件不能重用。
+real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入字节/输出 token/尝试数/超时、禁用 fallback、CNY 峰值价格及出处时间。grant 精确绑定 profile/suite hash、variants、repeat、期限、最大请求和金额及已有人工授权引用。每次 HTTP send 前按实际请求字节和最大输出预留费用并 fsync；请求额度、费用或期限用尽会在 send ACK 前阻断。usage 缺失保留全部预留，不退款。grant 在 OS 当前账号的 `.codex/evaluation/grant-claims` 独占认领：Windows 从 [Known Folder Profile](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid)读取，POSIX 从 UID 账号库读取；改变 CODEX_HOME/HOME/USERPROFILE 不产生另一份额度。复制文件不能重用。这是同一 OS 用户的本地防重复消费，不是对该用户主动修改代码或删除授权收据的身份认证系统。
 
 凭据仅从本地引用在子进程内解析。请求不得隐式重试、重定向或读取代理配置；stream 必须要求 include_usage。记录 requested alias 和实际返回 model、usage、调用身份与最终请求 hash；HTTP SDK 的 stream 标志不能替代业务 wire stream。缺身份/usage 是 unknown，不推测服务模型版本。
 

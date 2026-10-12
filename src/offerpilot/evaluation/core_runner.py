@@ -347,12 +347,46 @@ def aggregate(manifest: RunManifestV2, results: list[TrialResultV2]) -> dict[str
     }
 
 
+def authority_home() -> Path:
+    """OS account authority, independent of caller-controlled home variables."""
+    import os
+    import sys
+
+    if sys.platform != "win32":
+        import pwd
+
+        return Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    import ctypes
+    from uuid import UUID
+
+    folder = (ctypes.c_ubyte * 16).from_buffer_copy(
+        UUID("5e6c858f-0e22-4760-9afe-ea3317b67173").bytes_le
+    )
+    value = ctypes.c_void_p()
+    get_path = ctypes.windll.shell32.SHGetKnownFolderPath
+    get_path.argtypes = [
+        ctypes.c_void_p,
+        ctypes.c_uint32,
+        ctypes.c_void_p,
+        ctypes.POINTER(ctypes.c_void_p),
+    ]
+    get_path.restype = ctypes.c_long
+    release = ctypes.windll.ole32.CoTaskMemFree
+    release.argtypes = [ctypes.c_void_p]
+    release.restype = None
+    try:
+        if get_path(ctypes.byref(folder), 0, None, ctypes.byref(value)) != 0 or not value.value:
+            raise OSError("OS account profile unavailable; grant cannot be claimed")
+        return Path(ctypes.wstring_at(value.value)).resolve()
+    finally:
+        if value.value:
+            release(value)
+
+
 def claim_grant(grant: Any, grant_path: Path, run_id: str) -> None:
     import os
 
-    claims = (
-        Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "evaluation/grant-claims"
-    )
+    claims = authority_home() / ".codex/evaluation/grant-claims"
     claims.mkdir(parents=True, exist_ok=True)
     with (claims / (str(grant.grant_id) + ".json")).open("x", encoding="utf-8") as claim:
         json.dump({"run_id": run_id, "grant_hash": file_hash(grant_path)}, claim)
