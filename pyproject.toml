@@ -41,7 +41,13 @@ packages = ["src/offerpilot"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+addopts = "--strict-markers"
+markers = [
+  "p0: core availability, authorization, persistence and recovery safety",
+  "p1: main business behavior and common failure handling",
+  "p2: secondary experience and low-risk compatibility",
+]
 
 [tool.ruff]
 line-length = 100
