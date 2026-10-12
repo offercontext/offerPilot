@@ -1,6 +1,6 @@
 # OfferPilot Harness 评估体系调研与第一版设计
 
-日期：2026-10-12。状态：P0 设计评审通过，尚未实现或运行评估；具体施工见 [P0 实施方案](./harness-evaluation-p0-implementation.md)。静态核对代码基线为 `origin/master@5b9605bab343c4f95ede2c0c61ecd47bb7d923a1`；原工作区 `2762aa11` 仅多一项 README 定位更新，不影响以下代码结论。
+日期：2026-10-12。状态：P0 与 S1–S4 已完成工程实施及针对性验收，未完成完整发布验收，见[交付记录](./harness-p0-verification-20261012.md)。当前实现核对基线为 `0dd52e2b`；最初产品调研基线为 `5b9605ba`。下一步施工见 [P1 方案](./harness-evaluation-p1-implementation.md)及 [P2/P3 与 S5 方案](./harness-evaluation-p2-p3-implementation.md)，[原 P0 方案](./harness-evaluation-p0-implementation.md)保留为施工契约。
 
 建议在现有验收上增加一个仓库内的评估核心：用版本化业务场景驱动真实 OfferPilot 接口，独立检查数据库、授权过程与结果交付，重复运行并比较两个版本。第一版使用现有 Python、Pydantic、HTTPX 和 pytest；Pydantic Evals 保留为可选适配，暂不部署评估平台。
 
@@ -62,15 +62,15 @@ flowchart LR
   G --> O[本地报告与版本差异]
 ```
 
-拟新增 `src/offerpilot/evaluation/`，按 `contracts`、`runner`、`adapters`、`evidence`、`graders`、`compare`、`reporting` 分工；测试在 `tests/evaluation/`，场景与基线元数据在仓库顶层 `evals/`。模块不被 `pilot_runtime`、工具执行或业务 repository 反向依赖；生产应用正常启动不加载评估驱动。
+已有 `src/offerpilot/evaluation/` 薄核心和 `scripts/evaluation_subject/` 隔离桥；后续沿 `contracts`、`runner`、`adapters`、`evidence`、`graders`、`compare`、`reporting` 扩展。测试在 `tests/evaluation/`，场景与基线元数据在 `evals/`。模块不被 `pilot_runtime`、工具执行或业务 repository 反向依赖；生产应用正常启动不加载评估驱动。
 
-`oc eval` 是拟新增的维护命令。`oc verify` 继续证明启动与业务集成可用；`oc eval` 回答指定场景下的质量与版本变化；release gate 根据明确选项调用两者。先将 smoke 中中性的隔离启动和安全审计辅助函数提取到共享支持模块，保留旧输出与语义，禁止评估模块持续调用 smoke 的私有函数。
+`oc eval validate/run/compare` 的 P0 子集已实现，当前尚未接入 release gate。`oc verify` 继续证明启动与业务集成可用；`oc eval` 回答指定场景下的质量与版本变化；P2 再按明确选项接入发布。只在确有复用需求时提取 smoke 的中性支持函数，保留旧输出与语义，禁止持续调用 smoke 私有函数。
 
 以 `/api/pilot/runtime/v1/turns`、`/turns/{id}/confirm`、状态、snapshot 和 events 为主路径；确认携带实际返回的 operation/token 和新的 request ID。旧 `/api/chat`、`/api/chat/confirm` 作为命名为 `legacy-chat` 的适配器。两种协议的断连语义按 [ADR-0010](./decisions/0010-own-pilot-execution-in-runtime.md)分别评分，不强制相同轨迹。
 
 ## 4 场景和结果契约
 
-所有字段均为拟新增评估格式；用严格 Pydantic schema 校验，拒绝未知字段和不可识别的 fixture、action、grader ID。JSON 只引用代码注册表，不含可执行表达式或动态导入路径。
+下表是完整体系目标；P0 已实现固定三项的 schema 1 子集，P1 通过 schema 2 扩展，历史格式不可静默重评分。使用严格 Pydantic schema，拒绝未知字段和不可识别的 fixture、action、grader ID；JSON 只引用代码注册表，不含可执行表达式或动态导入路径。
 
 | 对象 | 最少字段与职责 |
 | --- | --- |
@@ -91,7 +91,7 @@ flowchart LR
 ```json
 {
   "case_id": "E04",
-  "case_version": 1,
+  "case_version": 2,
   "execution_item_id": "E04.runtime_edit",
   "supported_modes": ["deterministic", "real"],
   "tags": ["approval", "application_events"],
@@ -99,7 +99,7 @@ flowchart LR
   "adapter": "runtime-v1",
   "required_capabilities": ["edited_confirmation_receipt"],
   "coverage_profile": "applications_application_events.v1",
-  "fixture_id": "two_interviews_same_application.v1",
+  "fixture_id": "synthetic-interviews-v1",
   "script": [
     {"action": "send", "text": "把云岚数据测试开发的技术面改到2026年10月14日北京时间下午3点，其他日程不动"},
     {"action": "await_pending", "tool": "update_application_event"},
@@ -112,8 +112,8 @@ flowchart LR
     "unchanged_aliases": ["other_interview"],
     "committed_business_effects": 1
   },
-  "product_budget": {"policy": "configure", "wall_seconds": 120, "provider_calls": 4, "tool_calls": 8},
-  "evaluator_limits": {"wall_seconds": 180, "provider_calls": 6, "tool_calls": 12, "user_replies": 4},
+  "product_budget": {"policy": "configure", "timeout_seconds": 120, "max_model_calls": 4, "max_title_model_calls": 1, "max_tool_calls": 8},
+  "evaluator_limits": {"wall_seconds": 180, "model_calls": 6, "tool_attempts": 12, "script_replies": 4},
   "grader_ids": ["approval.before_commit", "approval.effective_payload", "event.exact_target", "receipt.edited_no_model_continuation"]
 }
 ```
@@ -230,24 +230,25 @@ P0 固定 `verdict=pass/fail/incomplete` 合并顺序：任一必需条件有充
 
 报告逐题展示 A/B 的成功次数、违规、失败类型、延迟与调用量；分类为修复、新增失败、持续失败、波动或不可判定。三次重复是发现波动的起点，不足以证明小幅统计收益；明显冲突时在独立 run 中扩大相关 case 的预先声明样本量。较大集按 case 分组做配对区间估计，不能把同一 case 的重复当作独立新题夸大置信度。
 
-`evals/baselines/` 只保存不可变报告摘要/hash、代码与数据版本、晋升理由和审核记录，不提交原始对话/数据库。运行命令绝不覆盖基线；拟新增 `oc eval baseline promote` 为显式管理动作，要求完整性与 §9 绝对验收记录。首次晋升不要求已有基线，也不能靠与自身比较获得资格；后续晋升另须满足相对策略。改变场景或 grader 时提升版本，先重评同一证据或重跑双方后再比较；批准一个已知风险不等于提高分数或删掉失败样本。
+`evals/baselines/` 只保存不可变报告摘要/hash、代码与数据版本、晋升理由和审核记录，不提交原始对话/数据库。运行命令绝不覆盖基线；拟新增 `oc eval baseline promote` 为显式管理动作，要求完整性与 §9 绝对验收记录。首次晋升不要求已有基线，也不能靠与自身比较获得资格；后续晋升另须满足相对策略。改变场景或 grader 时提升版本，正式对照用同一新评估器重跑双方；旧证据离线分析另列，不改历史分数或当成新一次试验。批准已知风险不等于提高分数或删掉失败样本。
 
 ## 9 命令和发布接入
 
-以下是拟实施命令，当前仓库尚不可执行：
+以下是 P1/P2 的目标命令，当前只有 P0 子集可执行；完整参数以对应实施方案为准：
 
 ```text
-oc eval validate --suite core-v1
-oc eval run --suite core-v1 --mode deterministic --repeat 1 --output <新目录>
-oc eval run --suite core-v1 --mode real --repeat 3 --provider-id <已授权配置> --output <新目录>
-oc eval compare --baseline <A报告> --candidate <B报告> --policy core-v1
+oc eval validate --suite evals/suites/harness-core-v1.json
+oc eval plan --suite evals/suites/harness-core-v1.json --mode deterministic --repeat 3 --variants <variants.json> --output <新目录>
+oc eval run --plan <run-plan.json>
+oc eval compare --baseline <A报告> --candidate <B报告> --policy <policy.json>
+oc eval gate --candidate <B报告> --baseline <A报告> --policy <policy.json> --purpose release --mode enforce --review <审核.json> --output <gate.json>
 ```
 
 `validate` 检查 schema、引用、覆盖与两类预算，零 provider 调用；`deterministic` 使用固定模型适配器运行真实业务路径，并拒绝外部 provider 网络访问。`real` 明确携带 provider 配置与授权预算，先输出 trial 数和最大调用数；本次研究不授权实际调用。`product_budget` 是被测产品的限制；`evaluator_limits` 是 trial 及全 run 的外层保护，在下一次调用前检查，不能充当产品预算生效证据。
 
-预算题须事先登记产品上限低于外层保护，要求产品先触发自身限制，并记录尝试、获准发送和被拦截的调用及预算快照。`termination_origin` 取 `product_budget/evaluator_watchdog/provider_timeout/explicit_user_stop/normal/unknown`，附终止事件链；外层先触发绝不能判产品预算通过，有证据证明产品越界则 fail，否则相关项 unknown。优先用固定 provider 校验，不因此提高真实调用费用授权。
+预算题须事先登记产品上限低于外层保护，要求产品先触发自身限制，并记录尝试、获准发送和被拦截的调用及预算快照。沿用已实现字段 `termination_source`，取 `product_budget/evaluator_watchdog/provider_timeout/explicit_user_stop/normal/unknown`，附终止事件链；外层先触发绝不能判产品预算通过，有证据证明产品越界则 fail，否则相关项 unknown。优先用固定 provider 校验，不因此提高真实调用费用授权。
 
-示例外层上限为每 trial 180 秒、6 次 provider、12 次工具、4 次脚本回复；产品示例上限另列于 §4，恢复题单独登记时间。十个执行项 × 三次 × 两版本为 60 trial，外层上界 360 次请求；E06 等增加变体后按 manifest 重算，不能仍以十个逻辑 case 估算。先用 P0 三项校准，再授权完整运行；首次基线与 A/B 成本分列。预算报告区分已知消耗、仍可能在途及未知消耗；停止等待或取消不能证明 provider 停止计算/计费。
+示例外层上限为每 trial 180 秒、6 次模型、12 次工具尝试、4 次脚本回复；产品上限另列于 §4，恢复题单独登记等待与回收时间。P1 计划为十九 D、十三 R 执行项；两版本单次分别为 38/26 trial，P2 三次分别为 114/78，混合模式总数为 192。调用上界按各项实际上限求和，不能仍按十个逻辑 case 估算；首次基线与 A/B 成本分列。预算报告区分已知消耗、仍可能在途及未知消耗；停止等待或取消不能证明 provider 停止计算/计费。
 
 | 执行层 | 触发与门禁 |
 | --- | --- |
@@ -270,12 +271,12 @@ oc eval compare --baseline <A报告> --candidate <B报告> --policy core-v1
 
 | 阶段 | 具体交付 | 验收条件 |
 | --- | --- | --- |
-| P0 证据闭环 | 先冻结 §5/§7 证据与合并规则、GatePolicy 结构并完成提交观察 PoC，再实现最小 runner/隔离/报告、E01/E04/`E06.legacy_saved` 和 A/B 差异 | 无凭据可跑；§5 四类注入证明采集边界，覆盖不足不判安全通过；两 checkout 可比；已知失败不被 unknown 覆盖，故障归因四种分支可区分 |
-| P1 核心真实场景 | E01–E10、其余 E06 执行项的入口/租约契约、合成输入观察、两类预算及终止归因；导入已有 verify/Knowledge 报告 | 先验证观察和预算边界，再按授权真实运行；所有计划 trial 有结果或缺测解释；新旧协议不混报，评估器拦截不能替产品拿通过 |
+| P0 证据闭环（已完成） | 固定三项、两表观察、隔离 runner、HITL/恢复、最小 A/B；S1–S4 另验收 | 已有针对性证据，见交付记录；不推导完整发布、自然租约或真实模型通过 |
+| P1 核心场景与真实观察 | E01–E10 的十九 D/十三 R 执行项、自然租约、最终传输输入、新来源表观察、产品/外层预算；导入 verify/Knowledge 报告 | 先验证确定性观察与真实调用准备，再按授权运行；工程完成与真实质量分别报告，新旧协议/只读观察不混报 |
 | P2 比较和门禁 | 三次重复、配对对照、不可比判断、绝对/相对策略、首次基线晋升及限时质量例外、两种 release 脚本集成 | 新增失败与基线已有的必需能力持续失败都能阻断；首次晋升不自比较；例外不改分，缺证据不豁免；两端正确传播非零，基线不自动变化 |
 | P3 扩展和运营 | 扩展集、保留集、人工标注流程；按需 PoC Pydantic Evals 或平台导出 | 新案例来自具体失败；裁判与平台可替换；现有安全报告及隐私边界不变 |
 
-P0 的顺序是“结果/证据契约 → 提交观察可行性 → 三个确定性执行项 → 最小 A/B”，观察器通过才允许安全判分，不先完善报告界面。P1 补完整场景，P2 接发布判断；每阶段独立提交，不预设日期或未经验证的人天承诺。首项实现保持 P0 的有限范围。
+P0 的有限范围保持不变。接下来按 [P1 实施方案](./harness-evaluation-p1-implementation.md)补场景与 real 准备，再按 [P2/P3 方案](./harness-evaluation-p2-p3-implementation.md)接重复比较、基线和发布判断；S5 逐批细化现有优先级。各阶段独立提交和验收，不预设日期或未经验证的人天。
 
 必须验证评估器本身：合法轨迹可通过；错误对象、批准后偷换参数、未批准提交、重复业务效果、错误回执至少各一例失败；丢审计或 grader 异常增加 unknown，无已知失败才为 incomplete。补充“产品未到故障点即失败”“已知失败后丢日志”“外层保护先触发”“基线与候选同一必需题持续失败”的反例。除报告样本外，在隔离服务注入业务退步，证明采集—评分—退出码全链路能发现。
 
@@ -283,8 +284,8 @@ P0 的顺序是“结果/证据契约 → 提交观察可行性 → 三个确定
 
 ## 11 设计边界与本轮验证
 
-P0 的硬前置是业务提交观察可行性，目前尚未实施验证；其后才验证 Runtime 关联导出、子进程故障屏障及 P1 的最终模型输入观察，业务时钟按相对日期场景需要扩展。已有测试不等于通用 eval 接口，尤其不证明自然租约或 Runtime 缺失回执修复。取不到证据时记录 unknown 并补接缝；已知产品失败仍按 §7 判 fail，不降低规则。
+P0 已证明其声明的两表普通 DML 观察、持久屏障与有限恢复路径；这不覆盖 REPLACE、级联、DDL 或任意业务表。P1 的自然租约、最终传输输入、新来源 profile 和真实预算仍需各自验证。业务时钟按相对日期场景需要扩展；Runtime 缺失回执只读观察不等于自动修复。取不到证据时记 unknown，已知产品失败仍按 §7 判 fail，不降低规则。
 
 本设计保留 `application_events`、`event_type + subtype + tags`、`context_type/context_ref`、默认 HITL、provider 特定块及已有恢复链路。Knowledge 的规则以[当前架构](./knowledge-system.md)为准：Note/Evidence 参与引用，Memory 只提供偏好，Brief 不进入 V1 核心 gate。未纳入的语音、真实外部操作、多租户与 UI 渲染，不在首版分数中宣称覆盖。
 
-本轮仅修订设计并补充 P0 实施方案，补齐执行项身份、聚合口径、阶段措辞及增量选测计划；此前六项评审修正保留。沿用前轮飞书及框架调研，定向核对代码、SQLite 观察方案、现有测试分组/配置、Markdown 链接、JSON 示例与 diff。未实现观察器、评估器或选测器，也未执行模型调用、pytest、前端构建或 release gate，因为未修改产品代码或依赖。破坏性变化：无。剩余风险为观察器可行性、选测映射完备性、自然租约恢复实测、小样本随机性及旧 PRD 差异，必须按上述阶段取得证据，不能把静态核对视为实现验收。
+本轮基于 P0 交付代码和历史验收产物补充剩余阶段方案，保留前轮六项评审约束；回读 Pilot PRD 并核对 Runtime、Provider、来源和评估接缝。仅改文档，检查本地链接、示例、计数与 diff；未重跑历史测试，未执行新场景、真实模型或完整 release gate。破坏性变化：无。剩余风险为最终传输观察、新表覆盖、自然租约、真实质量、小样本归因、审核来源与选测映射细化，须按各阶段取得实际证据。
