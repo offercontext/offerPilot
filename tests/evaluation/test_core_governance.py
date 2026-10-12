@@ -169,6 +169,7 @@ def test_fixed_baseline_failure_does_not_block_candidate_absolute(manifest, tmp_
     result = rows(manifest, failure=first)
     comparison = compare_core(manifest, result, manifest, result, experiment(manifest))
     assert comparison["groups"][0]["classification"] == "fixed"
+    assert comparison["baseline_variant"] == "baseline"
     assert comparison["exit_code"] == 0
     gate = gate_core(
         [manifest],
@@ -185,6 +186,54 @@ def test_fixed_baseline_failure_does_not_block_candidate_absolute(manifest, tmp_
         ]
         == 3
     )
+
+
+def test_release_reusing_approved_ab_run_compares_approved_candidate_arm(manifest, tmp_path):
+    first = manifest.planned_trials[0].identity()
+    result = rows(manifest, failure=first)
+    p = policy(manifest)
+    bundle = review(manifest, tmp_path)
+    old_gate = gate_core([manifest], [result], p, bundle, "initial_baseline", "enforce")
+    old_gate_path = tmp_path / "approved-gate.json"
+    old_gate_path.write_text(json.dumps(old_gate), encoding="utf-8")
+    candidate_hash = product_hash(manifest, "candidate")
+    exp = ExperimentSpec(
+        variables=[dict(name="product_snapshot", baseline=candidate_hash, candidate=candidate_hash)],
+        rationale="Synthetic approved candidate reused without a product change",
+    )
+    record = dict(
+        baseline_id="synthetic",
+        sources=[dict(manifest_hash=digest(manifest.model_dump(mode="json")))],
+        gate_path=str(old_gate_path),
+        gate_hash=digest(old_gate),
+    )
+    gate = gate_core(
+        [manifest], [result], p, bundle, "release", "enforce",
+        [(manifest, result)], exp, {manifest.mode: record},
+    )
+    assert gate["gate_satisfied"] and gate["exit_code"] == 0
+    comparison = gate["relative"]["comparisons"][0]
+    for view in [comparison, comparison["derived_review_comparison"]]:
+        assert view["baseline_variant"] == view["candidate_variant"] == "candidate"
+        assert view["changed_variables"] == []
+        assert {g["classification"] for g in view["groups"]} == {"passing"}
+        assert all(g["baseline"]["variant_id"] == "candidate" for g in view["groups"])
+
+
+def test_explicit_approved_candidate_comparison_allows_candidate_only_reuse(manifest):
+    single = manifest.model_copy(update={
+        "variants": {"candidate": manifest.variants["candidate"]},
+        "planned_trials": [p for p in manifest.planned_trials if p.variant_id == "candidate"],
+    })
+    value = product_hash(single)
+    exp = ExperimentSpec(
+        variables=[dict(name="product_snapshot", baseline=value, candidate=value)],
+        rationale="Synthetic candidate-only approved reuse",
+    )
+    comparison = compare_core(single, rows(single), single, rows(single), exp, baseline_variant="candidate")
+    assert comparison["exit_code"] == 0
+    with pytest.raises(ValueError, match="variant missing"):
+        compare_core(single, rows(single), single, rows(single), exp, baseline_variant="baseline")
 
 
 def test_persistent_safety_failure_is_absolute_blocker(manifest, tmp_path):

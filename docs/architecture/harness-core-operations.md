@@ -48,6 +48,8 @@ oc eval gate --candidate <run目录> --baseline <批准基线run目录> --policy
 
 正式比较必须声明 ExperimentSpec。五类已注册变量为 product_snapshot、provider_model、prompt_or_tool_surface、dependency_set、context_policy；声明不豁免评估器、fixture、预算、模式和环境核对。展示 fixed、persistent/new failure、incomplete、incomparable 和波动，三次样本不宣称总体稳定性、可靠 p95 或单因素因果。
 
+直接比较同一 A/B run 默认为原 baseline 对 candidate；正式相对门禁始终读取获批 run 的 candidate 分组。EvalReuse 复用该获批 run 本身时也是 candidate 对 candidate，报告记录双方实际分组，实验变量 hash 按获批分组声明。
+
 [initial 模板](../../evals/policies/core-initial-baseline-v3.json)和 [release 模板](../../evals/policies/core-release-v3.json)默认要求 19 项 D 每项三次并有真实独立审查引用。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
 
 exit 优先级为已知阻断失败 1、配置或不可比 2、不完整或待人工 3、满足 0。所有 eval/compare/gate 报告仍为 release_eligible=false。质量例外只对已完成的人工质量 fail、精确对象和有效期生效；安全失败、缺测、缺证据和待人工不得例外。

@@ -5,10 +5,10 @@ import json
 import pytest
 
 from offerpilot.evaluation import core_release as release
-from offerpilot.evaluation.core_governance import gate_core
+from offerpilot.evaluation.core_governance import ExperimentSpec, gate_core, product_hash
 from offerpilot.evaluation.registry import digest, file_hash
 from tests.evaluation.test_core_governance import manifest as manifest
-from tests.evaluation.test_core_governance import policy, review, rows, experiment
+from tests.evaluation.test_core_governance import policy, review, rows
 from tests.evaluation.test_core_governance import real_manifest
 
 
@@ -25,7 +25,10 @@ def setup_release(manifest, tmp_path, monkeypatch):
             for v in changed.variants.values()
         ],
         "review": review(changed, tmp_path).model_dump(mode="json"),
-        "experiment": experiment(changed).model_dump(mode="json"),
+        "experiment": ExperimentSpec(
+            variables=[dict(name="product_snapshot", baseline=product_hash(changed), candidate=product_hash(changed))],
+            rationale="Synthetic approved candidate reuse without a product change",
+        ).model_dump(mode="json"),
     }
     for name, data in inputs.items():
         p = tmp_path / (name + ".json")
@@ -73,6 +76,26 @@ def test_preflight_is_zero_network_and_checks_dirty_source(manifest, tmp_path, m
     monkeypatch.setattr(release, "snapshot", lambda *_: {"changed_dirty_diff": True})
     with pytest.raises(ValueError, match="source/environment changed"):
         release.read_preflight(path)
+
+
+def test_approved_same_run_reuse_preflight_execute_and_receipt(manifest, tmp_path, monkeypatch):
+    m, paths, args = setup_release(manifest, tmp_path, monkeypatch)
+    candidate_hash = product_hash(m)
+    paths["experiment"].write_text(json.dumps(dict(
+        variables=[dict(name="product_snapshot", baseline=candidate_hash, candidate=candidate_hash)],
+        rationale="Synthetic same approved candidate reused",
+    )), encoding="utf-8")
+    first = next(p.identity() for p in m.planned_trials if p.variant_id == "baseline")
+    actual_rows = rows(m, failure=first)
+    monkeypatch.setattr(release, "read_run", lambda *_: (m, actual_rows))
+    release.preflight(*args, reuse=[tmp_path / "baseline"])
+    path = args[3] / "release-preflight.json"
+    report = release.execute(path)
+    assert report["gate_satisfied"]
+    comparison = report["relative"]["comparisons"][0]
+    assert comparison["baseline_variant"] == "candidate"
+    assert {g["classification"] for g in comparison["groups"]} == {"passing"}
+    assert release.verify_receipt(path)["evaluation_satisfied"]
 
 
 def test_release_real_requirement_blocks_missing_profile_and_grant_before_execute(manifest, tmp_path, monkeypatch):

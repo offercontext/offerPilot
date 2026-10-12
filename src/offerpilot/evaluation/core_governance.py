@@ -237,10 +237,14 @@ def compare_core(
     b: RunManifestV2,
     br: list[TrialResultV2],
     experiment: ExperimentSpec,
+    *,
+    baseline_variant: Literal["baseline", "candidate"] | None = None,
 ) -> dict[str, Any]:
-    if a.run_id == b.run_id and set(a.variants) != {"baseline", "candidate"}:
+    if baseline_variant is None and a.run_id == b.run_id and set(a.variants) != {"baseline", "candidate"}:
         raise ValueError("candidate-only run cannot compare with itself")
-    av = "baseline" if a.run_id == b.run_id else "candidate"
+    av = baseline_variant or ("baseline" if a.run_id == b.run_id else "candidate")
+    if av not in a.variants:
+        raise ValueError("comparison baseline variant missing")
     left_values, right_values = variable_values(a, av), variable_values(b, "candidate")
     declarations: dict[str, ExperimentVariable] = {v.name: v for v in experiment.variables}
     reasons = []
@@ -342,7 +346,9 @@ def compare_core(
     return dict(
         schema_version=2,
         baseline_run_id=str(a.run_id),
+        baseline_variant=av,
         candidate_run_id=str(b.run_id),
+        candidate_variant="candidate",
         groups=groups,
         item_groups=item_groups,
         changed_variables=[n for n in left_values if left_values[n] != right_values[n]],
@@ -523,7 +529,11 @@ def gate_core(
                     )
                 ):
                     incomplete.append("approved_baseline_record_missing_or_mismatched")
-                comparison = compare_core(*old, candidate_manifest, candidate_rows, experiment)
+                # Promotion approves the source run's candidate arm, including
+                # when EvalReuse returns that very same A/B run.
+                comparison = compare_core(
+                    *old, candidate_manifest, candidate_rows, experiment, baseline_variant="candidate"
+                )
                 if record and record.get("gate_path"):
                     old_gate_path = Path(record["gate_path"])
                     old_gate = json.loads(old_gate_path.read_bytes())
@@ -538,6 +548,7 @@ def gate_core(
                             candidate_manifest,
                             reviewed_trials(candidate_manifest, candidate_rows, policy, review),
                             experiment,
+                            baseline_variant="candidate",
                         )
                         comparison["derived_review_comparison"] = derived
                         comparison["raw_exit_code"] = comparison["exit_code"]
