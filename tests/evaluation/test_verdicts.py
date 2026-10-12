@@ -55,13 +55,19 @@ def test_bad_result_metadata_cannot_swallow_independent_failure(bad: dict) -> No
     assert aggregate(manifest(p), [result])["exit_code"] == 1
 
 
-def test_recovery_receipt_cannot_claim_another_conversation() -> None:
+@pytest.mark.parametrize("conversation_id,write_status,expected", [
+    (1, "success", "pass"), (2, "success", "fail"),
+    (1, "committed", "fail"), (1, "failed", "fail"),
+])
+def test_recovery_receipt_uses_public_status_and_original_identity(
+    conversation_id: int, write_status: str, expected: str,
+) -> None:
     from offerpilot.evaluation.graders.p0 import saved_receipt
     operation = {"id": "original", "conversation_id": 1, "status": "committed",
                  "terminal_payload_sha256": "digest", "confirmation_strategy_fingerprint": "strategy"}
     messages = [{"role": "tool", "content": "effect"}, {"role": "assistant", "content": "saved"}]
-    responses = [{"message": "saved", "operation_id": "original", "conversation_id": 2,
-                  "write_status": "committed", "replayed": True}] * 2
+    responses = [{"message": "saved", "operation_id": "original", "conversation_id": conversation_id,
+                  "write_status": write_status, "replayed": True}] * 2
     evidence = EvidenceBundle(milestones={"persisted": {"operation": operation, "messages": messages}},
         facts={"operation": operation, "messages": messages, "replays": responses})
-    assert saved_receipt(evidence).status == "fail"
+    assert saved_receipt(evidence).status == expected

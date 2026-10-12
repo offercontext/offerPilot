@@ -186,7 +186,7 @@ def saved_receipt(e: EvidenceBundle) -> RuleResult:
                                                      for r in responses)
           and all(r.get("operation_id") == old_op["id"]
                   and r.get("conversation_id") == old_op["conversation_id"]
-                  and r.get("write_status") == "committed" and r.get("replayed") is True
+                  and r.get("write_status") == "success" and r.get("replayed") is True
                   and r.get("pending_action") is None for r in responses)
           and all(op.get(k) == old_op.get(k) for k in (
               "id", "status", "terminal_payload_sha256", "confirmation_strategy_fingerprint")))

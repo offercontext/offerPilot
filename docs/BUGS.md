@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 恢复回执评分混用内部与公开状态（2026-10-12）
+
+**现象：** 最终跨版本正常评估中，两个 E06 恢复项均被新增回执身份检查误判为失败。
+
+**根因：** 数据库 WriteOperation 使用 `status=committed`，公开 replay response 使用 `write_status=success`；评分器错误要求公开响应使用内部状态。
+
+**修复：** 按公开契约校验 `success`，继续核对原 operation、conversation、replayed 和 pending。回归证明正常 success 通过，错误会话、内部状态或失败响应被拒绝。
+
+**教训：** 持久化状态和运输层状态应分别核对；增强评分规则必须用真实成功响应回验。
+
 ## 参数化前端断言标题重复导致无法对账（2026-10-12）
 
 **现象：** 2428 条 Vitest 断言全部通过，但新增选测入口及既有 Windows 分组规则发现两组重复 assertion ID。
