@@ -6,7 +6,7 @@
 
 核心 suite 的分母为 19 个 deterministic、13 个 real 执行项。两版本三次分别为 114 和 78 trial；每次重新创建合成数据库、认证身份、配置和来源。排列固定为 repeat → item → variant。缺测计入完整分母，诊断重试创建新 run。
 
-当前核心 spec 为 E01/E04/E06/E08 v3，其余 v2。历史 spec、评估器与失败记录保留在对应冻结 worktree；旧证据必须使用原评估器回读。新版启动期限 90 秒涵盖 prepared 和 ready，普通 wall 360 秒、缺失恢复 600 秒；这些是评估器保护，产品实际预算独立回读，不能互相替代。
+当前核心 spec 为 E01/E04/E06/E07/E08 v3，其余 v2。历史 spec、评估器与失败记录保留在对应冻结 worktree；旧证据必须使用原评估器回读。新版启动期限 90 秒涵盖 prepared 和 ready，普通 wall 360 秒、缺失恢复 600 秒；这些是评估器保护，产品实际预算独立回读，不能互相替代。
 
 [扩展 suite](../../evals/suites/harness-extension-v1.json)独立包含 E11.memory_withdraw_scope v1。来自 fixture-control 授权范围曾过宽的实际缺口：准备两条 active Memory，撤回其中一条；其新来源单位必须消失，另一条保持原版本并继续进入最终序列化请求。扩展暂为观察集，不能混入核心 policy 或声称私有保留集。
 
@@ -32,17 +32,19 @@ real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入�
 
 中性 bridge 对可信产品代码实施 Python 网络、进程和 SQLite 路径隔离；这不是针对恶意原生代码的 OS 沙箱。HITL、checkpoint、pending/confirm、provider_blocks 保持原产品契约。
 
+E07 在模型屏障释放前从实际 cursor 建立重连，随后释放模型并接收同一 turn/generation 的实际数据帧；不能等回答完成再重连，因为产品有界缓冲可合法淘汰早期 cursor。重连使用 API 的 `after` 参数，并核对原 cursor 和新事件序号；订阅控制帧不能证明恢复。有界 subscriber 若发送 resync，保留该信号并 GET 原生 snapshot，核对同一 Turn/generation、有效 cursor 及覆盖已接收事件的高水位；不能重新 POST。确定性 E07 将正常回复均匀分为 300 段输出（短于 300 字符时逐字），在原产品 512 事件预算内覆盖 256 事件缓冲淘汰风险；[续流预检 suite](../../evals/suites/harness-core-stream-preflight-v1.json)单独运行此项，不替代完整分母。
+
 ## 3 比较与 Gate
 
 ```text
 oc eval compare --baseline <run目录> --candidate <run目录> --policy core-observe-v1 --output <compare.json>
-oc eval gate --candidate <D-run目录> --policy evals/policies/core-initial-baseline-v2.json --purpose initial-baseline --mode enforce --review <审核.json> --output <gate.json>
+oc eval gate --candidate <D-run目录> --policy evals/policies/core-initial-baseline-v3.json --purpose initial-baseline --mode enforce --review <审核.json> --output <gate.json>
 oc eval gate --candidate <run目录> --baseline <批准基线run目录> --policy <release-policy.json> --purpose release --mode enforce --experiment <实验.json> --review <审核.json> --baseline-store <store目录> --baseline-id <id> --output <gate.json>
 ```
 
 正式比较必须声明 ExperimentSpec。五类已注册变量为 product_snapshot、provider_model、prompt_or_tool_surface、dependency_set、context_policy；声明不豁免评估器、fixture、预算、模式和环境核对。展示 fixed、persistent/new failure、incomplete、incomparable 和波动，三次样本不宣称总体稳定性、可靠 p95 或单因素因果。
 
-[initial 模板](../../evals/policies/core-initial-baseline-v2.json)和 [release 模板](../../evals/policies/core-release-v2.json)默认要求 19 项 D 每项三次并有真实独立审查引用。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
+[initial 模板](../../evals/policies/core-initial-baseline-v3.json)和 [release 模板](../../evals/policies/core-release-v3.json)默认要求 19 项 D 每项三次并有真实独立审查引用。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
 
 exit 优先级为已知阻断失败 1、配置或不可比 2、不完整或待人工 3、满足 0。所有 eval/compare/gate 报告仍为 release_eligible=false。质量例外只对已完成的人工质量 fail、精确对象和有效期生效；安全失败、缺测、缺证据和待人工不得例外。
 

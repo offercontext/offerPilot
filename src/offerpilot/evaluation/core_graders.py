@@ -276,9 +276,32 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
     if rule == "stream.same_generation":
         if "disconnect_state" not in f:
             return None, "disconnect_not_observed"
-        return f.get("disconnect_state") == "running" and f.get("reattached") is True and len(
+        errors = f.get("reattachment_errors", [])
+        resync = f.get("reattachment_resync_snapshot", {})
+        recovered = (
+            errors == ["runtime_resync_required"]
+            and resync.get("turn_id") == f.get("turn_id")
+            and resync.get("execution_generation") == f.get("generation")
+            and bool(resync.get("snapshot_cursor"))
+            and type(resync.get("high_watermark")) is int
+            and resync["high_watermark"] >= max(f.get("reattached_event_sequences") or [0])
+        )
+        return type(f.get("generation")) is int and f["generation"] >= 1 and bool(
+            f.get("turn_id")
+        ) and f.get("disconnect_state") == "running" and f.get("reattached") is True and len(
             f.get("submit_ids", [])
-        ) == 1 and f.get("generation") == 1, "actual_disconnect_cursor_reattach"
+        ) == 1 and f.get("reattached_before_release") is True and bool(
+            f.get("disconnect_cursor")
+        ) and f.get("reattach_after") == f["disconnect_cursor"] and f.get(
+            "reattached_generations"
+        ) == [f.get("generation")] and f.get("reattached_turns") == [f.get("turn_id")] and (
+            not errors or recovered
+        ) and type(f.get("disconnect_event_seq")) is int and bool(
+            f.get("reattached_event_sequences")
+        ) and all(
+            type(seq) is int and seq > f["disconnect_event_seq"]
+            for seq in f["reattached_event_sequences"]
+        ), "actual_disconnect_cursor_reattach"
     if rule == "unknown.fenced":
         if not f.get("primary_barrier") or f.get("primary_barrier_high_water") is None:
             return None, "accepted_primary_delivery_boundary_not_reached"
@@ -345,6 +368,47 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             len({(b["admitted_at"], b["deadline_at"]) for b in group}) == 1
             for group in groups.values()
         )
+        if item == "E07.runtime_reattach":
+            used = ("model_calls", "title_model_calls", "tool_calls", "event_count", "event_bytes")
+            remaining = (
+                "remaining_model_calls",
+                "remaining_title_model_calls",
+                "remaining_tool_calls",
+                "remaining_events",
+                "remaining_event_bytes",
+            )
+            same = (
+                same
+                and len(budgets) >= 2
+                and set(groups) == {str((f.get("turn_id"), f.get("generation")))}
+                and any(b.get("observation_stage") == "sse_disconnect" for b in budgets)
+                and any(b.get("observation_stage") is None for b in budgets)
+                and (
+                    not f.get("reattachment_errors")
+                    or any(b.get("observation_stage") == "resync_snapshot" for b in budgets)
+                )
+                and all(
+                    type(b.get(k)) is int and b[k] >= 0 for b in budgets for k in used + remaining
+                )
+                and all(
+                    type(b.get("remaining_seconds")) in {int, float} and b["remaining_seconds"] >= 0
+                    for b in budgets
+                )
+                and all(
+                    after[k] >= before[k]
+                    for before, after in zip(budgets, budgets[1:])
+                    for k in used
+                )
+                and all(
+                    after[k] <= before[k]
+                    for before, after in zip(budgets, budgets[1:])
+                    for k in remaining
+                )
+                and all(
+                    after["remaining_seconds"] <= before["remaining_seconds"] + 1e-6
+                    for before, after in zip(budgets, budgets[1:])
+                )
+            )
         if item == "E08.runtime_deadline":
             same = (
                 same

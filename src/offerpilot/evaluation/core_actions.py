@@ -171,7 +171,15 @@ def drive(
                 cursor = stream_cursor(line)
                 if cursor:
                     f["disconnect_cursor"] = cursor
-                if f.get("disconnect_cursor") and any(
+                if line.startswith("data:"):
+                    value = json.loads(line[5:])
+                    if (
+                        isinstance(value, dict)
+                        and value.get("cursor") == cursor
+                        and "kind" not in value
+                    ):
+                        f["disconnect_event_seq"] = value.get("event_seq")
+                if f.get("disconnect_event_seq") and any(
                     x.get("type") == "fault_reached" for x in subject.events
                 ):
                     break
@@ -183,15 +191,85 @@ def drive(
             if v.get("type") == "fault_reached"
             and v.get("boundary") in {"model_entered", "http_before_send"}
         )
-        f["disconnect_state"] = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")[
-            "state"
-        ]
+        disconnected_status = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")
+        f["disconnect_state"] = disconnected_status["state"]
+        if disconnected_status.get("budget"):
+            f.setdefault("budget_snapshots", []).append(
+                disconnected_status["budget"]
+                | {
+                    "turn_id": disconnected_status.get("turn_id"),
+                    "execution_generation": disconnected_status.get("execution_generation"),
+                    "observation_stage": "sse_disconnect",
+                }
+            )
         observer.marker(
             data,
             "stream_disconnected_before_release",
             {"control_seq": barrier["seq"], "state": f["disconnect_state"]},
         )
-        subject.send({"command": "ack", "seq": barrier["seq"]})
+        cursor = f.get("disconnect_cursor")
+        if not cursor:
+            raise ValueError("no actual SSE cursor observed")
+        # Subscribe while the model is held; completion can expire a ring cursor.
+        with driver.client.stream(
+            "GET", submitted["links"]["events_url"], params={"after": cursor}, timeout=30
+        ) as stream:
+            f["reattached"] = stream.status_code == 200
+            if not f["reattached"]:
+                raise ProductFailure("valid held cursor reattachment was rejected")
+            observer.marker(
+                data,
+                "stream_reattached_before_release",
+                {"control_seq": barrier["seq"], "turn_id": turn, "generation": f["generation"]},
+            )
+            f["reattached_before_release"] = True
+            f["reattach_after"] = stream.request.url.params.get("after")
+            subject.send({"command": "ack", "seq": barrier["seq"]})
+            captured = []
+            generations, sse_turns, sse_errors, event_sequences = set(), set(), set(), set()
+            for line in stream.iter_lines():
+                if time.monotonic() >= driver.deadline:
+                    raise TimeoutError("reattachment trial watchdog")
+                captured.append(line)
+                if line.startswith("data:"):
+                    try:
+                        value = json.loads(line[5:])
+                    except ValueError:
+                        continue
+                    if isinstance(value, dict):
+                        if "execution_generation" in value:
+                            generations.add(value["execution_generation"])
+                        if "kind" not in value and type(value.get("event_seq")) is int:
+                            event_sequences.add(value["event_seq"])
+                        if "turn_id" in value:
+                            sse_turns.add(value["turn_id"])
+                        if value.get("error_code"):
+                            sse_errors.add(value["error_code"])
+                        if isinstance(value.get("data"), dict) and value["data"].get("error_code"):
+                            sse_errors.add(value["data"]["error_code"])
+                        if value.get("kind") == "resync_required":
+                            sse_errors.add("runtime_resync_required")
+            f["reattached_generations"] = sorted(generations)
+            f["reattached_turns"] = sorted(sse_turns)
+            f["reattachment_errors"] = sorted(sse_errors)
+            f["reattached_event_sequences"] = sorted(event_sequences)
+            e["milestones"]["reattached_sse"] = "\n".join(captured)
+        if sse_errors == {"runtime_resync_required"}:
+            # A bounded subscriber can request native snapshot resynchronization.
+            # This is still a read of the original generation, never a new POST.
+            f["reattachment_resync_snapshot"] = driver.request(
+                "GET", submitted["links"]["snapshot_url"]
+            )
+            resync_snapshot = f["reattachment_resync_snapshot"]
+            if resync_snapshot.get("budget"):
+                f.setdefault("budget_snapshots", []).append(
+                    resync_snapshot["budget"]
+                    | {
+                        "turn_id": resync_snapshot.get("turn_id"),
+                        "execution_generation": resync_snapshot.get("execution_generation"),
+                        "observation_stage": "resync_snapshot",
+                    }
+                )
     if item == "E08.runtime_deadline":
         second = driver.request(
             "POST", "/api/pilot/runtime/v1/turns", body | {"request_id": str(uuid4())}
@@ -247,16 +325,6 @@ def drive(
             "E10.",
         )
     ):
-        if item == "E07.runtime_reattach":
-            cursor = f.get("disconnect_cursor")
-            if not cursor:
-                raise ValueError("no actual SSE cursor observed")
-            with driver.client.stream(
-                "GET", submitted["links"]["events_url"], params={"cursor": cursor}, timeout=30
-            ) as stream:
-                raw = "\n".join(stream.iter_lines())
-                e["milestones"]["reattached_sse"] = raw
-                f["reattached"] = stream.status_code == 200
         if item == "E09.memory_withdraw":
             before = observer.marker(
                 data, "fixture_control_decided", {"memory_id": aliases["memory_id"]}

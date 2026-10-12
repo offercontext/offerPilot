@@ -35,6 +35,152 @@ def test_missing_is_unknown_keeps_full_denominator(tmp_path, monkeypatch):
     assert all(r.status == "unknown" for r in missing(manifest.planned_trials[0], "missing").rules)
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "none",
+        "late_attach",
+        "wrong_generation",
+        "wrong_turn",
+        "resync",
+        "missing_generation",
+        "missing_resume_parameter",
+        "replayed_old_frame",
+        "resync_recovered",
+        "resync_wrong_turn",
+        "resync_wrong_generation",
+        "resync_stale_snapshot",
+    ],
+)
+def test_stream_success_requires_live_reattach_and_actual_generation_frames(mutation):
+    facts = dict(
+        disconnect_state="running",
+        reattached=True,
+        submit_ids=["request"],
+        generation=1,
+        turn_id="turn",
+        reattached_before_release=True,
+        disconnect_cursor="signed",
+        reattach_after="signed",
+        disconnect_event_seq=4,
+        reattached_event_sequences=[5, 6],
+        reattached_generations=[1],
+        reattached_turns=["turn"],
+        reattachment_errors=[],
+    )
+    if mutation == "late_attach":
+        facts["reattached_before_release"] = False
+    elif mutation == "wrong_generation":
+        facts["reattached_generations"] = [2]
+    elif mutation == "wrong_turn":
+        facts["reattached_turns"] = ["other"]
+    elif mutation == "resync":
+        facts["reattachment_errors"] = ["runtime_resync_required"]
+    elif mutation == "missing_generation":
+        facts["generation"] = None
+        facts["reattached_generations"] = [None]
+    elif mutation == "missing_resume_parameter":
+        facts["reattach_after"] = None
+    elif mutation == "replayed_old_frame":
+        facts["reattached_event_sequences"] = [3, 5]
+    elif mutation.startswith("resync_"):
+        facts["reattachment_errors"] = ["runtime_resync_required"]
+        facts["reattachment_resync_snapshot"] = dict(
+            turn_id="turn", execution_generation=1, snapshot_cursor="current", high_watermark=6
+        )
+        if mutation == "resync_wrong_turn":
+            facts["reattachment_resync_snapshot"]["turn_id"] = "other"
+        elif mutation == "resync_wrong_generation":
+            facts["reattachment_resync_snapshot"]["execution_generation"] = 2
+        elif mutation == "resync_stale_snapshot":
+            facts["reattachment_resync_snapshot"]["high_watermark"] = 4
+    assert grade_rule("stream.same_generation", "E07.runtime_reattach", dict(facts=facts))[0] == (
+        mutation in {"none", "resync_recovered"}
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "none",
+        "reset",
+        "missing_before",
+        "wrong_generation",
+        "missing_resync",
+        "counter_reset",
+        "allowance_reset",
+    ],
+)
+def test_stream_budget_compares_disconnect_and_post_reattach_readback(mutation):
+    before = dict(
+        turn_id="turn",
+        execution_generation=1,
+        admitted_at=10,
+        deadline_at=130,
+        observation_stage="sse_disconnect",
+        model_calls=1,
+        title_model_calls=0,
+        tool_calls=0,
+        event_count=2,
+        event_bytes=77,
+        remaining_model_calls=19,
+        remaining_title_model_calls=1,
+        remaining_tool_calls=40,
+        remaining_events=510,
+        remaining_event_bytes=1048499,
+        remaining_seconds=100,
+    )
+    after = {k: v for k, v in before.items() if k != "observation_stage"}
+    facts = dict(turn_id="turn", generation=1, budget_snapshots=[before, after])
+    if mutation == "reset":
+        after["deadline_at"] = 140
+    elif mutation == "missing_before":
+        facts["budget_snapshots"] = [after]
+    elif mutation == "wrong_generation":
+        after["execution_generation"] = 2
+    elif mutation == "missing_resync":
+        facts["reattachment_errors"] = ["runtime_resync_required"]
+    elif mutation == "counter_reset":
+        after["model_calls"] = 0
+    elif mutation == "allowance_reset":
+        after["remaining_model_calls"] = 20
+    assert grade_rule("budget.continuity", "E07.runtime_reattach", dict(facts=facts))[0] == (
+        mutation == "none"
+    )
+
+
+def test_runtime_resume_route_rejects_invalid_after_cursor(tmp_path):
+    from fastapi.testclient import TestClient
+    from offerpilot.ai.types import Assistant
+    from offerpilot.api import create_app
+    from test_managed_runtime_api import _wait_for_status
+    from uuid import uuid4
+
+    class Model:
+        def complete(self, messages, tools):
+            return Assistant(content="完成。")
+
+    with TestClient(create_app(data_dir=tmp_path, chat_model=Model())) as client:
+        response = client.post(
+            "/api/pilot/runtime/v1/turns",
+            json={"request_id": str(uuid4()), "conversation_id": 0, "message": "只读回答"},
+        )
+        assert response.status_code == 202
+        submitted = response.json()
+        assert (
+            _wait_for_status(client, submitted["turn_id"], terminal={"completed", "failed"})[
+                "state"
+            ]
+            == "completed"
+        )
+        # Unknown query names are ignored by FastAPI; only `after` resumes.
+        fresh = client.get(submitted["links"]["events_url"], params={"cursor": "invalid"})
+        assert fresh.status_code == 200
+        resumed = client.get(submitted["links"]["events_url"], params={"after": "invalid"})
+        assert resumed.status_code == 409
+        assert resumed.json()["error_code"] == "runtime_resync_required"
+
+
 def withdrawal():
     old = {"id": "m", "current_version": 1, "state": "active"}
     new = old | {"current_version": 2, "state": "withdrawn"}

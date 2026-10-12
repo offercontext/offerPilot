@@ -133,6 +133,7 @@ def suite_items(suite_id: str) -> set[str]:
     return {
         "harness-core-v1": set(ITEMS),
         "harness-core-preflight-v1": {"E01.runtime_read"},
+        "harness-core-stream-preflight-v1": {"E07.runtime_reattach"},
         "harness-extension-v1": set(EXTENSION_ITEMS),
     }.get(suite_id, set())
 
@@ -161,14 +162,14 @@ def case_definition(item: str) -> dict[str, Any]:
         case_version=1
         if item in EXTENSION_ITEMS
         else 3
-        if case in {"E01", "E04", "E06", "E08"}
+        if case in {"E01", "E04", "E06", "E07", "E08"}
         else 2,
         execution_item_id=item,
         fixture_id="synthetic-core-extension-v1"
         if item in EXTENSION_ITEMS
         else "synthetic-core-v1",
         action_id=data.get("action", item),
-        model_id="core-script-v1",
+        model_id="core-stream-burst-v1" if case == "E07" else "core-script-v1",
         grader_id="core-v1",
         supported_modes=["deterministic", "real"] if data["real"] else ["deterministic"],
         coverage_kind=data.get("coverage", "task"),

@@ -55,7 +55,7 @@ class CaseSpecV2(Contract):
     execution_item_id: str
     fixture_id: Literal["synthetic-core-v1", "synthetic-core-extension-v1"]
     action_id: str
-    model_id: Literal["core-script-v1"]
+    model_id: Literal["core-script-v1", "core-stream-burst-v1"]
     grader_id: Literal["core-v1"]
     supported_modes: list[Mode]
     required_capabilities: list[str]
@@ -99,7 +99,12 @@ class SuiteItemV2(Contract):
 
 class SuiteV2(Contract):
     schema_version: Literal[2] = 2
-    suite_id: Literal["harness-core-v1", "harness-core-preflight-v1", "harness-extension-v1"]
+    suite_id: Literal[
+        "harness-core-v1",
+        "harness-core-preflight-v1",
+        "harness-core-stream-preflight-v1",
+        "harness-extension-v1",
+    ]
     execution_items: list[SuiteItemV2]
 
     @model_validator(mode="after")

@@ -174,6 +174,20 @@ class ScriptModel:
         )
 
 
+class StreamBurstModel(ScriptModel):
+    def stream_complete(
+        self, messages: Any, tools: Any, on_delta: Any, response_format: Any = None
+    ) -> Any:
+        answer = self.complete(messages, tools, response_format)
+        content = answer.content or ""
+        # Exceed the default 256-event replay ring, retain the 512-event budget.
+        chunks = min(300, len(content))
+        for index in range(chunks):
+            on_delta(content[index * len(content) // chunks : (index + 1) * len(content) // chunks])
+            time.sleep(0.03)
+        return answer
+
+
 def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> None:
     from scripts.evaluation_subject.core_transport import SEND_PERMISSION
 
@@ -280,7 +294,12 @@ def serve(channel: Channel) -> None:
         import asyncio
 
         loop = asyncio.new_event_loop()
-        model: Any = ScriptModel(channel)
+        action_id = config.get("action_id", config["trial_key"]["execution_item_id"])
+        model: Any = (
+            StreamBurstModel(channel)
+            if action_id == "E07.runtime_reattach"
+            else ScriptModel(channel)
+        )
         provider_server: Any = None
         endpoint = (
             config.get("provider_profile", {}).get("endpoint")
@@ -288,7 +307,6 @@ def serve(channel: Channel) -> None:
             else None
         )
         ports = {port}
-        action_id = config.get("action_id", config["trial_key"]["execution_item_id"])
         if config["trial_key"]["mode"] == "deterministic" and action_id.startswith(
             ("E09.", "E10.")
         ):
