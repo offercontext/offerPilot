@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "suite_id": "harness-core-preflight-v1",
+  "execution_items": [
+    {
+      "execution_item_id": "E01.runtime_read",
+      "spec_path": "cases/E01.runtime_read.v2.json",
+      "required": true
+    }
+  ]
+}
