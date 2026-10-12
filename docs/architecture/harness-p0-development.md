@@ -1,5 +1,7 @@
 # Harness P0 开发与增量选测
 
+本次实现快照、验收命令与边界见[验证记录](harness-p0-verification-20261012.md)。
+
 实现依据：[P0 实施方案](harness-evaluation-p0-implementation.md)。Harness T1–T7 与选测 S1–S4 是两套独立验收；成功报告始终带 `release_eligible=false`。完整发布仍使用原 release gate。
 
 ## 隔离评估
