@@ -9,7 +9,6 @@ import importlib
 import os
 from pathlib import Path
 import re
-from statistics import median
 from typing import Any, Iterator, Literal
 from uuid import uuid4
 
@@ -972,35 +971,4 @@ def revoke_baseline(
 
 
 def statistics(manifest: RunManifestV2, rows: list[TrialResultV2]) -> dict[str, Any]:
-    summary = aggregate(manifest, rows)
-    samples = summary["trials"]
-    summary["decidable"] = {
-        "numerator": sum(r["verdict"] != "incomplete" for r in samples),
-        "denominator": len(samples),
-    }
-    summary["evidence_complete"] = {
-        "numerator": sum(
-            any(
-                v["rule_id"] == "evidence.required_complete" and v["status"] == "pass"
-                for v in r["rules"]
-            )
-            for r in samples
-        ),
-        "denominator": len(samples),
-    }
-    summary["resources"] = [
-        dict(
-            trial_key=(r["variant_id"], r["execution_item_id"], r["mode"], r["repeat_index"]),
-            consumption=r["consumption"],
-        )
-        for r in samples
-    ]
-    times = [
-        r["consumption"]["wall_seconds"]
-        for r in samples
-        if r["consumption"].get("wall_seconds") is not None
-    ]
-    summary["wall_seconds_median"] = median(times) if times else None
-    summary["resource_samples"] = len(times)
-    summary["p95"] = None
-    return summary
+    return aggregate(manifest, rows)

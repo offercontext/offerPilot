@@ -8,6 +8,7 @@ from pathlib import Path
 import queue
 import subprocess
 import threading
+import time
 from typing import Any
 
 from offerpilot.evaluation.core_contracts import RunGrant, RunManifestV2
@@ -84,6 +85,7 @@ class CoreSubject(Subject):
         self.messages: queue.Queue[dict[str, Any]] = queue.Queue()
         self.errors: list[str] = []
         self.closed = False
+        self.started = time.monotonic()
         self.lock = threading.Lock()
         self.stderr = (private / f"epoch-{config['epoch']}.stderr").open("w", encoding="utf-8")
         self.tree = process_tree(
@@ -112,6 +114,7 @@ class CoreSubject(Subject):
             "fault_reached",
             "negative_control_reached",
             "shutdown_complete",
+            "setup_progress",
             "model_observation",
             "executor_observation",
         }

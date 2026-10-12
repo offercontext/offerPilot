@@ -4,7 +4,7 @@
   "execution_items": [
     {
       "execution_item_id": "E01.runtime_read",
-      "spec_path": "cases/E01.runtime_read.v2.json",
+      "spec_path": "cases/E01.runtime_read.v3.json",
       "required": true
     }
   ]

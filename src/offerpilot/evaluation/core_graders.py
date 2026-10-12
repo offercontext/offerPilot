@@ -15,6 +15,25 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
     calls = e.get("calls", [])
     mil = e.get("milestones", {})
     if rule == "evidence.required_complete":
+        if e.get("trial_key", {}).get("mode") == "real":
+            sends = [
+                v for v in calls if v.get("purpose") == "provider_send" and not v.get("blocked")
+            ]
+            usage = [
+                v
+                for v in e.get("input_observations", [])
+                if v.get("category") == "usage"
+                and v.get("actual_model")
+                and isinstance(v.get("usage"), dict)
+                and all(
+                    type(v["usage"].get(k)) is int and v["usage"][k] >= 0
+                    for k in ("prompt_tokens", "completion_tokens", "total_tokens")
+                )
+            ]
+            if not sends or {(v.get("epoch"), v.get("attempt")) for v in usage} != {
+                (v.get("epoch"), f"http-{v['seq']}") for v in sends
+            }:
+                return None, "actual_provider_model_or_usage_unobserved"
         return (
             None
             if e.get("errors")
@@ -146,6 +165,8 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
                 return None, "answer_requires_manual_or_structured_fact_check"
         return {r["id"] for r in rows} == {r["id"] for r in expected}, "exact_query_set"
     if rule == "scope.correct_target":
+        if f.get("proposed_id") is None:
+            return None, "proposal_not_observed"
         return f.get("proposed_id") == f.get("aliases", {}).get(
             "technical_interview"
         ), "proposal_not_repaired"
@@ -176,6 +197,8 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             args["scheduled_at"]
         ) == instant(f["approvals"][0]["effective_time"]), "actual_executor_payload"
     if rule == "receipt.edited":
+        if not f.get("driver_completed"):
+            return None, "edited_receipt_not_observed"
         return "自动续答已结束" in f.get("answer", "") and not [
             c
             for c in calls
@@ -184,10 +207,14 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
         ], "saved_edited_receipt"
     if rule in {"operation.idempotent", "request.conflict"}:
         if rule == "request.conflict":
+            if "conflict_code" not in f:
+                return None, "conflicting_request_not_observed"
             return f.get("conflict_code") == 409 and f.get("conflict_body", {}).get(
                 "error_code"
             ) == "runtime_submission_conflict", "same_request_changed_payload"
         r = f.get("replays", [])
+        if not r:
+            return None, "replay_not_observed"
         return bool(r) and all(
             v.get("replayed") is True
             and v.get("turn_id") == f["turn_id"]
@@ -244,6 +271,8 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             "after_restart_state"
         ) != "completed", "missing_delivery_not_public_success"
     if rule == "stream.same_generation":
+        if "disconnect_state" not in f:
+            return None, "disconnect_not_observed"
         return f.get("disconnect_state") == "running" and f.get("reattached") is True and len(
             f.get("submit_ids", [])
         ) == 1 and f.get("generation") == 1, "actual_disconnect_cursor_reattach"
@@ -259,6 +288,8 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             c.get("purpose") == "execute_primary" for c in calls
         ) == 1, "accepted_write_late_result_fenced"
     if rule == "budget.product_origin":
+        if not any(v.get("category") == "budget_termination" for v in e.get("budget_events", [])):
+            return None, "product_budget_termination_not_observed"
         return f.get("terminal_state") in {"result_unknown", "interrupted", "failed"} and f.get(
             "termination_source"
         ) == "product_budget" and f.get("budget_reason") in {
@@ -315,7 +346,8 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             same = (
                 same
                 and f.get("queued_probe", {}).get("budget", {}).get("model_calls") == 0
-                and f.get("queued_probe", {}).get("state") in {"result_unknown", "interrupted"}
+                and f.get("queued_probe", {}).get("state")
+                in {"result_unknown", "interrupted", "failed"}
                 and f.get("queued_admission", {}).get("state") == "queued"
                 and f.get("deadline_model_barriers", 0) >= 2
             )
@@ -395,6 +427,16 @@ def grade(
             "evidence_hash": evidence_hash,
             "private_directory": private_directory,
             "termination_source": evidence.get("facts", {}).get("termination_source", "unknown"),
+            "termination_events": [
+                v
+                for v in evidence.get("budget_events", [])
+                if v.get("category") == "budget_termination"
+            ]
+            + [
+                v
+                for v in evidence.get("input_observations", [])
+                if v.get("category") == "provider_error"
+            ],
             "consumption": evidence.get("facts", {}).get("consumption", {}),
             "fault_witnesses": evidence.get("faults", []),
             "manual_review": evidence.get("manual_review", []),

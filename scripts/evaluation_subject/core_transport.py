@@ -109,18 +109,24 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             or set(payload) - allowed_fields
             or type(payload.get("max_tokens")) is not int
             or not 0 < payload["max_tokens"] <= limits["max_output_tokens"]
+            or type(payload.get("n", 1)) is not int
             or payload.get("n", 1) != 1
-            or payload.get("temperature", 0) != 0
-            or payload.get("thinking", {"type": "disabled"}) != {"type": "disabled"}
+            or type(payload.get("temperature")) not in {int, float}
+            or payload.get("temperature") != 0
+            or payload.get("thinking") != {"type": "disabled"}
+            or type(payload.get("stream", False)) is not bool
+            or payload.get("stream") is True
+            and payload.get("stream_options") != {"include_usage": True}
+            or payload.get("stream", False) is False
+            and "stream_options" in payload
         ):
             raise ValueError("provider model/output cap changed")
-        channel.attempt(
-            "provider_send",
+        attempt_seq = channel.provider_attempt(
             **(getattr(state, "identity", None) or {}),
             input_bytes=len(body),
             output_cap=limits["max_output_tokens"],
         )
-        attempt = f"http-{channel.seq}"
+        attempt = f"http-{attempt_seq}"
         private = Path(channel.config["data_dir"])
         path = private / (attempt + "-request.json")
         path.write_bytes(body)
@@ -215,13 +221,26 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                     "attempt": attempt,
                     "status": response.status_code,
                     "request_id_hash": hashlib.sha256(
-                        response.headers.get("x-request-id", "").encode()
-                    ).hexdigest(),
+                        response.headers["x-request-id"].encode()
+                    ).hexdigest()
+                    if response.headers.get("x-request-id")
+                    else None,
+                    "transport_stream": bool(kwargs.get("stream")),
+                    "wire_stream": bool(payload.get("stream")),
+                    "content_encoding": response.headers.get("content-encoding"),
+                    "content_type": response.headers.get("content-type"),
                 },
                 ack=True,
             )
-            if not kwargs.get("stream"):
+            if not payload.get("stream"):
+                # SDKs can use HTTP streaming for ordinary JSON. Read the decoded
+                # response, rather than interpreting transport chunks as SSE.
+                raw_bytes = response.read()
+                if len(raw_bytes) > 1024 * 1024:
+                    raise ValueError("oversized provider JSON response")
                 raw = response.json()
+                if response.status_code == 200:
+                    (private / (attempt + "-response.json")).write_bytes(raw_bytes)
                 channel.emit(
                     "model_observation",
                     {
@@ -229,46 +248,50 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                         "attempt": attempt,
                         "actual_model": raw.get("model"),
                         "usage": raw.get("usage"),
+                        "completion_id_hash": hashlib.sha256(raw["id"].encode()).hexdigest()
+                        if isinstance(raw.get("id"), str)
+                        else None,
                     },
                     ack=True,
                 )
             else:
-                if not isinstance(response.stream, httpx.SyncByteStream):
-                    raise TypeError("synchronous provider stream required")
-                original_stream = response.stream
+                # Observe the public decoded-byte iterator so gzip/deflate SSE
+                # is preserved for the SDK and the evidence observer alike.
+                original_iterator = response.iter_bytes
 
-                class ObservedStream(httpx.SyncByteStream):
-                    def __iter__(self) -> Any:
-                        pending = b""
-                        for chunk in original_stream:
-                            pending += chunk
-                            if len(pending) > 1024 * 1024:
-                                raise ValueError("oversized provider SSE frame")
-                            while b"\n" in pending:
-                                line, pending = pending.split(b"\n", 1)
-                                if line.startswith(b"data:"):
-                                    try:
-                                        value = json.loads(line[5:].strip())
-                                    except ValueError:
-                                        continue
-                                    if value.get("usage"):
-                                        channel.emit(
-                                            "model_observation",
-                                            {
-                                                "category": "usage",
-                                                "attempt": attempt,
-                                                "actual_model": value.get("model"),
-                                                "usage": value["usage"],
-                                                "stream": True,
-                                            },
-                                            ack=True,
-                                        )
-                            yield chunk
+                def observed_iterator(*args: Any, **kwargs: Any) -> Any:
+                    pending = b""
+                    for chunk in original_iterator(*args, **kwargs):
+                        pending += chunk
+                        if len(pending) > 1024 * 1024:
+                            raise ValueError("oversized provider SSE frame")
+                        while b"\n" in pending:
+                            line, pending = pending.split(b"\n", 1)
+                            if line.startswith(b"data:"):
+                                try:
+                                    value = json.loads(line[5:].strip())
+                                except ValueError:
+                                    continue
+                                if value.get("usage"):
+                                    channel.emit(
+                                        "model_observation",
+                                        {
+                                            "category": "usage",
+                                            "attempt": attempt,
+                                            "actual_model": value.get("model"),
+                                            "usage": value["usage"],
+                                            "stream": True,
+                                            "completion_id_hash": hashlib.sha256(
+                                                value["id"].encode()
+                                            ).hexdigest()
+                                            if isinstance(value.get("id"), str)
+                                            else None,
+                                        },
+                                        ack=True,
+                                    )
+                        yield chunk
 
-                    def close(self) -> None:
-                        original_stream.close()
-
-                response.stream = ObservedStream()
+                setattr(response, "iter_bytes", observed_iterator)
             return response
         except Exception as exc:
             channel.emit(

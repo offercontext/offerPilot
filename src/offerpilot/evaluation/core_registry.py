@@ -131,7 +131,7 @@ def case_definition(item: str) -> dict[str, Any]:
     return dict(
         schema_version=2,
         case_id=case,
-        case_version=2 if case in {"E01", "E04", "E06", "E08"} else 1,
+        case_version=3 if case in {"E01", "E04", "E06", "E08"} else 2,
         execution_item_id=item,
         fixture_id="synthetic-core-v1",
         action_id=item,
@@ -160,11 +160,11 @@ def case_definition(item: str) -> dict[str, Any]:
         ],
         allowed_approvals=["technical_interview"],
         evaluator_limits=dict(
-            wall_seconds=420 if "missing" in item else 180,
+            wall_seconds=600 if "missing" in item else 360,
             model_calls=6 if item == "E08.runtime_model_budget" else 12,
             tool_attempts=6 if item == "E08.runtime_tool_budget" else 16,
             script_replies=8,
-            startup_seconds=45,
+            startup_seconds=90,
             shutdown_seconds=30,
         ),
     )

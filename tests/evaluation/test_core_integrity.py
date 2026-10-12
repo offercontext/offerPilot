@@ -208,6 +208,8 @@ def test_budget_continuity_groups_distinct_turn_admissions():
     )
     evidence = dict(facts=facts, observed=dict(deltas=[]), calls=[])
     assert grade_rule("budget.continuity", "E08.runtime_deadline", evidence)[0] is True
+    facts["queued_probe"]["state"] = "failed"
+    assert grade_rule("budget.continuity", "E08.runtime_deadline", evidence)[0] is True
     facts["budget_snapshots"][-1] = budgets[-1] | dict(deadline_at=100)
     assert grade_rule("budget.continuity", "E08.runtime_deadline", evidence)[0] is False
 
@@ -255,7 +257,14 @@ def test_budget_failed_state_requires_actual_product_budget_origin():
         termination_source="product_budget",
         budget_reason="runtime budget exhausted",
     )
-    e = dict(facts=f, observed=dict(deltas=[]), calls=[])
+    e = dict(
+        facts=f,
+        observed=dict(deltas=[]),
+        calls=[],
+        budget_events=[
+            dict(category="budget_termination", origin="RuntimeBudget", resource="model")
+        ],
+    )
     assert grade_rule("budget.product_origin", "E08.runtime_model_budget", e)[0] is True
     f["termination_source"] = "normal"
     assert grade_rule("budget.product_origin", "E08.runtime_model_budget", e)[0] is False

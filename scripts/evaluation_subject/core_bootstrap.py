@@ -26,19 +26,22 @@ from scripts.evaluation_subject.core_transport import observe  # noqa: E402
 
 class CoreChannel(Channel):
     def emit(self, kind: str, payload: dict[str, Any], *, ack: bool = False) -> None:
-        if (
-            kind != "fault_reached"
-            or not ack
-            or self.config["fault_profile"] not in {"executor_block", "model_block"}
-        ):
-            return super().emit(kind, payload, ack=ack)
+        self.emit_sequence(kind, payload, ack=ack)
+
+    def provider_attempt(self, **metadata: Any) -> int:
+        return self.emit_sequence(
+            "call_attempt", {"purpose": "provider_send", **metadata}, ack=True
+        )
+
+    def emit_sequence(self, kind: str, payload: dict[str, Any], *, ack: bool = False) -> int:
         from scripts.evaluation_subject.bootstrap import CONTROL, MAX_MESSAGE
 
         with self.lock:
             self.seq += 1
             seq = self.seq
             waiter = threading.Event()
-            self.pending[seq] = waiter
+            if ack:
+                self.pending[seq] = waiter
             event = {
                 "schema_version": 1,
                 "trial_key": self.config["trial_key"],
@@ -52,10 +55,20 @@ class CoreChannel(Channel):
                 raise ValueError("oversized control message")
             CONTROL.write(line + "\n")
             CONTROL.flush()
-        if not waiter.wait(max(0, min(90, self.deadline - time.monotonic()))):
-            raise RuntimeError("controlled fault release was not acknowledged")
-        with self.lock:
-            self.pending.pop(seq, None)
+        if ack:
+            controlled = kind == "fault_reached" and self.config["fault_profile"] in {
+                "executor_block",
+                "model_block",
+            }
+            try:
+                if not waiter.wait(
+                    max(0, min(90 if controlled else 30, self.deadline - time.monotonic()))
+                ):
+                    raise RuntimeError("control ACK missing; call was blocked")
+            finally:
+                with self.lock:
+                    self.pending.pop(seq, None)
+        return seq
 
 
 class ScriptModel:
@@ -247,6 +260,7 @@ def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> N
 
 def serve(channel: Channel) -> None:
     config = channel.config
+    setup_started = time.monotonic()
     try:
         checkout, data = Path(config["checkout"]).resolve(), Path(config["data_dir"]).resolve()
         if json.loads((data / ".eval-trial.json").read_bytes()) != config["trial_key"]:
@@ -386,7 +400,18 @@ def serve(channel: Channel) -> None:
                 )
             return result
 
+        channel.emit(
+            "setup_progress",
+            {"phase": "product_import", "elapsed_seconds": time.monotonic() - setup_started},
+            ack=True,
+        )
         from offerpilot.api import create_app
+
+        channel.emit(
+            "setup_progress",
+            {"phase": "product_imported", "elapsed_seconds": time.monotonic() - setup_started},
+            ack=True,
+        )
 
         for m in list(sys.modules.values()):
             if m and getattr(m, "execute_prepared", None) is original_tool:
@@ -457,6 +482,8 @@ def serve(channel: Channel) -> None:
             original_completion = getattr(client_module, "completion")
 
             def completion(**payload: Any) -> Any:
+                if payload.get("stream"):
+                    payload["stream_options"] = {"include_usage": True}
                 payload.update(
                     client=sdk_client,
                     timeout=limits["timeout_seconds"],
@@ -470,6 +497,11 @@ def serve(channel: Channel) -> None:
             setattr(client_module, "completion", completion)
             # The gateway calls this exact client; every HTTP SDK retry crosses send.
         product = create_app(data_dir=data, chat_model=model, title_model=None)
+        channel.emit(
+            "setup_progress",
+            {"phase": "product_created", "elapsed_seconds": time.monotonic() - setup_started},
+            ack=True,
+        )
         budget = config["product_budget"]
         manager = product.state.runtime_manager
         from scripts.evaluation_subject.core_transport import EXECUTION_IDENTITY
@@ -681,6 +713,7 @@ def serve(channel: Channel) -> None:
                         "address": f"http://127.0.0.1:{port}",
                         "capabilities": caps,
                         "product_budget_effective": effective,
+                        "setup_seconds": time.monotonic() - setup_started,
                     },
                     ack=True,
                 )

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 import json
 from pathlib import Path
+from statistics import median
 import secrets
 import time
 from typing import Any
@@ -92,7 +93,10 @@ def run_trial(
         return value
 
     def handshake(value: CoreSubject) -> CoreHTTPDriver:
-        ready = value.wait("ready", spec.evaluator_limits.startup_seconds)
+        ready = value.wait(
+            "ready",
+            max(0, spec.evaluator_limits.startup_seconds - (time.monotonic() - value.started)),
+        )
         target = manifest.variants[plan.variant_id]
         if (
             ready["checkout_sha"] != target["commit"]
@@ -274,11 +278,17 @@ def aggregate(manifest: RunManifestV2, results: list[TrialResultV2]) -> dict[str
             raise ValueError("verdict differs from required rules")
     counts: dict[str, int] = dict(Counter(r.verdict for r in rows))
     groups = []
-    for item in dict.fromkeys(p.execution_item_id for p in manifest.planned_trials):
-        group = [r for r in rows if r.execution_item_id == item]
+    for item, variant, mode in dict.fromkeys(
+        (p.execution_item_id, p.variant_id, p.mode) for p in manifest.planned_trials
+    ):
+        group = [
+            r for r in rows if (r.execution_item_id, r.variant_id, r.mode) == (item, variant, mode)
+        ]
         groups.append(
             {
                 "execution_item_id": item,
+                "variant_id": variant,
+                "mode": mode,
                 "planned": len(group),
                 "pass": sum(r.verdict == "pass" for r in group),
                 "fail": sum(r.verdict == "fail" for r in group),
@@ -294,10 +304,42 @@ def aggregate(manifest: RunManifestV2, results: list[TrialResultV2]) -> dict[str
         "counts": {k: counts.get(k, 0) for k in ("pass", "fail", "incomplete")},
         "groups": groups,
         "trials": [r.model_dump(mode="json") for r in rows],
-        "exit_code": 1 if counts.get("fail") else 3 if counts.get("incomplete") else 0,
+        "exit_code": 1
+        if counts.get("fail")
+        else 2
+        if any(r.execution_status in {"unsupported", "eval_error"} for r in rows)
+        else 3
+        if counts.get("incomplete")
+        else 0,
         "release_eligible": False,
         "repeats": manifest.repeats,
         "stability_claim": False,
+        "decidable": {
+            "numerator": sum(r.verdict != "incomplete" for r in rows),
+            "denominator": len(rows),
+        },
+        "evidence_complete": {
+            "numerator": sum(
+                any(
+                    v.rule_id == "evidence.required_complete" and v.status == "pass"
+                    for v in r.rules
+                )
+                for r in rows
+            ),
+            "denominator": len(rows),
+        },
+        "resources": [{"trial_key": r.identity(), "consumption": r.consumption} for r in rows],
+        "wall_seconds_median": median(
+            [
+                r.consumption["wall_seconds"]
+                for r in rows
+                if r.consumption.get("wall_seconds") is not None
+            ]
+        )
+        if any(r.consumption.get("wall_seconds") is not None for r in rows)
+        else None,
+        "resource_samples": sum(r.consumption.get("wall_seconds") is not None for r in rows),
+        "p95": None,
     }
 
 
