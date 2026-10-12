@@ -98,7 +98,10 @@ def wait(driver: HTTPDriver, turn: str, states: set[str], facts: dict[str, Any])
     while time.monotonic() < driver.deadline:
         value = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")
         if value.get("budget"):
-            facts.setdefault("budget_snapshots", []).append(value["budget"])
+            facts.setdefault("budget_snapshots", []).append(
+                value["budget"]
+                | {"turn_id": turn, "execution_generation": value.get("execution_generation")}
+            )
         if value["state"] in states | TERMINAL:
             return value
         time.sleep(0.05)
@@ -197,7 +200,9 @@ def drive(
             "POST", "/api/pilot/runtime/v1/turns", body | {"request_id": str(uuid4())}
         )
         f["queued_admission"] = queued
-        f["queued_probe"] = wait(driver, queued["turn_id"], TERMINAL, {})
+        f["deadline_admissions"] = [submitted, second, queued]
+        f["queued_probe"] = wait(driver, queued["turn_id"], TERMINAL, f)
+        f["second_probe"] = wait(driver, second["turn_id"], TERMINAL, f)
         f["queue_occupiers"] = [submitted["turn_id"], second["turn_id"]]
         barriers = [
             v
@@ -297,8 +302,10 @@ def drive(
             response = current.get("terminal", {}).get("response", {})
             f.update(answer=response.get("message", ""), pending=response.get("pending_action"))
         f["terminal_state"] = current.get("state")
-        if f["terminal_state"] in {"result_unknown", "interrupted"} and item.startswith("E08."):
-            f["termination_source"] = "product_budget"
+        if f["terminal_state"] in {"result_unknown", "interrupted", "failed"} and item.startswith(
+            "E08."
+        ):
+            pass  # The grader requires actual RuntimeBudget/manager provenance.
         elif f["terminal_state"] != "completed":
             raise ProductFailure("unexpected product terminal")
         f["driver_completed"] = True
@@ -410,21 +417,37 @@ def drive(
     else:
         accepted = driver.request("POST", path, confirm)
         f["generation"] = accepted.get("execution_generation")
+        if item == "E03.runtime_reject":
+            # Rejection is a synchronous saved receipt, not a new managed generation.
+            f["rejection_receipt"] = accepted.get("terminal", {}).get("response", {})
+            f["answer"] = f["rejection_receipt"].get("message", "")
+            f["terminal_state"] = accepted.get("state")
+            time.sleep(3)
+            f["rejection_readback"] = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")
+            f.update(operation_facts(data, operation, conversation))
+            f["driver_completed"] = True
+            return subject, driver
         terminal = wait(driver, turn, TERMINAL, f)
         f["terminal_state"] = terminal["state"]
         f["answer"] = terminal.get("terminal", {}).get("response", {}).get("message", "")
         if item == "E08.runtime_unknown":
             f["primary_barrier"] = any(
-                x.get("boundary") == "accepted_primary_tool" for x in subject.events
+                x.get("boundary") == "accepted_primary_tool"
+                and x.get("stage") == "primary_committed_before_result_delivery"
+                and x.get("operation_id") == operation
+                for x in subject.events
             )
             for barrier in subject.events:
                 if (
                     barrier.get("type") == "fault_reached"
                     and barrier.get("boundary") == "accepted_primary_tool"
                 ):
+                    f["primary_barrier_high_water"] = barrier["observer_high_water"]
                     subject.send({"command": "ack", "seq": barrier["seq"]})
             time.sleep(3)
-            f["late_state"] = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")["state"]
+            late = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")
+            f["late_state"] = late["state"]
+            f["late_generation"] = late.get("execution_generation")
         elif item == "E05.runtime_replay":
             f["replays"] = [
                 driver.request("POST", path, confirm),

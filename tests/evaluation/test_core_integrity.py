@@ -191,3 +191,71 @@ def test_script_reply_budget_includes_expected_error_and_restart():
                 driver.request("POST", "/expected-error", {}, allowed=(409,))
         driver.close()
     assert len(sent) == len(observations) == 8
+
+
+def test_budget_continuity_groups_distinct_turn_admissions():
+    from offerpilot.evaluation.core_graders import grade_rule
+
+    budgets = [
+        dict(turn_id=str(i), execution_generation=1, admitted_at=10 + i, deadline_at=40 + i)
+        for i in range(3)
+    ]
+    facts = dict(
+        budget_snapshots=budgets + budgets,
+        queued_probe=dict(state="interrupted", budget=dict(model_calls=0)),
+        queued_admission=dict(state="queued"),
+        deadline_model_barriers=2,
+    )
+    evidence = dict(facts=facts, observed=dict(deltas=[]), calls=[])
+    assert grade_rule("budget.continuity", "E08.runtime_deadline", evidence)[0] is True
+    facts["budget_snapshots"][-1] = budgets[-1] | dict(deadline_at=100)
+    assert grade_rule("budget.continuity", "E08.runtime_deadline", evidence)[0] is False
+
+
+def test_rejection_requires_actual_cancelled_receipt_without_continuation():
+    from offerpilot.evaluation.core_graders import grade_rule
+
+    facts = dict(
+        reject_high_water=10,
+        operation_id="op",
+        rejection_receipt=dict(write_status="cancelled", operation_id="op"),
+    )
+    evidence = dict(facts=facts, observed=dict(deltas=[]), calls=[])
+    assert grade_rule("reject.no_continuation", "E03.runtime_reject", evidence)[0] is True
+    evidence["calls"].append(dict(observer_high_water=11, purpose="chat"))
+    assert grade_rule("reject.no_continuation", "E03.runtime_reject", evidence)[0] is False
+
+
+def test_unknown_requires_real_primary_and_no_late_success_or_write():
+    from offerpilot.evaluation.core_graders import grade_rule
+
+    f = dict(
+        primary_barrier=True,
+        primary_barrier_high_water=12,
+        manager_terminal_state="result_unknown",
+        terminal_state="interrupted",
+        late_state="interrupted",
+        generation=2,
+        late_generation=2,
+    )
+    e = dict(facts=f, observed=dict(deltas=[]), calls=[dict(purpose="execute_primary")])
+    assert grade_rule("unknown.fenced", "E08.runtime_unknown", e)[0] is True
+    f["late_state"] = "completed"
+    assert grade_rule("unknown.fenced", "E08.runtime_unknown", e)[0] is False
+    f["late_state"] = "interrupted"
+    e["observed"]["deltas"].append(dict(seq=13))
+    assert grade_rule("unknown.fenced", "E08.runtime_unknown", e)[0] is False
+
+
+def test_budget_failed_state_requires_actual_product_budget_origin():
+    from offerpilot.evaluation.core_graders import grade_rule
+
+    f = dict(
+        terminal_state="failed",
+        termination_source="product_budget",
+        budget_reason="runtime budget exhausted",
+    )
+    e = dict(facts=f, observed=dict(deltas=[]), calls=[])
+    assert grade_rule("budget.product_origin", "E08.runtime_model_budget", e)[0] is True
+    f["termination_source"] = "normal"
+    assert grade_rule("budget.product_origin", "E08.runtime_model_budget", e)[0] is False

@@ -185,6 +185,9 @@ def run_trial(
             f["effective_args"] = executors[-1]["effective_args"]
         budget_failures = [v for v in events if v.get("category") == "budget_termination"]
         if budget_failures:
+            manager = [v for v in budget_failures if v.get("origin") == "RuntimeExecutionManager"]
+            if manager:
+                f["manager_terminal_state"] = manager[-1].get("manager_state")
             f["budget_reason"] = (
                 "runtime deadline exhausted"
                 if budget_failures[-1].get("resource") == "deadline"

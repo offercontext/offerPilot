@@ -157,7 +157,12 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
         boundary = f.get("reject_high_water")
         if boundary is None:
             return None, "rejection_not_exercised"
-        return not deltas and not [
+        receipt = f.get("rejection_receipt")
+        if not receipt:
+            return None, "rejection_receipt_not_observed"
+        return receipt.get("write_status") == "cancelled" and receipt.get("operation_id") == f.get(
+            "operation_id"
+        ) and not receipt.get("pending_action") and not deltas and not [
             c
             for c in calls
             if c.get("observer_high_water", 0) >= boundary
@@ -243,11 +248,18 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             f.get("submit_ids", [])
         ) == 1 and f.get("generation") == 1, "actual_disconnect_cursor_reattach"
     if rule == "unknown.fenced":
-        return f.get("primary_barrier") and f.get("terminal_state") == "result_unknown" and f.get(
-            "late_state"
-        ) == "result_unknown", "accepted_write_late_result_fenced"
+        if not f.get("primary_barrier") or f.get("primary_barrier_high_water") is None:
+            return None, "accepted_primary_delivery_boundary_not_reached"
+        return f.get("manager_terminal_state") == "result_unknown" and f.get("terminal_state") in {
+            "result_unknown",
+            "interrupted",
+        } and f.get("late_state") == f.get("terminal_state") and f.get("late_generation") == f.get(
+            "generation"
+        ) and not [d for d in deltas if d["seq"] > f["primary_barrier_high_water"]] and sum(
+            c.get("purpose") == "execute_primary" for c in calls
+        ) == 1, "accepted_write_late_result_fenced"
     if rule == "budget.product_origin":
-        return f.get("terminal_state") in {"result_unknown", "interrupted"} and f.get(
+        return f.get("terminal_state") in {"result_unknown", "interrupted", "failed"} and f.get(
             "termination_source"
         ) == "product_budget" and f.get("budget_reason") in {
             "runtime budget exhausted",
@@ -270,6 +282,19 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             < 0.000001
             for v in exports
         )
+        if item == "E08.runtime_deadline":
+            reads = f.get("budget_snapshots", [])
+            expected_turns = {v["turn_id"] for v in f.get("deadline_admissions", [])}
+            if len(expected_turns) != 3 or {v.get("turn_id") for v in reads} != expected_turns:
+                return None, "not_every_admitted_budget_observed"
+            actual = actual and all(
+                any(
+                    v["snapshot"]["admitted_at"] == b["admitted_at"]
+                    and v["snapshot"]["deadline_at"] == b["deadline_at"]
+                    for v in exports
+                )
+                for b in reads
+            )
         return all(
             effective.get(k) == v for k, v in requested.items() if k != "policy"
         ) and actual, "manager_and_actual_budget_readback"
@@ -277,7 +302,15 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
         budgets = f.get("budget_snapshots", [])
         if not budgets:
             return None, "budget_snapshots_missing"
-        same = len({b["deadline_at"] for b in budgets}) == 1
+        groups: dict[str, list[dict[str, Any]]] = {}
+        for budget in budgets:
+            groups.setdefault(
+                str((budget.get("turn_id"), budget.get("execution_generation"))), []
+            ).append(budget)
+        same = all(
+            len({(b["admitted_at"], b["deadline_at"]) for b in group}) == 1
+            for group in groups.values()
+        )
         if item == "E08.runtime_deadline":
             same = (
                 same

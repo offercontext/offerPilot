@@ -312,6 +312,28 @@ def serve(channel: Channel) -> None:
             if config["epoch"] > 1:
                 raise AssertionError("recovery executed primary")
             result = original_execute(self, *a, **kw)
+            if config["fault_profile"] == "executor_block" and result[1] is not None:
+                with sqlite3.connect(data / "data.db") as probe:
+                    persisted = probe.execute(
+                        "SELECT status FROM write_operations WHERE id=?", (kw["operation_id"],)
+                    ).fetchone()
+                if persisted != ("committed",):
+                    raise ValueError("primary delivery fault requires actual committed operation")
+                boundary = observer.marker(
+                    data / "data.db",
+                    "primary_committed_before_delivery",
+                    {"operation_id": kw["operation_id"]},
+                )
+                channel.emit(
+                    "fault_reached",
+                    {
+                        "boundary": "accepted_primary_tool",
+                        "stage": "primary_committed_before_result_delivery",
+                        "operation_id": kw["operation_id"],
+                        "observer_high_water": boundary,
+                    },
+                    ack=True,
+                )
             if result[1] is not None:
                 channel.emit(
                     "executor_observation",
@@ -352,11 +374,6 @@ def serve(channel: Channel) -> None:
             channel.attempt("tool", tool_name=prepared.spec.name)
             if config["epoch"] > 1:
                 raise AssertionError("recovery invoked tool")
-            if (
-                config["fault_profile"] == "executor_block"
-                and prepared.spec.name == "update_application_event"
-            ):
-                channel.emit("fault_reached", {"boundary": "accepted_primary_tool"}, ack=True)
             result = original_tool(*a, **kw)
             if prepared.spec.name == "list_application_events":
                 from offerpilot.ai.tool_runtime.rendering import render_compatibility
@@ -490,6 +507,7 @@ def serve(channel: Channel) -> None:
                                 "method": method_name,
                                 "turn_id": handle.turn_id,
                                 "generation": handle.generation,
+                                "manager_state": handle.state,
                                 "admitted_at": handle.budget.admitted_at,
                                 "deadline_at": handle.budget.deadline_at,
                             },
@@ -537,6 +555,7 @@ def serve(channel: Channel) -> None:
                                 {
                                     "category": "budget_termination",
                                     "resource": getattr(exc, "resource", "deadline"),
+                                    "origin": "RuntimeBudget",
                                     "admitted_at": self.admitted_at,
                                     "deadline_at": self.deadline_at,
                                 },
