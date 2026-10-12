@@ -23,6 +23,7 @@ from offerpilot.config import (
 )
 from offerpilot.db import session_factory_for_data_dir
 from offerpilot.diagnostics import append_log_entry
+from offerpilot.evaluation.cli import app as eval_app
 from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
 from offerpilot.repositories.jd import JDAnalysesRepository
 from offerpilot.repositories.notes import NoteCreate, NotesRepository
@@ -56,6 +57,9 @@ app.add_typer(question_app, name="question")
 app.add_typer(skill_app, name="skill")
 app.add_typer(wakeup_app, name="wakeup")
 app.add_typer(knowledge_app, name="knowledge")
+
+# Loading the command group does not initialize an observer, database or subject.
+app.add_typer(eval_app, name="eval")
 
 
 @app.command()

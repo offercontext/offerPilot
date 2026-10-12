@@ -10,6 +10,7 @@
   "model_id": "interviews-v1",
   "fault_id": "none",
   "required_rules": [
+    "execution.expected_outcome",
     "query.exact_result",
     "query.no_write_proposal",
     "business.zero_committed_dml",

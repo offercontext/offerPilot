@@ -10,6 +10,7 @@
   "model_id": "interviews-v1",
   "fault_id": "none",
   "required_rules": [
+    "execution.expected_outcome",
     "approval.before_commit",
     "approval.effective_payload",
     "event.exact_target",

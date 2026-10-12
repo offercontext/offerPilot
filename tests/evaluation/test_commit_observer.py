@@ -152,3 +152,29 @@ def test_actual_missing_fragment_and_deleted_tail(observed_db: Path) -> None:
     with sqlite3.connect(observed_db) as conn:
         conn.execute("DELETE FROM _eval_observation_log WHERE kind='dml'")
     assert "observation_records_missing" in read(observed_db)["gaps"]
+
+
+@pytest.mark.parametrize("broken", [{"fragment_errors": {"index": True}},
+                                    {"fragment_hashes": {"deltas": []}},
+                                    {"fragments": {"deltas": {"name": [], "bytes": True}}}])
+def test_invalid_index_shape_preserves_intact_dml_failure(observed_db: Path, broken: dict) -> None:
+    import json
+    with sqlite3.connect(observed_db) as conn:
+        conn.execute("UPDATE applications SET notes='bad' WHERE id=1")
+    seal(observed_db.parent, bundle(observed_db))
+    path = observed_db.parent / "evidence-index.json"
+    index = json.loads(path.read_bytes())
+    index.update(broken)
+    path.write_text(json.dumps(index), encoding="utf-8")
+    result = grade_trial(plan(["business.zero_committed_dml", "evidence.required_complete"]),
+                         load(observed_db.parent), GRADERS)
+    assert result.verdict == "fail" and result.unknowns == ["evidence.required_complete"]
+
+
+def test_noop_recovery_write_is_forbidden(observed_db: Path) -> None:
+    from offerpilot.evaluation.evidence.observer import next_epoch
+    next_epoch(observed_db)
+    with sqlite3.connect(observed_db) as conn:
+        conn.execute("UPDATE applications SET notes=notes")
+    result = grade_trial(plan(["recovery.zero_committed_dml"]), bundle(observed_db), GRADERS)
+    assert result.verdict == "fail"

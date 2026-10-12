@@ -10,6 +10,7 @@
   "model_id": "interviews-v1",
   "fault_id": "after_persist",
   "required_rules": [
+    "execution.expected_outcome",
     "approval.before_commit",
     "approval.effective_payload",
     "event.exact_target",
@@ -18,6 +19,7 @@
     "receipt.edited_no_model_continuation",
     "recovery.saved_receipt",
     "recovery.zero_calls",
+    "recovery.zero_committed_dml",
     "evidence.required_complete"
   ],
   "product_budget": {

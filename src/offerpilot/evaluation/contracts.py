@@ -122,13 +122,20 @@ class PlannedTrial(TrialKey):
     coverage_kind: CoverageKind
     required_rules: list[str]
 
+    @field_validator("required_rules")
+    @classmethod
+    def unique_required_rules(cls, value: list[str]) -> list[str]:
+        if not value or any(not name for name in value) or len(set(value)) != len(value):
+            raise ValueError("required rules must be nonempty and unique")
+        return value
+
 
 class VariantConfig(Contract):
     variant_id: Variant
     checkout: str
     interpreter: str
     fault: Literal["none", "wrong_target", "wrong_payload", "duplicate_effect",
-                   "unapproved_compensation", "bad_receipt"] = "none"
+                   "unapproved_compensation", "bad_receipt", "late_write", "shutdown_timeout"] = "none"
 
 
 class RunManifest(Contract):
@@ -156,10 +163,12 @@ class RunManifest(Contract):
         if not keys or len(keys) != len(set(keys)):
             raise ValueError("empty plan or duplicate trial_key")
         bindings: dict[str, tuple[Any, ...]] = {}
+        if not self.variants or set(self.variants) - {"baseline", "candidate"}:
+            raise ValueError("unregistered variant")
         for p in self.planned_trials:
             if p.run_id != self.run_id or p.variant_id not in self.variants:
                 raise ValueError("trial identity outside run")
-            binding = (p.case_id, p.case_version, p.spec_hash, p.fixture_hash, p.coverage_kind)
+            binding = (p.case_id, p.case_version, p.spec_hash, p.fixture_hash, p.coverage_kind, tuple(p.required_rules))
             if p.execution_item_id in bindings and bindings[p.execution_item_id] != binding:
                 raise ValueError("execution item has conflicting binding")
             bindings[p.execution_item_id] = binding
@@ -170,6 +179,12 @@ class RunManifest(Contract):
                       for p in self.planned_trials}
             if actual != expected:
                 raise ValueError("P0 plan must contain suite x variants x repeats")
+            from offerpilot.evaluation.registry import RULES
+            if any(p.required_rules != RULES[p.execution_item_id]
+                   or p.case_id != p.execution_item_id.split(".")[0] or p.case_version != 1
+                   or p.coverage_kind != ("full_recovery" if p.case_id == "E06" else "task")
+                   for p in self.planned_trials):
+                raise ValueError("P0 required rules differ from registered contract")
         return self
 
 
@@ -245,7 +260,7 @@ class RuleResult(Contract):
 class TrialResult(TrialKey):
     case_id: str
     case_version: Positive
-    execution_status: Literal["completed", "not_run", "setup_error", "eval_error",
+    execution_status: Literal["completed", "not_run", "setup_error", "eval_error", "product_failed",
                               "unsupported", "interrupted"]
     verdict: Verdict
     rules: list[RuleResult]

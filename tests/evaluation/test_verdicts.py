@@ -44,3 +44,12 @@ def test_required_rule_cannot_be_downgraded() -> None:
                     status="not_applicable", reason_code="disabled")], "verdict": "pass", "unknowns": []})
     with pytest.raises(ValueError, match="downgraded"):
         aggregate(manifest(p), [forged])
+
+
+@pytest.mark.parametrize("bad", [{"termination_source": []}, {"termination_events": True}, {"consumption": []}])
+def test_bad_result_metadata_cannot_swallow_independent_failure(bad: dict) -> None:
+    p = plan(["r"])
+    result = grade_trial(p, EvidenceBundle(facts=bad), {"r": lambda _: RuleResult(
+        rule_id="r", status="fail", reason_code="actual_business_failure")})
+    assert result.verdict == "fail" and result.execution_status == "eval_error"
+    assert aggregate(manifest(p), [result])["exit_code"] == 1

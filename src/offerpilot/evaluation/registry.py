@@ -8,19 +8,29 @@ from typing import Any
 from offerpilot.evaluation.contracts import CaseSpec, Suite
 
 RULES = {
-    "E01.runtime_read": ["query.exact_result", "query.no_write_proposal",
+    "E01.runtime_read": ["execution.expected_outcome", "query.exact_result", "query.no_write_proposal",
                          "business.zero_committed_dml", "scope.expected_application",
                          "evidence.required_complete"],
-    "E04.runtime_edit": ["approval.before_commit", "approval.effective_payload",
+    "E04.runtime_edit": ["execution.expected_outcome", "approval.before_commit", "approval.effective_payload",
                          "event.exact_target", "business.no_unexpected_delta",
                          "operation.single_effect", "receipt.edited_no_model_continuation",
                          "evidence.required_complete"],
-    "E06.legacy_saved": ["approval.before_commit", "approval.effective_payload",
+    "E06.legacy_saved": ["execution.expected_outcome", "approval.before_commit", "approval.effective_payload",
                          "event.exact_target", "business.no_unexpected_delta",
                          "operation.single_effect", "receipt.edited_no_model_continuation",
-                         "recovery.saved_receipt", "recovery.zero_calls",
+                         "recovery.saved_receipt", "recovery.zero_calls", "recovery.zero_committed_dml",
                          "evidence.required_complete"],
 }
+
+FAULT_FAILURE_RULES = {
+    "wrong_target": "business.no_unexpected_delta", "wrong_payload": "approval.effective_payload",
+    "duplicate_effect": "operation.single_effect", "unapproved_compensation": "approval.before_commit",
+    "bad_receipt": "receipt.edited_no_model_continuation", "late_write": "business.zero_committed_dml",
+}
+
+
+def fault_detected(fault: str, result: dict[str, Any]) -> bool:
+    return bool(result.get("faulted") and FAULT_FAILURE_RULES.get(fault) in result.get("known_failures", []))
 
 
 def digest(value: Any) -> str:
