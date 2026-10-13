@@ -23,6 +23,27 @@ from offerpilot.evaluation.registry import digest, file_hash
 from offerpilot.evaluation.runner import ROOT
 
 
+@pytest.mark.parametrize("prefix", ["core-initial-baseline", "core-release"])
+def test_latest_public_policy_binds_checked_out_suite(manifest, tmp_path, prefix):
+    paths = list((ROOT / "evals/policies").glob(f"{prefix}-v*.json"))
+    latest = max(paths, key=lambda path: int(path.stem.rsplit("-v", 1)[1]))
+    configured = GatePolicyV2.model_validate_json(latest.read_bytes())
+    suite_path = ROOT / "evals/suites/harness-core-v1.json"
+    assert b"\r" not in suite_path.read_bytes(), "core suite checkout must retain LF bytes"
+    assert configured.suite_hash == file_hash(suite_path) == manifest.suite_hash
+    assert len(configured.absolute) == 19
+    assert all(item.repeats == 3 for item in configured.absolute)
+    purpose = configured.purposes[0]
+    result = gate_core(
+        [manifest], [rows(manifest)], configured, review(manifest, tmp_path), purpose, "enforce"
+    )
+    assert not result["integrity"]["errors"]
+    if purpose == "initial_baseline":
+        assert result["gate_satisfied"] and result["exit_code"] == 0
+    else:
+        assert result["exit_code"] == 3 and not result["gate_satisfied"]
+
+
 @pytest.fixture
 def manifest(tmp_path, monkeypatch):
     monkeypatch.setattr(

@@ -8,4 +8,4 @@ tests/fixtures/review_readiness/*.json text eol=lf
 tests/fixtures/review_readiness/*.sql text eol=lf
 tests/fixtures/core_task_surface/*.json text eol=lf
 evals/suites/harness-core*.json text eol=lf
-evals/policies/*v2.json text eol=lf
+evals/policies/core-*.json text eol=lf

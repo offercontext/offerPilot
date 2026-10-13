@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 公开门禁模板绑定换行规范化前的 suite（2026-10-13）
+
+**现象：** 冻结 v7 的候选 D 57/57 通过、独立审查有效，但原生 initial gate 退出 2，报告 `policy_suite_mismatch`；两个公开模板的实际 checkout 回归均失败。
+
+**根因：** v3 policy 写入的是施工工作文件的 CRLF 字节 hash。随后 suite 已配置 `text eol=lf` 并经 Git 归一化，新 worktree 的 LF 字节 hash 与模板不同；只用动态构造的 policy 单测没有核对公开模板。
+
+**修复：** 新增 v4 initial/release policy，绑定实际 LF checkout 的 suite hash，十九执行项、三次重复、所有安全规则及独立审核要求保持不变。core policy 也固定 LF。历史 v3 和非零报告保留，不改原始结果或放宽 hash 校验。公开模板回归同时检查 suite 字节与 gate 接线，release 缺基线仍 incomplete。
+
+**教训：** 含字节 hash 的发行配置必须在 Git checkout 后核对；工作目录内容与 Git 归一化后的字节不能混用。
+
 ## 外部检查导入的引用和 Git 读取边界（2026-10-13）
 
 **现象：** 独立审查发现外部回执草案可接受与命令无关的报告/数据文件，空指标或缺定义的完整性判定不一致；Git 快照可能触发仓库配置中的外部 diff、textconv、fsmonitor 或 clean filter。
