@@ -3,6 +3,14 @@
   "baseline_id": "selection-safety-v1",
   "tests": [
     {
+      "id": "tests/test_managed_runtime_api.py::test_runtime_status_rereads_durable_terminal_after_manager_transition",
+      "reason": "same-generation durable terminal wins after manager observation"
+    },
+    {
+      "id": "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
+      "reason": "source withdrawal during status observation fails closed"
+    },
+    {
       "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[application_events]",
       "reason": "all-table committed DML"
     },
