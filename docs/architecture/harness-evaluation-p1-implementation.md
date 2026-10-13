@@ -1,6 +1,6 @@
 # OfferPilot Harness P1 核心场景与真实模型实施方案
 
-日期：2026-10-12。状态：待实施。基于 `feat/20261012-harness-evaluation-p0@0dd52e2b` 继续设计；P0 与 S1–S4 的交付事实见[验收记录](harness-p0-verification-20261012.md)，现有命令见[开发指南](harness-p0-development.md)。本文细化[体系设计](harness-evaluation-design.md)的阶段 P1；阶段 P2/P3 和选测细化见[后续方案](harness-evaluation-p2-p3-implementation.md)。
+日期：2026-10-12；实施状态更新于 2026-10-13。状态：工程已实现，最终快照验收进行中；真实观察已执行，人工质量项待标注。设计基于 `feat/20261012-harness-evaluation-p0@0dd52e2b`；P0 与 S1–S4 的交付事实见[验收记录](harness-p0-verification-20261012.md)，当前核心命令和边界见[操作指南](harness-core-operations.md)。本文细化[体系设计](harness-evaluation-design.md)的阶段 P1；阶段 P2/P3 和选测细化见[后续方案](harness-evaluation-p2-p3-implementation.md)。
 
 P1 先把十个逻辑 case 扩展为十九个独立执行项，完成确定性证据与故障验收，再开放受控真实模型观察。工程具备 real 能力与真实质量验收分别交付；没有实际授权和运行记录，不能把前者写成后者。本文不授权模型费用、发布、部署或生产数据操作。
 

@@ -1,6 +1,6 @@
 # OfferPilot Harness 评估体系调研与第一版设计
 
-日期：2026-10-12。状态：P0 与 S1–S4 已完成工程实施及针对性验收，未完成完整发布验收，见[交付记录](./harness-p0-verification-20261012.md)。当前实现核对基线为 `0dd52e2b`；最初产品调研基线为 `5b9605ba`。下一步施工见 [P1 方案](./harness-evaluation-p1-implementation.md)及 [P2/P3 与 S5 方案](./harness-evaluation-p2-p3-implementation.md)，[原 P0 方案](./harness-evaluation-p0-implementation.md)保留为施工契约。
+日期：2026-10-12；实施状态更新于 2026-10-13。P0 与 S1–S4 已完成工程实施及针对性验收，见[交付记录](./harness-p0-verification-20261012.md)。P1、P2、P3 条件执行能力及 S5 工程已实现，最终快照验收进行中；真实观察已执行，人工质量标注、裁判校准和正式基线批准仍待完成。当前命令和边界见[操作指南](./harness-core-operations.md)。原设计核对基线为 `0dd52e2b`，最初产品调研基线为 `5b9605ba`；[P1 方案](./harness-evaluation-p1-implementation.md)、[P2/P3 与 S5 方案](./harness-evaluation-p2-p3-implementation.md)和[原 P0 方案](./harness-evaluation-p0-implementation.md)保留为施工契约，工程实现不代表已获发布资格。
 
 建议在现有验收上增加一个仓库内的评估核心：用版本化业务场景驱动真实 OfferPilot 接口，独立检查数据库、授权过程与结果交付，重复运行并比较两个版本。第一版使用现有 Python、Pydantic、HTTPX 和 pytest；Pydantic Evals 保留为可选适配，暂不部署评估平台。
 
@@ -64,7 +64,7 @@ flowchart LR
 
 已有 `src/offerpilot/evaluation/` 薄核心和 `scripts/evaluation_subject/` 隔离桥；后续沿 `contracts`、`runner`、`adapters`、`evidence`、`graders`、`compare`、`reporting` 扩展。测试在 `tests/evaluation/`，场景与基线元数据在 `evals/`。模块不被 `pilot_runtime`、工具执行或业务 repository 反向依赖；生产应用正常启动不加载评估驱动。
 
-`oc eval validate/run/compare` 的 P0 子集已实现，当前尚未接入 release gate。`oc verify` 继续证明启动与业务集成可用；`oc eval` 回答指定场景下的质量与版本变化；P2 再按明确选项接入发布。只在确有复用需求时提取 smoke 的中性支持函数，保留旧输出与语义，禁止持续调用 smoke 私有函数。
+`oc eval` 已实现 schema 1/2 的计划、运行、比较、门禁与审核能力；两端 release gate 通过显式 eval 参数接线，保留全部原有检查。`oc verify` 继续证明启动与业务集成可用；`oc eval` 回答指定场景下的质量与版本变化。完整参数和实际边界见[操作指南](./harness-core-operations.md)。只在确有复用需求时提取 smoke 的中性支持函数，保留旧输出与语义，禁止持续调用 smoke 私有函数。
 
 以 `/api/pilot/runtime/v1/turns`、`/turns/{id}/confirm`、状态、snapshot 和 events 为主路径；确认携带实际返回的 operation/token 和新的 request ID。旧 `/api/chat`、`/api/chat/confirm` 作为命名为 `legacy-chat` 的适配器。两种协议的断连语义按 [ADR-0010](./decisions/0010-own-pilot-execution-in-runtime.md)分别评分，不强制相同轨迹。
 
@@ -234,7 +234,7 @@ P0 固定 `verdict=pass/fail/incomplete` 合并顺序：任一必需条件有充
 
 ## 9 命令和发布接入
 
-以下是 P1/P2 的目标命令，当前只有 P0 子集可执行；完整参数以对应实施方案为准：
+以下保留 P1/P2 的设计目标命令；已实现命令的准确参数以[操作指南](./harness-core-operations.md)和 CLI help 为准：
 
 ```text
 oc eval validate --suite evals/suites/harness-core-v1.json
