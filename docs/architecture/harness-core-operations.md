@@ -30,7 +30,7 @@ real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入�
 
 凭据仅从本地引用在子进程内解析。请求不得隐式重试、重定向或读取代理配置；stream 必须要求 include_usage。记录 requested alias 和实际返回 model、usage、调用身份与最终请求 hash；HTTP SDK 的 stream 标志不能替代业务 wire stream。缺身份/usage 是 unknown，不推测服务模型版本。
 
-中性 bridge 对可信产品代码实施 Python 网络、进程和 SQLite 路径隔离；这不是针对恶意原生代码的 OS 沙箱。HITL、checkpoint、pending/confirm、provider_blocks 保持原产品契约。
+中性 bridge 对可信产品代码实施 Python 网络、进程和 SQLite 路径隔离；这不是针对恶意原生代码的 OS 沙箱。安装围栏前预热标准库平台元数据，避免 Windows 版本探测的本地进程回退被误判为产品越界；围栏安装后的产品进程尝试仍被拒绝。HITL、checkpoint、pending/confirm、provider_blocks 保持原产品契约。
 
 E07 在模型屏障释放前从实际 cursor 建立重连，随后释放模型并接收同一 turn/generation 的实际数据帧；不能等回答完成再重连，因为产品有界缓冲可合法淘汰早期 cursor。重连使用 API 的 `after` 参数，并核对原 cursor 和新事件序号；订阅控制帧不能证明恢复。有界 subscriber 若发送 resync，保留该信号并 GET 原生 snapshot，核对同一 Turn/generation、有效 cursor 及覆盖已接收事件的高水位；不能重新 POST。确定性 E07 将正常回复均匀分为 300 段输出（短于 300 字符时逐字），在原产品 512 事件预算内覆盖 256 事件缓冲淘汰风险；[续流预检 suite](../../evals/suites/harness-core-stream-preflight-v1.json)单独运行此项，不替代完整分母。
 

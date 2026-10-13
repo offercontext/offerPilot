@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.metadata
 import json
 import os
+import platform
 from pathlib import Path
 import socket
 import sqlite3
@@ -191,6 +192,10 @@ class StreamBurstModel(ScriptModel):
 def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> None:
     from scripts.evaluation_subject.core_transport import SEND_PERMISSION
 
+    # Windows uname may fall back to a local `ver` subprocess when WMI is
+    # unavailable. Prepare this neutral metadata before fencing product code;
+    # later platform.machine() reads must not become false isolation violations.
+    platform.uname()
     target = urlsplit(provider_endpoint) if provider_endpoint else None
     hosts = {"127.0.0.1", "::1"}
     endpoints = {("127.0.0.1", p) for p in ports} | {("::1", p) for p in ports}

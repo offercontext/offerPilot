@@ -429,3 +429,53 @@ def test_budget_failed_state_requires_actual_product_budget_origin():
     assert grade_rule("budget.product_origin", "E08.runtime_model_budget", e)[0] is True
     f["termination_source"] = "normal"
     assert grade_rule("budget.product_origin", "E08.runtime_model_budget", e)[0] is False
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows platform version fallback")
+def test_windows_metadata_fallback_does_not_weaken_product_process_fence(tmp_path):
+    code = r'''
+import json, os, platform, sys
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+sys.path.insert(0, str(root / "src"))
+from scripts.evaluation_subject.core_bootstrap import fence
+# Model the public metadata seam's native process audit boundary; no actual
+# command or live WMI service is needed to exercise the cold fallback.
+platform._uname_cache = None
+def metadata_version(*args, **kwargs):
+    sys.audit("subprocess.Popen", "cmd.exe", ["cmd.exe", "/c", "ver"], None, None)
+    return "10", "10.0.19045", "", "Multiprocessor"
+platform.win32_ver = metadata_version
+class Channel:
+    config = {"data_dir": sys.argv[2]}
+    calls = []
+    def attempt(self, purpose, **fields):
+        self.calls.append({"purpose": purpose, **fields})
+channel = Channel()
+fence(channel, set(), None)
+try:
+    machine = platform.machine()
+    metadata_error = None
+except PermissionError:
+    machine, metadata_error = None, "PermissionError"
+metadata_blocked = len(channel.calls)
+try:
+    os.system("echo forbidden-product-command")
+    forbidden_blocked = False
+except PermissionError:
+    forbidden_blocked = True
+print(json.dumps({"machine": machine, "metadata_error": metadata_error,
+                  "metadata_blocked": metadata_blocked,
+                  "forbidden_blocked": forbidden_blocked,
+                  "blocked_after_product_attempt": len(channel.calls)}), file=sys.__stdout__)
+'''
+    process = subprocess.run(
+        [sys.executable, "-c", code, str(ROOT), str(tmp_path)],
+        cwd=ROOT, capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert process.returncode == 0, process.stderr
+    result = json.loads(process.stdout)
+    assert result["machine"] and result["metadata_error"] is None
+    assert result["metadata_blocked"] == 0
+    assert result["forbidden_blocked"] and result["blocked_after_product_attempt"] == 1
