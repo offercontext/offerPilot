@@ -3,6 +3,7 @@ import type {
   MockInterviewHistoryItem,
   MockInterviewProposalResponse,
   MockInterviewPendingResponse,
+  AnswerAcceptance,
 } from '@/types/mockInterview';
 import { createApiClient } from './http';
 
@@ -131,8 +132,10 @@ export async function submitInterviewStudioAnswer(input: {
   turnNo: number;
   answerText: string;
   turnKey: string;
+  acceptance?: AnswerAcceptance;
 }): Promise<{ attempt_id: number; attempt_status: string; transcript_fingerprint: string }> {
   const { data } = await http.post(`${attemptPath(input.context, input.attemptId)}/turns`, {
+    ...input.acceptance,
     turn_no: input.turnNo,
     answer_text: input.answerText,
     turn_idempotency_key: input.turnKey,

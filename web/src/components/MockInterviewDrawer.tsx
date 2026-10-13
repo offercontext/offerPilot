@@ -758,6 +758,7 @@ export default function MockInterviewDrawer({
                     <div key={turn.turn_no}>
                       <div>第 {turn.turn_no} 题：{turn.question}</div>
                       <div className={workflowStyles.mutedText}>回答：{turn.answer || '（未提交）'}</div>
+                      {turn.answer ? <div className={workflowStyles.mutedText}>{turn.acceptance_method === 'session_auto' ? '语音自动记录 · 未人工校对' : turn.acceptance_method === 'manual' ? '人工提交' : '来源未知'}</div> : null}
                     </div>
                   ))}
                   {blocks(item.proposal).map((block) => (

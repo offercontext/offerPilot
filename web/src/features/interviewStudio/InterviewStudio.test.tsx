@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ContinuousVoiceModePanel from './ContinuousVoiceModePanel';
 import InterviewStudio from './InterviewStudio';
+import { RealtimeVoiceController } from '@/features/mockInterviewVoice/realtimeVoiceController';
 
 const serviceSpies = vi.hoisted(() => ({
   start: vi.fn(),
@@ -24,6 +25,11 @@ vi.mock('@/services/mockInterviews', () => ({
 
 vi.mock('@/services/voiceCoaching', () => ({
   saveInterviewStudioVoiceCoachingSnapshot: serviceSpies.saveVoiceReview,
+}));
+
+vi.mock('@/services/interviewVoice', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/interviewVoice')>(),
+  voiceCapabilities: vi.fn().mockResolvedValue({ available: false, reason: '测试未启用语音进程' }),
 }));
 
 vi.mock('@/features/mockInterviewVoice/VoiceAnswerComposer', () => ({
@@ -118,6 +124,28 @@ describe('ContinuousVoiceModePanel', () => {
 });
 
 describe('InterviewStudio continuous voice integration', () => {
+  it.each(['依据', '关闭回答工作台', 'Escape'])('revokes realtime voice when hiding the answer panel through %s', async (label) => {
+    const ready = vi.spyOn(RealtimeVoiceController.prototype, 'questionReady');
+    const pause = vi.spyOn(RealtimeVoiceController.prototype, 'pause');
+    try {
+      await act(async () => {
+        root = createRoot(host = document.createElement('div'));
+        document.body.appendChild(host);
+        root.render(<InterviewStudio context={{ kind: 'application_event', applicationId: 7, eventId: 8, resumeId: 9, jdVersionId: 10, jdText: '排障' }} onClose={vi.fn()} />);
+      });
+      await act(async () => { await Promise.resolve(); });
+      const controller = ready.mock.contexts[0] as RealtimeVoiceController;
+      expect(controller).toBeDefined();
+      await act(async () => { button('打开回答工作台').click(); });
+      controller.state.locked = true;
+      await act(async () => {
+        if (label === 'Escape') host!.querySelector('[data-interview-studio]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        else button(label).click();
+      });
+      expect(pause).toHaveBeenCalled();
+      expect(controller.state.locked).toBe(false);
+    } finally { ready.mockRestore(); pause.mockRestore(); }
+  });
   beforeEach(() => {
     globalThis.IS_REACT_ACT_ENVIRONMENT = true;
     serviceSpies.start.mockResolvedValue({

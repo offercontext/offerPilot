@@ -74,6 +74,18 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    for column, sql_type in (
+        ("input_source", "TEXT"),
+        ("acceptance_method", "TEXT"),
+        ("voice_session_id", "TEXT"),
+        ("voice_session_epoch", "INTEGER"),
+        ("voice_consent_revision", "TEXT"),
+    ):
+        _ensure_column(engine, "mock_interview_turns", column, sql_type)
+    _record_migration(
+        engine, "0033_interview_voice_sessions",
+        "Add scoped voice session ownership and answer acceptance provenance",
+    )
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
         _ensure_column(engine, "pilot_executions", "runtime_epoch", "TEXT"),

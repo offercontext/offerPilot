@@ -1275,10 +1275,38 @@ class MockInterviewTurn(Base):
     answer_sha256: Mapped[str] = mapped_column(
         String, nullable=False, default="", server_default=""
     )
+    input_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    acceptance_method: Mapped[str | None] = mapped_column(String, nullable=True)
+    voice_session_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    voice_session_epoch: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    voice_consent_revision: Mapped[str | None] = mapped_column(String, nullable=True)
     turn_status: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.current_timestamp()
     )
+
+
+class InterviewVoiceSession(Base):
+    __tablename__ = "interview_voice_sessions"
+    __table_args__ = (
+        UniqueConstraint("attempt_id", "request_key"),
+        UniqueConstraint("attempt_id", "epoch"),
+        Index("idx_interview_voice_sessions_attempt", "attempt_id", "state"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    attempt_id: Mapped[int] = mapped_column(
+        ForeignKey("mock_interview_attempts.id", ondelete="CASCADE"), nullable=False
+    )
+    request_key: Mapped[str] = mapped_column(String, nullable=False)
+    epoch: Mapped[int] = mapped_column(Integer, nullable=False)
+    consent_revision: Mapped[str] = mapped_column(String, nullable=False)
+    token_sha256: Mapped[str] = mapped_column(String, nullable=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="active")
+    initial_turn_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class VoiceCoachingSnapshot(Base):

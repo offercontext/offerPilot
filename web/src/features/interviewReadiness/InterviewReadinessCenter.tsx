@@ -577,14 +577,14 @@ export default function InterviewReadinessCenter({
             <button type="button" className={actionEmphasis === 'primary' ? styles.primaryAction : styles.secondaryAction} disabled={!quickReadiness.ready || !quickResumeSelectionValid || creatingCase} onClick={() => void startQuickPractice()}>
               {creatingCase ? '正在冻结练习资料…' : '进入快速练习'}<span aria-hidden="true">↗</span>
             </button>
-            <p className={styles.privacyNote}>进入后仍会保留人工确认、原尝试恢复和来源状态说明。未确认的语音转写只在浏览器处理。</p>
+            <p className={styles.privacyNote}>默认逐轮核对文字，并保留原尝试恢复。实验性实时对话需要另行授权自动记录，开启前会说明音频处理位置。</p>
           </div>
         )}
 
         <aside className={styles.sidePanel} aria-label="面试说明">
-          <div className={styles.sideBlock}><span className={styles.eyebrow}>本次输入</span><h3>{realMode ? '只带入已确认来源' : '只发送已确认资料'}</h3><p>{realMode ? '当前 JD、明确选择的简历和已锁定的面试事件属于本次准备。' : '快速练习只发送冻结 JD、明确选择的简历和本次确认的回答。'}</p></div>
-          <div className={styles.sideBlock}><span className={styles.eyebrow}>仅在本地</span><h3>什么不会离开浏览器</h3><p>原始音频、临时转写、语音活动片段和 Haru 的位置只在本地处理或保存。</p></div>
-          <div className={styles.sideBlock}><span className={styles.eyebrow}>练习结束后</span><h3>保留清晰的来源边界</h3><p>你可以查看确认过的回答与复盘入口。快速练习不会出现在投递或日历里。</p></div>
+          <div className={styles.sideBlock}><span className={styles.eyebrow}>本次输入</span><h3>{realMode ? '只带入已确认来源' : '只发送已确认资料'}</h3><p>{realMode ? '当前 JD、明确选择的简历和已锁定的面试事件属于本次准备。' : '快速练习使用冻结 JD、明确选择的简历和本场已提交的回答。'}</p></div>
+          <div className={styles.sideBlock}><span className={styles.eyebrow}>音频隐私</span><h3>按所选模式处理音频</h3><p>标准语音在浏览器内识别；实时对话会将音频发送到 OfferPilot 所在设备或服务器处理，不保存原始音频。Haru 的位置仅在本机保存。</p></div>
+          <div className={styles.sideBlock}><span className={styles.eyebrow}>练习结束后</span><h3>保留清晰的来源边界</h3><p>历史回答会区分人工提交与语音自动记录。快速练习不会出现在投递或日历里。</p></div>
         </aside>
       </div>
     </section>

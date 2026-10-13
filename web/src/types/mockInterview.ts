@@ -1,7 +1,21 @@
+export interface AnswerAcceptance {
+  input_source: 'text' | 'voice';
+  acceptance_method: 'manual' | 'session_auto';
+  voice_session_id?: string;
+  voice_session_epoch?: number;
+  voice_consent_revision?: string;
+  voice_session_token?: string;
+}
+
 export interface MockInterviewTurn {
   turn_no: number;
   question: string;
   answer: string;
+  input_source?: 'text' | 'voice' | null;
+  acceptance_method?: 'manual' | 'session_auto' | null;
+  voice_session_id?: string | null;
+  voice_session_epoch?: number | null;
+  voice_consent_revision?: string | null;
   question_kind?: 'follow_up' | 'new_topic';
   parent_turn_no?: number | null;
   topic_root_turn_no?: number;

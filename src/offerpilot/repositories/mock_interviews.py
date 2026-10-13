@@ -27,6 +27,9 @@ from offerpilot.repositories.interview_preparation_proposals import (
     source_is_current_for_mock_interview,
 )
 from offerpilot.repositories.interview_practice_cases import validate_context
+from offerpilot.interview_voice.admission import (
+    AnswerAcceptance, check_answer_admission, set_answer_acceptance,
+)
 
 
 class MockInterviewIdempotencyConflict(ValueError):
@@ -252,8 +255,13 @@ class MockInterviewRepository:
         turn_no: int,
         answer_text: str,
         turn_idempotency_key: str,
+        *,
+        acceptance: AnswerAcceptance | None = None,
     ) -> MockInterviewAttempt:
         _validate_key(turn_idempotency_key, "turn_idempotency_key")
+        if not isinstance(answer_text, str) or not answer_text.strip() or len(answer_text) > 30_000:
+            raise ValueError("answer_text must contain 1-30000 characters")
+        acceptance = acceptance or AnswerAcceptance()
         with self._session_factory() as session:
             self._begin_immediate(session)
             attempt = session.get(MockInterviewAttempt, attempt_id)
@@ -269,7 +277,9 @@ class MockInterviewRepository:
             if turn.answer_text:
                 if turn.turn_idempotency_key != turn_idempotency_key or turn.answer_text != answer_text:
                     raise MockInterviewTurnIdempotencyConflict("submitted answer changed")
+                check_answer_admission(session, attempt, turn, acceptance, replay=True)
                 return attempt
+            check_answer_admission(session, attempt, turn, acceptance, replay=False)
             if turn.turn_status != "awaiting_answer":
                 raise ValueError("turn is still being generated")
             if turn.turn_idempotency_key and turn.turn_idempotency_key != turn_idempotency_key:
@@ -277,6 +287,7 @@ class MockInterviewRepository:
             turn.turn_idempotency_key = turn_idempotency_key
             turn.answer_text = answer_text
             turn.answer_sha256 = sha256_text(answer_text)
+            set_answer_acceptance(turn, acceptance)
             turn.turn_status = "answered"
             attempt.current_turn_no = max(attempt.current_turn_no, turn_no)
             turns = list(session.scalars(

@@ -5,6 +5,10 @@
 
 ## 当前记录
 
+### 面试语音
+
+- [ADR-0013: 用受限会话接入实时面试语音](./0013-scope-realtime-interview-voice.md) — Accepted（实验功能）
+
 ### 投递录入
 
 - [ADR-0006: 单条岗位录入的原子创建与恢复](./0006-reliable-single-application-intake.md) — Accepted
