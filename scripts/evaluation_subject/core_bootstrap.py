@@ -279,6 +279,34 @@ def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> N
     sys.addaudithook(audit)
 
 
+def budget_finish_wrapper(channel: Channel, original: Any, method_name: str) -> Any:
+    def finish(self: Any, handle: Any, message: str, *args: Any, **kwargs: Any) -> Any:
+        result = original(handle, message, *args, **kwargs)
+        if (
+            message in {"runtime deadline exhausted", "runtime budget exhausted"}
+            and handle.logical_terminal
+            and handle.state in {"failed", "result_unknown"}
+        ):
+            channel.emit(
+                "model_observation",
+                {
+                    "category": "budget_termination",
+                    "resource": "deadline" if "deadline" in message else "budget",
+                    "origin": "RuntimeExecutionManager",
+                    "method": method_name,
+                    "turn_id": handle.turn_id,
+                    "generation": handle.generation,
+                    "manager_state": handle.state,
+                    "admitted_at": handle.budget.admitted_at,
+                    "deadline_at": handle.budget.deadline_at,
+                },
+                ack=True,
+            )
+        return result
+
+    return finish
+
+
 def serve(channel: Channel) -> None:
     config = channel.config
     setup_started = time.monotonic()
@@ -550,30 +578,7 @@ def serve(channel: Channel) -> None:
         for method in ("_finish_before_start_locked", "_finish_unknown_locked"):
             original_finish = getattr(manager, method)
 
-            def finish_wrapper(original: Any, method_name: str) -> Any:
-                def finish(self: Any, handle: Any, message: str, *args: Any, **kwargs: Any) -> Any:
-                    result = original(handle, message, *args, **kwargs)
-                    if message in {"runtime deadline exhausted", "runtime budget exhausted"}:
-                        channel.emit(
-                            "model_observation",
-                            {
-                                "category": "budget_termination",
-                                "resource": "deadline" if "deadline" in message else "budget",
-                                "origin": "RuntimeExecutionManager",
-                                "method": method_name,
-                                "turn_id": handle.turn_id,
-                                "generation": handle.generation,
-                                "manager_state": handle.state,
-                                "admitted_at": handle.budget.admitted_at,
-                                "deadline_at": handle.budget.deadline_at,
-                            },
-                            ack=True,
-                        )
-                    return result
-
-                return finish
-
-            setattr(manager, method, MethodType(finish_wrapper(original_finish, method), manager))
+            setattr(manager, method, MethodType(budget_finish_wrapper(channel, original_finish, method), manager))
         if budget["policy"] == "configure":
             for name in (
                 "timeout_seconds",

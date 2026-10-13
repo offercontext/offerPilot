@@ -530,6 +530,18 @@ U01 模型文字二次确认/备注能力描述、U02 unknown_tool、U05 标签�
 
 **教训：** 隔离初始化须区分可信平台准备与产品执行，不能通过放宽产品进程权限消除环境误判。
 
+## 超时写入竞争让迟到清理把未知结果改为失败（2026-10-13）
+
+**现象：** E08 的主业务修改已经提交，真实运行 deadline 将任务公开为 result_unknown；释放迟到结果后，公开状态可能变为 failed。原始冻结观察保留，不能因为没有额外业务 DML 就把该状态变化判为通过。
+
+**根因：** 超时控制先以零等待 try_finish 尝试写 interrupted，SQLite 忙锁可使其未成功。Durable control 的 finally 只按较长租约判断终态，忽略已发生的 TIMED_OUT，随后将仍为 running 的持久行写成 failed。只在等待数据库锁前采样状态仍有竞争窗口。
+
+**修复：** 仓库取得写锁并核对同 owner/Turn/generation、仍有效的 running 行后才解析终态。控制器用短 CAS 领取完成权；超时先赢时始终选择 result_unknown，完成先赢时 watchdog 不再广播超时未知。数据库锁等待不持有控制器锁；超时初次探测仍为零等待。已结束或过期的行、恢复 scope 和业务提交围栏沿用原约束，worker 自身的超时异常仍收敛到 unknown。
+
+**验证：** 三种迟到终态及 watchdog 完成竞争分别在旧实现复现失败；70 项 control、manager、event-sink 回归通过，含真实 SQLite 写锁竞争、首个探测未成功、正常 completed/failed、旧终态不覆盖和物理 worker 异常收敛。Ruff、相关四模块及全库 228 文件 mypy 通过。端到端及完整门禁结果见本轮冻结验收记录。
+
+**教训：** 较长的执行租约不能替代较短的产品 deadline；终态决定必须与超时控制有明确先后关系，且不得让超时等待业务数据库锁。
+
 ## BUG 模板
 
 ```markdown

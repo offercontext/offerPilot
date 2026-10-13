@@ -479,3 +479,65 @@ print(json.dumps({"machine": machine, "metadata_error": metadata_error,
     assert result["machine"] and result["metadata_error"] is None
     assert result["metadata_blocked"] == 0
     assert result["forbidden_blocked"] and result["blocked_after_product_attempt"] == 1
+
+
+@pytest.mark.parametrize('completed_first', [True, False])
+def test_budget_observer_records_only_actual_manager_termination(tmp_path, completed_first):
+    code = r'''
+import json, sys, threading
+from pathlib import Path
+from types import MethodType
+root = Path(sys.argv[1])
+sys.path.insert(0, str(root))
+sys.path.insert(0, str(root / "src"))
+from scripts.evaluation_subject.core_bootstrap import budget_finish_wrapper
+from offerpilot.pilot_runtime.contracts import MessageOutcome
+from offerpilot.pilot_runtime.managed_execution import RuntimeExecutionManager
+from offerpilot.pilot_runtime.event_sink import InMemoryRuntimeInvocationControl
+completed_first = sys.argv[2] == "true"
+clock = [0.0]
+started, release, checked = threading.Event(), threading.Event(), threading.Event()
+original_timeout = InMemoryRuntimeInvocationControl.request_timeout
+def observed_timeout(control):
+    changed = original_timeout(control)
+    checked.set()
+    return changed
+InMemoryRuntimeInvocationControl.request_timeout = observed_timeout
+class Channel:
+    observations = []
+    def emit(self, kind, value, **kwargs):
+        self.observations.append(value)
+channel = Channel()
+manager = RuntimeExecutionManager(run_workers=1, clock=lambda: clock[0])
+manager._finish_unknown_locked = MethodType(budget_finish_wrapper(
+    channel, manager._finish_unknown_locked, "_finish_unknown_locked"), manager)
+def operation(sink, control, budget):
+    if completed_first:
+        assert control.mark_completed()
+    started.set()
+    assert release.wait(5)
+    return MessageOutcome("synthetic known result", conversation_id=1)
+try:
+    manager.submit(turn_id="observed-finish", conversation_id=1,
+                   operation=operation, timeout_seconds=1)
+    assert started.wait(5)
+    clock[0] = 2.0
+    assert checked.wait(5)
+    status = manager.status("observed-finish")
+    result = {"state": status["state"], "observations": channel.observations}
+    print(json.dumps(result), file=sys.__stdout__)
+finally:
+    release.set()
+    manager.close(wait=True)
+'''
+    process = subprocess.run(
+        [sys.executable, '-c', code, str(ROOT), str(completed_first).lower()],
+        cwd=ROOT, capture_output=True, text=True, timeout=60, check=False,
+    )
+    assert process.returncode == 0, process.stderr
+    result = json.loads(process.stdout)
+    assert result['state'] == ('running' if completed_first else 'result_unknown')
+    assert len(result['observations']) == (0 if completed_first else 1)
+    if result['observations']:
+        assert result['observations'][0]['category'] == 'budget_termination'
+        assert result['observations'][0]['manager_state'] == 'result_unknown'

@@ -77,7 +77,7 @@ def test_try_finish_restores_busy_timeout_after_handler_exception(control_store,
     lease = controls.claim_start(turn.turn_id)
     baseline, observed, checkin = _observe_checkin_busy_timeouts(engine)
 
-    def fail_finish(*_args):
+    def fail_finish(*_args, **_kwargs):
         raise RuntimeError("synthetic finish failure")
 
     monkeypatch.setattr(controls, "_finish_in_session", fail_finish)
@@ -285,6 +285,140 @@ def test_monotonic_expiry_cannot_be_extended_by_a_late_heartbeat(control_store, 
         assert not control.is_active()
         assert controls.get_execution(turn.turn_id)['state'] == 'result_unknown'
         control.finish('completed')
+        assert controls.get_execution(turn.turn_id)['state'] == 'result_unknown'
+    finally:
+        control.finish('interrupted')
+
+
+@pytest.mark.parametrize('late_state', ['failed', 'completed', 'waiting_confirmation'])
+def test_timeout_finish_remains_unknown_when_initial_terminal_probe_misses(
+    control_store, monkeypatch, late_state,
+):
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    _, controls, turns, _ = control_store
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    original = controls.try_finish
+    probes = []
+
+    def miss_initial_probe(value, state, **kwargs):
+        probes.append((value, state))
+        if len(probes) == 1:
+            return False
+        return original(value, state, **kwargs)
+
+    monkeypatch.setattr(controls, 'try_finish', miss_initial_probe)
+    control = DurableRuntimeInvocationControl(controls, lease, monotonic_clock=lambda: 10.0)
+    try:
+        assert control.request_timeout()
+        assert probes == [(lease, 'interrupted')]
+        assert controls.get_execution(turn.turn_id)['state'] == 'running'
+        control.finish(late_state)
+        assert probes[-1] == (lease, 'result_unknown')
+        assert controls.get_execution(turn.turn_id)['state'] == 'result_unknown'
+    finally:
+        control.finish('interrupted')
+
+
+def test_finish_waiting_for_sqlite_does_not_prevent_timeout_from_winning(control_store):
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    factory, controls, turns, _ = control_store
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    control = DurableRuntimeInvocationControl(controls, lease, monotonic_clock=lambda: 10.0)
+    engine = factory.kw['bind']
+    holder = engine.connect()
+    holder.exec_driver_sql('BEGIN IMMEDIATE')
+    waiting = Event()
+
+    def before_begin(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement == 'BEGIN IMMEDIATE':
+            waiting.set()
+
+    event.listen(engine, 'before_cursor_execute', before_begin)
+    try:
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            finishing = workers.submit(control.finish, 'failed')
+            try:
+                assert waiting.wait(5)
+                # A real SQLite writer holds the lock. Timeout's zero-wait
+                # terminal probe must return while finish is still blocked.
+                assert workers.submit(control.request_timeout).result(timeout=2)
+                assert not finishing.done()
+            finally:
+                holder.rollback()
+                holder.close()
+            finishing.result(timeout=5)
+        assert controls.get_execution(turn.turn_id)['state'] == 'result_unknown'
+    finally:
+        holder.close()
+        event.remove(engine, 'before_cursor_execute', before_begin)
+        control.finish('interrupted')
+
+
+@pytest.mark.parametrize('state', ['completed', 'failed'])
+def test_terminal_finish_winner_keeps_normal_outcome_and_rejects_timeout(control_store, state):
+    from offerpilot.pilot_runtime.contracts import InvocationState
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    _, controls, turns, _ = control_store
+    turn = admit(turns)
+    control = DurableRuntimeInvocationControl(controls, controls.claim_start(turn.turn_id))
+    try:
+        control.finish(state)
+        assert control.state is InvocationState.COMPLETED
+        assert control.request_timeout() is False
+        assert controls.get_execution(turn.turn_id)['state'] == state
+    finally:
+        control.finish('interrupted')
+
+
+def test_stale_finish_cannot_claim_local_completion_or_replace_terminal_row(control_store):
+    from offerpilot.pilot_runtime.contracts import InvocationState
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    _, controls, turns, _ = control_store
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    control = DurableRuntimeInvocationControl(controls, lease)
+    try:
+        controls.finish(lease, 'interrupted')
+        control.finish('completed')
+        assert control._inner.state is InvocationState.ACTIVE
+        assert controls.get_execution(turn.turn_id)['state'] == 'interrupted'
+    finally:
+        control.finish('interrupted')
+
+
+def test_failed_terminal_commit_keeps_execution_fenced_until_lease_reconciliation(
+    control_store, monkeypatch,
+):
+    from offerpilot.pilot_runtime.contracts import InvocationState
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    _, controls, turns, now = control_store
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    original = controls._finish_in_session
+
+    def fail_after_resolution(*args, **kwargs):
+        original(*args, **kwargs)
+        raise RuntimeError('terminal transaction failed before commit')
+
+    monkeypatch.setattr(controls, '_finish_in_session', fail_after_resolution)
+    control = DurableRuntimeInvocationControl(controls, lease, monotonic_clock=lambda: 10.0)
+    attempts = []
+    try:
+        control.finish('completed')
+        assert control.state is InvocationState.COMPLETED
+        assert controls.get_execution(turn.turn_id)['state'] == 'running'
+        assert control.run_if_active(lambda: attempts.append('late-effect')) == (False, None)
+        assert attempts == [] and control.request_timeout() is False
+        now[0] += controls.lease_ms + 1
+        assert controls.get_execution(turn.turn_id)['state'] == 'result_unknown'
+        control.finish('failed')
         assert controls.get_execution(turn.turn_id)['state'] == 'result_unknown'
     finally:
         control.finish('interrupted')

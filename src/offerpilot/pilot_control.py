@@ -489,12 +489,21 @@ class PilotControlRepository:
         if state not in {"waiting_confirmation", "completed", "failed", "interrupted", "result_unknown"}:
             raise ValueError("Invalid execution outcome")
 
-    def _finish_in_session(self, session: Session, lease: ExecutionLease, state: str) -> None:
+    def _finish_in_session(self, session: Session, lease: ExecutionLease, state: str,
+                           *, resolve_state: Callable[[], str] | None = None) -> None:
         row = session.get(PilotExecution, (lease.turn_id, lease.generation))
         if (row is None or row.owner_token != lease.owner_token
                 or row.conversation_id != lease.conversation_id or row.state != "running"):
             return
-        row.state = state if execution_state(row, self.now_ms()) == "running" else "result_unknown"
+        if execution_state(row, self.now_ms()) != "running":
+            row.state = "result_unknown"
+        else:
+            # Resolve local control state only after taking the SQLite writer
+            # lock and checking this exact, still-running lease. Waiting for
+            # that lock must not hold the invocation's cancellation lock.
+            terminal_state = resolve_state() if resolve_state is not None else state
+            self._validate_finish_state(terminal_state)
+            row.state = terminal_state
         conversation = session.get(Conversation, lease.conversation_id)
         if row.state == "completed" and conversation is not None and conversation.pending_operation_id:
             binding = session.get(PilotTurnOperation, conversation.pending_operation_id)
@@ -504,14 +513,16 @@ class PilotControlRepository:
         if turn is not None:
             turn.state = {"waiting_confirmation": "started", "result_unknown": "incomplete"}.get(row.state, row.state)
 
-    def finish(self, lease: ExecutionLease, state: str) -> None:
+    def finish(self, lease: ExecutionLease, state: str,
+               *, resolve_state: Callable[[], str] | None = None) -> None:
         self._validate_finish_state(state)
         with self._session() as session:
             session.execute(text("BEGIN IMMEDIATE"))
-            self._finish_in_session(session, lease, state)
+            self._finish_in_session(session, lease, state, resolve_state=resolve_state)
             session.commit()
 
-    def try_finish(self, lease: ExecutionLease, state: str) -> bool:
+    def try_finish(self, lease: ExecutionLease, state: str,
+                   *, resolve_state: Callable[[], str] | None = None) -> bool:
         """Best-effort terminal update that never waits behind an Agent write.
 
         Timeout/cancellation is a transport boundary.  Its caller must be able
@@ -557,7 +568,7 @@ class PilotControlRepository:
                     raise
                 with self.session_factory(bind=connection) as session:
                     try:
-                        self._finish_in_session(session, lease, state)
+                        self._finish_in_session(session, lease, state, resolve_state=resolve_state)
                         session.commit()
                         return True
                     except BaseException:

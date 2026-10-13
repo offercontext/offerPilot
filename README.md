@@ -147,7 +147,7 @@ uv run oc start
 
 ## 开发验证
 
-源码开发可使用 `uv run oc eval` 执行隔离的确定性 Harness P0 评估，以及 `scripts/select_tests.py` 生成和执行增量测试计划。配置、证据边界与命令见 [Harness 开发指南](docs/architecture/harness-p0-development.md)；这些检查不替代完整发布门禁。
+源码开发可使用 `uv run oc eval` 执行隔离 Harness 评估、重复比较及审核包生成，以及 `scripts/select_tests.py` 生成和执行增量测试计划。配置、证据边界与命令见 [核心操作指南](docs/architecture/harness-core-operations.md)；[P0 开发指南](docs/architecture/harness-p0-development.md)保留旧入口。真实模型运行须提供 provider profile 和费用 grant；这些检查不替代完整发布门禁。
 
 ## 许可证
 
