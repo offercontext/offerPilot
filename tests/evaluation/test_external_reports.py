@@ -152,13 +152,13 @@ def test_knowledge_metrics_keep_original_meaning_and_fail_precedence(captured, t
             "lexical_recall_at_5": "Original KI recall hit fraction; not a Harness task pass rate."
         },
     )
-    fixtures = tmp_path / "knowledge-fixtures"
-    fixtures.mkdir()
+    data_directory = tmp_path / "knowledge-fixtures"
+    data_directory.mkdir()
     for name in ("manifest.json", "queries.json"):
-        (fixtures / name).write_text("{}", encoding="utf-8")
-    receipt["command"] += ["--fixtures-dir", str(fixtures), "--report", str(source)]
+        (data_directory / name).write_text("{}", encoding="utf-8")
+    receipt["command"] += ["--fixtures-dir", str(data_directory), "--report", str(source)]
     receipt["data_files"] = [
-        dict(path=str(p), sha256=file_hash(p)) for p in sorted(fixtures.iterdir())
+        dict(path=str(p), sha256=file_hash(p)) for p in sorted(data_directory.iterdir())
     ]
     receipt["data_manifest"] = None
     if mutation == "fail":
