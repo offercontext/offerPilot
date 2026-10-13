@@ -853,7 +853,33 @@ def test_v2_expired_contract_error_does_not_delete_stale_stage(tmp_path, monkeyp
         assert stage.provider_call_token
 
 
-def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_path) -> None:
+def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_path, monkeypatch) -> None:
+    from offerpilot.repositories import opportunity_fit_reviews as fit_repository
+    from offerpilot.repositories import lease_heartbeat as heartbeat_module
+
+    # A real 0.8-second owner may expire during finalization under suite load.
+    # That fence correctly returns generating (covered by the expired-owner test).
+    # This test isolates error cleanup and takeover, using the persisted expiry
+    # and an explicitly controlled repository/heartbeat clock, without DB edits.
+    clock = [datetime.now(timezone.utc)]
+
+    class LeaseClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = clock[0]
+            return value.astimezone(tz) if tz is not None else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(fit_repository, "datetime", LeaseClock)
+    monkeypatch.setattr(heartbeat_module, "datetime", LeaseClock)
+    heartbeats = []
+    real_heartbeat = fit_repository.LeaseHeartbeat
+
+    def observe_heartbeat(*args, **kwargs):
+        heartbeat = real_heartbeat(*args, **kwargs)
+        heartbeats.append(heartbeat)
+        return heartbeat
+
+    monkeypatch.setattr(fit_repository, "LeaseHeartbeat", observe_heartbeat)
     factory, application, resume = _ready(tmp_path)
     repository = OpportunityFitReviewsRepository(
         factory,
@@ -875,7 +901,11 @@ def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_p
             model,
         )
 
-    time.sleep(1.2)
+    assert len(heartbeats) == 1 and not heartbeats[0].is_alive
+    with factory() as session:
+        failed_stage = session.scalar(select(OpportunityFitReviewStage))
+        assert failed_stage is not None and failed_stage.lease_expires_at is not None
+        clock[0] = failed_stage.lease_expires_at.replace(tzinfo=timezone.utc) + timedelta(microseconds=1)
     replay = repository.create_triage_v2(
         application.id,
         resume.id,
@@ -887,7 +917,9 @@ def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_p
     )
 
     assert replay[1].status == "ready"
+    assert replay[1].stage_generation == 2
     assert model.calls == 2
+    assert len(heartbeats) == 2 and all(not heartbeat.is_alive for heartbeat in heartbeats)
 
 
 def test_v2_stopped_heartbeat_allows_takeover_but_fences_late_result(tmp_path, monkeypatch) -> None:
