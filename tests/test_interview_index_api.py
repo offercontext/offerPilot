@@ -182,10 +182,13 @@ def test_interview_index_uses_latest_bound_note_before_pagination_and_list_get_a
 
 
 def test_interview_index_breaks_equal_note_timestamp_by_note_id(tmp_path) -> None:
-    client, _applications, application, event, _first_note = _ready(tmp_path)
+    client, _applications, application, event, first_note = _ready(tmp_path)
     timestamp = datetime(2026, 9, 30, 10, tzinfo=timezone.utc)
     with session_factory_for_data_dir(tmp_path)() as session:
         session.execute(text("DROP INDEX IF EXISTS uq_interview_notes_event_main"))
+        seeded_note = session.get(InterviewNote, first_note.id)
+        assert seeded_note is not None
+        seeded_note.created_at = timestamp
         first = InterviewNote(
             application_id=application.id,
             application_event_id=event.id,
