@@ -7565,5 +7565,5 @@
       "level": "test"
     }
   },
-  "safety_baseline": "tests/selection-safety-v1.json"
+  "safety_baseline": "tests/selection-safety-v2.json"
 }

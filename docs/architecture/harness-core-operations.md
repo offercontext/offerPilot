@@ -77,6 +77,6 @@ judge-preflight 为零网络条件检查：至少 20 个不同、有效、证据
 
 ## 6 S5 选测
 
-mapping schema 2 绑定 [固定安全身份](../../tests/selection-safety-v1.json)。真实 pytest node 与 Vitest 文件 catalog 回读时，安全 ID 缺失、重命名、无模块或降为 p1/p2 均失败封闭；修改 mapping、安全表或控制代码仍选全集。小型选择器测试夹具保留 schema 1；真实 OfferPilot 仓库必须 schema 2。
+mapping schema 2 绑定 [v2 固定安全身份](../../tests/selection-safety-v2.json)：完整保留 [v1](../../tests/selection-safety-v1.json) 的 109 项，再增加两项 Runtime 状态读取竞态回归。旧版本及其 canonical hash 不修改，真实 OfferPilot mapping 不能降回 v1。真实 pytest node 与 Vitest 文件 catalog 回读时，安全 ID 缺失、重命名、无模块或降为 p1/p2 均失败封闭；修改 mapping、任一版本安全表或控制代码仍选全集。小型选择器测试夹具保留 schema 1；真实 OfferPilot 仓库必须 schema 2。
 
 首批候选仅 CalendarView.theme p2、TopBar p1、application_status p1。直接/关联测试仍选中，merge 仍包含全局 p0，未知路径/缺分类延续原保守规则。冻结影子样本和实际临时行为变异经独立审查后才认定细化验收；此处不承诺减少固定百分比。完整发布仍全量。

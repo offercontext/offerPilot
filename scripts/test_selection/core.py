@@ -20,6 +20,7 @@ class SelectionError(ValueError):
 
 
 SAFETY_BASELINE_HASH = "75038332adbe43c7abb9514ba84f2e6f49a5e1e79635ad56bdf391c9be32106d"
+SAFETY_BASELINE_V2_HASH = "56f49d9e0ef11d8abb5c00041761fa57f5b3452e35ae2cd838a81e133a956e06"
 
 
 def digest(value: Any) -> str:
@@ -86,7 +87,7 @@ def load_mapping(root: Path) -> dict[str, Any]:
         raise SelectionError("invalid selection mapping schema")
     if version == 1 and (root / "src/offerpilot").is_dir():
         raise SelectionError("OfferPilot mapping requires the fixed safety baseline")
-    if version == 2 and mapping["safety_baseline"] != "tests/selection-safety-v1.json":
+    if version == 2 and mapping["safety_baseline"] != "tests/selection-safety-v2.json":
         raise SelectionError("unregistered safety baseline")
     modules = mapping["modules"]
     if not isinstance(modules, list) or not isinstance(mapping["test_metadata"], dict) or not isinstance(mapping["risk_rules"], list):
@@ -146,14 +147,21 @@ def load_mapping(root: Path) -> dict[str, Any]:
 def validate_safety(root: Path, mapping: dict[str, Any], catalog: list[dict[str, Any]]) -> dict[str, Any] | None:
     if mapping["schema_version"] == 1:
         return None
+    registrations = {
+        "tests/selection-safety-v1.json": ("selection-safety-v1", SAFETY_BASELINE_HASH),
+        "tests/selection-safety-v2.json": ("selection-safety-v2", SAFETY_BASELINE_V2_HASH),
+    }
+    registered = registrations.get(mapping["safety_baseline"])
+    if registered is None:
+        raise SelectionError("unregistered safety baseline")
     path = root / mapping["safety_baseline"]
     if not path.is_file() or path.is_symlink():
         raise SelectionError("fixed safety baseline unavailable")
     baseline = json.loads(path.read_bytes())
-    if digest(baseline) != SAFETY_BASELINE_HASH:
+    if digest(baseline) != registered[1]:
         raise SelectionError("fixed safety baseline changed; register and review a new baseline version")
     if (set(baseline) != {"schema_version", "baseline_id", "tests"}
-            or baseline["schema_version"] != 1 or baseline["baseline_id"] != "selection-safety-v1"
+            or baseline["schema_version"] != 1 or baseline["baseline_id"] != registered[0]
             or not isinstance(baseline["tests"], list) or not baseline["tests"]):
         raise SelectionError("invalid safety baseline")
     rows = {r["id"]: r for r in catalog}
@@ -326,7 +334,8 @@ def plan(root: Path, base: str, profile: str, output: Path,
     risk_rules = [r for m in [mapping, *([old_map] if old_map else [])] for r in m["risk_rules"]]
     risks = [r for r in risk_rules if any(fnmatchcase(p, pattern) for p in paths for pattern in r["paths"])]
     selection_controls = {"tests/selection-map.json", "tests/conftest.py", "scripts/select_tests.py",
-                          "scripts/windows-pytest-groups.ps1", "scripts/windows-vitest-groups.ps1", "tests/selection-safety-v1.json"}
+                          "scripts/windows-pytest-groups.ps1", "scripts/windows-vitest-groups.ps1",
+                          "tests/selection-safety-v1.json", "tests/selection-safety-v2.json"}
     force_full = any(r["expand"] == "full" for r in risks) or any(
         p in selection_controls or p.startswith("scripts/test_selection/") for p in paths)
     if force_full:

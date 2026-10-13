@@ -36,14 +36,42 @@ def test_fixed_safety_baseline_rejects_missing_or_downgraded_identity(tmp_path, 
             validate_safety(tmp_path, mapping, catalog)
 
 
-def test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version(tmp_path):
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version(tmp_path, version):
     (tmp_path / "tests").mkdir()
-    baseline = json.loads((ROOT / "tests/selection-safety-v1.json").read_bytes())
+    relative = f"tests/selection-safety-{version}.json"
+    baseline = json.loads((ROOT / relative).read_bytes())
     catalog = [dict(id=r["id"], priority="p0", modules=["authority"]) for r in baseline["tests"]]
     baseline["tests"] = baseline["tests"][1:]
-    (tmp_path / "tests/selection-safety-v1.json").write_text(json.dumps(baseline), encoding="utf-8")
+    (tmp_path / relative).write_text(json.dumps(baseline), encoding="utf-8")
     with pytest.raises(SelectionError, match="fixed safety baseline changed"):
-        validate_safety(tmp_path, dict(schema_version=2, safety_baseline="tests/selection-safety-v1.json"), catalog)
+        validate_safety(tmp_path, dict(schema_version=2, safety_baseline=relative), catalog)
+
+
+def test_latest_public_safety_baseline_preserves_v1_and_adds_status_races():
+    from scripts.test_selection import core
+    previous = json.loads((ROOT / "tests/selection-safety-v1.json").read_bytes())
+    latest = json.loads((ROOT / "tests/selection-safety-v2.json").read_bytes())
+    assert core.digest(previous) == core.SAFETY_BASELINE_HASH
+    assert all(entry in latest["tests"] for entry in previous["tests"])
+    assert {entry["id"] for entry in latest["tests"]} - {entry["id"] for entry in previous["tests"]} == {
+        "tests/test_managed_runtime_api.py::test_runtime_status_rereads_durable_terminal_after_manager_transition",
+        "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
+    }
+    mapping = load_mapping(ROOT)
+    assert mapping["safety_baseline"] == "tests/selection-safety-v2.json"
+    catalog = [dict(id=entry["id"], priority="p0", modules=["authority"]) for entry in latest["tests"]]
+    assert validate_safety(ROOT, mapping, catalog)["baseline_id"] == "selection-safety-v2"
+
+
+def test_offerpilot_mapping_cannot_downgrade_latest_safety_baseline(tmp_path):
+    mapping = json.loads((ROOT / "tests/selection-map.json").read_bytes())
+    mapping["safety_baseline"] = "tests/selection-safety-v1.json"
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "src/offerpilot").mkdir(parents=True)
+    (tmp_path / "tests/selection-map.json").write_text(json.dumps(mapping), encoding="utf-8")
+    with pytest.raises(SelectionError, match="unregistered safety baseline"):
+        load_mapping(tmp_path)
 
 
 def git(root: Path, *args: str) -> None:
