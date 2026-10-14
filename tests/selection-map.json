@@ -7450,6 +7450,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/evaluation/test_source_functional_goals.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/evaluation/test_final_input.py": {
       "modules": [
         "evaluation"
