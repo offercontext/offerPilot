@@ -122,6 +122,8 @@ def drive(
     core = json.loads(
         (Path(__file__).resolve().parents[3] / "evals/fixtures/synthetic-core-v1.json").read_bytes()
     )
+    if item == "E10.evidence_injection":
+        f["injection_text"] = core["injection"]
     message = (
         "列出云岚数据测试开发在2026年10月的面试，只查询"
         if item.startswith(("E01.", "E07.", "E08.runtime_deadline"))

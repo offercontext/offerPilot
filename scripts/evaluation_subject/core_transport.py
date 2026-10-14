@@ -15,39 +15,50 @@ EXECUTION_IDENTITY = threading.local()
 
 def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
     import httpx
+    from offerpilot.context_projector.contracts import canonical_json
     from offerpilot.context_projector.gateway import SingleCandidateAgentTransport
-    from offerpilot.context_sources import loader
+    from offerpilot.context_projector.projector import ModelSurfaceProjector
 
     state = threading.local()
-    original_source = loader.load_optional_sources
+    original_project = ModelSurfaceProjector.project
+    projected: dict[str, tuple[Any, dict[str, Any]]] = {}
+    projection_lock = threading.Lock()
 
-    def sources(*args: Any, **kwargs: Any) -> Any:
-        result = original_source(*args, **kwargs)
-        state.sources = [
+    def project(self: Any, request: Any) -> Any:
+        surface = original_project(self, request)
+        optional = request.optional_sources
+        sources = [
             {
                 "kind": s.kind,
                 "source_id": s.revision_identity,
                 "revision": s.content_revision_fingerprint,
                 "content": s.canonical_content.decode("utf-8"),
             }
-            for s in result.sources
+            for s in (optional.sources if optional else ())
         ]
+        selection = {
+            "identity": {
+                "model_call_id": surface.model_call_id,
+                "segment_id": request.provider_surface_build_identity.segment_id,
+                "surface_fingerprint": surface.runtime_surface_fingerprint,
+            },
+            "sources": sources,
+            "contributors": [{"name": c.name, "status": c.status}
+                             for c in (optional.contributors if optional else ())],
+        }
+        with projection_lock:
+            projected[surface.model_call_id] = (surface, selection)
         channel.emit(
             "model_observation",
             {
                 "category": "sources",
-                "sources": state.sources,
-                "contributors": [{"name": c.name, "status": c.status} for c in result.contributors],
+                **selection,
             },
             ack=True,
         )
-        return result
+        return surface
 
-    import sys
-
-    for m in list(sys.modules.values()):
-        if m and getattr(m, "load_optional_sources", None) is original_source:
-            setattr(m, "load_optional_sources", sources)
+    setattr(ModelSurfaceProjector, "project", project)
     for name in ("complete_one", "stream_one"):
         original = getattr(SingleCandidateAgentTransport, name)
 
@@ -62,10 +73,20 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                     "surface_fingerprint": identity.surface_fingerprint,
                     "execution": getattr(EXECUTION_IDENTITY, "value", None),
                 }
+                with projection_lock:
+                    selected = projected.get(surface.model_call_id)
+                state.sources = (
+                    selected[1]["sources"]
+                    if selected is not None and selected[0] is surface
+                    and all(state.identity.get(key) == value
+                            for key, value in selected[1]["identity"].items())
+                    else []
+                )
                 try:
                     return original(self, candidate, surface, *args, **kwargs)
                 finally:
                     state.identity = None
+                    state.sources = []
 
             return execute
 
@@ -135,13 +156,15 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             selected = json.loads(source["content"])
             strings = []
 
-            def leaves(value: Any, path: str = "$", identity: Any = None) -> None:
+            def leaves(value: Any, path: str, root_unit: Any, identity: Any = None) -> None:
                 if isinstance(value, dict):
                     identity = {
                         k: value[k]
                         for k in (
                             "id",
                             "version",
+                            "version_id",
+                            "snapshot_id",
                             "note_id",
                             "note_version_id",
                             "source_id",
@@ -151,35 +174,62 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                     } or identity
                     for k, v in value.items():
                         if k in {"content", "text", "excerpt", "preference"} and isinstance(v, str):
-                            strings.append((v, f"{path}.{k}", identity))
+                            strings.append((v, f"{path}.{k}", identity, root_unit))
                         elif isinstance(v, (dict, list)):
-                            leaves(v, f"{path}.{k}", identity)
+                            leaves(v, f"{path}.{k}", root_unit, identity)
                 elif isinstance(value, list):
                     for n, v in enumerate(value):
-                        leaves(v, f"{path}[{n}]", identity)
+                        leaves(v, f"{path}[{n}]", root_unit, identity)
 
-            leaves(selected)
+            for n, unit in enumerate(selected if isinstance(selected, list) else [selected]):
+                leaves(unit, f"$[{n}]", unit)
             for i, m in enumerate(payload.get("messages", [])):
                 content = m.get("content", "")
                 if not isinstance(content, str):
                     continue
                 ranges = []
                 encoded = content.encode()
-                for t, source_path, unit in strings:
-                    needle = t.encode()
-                    start = 0
-                    while needle and (offset := encoded.find(needle, start)) >= 0:
-                        ranges.append(
-                            {
-                                "start": offset,
-                                "end": offset + len(needle),
-                                "content_hash": hashlib.sha256(needle).hexdigest(),
-                                "source_field_path": source_path,
-                                "unit_identity": unit,
-                                "coordinate_space": "decoded-field-utf8",
-                            }
-                        )
-                        start = offset + len(needle)
+                for t, source_path, unit, root_unit in strings:
+                    unit_bounds = []
+                    # Require the complete selected versioned unit in the wire,
+                    # rather than assigning its identity to matching history text.
+                    for ascii_only in (False, True):
+                        for compact in (False, True):
+                            serialized = json.dumps(
+                                root_unit, ensure_ascii=ascii_only, sort_keys=compact,
+                                **({"separators": (",", ":")} if compact else {}),
+                            ).encode()
+                            cursor = 0
+                            while (found := encoded.find(serialized, cursor)) >= 0:
+                                unit_bounds.append((found, found + len(serialized)))
+                                cursor = found + len(serialized)
+                    representations = {
+                        t.encode(): "plain",
+                        json.dumps(t, ensure_ascii=False)[1:-1].encode(): "json-string-content",
+                        json.dumps(t, ensure_ascii=True)[1:-1].encode(): "json-ascii-string-content",
+                    }
+                    for needle, wire_encoding in representations.items():
+                        start = 0
+                        while needle and (offset := encoded.find(needle, start)) >= 0:
+                            ranges.append(
+                                {
+                                    "start": offset,
+                                    "end": offset + len(needle),
+                                    "content_hash": hashlib.sha256(needle).hexdigest(),
+                                    "source_content_hash": hashlib.sha256(t.encode()).hexdigest(),
+                                    "wire_encoding": wire_encoding,
+                                    "source_field_path": source_path,
+                                    "unit_identity": unit,
+                                    "unit_hash": hashlib.sha256(canonical_json(root_unit)).hexdigest()
+                                    if any(lo <= offset and offset + len(needle) <= hi
+                                           for lo, hi in unit_bounds) else None,
+                                    "unit_binding": "complete-json-unit"
+                                    if any(lo <= offset and offset + len(needle) <= hi
+                                           for lo, hi in unit_bounds) else "content-only",
+                                    "coordinate_space": "decoded-field-utf8",
+                                }
+                            )
+                            start = offset + len(needle)
                 if ranges:
                     observations.append(
                         {

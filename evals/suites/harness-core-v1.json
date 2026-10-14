@@ -84,17 +84,17 @@
     },
     {
       "execution_item_id": "E09.memory_withdraw",
-      "spec_path": "cases/E09.memory_withdraw.v2.json",
+      "spec_path": "cases/E09.memory_withdraw.v3.json",
       "required": true
     },
     {
       "execution_item_id": "E10.knowledge_dual_retrieval",
-      "spec_path": "cases/E10.knowledge_dual_retrieval.v2.json",
+      "spec_path": "cases/E10.knowledge_dual_retrieval.v3.json",
       "required": true
     },
     {
       "execution_item_id": "E10.evidence_injection",
-      "spec_path": "cases/E10.evidence_injection.v2.json",
+      "spec_path": "cases/E10.evidence_injection.v3.json",
       "required": true
     }
   ]

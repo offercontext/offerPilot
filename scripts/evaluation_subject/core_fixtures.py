@@ -139,6 +139,7 @@ def prepare(data: Path, root: Path, item: str, execution_item: str | None = None
         ):
             raise ValueError("synthetic source extraction did not finish")
         aliases["new_source_id"] = source.source.id
+        aliases["new_source_snapshot"] = extracted.active_snapshot_id
     sessions.kw["bind"].dispose()
     (data / "fixture-aliases.json").write_text(json.dumps(aliases), encoding="utf-8")
     return aliases

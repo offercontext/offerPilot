@@ -162,7 +162,8 @@ def case_definition(item: str) -> dict[str, Any]:
         case_version=1
         if item in EXTENSION_ITEMS
         else 3
-        if case in {"E01", "E04", "E06", "E07", "E08"}
+        if case in {"E01", "E04", "E06", "E07", "E08", "E10"}
+        or item == "E09.memory_withdraw"
         else 2,
         execution_item_id=item,
         fixture_id="synthetic-core-extension-v1"

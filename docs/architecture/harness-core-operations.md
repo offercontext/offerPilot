@@ -1,6 +1,6 @@
 # Harness 核心执行、比较与审核
 
-日期：2026-10-13。实现说明；具体运行是否通过以冻结报告及独立审查为准。承接 [P1 方案](harness-evaluation-p1-implementation.md)和 [P2/P3/S5 方案](harness-evaluation-p2-p3-implementation.md)。P0 schema 1 入口保留。
+日期：2026-10-14。实现说明；具体运行是否通过以冻结报告及独立审查为准。承接 [P1 方案](harness-evaluation-p1-implementation.md)和 [P2/P3/S5 方案](harness-evaluation-p2-p3-implementation.md)。P0 schema 1 入口保留。
 
 ## 1 核心与扩展
 
@@ -9,6 +9,8 @@
 当前核心 spec 为 E01/E04/E06/E07/E08 v3，其余 v2。历史 spec、评估器与失败记录保留在对应冻结 worktree；旧证据必须使用原评估器回读。新版启动期限 90 秒涵盖 prepared 和 ready，普通 wall 360 秒、缺失恢复 600 秒；这些是评估器保护，产品实际预算独立回读，不能互相替代。
 
 [扩展 suite](../../evals/suites/harness-extension-v1.json)独立包含 E11.memory_withdraw_scope v1。来自 fixture-control 授权范围曾过宽的实际缺口：准备两条 active Memory，撤回其中一条；其新来源单位必须消失，另一条保持原版本并继续进入最终序列化请求。扩展暂为观察集，不能混入核心 policy 或声称私有保留集。
+
+E09.memory_withdraw 与两项 E10 已更新为 case v3，核心分母保持不变。撤回后的选择或最终输入采集缺失为 unknown；E10 同时核对实际笔记 ID/版本、独立原始 Evidence 的来源/快照及其最终请求内容区间。嵌套 JSON 中的转义文本保留实际区间 hash、原文 hash 和编码方式，不改写原始请求。注入题还要求完整恶意原文实际进入请求；刺激未送达时不能宣称通过。两段合成事实代号出现只证明事实标记存在，不能替代引用归属和回答质量的人工判断。
 
 `unapproved_compensation` 是实际负例：在合成 trial 首次 POST 前提交未授权业务写入，再独立提交补偿。最终数据库相同也必须 fail；观察器记录两次 committed DML。它只在显式 diagnostic variant 启用，不能用于正式基线或 release。
 
@@ -42,7 +44,7 @@ E07 在模型屏障释放前从实际 cursor 建立重连，随后释放模型�
 
 ```text
 oc eval compare --baseline <run目录> --candidate <run目录> --policy core-observe-v1 --output <compare.json>
-oc eval gate --candidate <D-run目录> --policy evals/policies/core-initial-baseline-v4.json --purpose initial-baseline --mode enforce --review <审核.json> --output <gate.json>
+oc eval gate --candidate <D-run目录> --policy evals/policies/core-initial-baseline-v5.json --purpose initial-baseline --mode enforce --review <审核.json> --output <gate.json>
 oc eval gate --candidate <run目录> --baseline <批准基线run目录> --policy <release-policy.json> --purpose release --mode enforce --experiment <实验.json> --review <审核.json> --baseline-store <store目录> --baseline-id <id> --output <gate.json>
 ```
 
@@ -50,7 +52,7 @@ oc eval gate --candidate <run目录> --baseline <批准基线run目录> --policy
 
 直接比较同一 A/B run 默认为原 baseline 对 candidate；正式相对门禁始终读取获批 run 的 candidate 分组。EvalReuse 复用该获批 run 本身时也是 candidate 对 candidate，报告记录双方实际分组，实验变量 hash 按获批分组声明。
 
-[initial 模板](../../evals/policies/core-initial-baseline-v4.json)和 [release 模板](../../evals/policies/core-release-v4.json)默认要求 19 项 D 每项三次并有真实独立审查引用。v4 修正 suite 的 LF checkout 字节绑定，必需项、规则、重复与审核要求沿用 v3；历史 v3 的原配置错误和报告保留，不能用于新的基线。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
+[initial 模板](../../evals/policies/core-initial-baseline-v5.json)和 [release 模板](../../evals/policies/core-release-v5.json)默认要求 19 项 D 每项三次并有真实独立审查引用。v5 绑定上述三个 v3 case 的新 suite 字节；必需规则、重复和审核要求不减。v4 的换行修复以及更早配置、失败报告均保留，历史报告应使用原冻结评估器，不能用新 grader 追溯改分。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
 
 exit 优先级为已知阻断失败 1、配置或不可比 2、不完整或待人工 3、满足 0。所有 eval/compare/gate 报告仍为 release_eligible=false。质量例外只对已完成的人工质量 fail、精确对象和有效期生效；安全失败、缺测、缺证据和待人工不得例外。
 
@@ -66,6 +68,10 @@ exit 优先级为已知阻断失败 1、配置或不可比 2、不完整或待�
 
 ## 5 人工评审与条件裁判
 
+外部提供的合成评估集单列为人工参考材料，先核对原包、提交文件 hash、唯一 sample_id、rubric 和四维评分，再保留原始私有副本。回答质量 rubric 与功能目标 rubric 不合并通过率；功能判定不能被高回答评分覆盖。AI 辅助标注及非独立盲审身份如实保留。没有实际 trial/evidence 绑定的合成题设不能制造运行记录、Adjudication 或裁判校准资格，也不改变冻结核心计划的分母。
+
+经单独费用与数据范围授权，可对合成质量标注执行探索性模型对照。冻结题目、rubric、提示词、模型参数、输出 schema、重复计划和费用上限，发送内容排除人工结论及样本身份；逐项保留分歧、abstain、不可解析响应、重复一致性和实际调用。结果保持 calibration_eligible=false、judge_release_enabled=false、release_eligible=false，不能写回运行评分或充当正式校准。
+
 ```text
 oc eval review-pack --run <real-run目录> --output <新评审目录> --audit-output <独立维护者目录/audit.json>
 oc eval judge-preflight --run <real-run目录> --review <真实人工记录.json>
@@ -73,7 +79,7 @@ oc eval judge-preflight --run <real-run目录> --review <真实人工记录.json
 
 review-pack 使用原冻结评估器重新评分，随机展示样本并隐藏 A/B 标签，audit 必须保存到评审目录之外；交给评审人的仅是评审目录，维护者负责 audit 的本地访问权限。包含原请求、最终回答、实际选中来源和四维 0–3 rubric：针对性、依据性、可行动性、交互负担。audit 保存 trial/evidence hash 和原 safety fail；人工结论追加保存，不能修改 raw TrialResult。仓库可见题目不声称秘密盲测。
 
-judge-preflight 为零网络条件检查：至少 20 个不同、有效、证据 hash 绑定的人工样本，且包含正反例；重复、冲突、abstain、过期或引用损坏不能凑数。每项引用必须是 `kind=human-rubric-record` 的结构化 JSON，包含与 Adjudication 完全相同的 adjudication_id/run_id/trial_key/evidence_hash/rubric/reviewer/decision/reason/dimensions/created_at/expires_at，schema_version=1；通用文本文件不能充当标注。run_id 必须与 trial key 一致，ID 不得重复。本地 attestation 仍不能认证实际作者，维护者须核对人工来源。即使满足，仍须单独授权实际校准并记录误报/漏报，judge_release_enabled=false。当前没有真实人工校准集，不执行模型裁判。平台适配器仅在实际导出需求及授权成立后开发，本任务没有上传动作。
+judge-preflight 为零网络条件检查：至少 20 个不同、有效、证据 hash 绑定的人工样本，且包含正反例；重复、冲突、abstain、过期或引用损坏不能凑数。每项引用必须是 `kind=human-rubric-record` 的结构化 JSON，包含与 Adjudication 完全相同的 adjudication_id/run_id/trial_key/evidence_hash/rubric/reviewer/decision/reason/dimensions/created_at/expires_at，schema_version=1；通用文本文件不能充当标注。run_id 必须与 trial key 一致，ID 不得重复。本地 attestation 仍不能认证实际作者，维护者须核对人工来源。即使满足，仍须单独授权实际校准并记录误报/漏报，judge_release_enabled=false。当前没有绑定真实运行的人工校准集，正式裁判保持关闭。平台适配器仅在实际导出需求及授权成立后开发，本任务没有上传动作。
 
 ## 6 S5 选测
 

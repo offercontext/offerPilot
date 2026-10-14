@@ -472,6 +472,10 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             u.get("id") == untouched for u in wire_units
         ), "unrelated_memory_unchanged_and_retained"
     if rule.startswith("source."):
+        if item.startswith("E10.") and rule in {"source.selected", "source.final_input"}:
+            from offerpilot.evaluation.core_source_goals import knowledge_provenance
+
+            return knowledge_provenance(rule, e, injection=item == "E10.evidence_injection")
         sources = [v for v in e.get("input_observations", []) if v.get("category") == "sources"]
         inputs = [v for v in e.get("input_observations", []) if v.get("category") == "final_input"]
         kinds = {s["kind"] for v in sources for s in v["sources"]}
@@ -499,7 +503,9 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
         if rule == "source.withdrawn":
             after = [v for v in sources if v["seq"] > f["withdraw_control_seq"]]
             final = [v for v in inputs if v["seq"] > f["withdraw_control_seq"]]
-            return bool(after) and bool(final) and not any(
+            if not after or not final:
+                return None, "post_withdraw_source_evidence_missing"
+            return not any(
                 s["kind"] == "confirmed_memory" for v in after for s in v["sources"]
             ) and not any(
                 o["kind"] == "confirmed_memory" for v in final for o in v["observations"]
