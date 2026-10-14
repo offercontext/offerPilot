@@ -92,7 +92,13 @@ _LEGACY_JD_EXECUTION_ORIGINAL: Any = None
 _TEST_TOOL_CATALOG = build_model_tool_catalog()
 
 
-def _timeout_after_agent_signal_host(signal: Event, worker_done: Event | None = None):
+def _timeout_after_agent_signal_host(
+    signal: Event,
+    worker_done: Event | None = None,
+    *,
+    signal_timeout_seconds: float = 5,
+    timeout_requested: Event | None = None,
+):
     """Return a deterministic non-joining host that times out after Agent work starts."""
 
     class TimeoutAfterAgentSignalHost:
@@ -111,8 +117,12 @@ def _timeout_after_agent_signal_host(signal: Event, worker_done: Event | None = 
 
             executor.submit(transport_module.copy_context().run, run_worker)
             try:
-                assert signal.wait(timeout=5), "Agent work did not reach the timeout probe"
+                assert signal.wait(timeout=signal_timeout_seconds), (
+                    "Agent work did not reach the timeout probe"
+                )
                 assert invocation_control.request_timeout()
+                if timeout_requested is not None:
+                    timeout_requested.set()
                 raise RuntimeAgentTimedOut()
             finally:
                 executor.shutdown(wait=False, cancel_futures=False)
@@ -7748,7 +7758,7 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         events = _parse_sse_events(response.text)
-        assert events[-1]["event"] == "completed"
+        assert events[-1]["event"] == "completed", response.text
         body = events[-1]["data"]["data"]["response"]
     else:
         body = response.json()
@@ -7772,7 +7782,7 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
     assert retry.status_code == 200
     if endpoint.endswith("/stream"):
         retry_events = _parse_sse_events(retry.text)
-        assert retry_events[-1]["event"] == "completed"
+        assert retry_events[-1]["event"] == "completed", retry.text
         retry_body = retry_events[-1]["data"]["data"]["response"]
     else:
         retry_body = retry.json()
@@ -7781,6 +7791,86 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
     assert retry_body["undo"] == body["undo"]
     assert retry_body["operation_id"] == body["operation_id"]
     assert retry_body["write_status"] == body["write_status"]
+
+
+@pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
+def test_chat_confirm_host_timeout_after_committed_origin_delivers_one_fallback(
+    tmp_path, monkeypatch, endpoint
+):
+    provider_entered = Event()
+    provider_returned = Event()
+    timeout_requested = Event()
+    release_provider = Event()
+    worker_done = Event()
+
+    class BlockedPostCommitModel(TimeoutAfterPendingModel):
+        def complete(self, messages, tools):
+            if self.calls == 0:
+                return super().complete(messages, tools)
+            self.calls += 1
+            provider_entered.set()
+            assert release_provider.wait(timeout=15), "test did not release the late provider"
+            provider_returned.set()
+            return Assistant(content="late provider response must not replace the saved fallback")
+
+    model = BlockedPostCommitModel(
+        ToolCall(
+            id="post-commit-host-timeout",
+            name="update_application_status",
+            args=json.dumps({"id": 1, "status": "offer"}),
+        )
+    )
+    _, client, _, pending = _create_status_confirmation(tmp_path, model)
+    monkeypatch.setattr(
+        transport_module,
+        "SyncAgentExecutionHost",
+        _timeout_after_agent_signal_host(
+            provider_entered,
+            worker_done,
+            signal_timeout_seconds=60,
+            timeout_requested=timeout_requested,
+        ),
+    )
+    request = {
+        "conversation_id": pending["conversation_id"],
+        "approved": True,
+        "confirmation_token": pending["pending_action"]["confirmation_token"],
+    }
+    try:
+        response = client.post(endpoint, json=request)
+        assert provider_entered.is_set(), response.text
+        assert timeout_requested.is_set(), response.text
+        assert response.status_code == 200, response.text
+        if endpoint.endswith("/stream"):
+            events = _parse_sse_events(response.text)
+            assert events[-1]["event"] == "completed", response.text
+            body = events[-1]["data"]["data"]["response"]
+        else:
+            body = response.json()
+        assert "写入已完成" in body["message"], response.text
+        assert body["undo"]["application_id"] == 1
+    finally:
+        release_provider.set()
+        assert worker_done.wait(timeout=15), "late confirmation worker did not exit"
+
+    assert provider_returned.is_set(), "late provider failed before producing its reply"
+
+    stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+    assert [message["role"] for message in stored].count("tool") == 1
+    assert [message["content"] for message in stored].count(body["message"]) == 1
+    assert not any("late provider response" in message["content"] for message in stored)
+    replay = client.post(endpoint, json={**request, "operation_id": body["operation_id"]})
+    assert replay.status_code == 200, replay.text
+    if endpoint.endswith("/stream"):
+        replay_events = _parse_sse_events(replay.text)
+        assert replay_events[-1]["event"] == "completed", replay.text
+        replay_body = replay_events[-1]["data"]["data"]["response"]
+    else:
+        replay_body = replay.json()
+    assert replay_body["replayed"] is True
+    assert replay_body["message"] == body["message"]
+    assert replay_body["operation_id"] == body["operation_id"]
+    assert model.calls == 2
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
