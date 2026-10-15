@@ -2977,6 +2977,20 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_selection/test_backend_gate.py": {
+      "modules": [
+        "selection"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "failure_propagation",
+        "full_execution_coverage"
+      ],
+      "level": "integration",
+      "estimated_seconds": null
+    },
     "tests/test_selection/test_selection.py": {
       "modules": [
         "selection"

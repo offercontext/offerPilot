@@ -14,7 +14,9 @@ param(
     [string]$EvalProviderProfile,
     [string]$EvalGrant,
     [string[]]$EvalReuse,
-    [double]$EvalTimeoutSeconds = 0
+    [double]$EvalTimeoutSeconds = 0,
+    [switch]$IsolateBackendTests,
+    [string]$BackendOutput
 )
 
 $ErrorActionPreference = "Stop"
@@ -22,6 +24,8 @@ $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
 Push-Location $Repo
 try {
+    if ($IsolateBackendTests -and -not $BackendOutput) { throw '-BackendOutput is required with -IsolateBackendTests.' }
+    if ($BackendOutput -and -not $IsolateBackendTests) { throw '-BackendOutput requires -IsolateBackendTests.' }
     $evalValues = @($EvalSuite, $EvalPolicy, $EvalVariants, $EvalOutput, $EvalBaselineId, $EvalBaselineStore, $EvalReview, $EvalExperiment)
     if (($evalValues | Where-Object { $_ }).Count -or $EvalProviderProfile -or $EvalGrant -or $EvalReuse -or $EvalTimeoutSeconds) {
         if ($EvalTimeoutSeconds -lt 0 -or [double]::IsNaN($EvalTimeoutSeconds) -or [double]::IsInfinity($EvalTimeoutSeconds)) { throw "Positive finite eval timeout required." }
@@ -34,8 +38,15 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Evaluation preflight failed (exit $LASTEXITCODE)." }
         if (-not (Test-Path -LiteralPath (Join-Path $EvalOutput 'release-preflight.json') -PathType Leaf)) { throw "Evaluation preflight artifact missing." }
     }
-    uv run pytest -q
-    if ($LASTEXITCODE -ne 0) { throw "pytest failed (exit $LASTEXITCODE)." }
+    if ($IsolateBackendTests) {
+        uv run python -m scripts.test_selection.backend_gate --output $BackendOutput
+        if ($LASTEXITCODE -ne 0) { throw "Full isolated backend tests failed (exit $LASTEXITCODE)." }
+        $backendReceipt = uv run python -m scripts.test_selection.backend_gate --output $BackendOutput --verify
+        if ($LASTEXITCODE -ne 0 -or (($backendReceipt -join "`n").Trim() -notmatch '^BACKEND_FULL_VERIFIED [a-f0-9]{64}$')) { throw 'Full backend execution receipt missing or invalid.' }
+    } else {
+        uv run pytest -q
+        if ($LASTEXITCODE -ne 0) { throw "pytest failed (exit $LASTEXITCODE)." }
+    }
     uv run ruff check .
     if ($LASTEXITCODE -ne 0) { throw "ruff failed (exit $LASTEXITCODE)." }
     uv run mypy src

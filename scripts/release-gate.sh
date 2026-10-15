@@ -18,9 +18,13 @@ EVAL_PROVIDER=""
 EVAL_GRANT=""
 EVAL_REUSE=()
 EVAL_TIMEOUT=""
+ISOLATE_BACKEND_TESTS=0
+BACKEND_OUTPUT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --isolate-backend-tests) ISOLATE_BACKEND_TESTS=1; shift ;;
+    --backend-output) BACKEND_OUTPUT="${2:?Missing backend output}"; shift 2 ;;
     --eval-suite) EVAL_SUITE="${2:?Missing eval suite}"; shift 2 ;;
     --eval-policy) EVAL_POLICY="${2:?Missing eval policy}"; shift 2 ;;
     --eval-variants) EVAL_VARIANTS="${2:?Missing eval variants}"; shift 2 ;;
@@ -57,6 +61,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 cd "$ROOT"
+if [[ "$ISOLATE_BACKEND_TESTS" -eq 1 && -z "$BACKEND_OUTPUT" ]]; then
+  echo '--backend-output is required with --isolate-backend-tests' >&2; exit 2
+fi
+if [[ "$ISOLATE_BACKEND_TESTS" -eq 0 && -n "$BACKEND_OUTPUT" ]]; then
+  echo '--backend-output requires --isolate-backend-tests' >&2; exit 2
+fi
 if [[ -n "$EVAL_SUITE$EVAL_POLICY$EVAL_VARIANTS$EVAL_OUTPUT$EVAL_BASELINE_ID$EVAL_BASELINE_STORE$EVAL_REVIEW$EVAL_EXPERIMENT$EVAL_PROVIDER$EVAL_GRANT$EVAL_TIMEOUT" || ${#EVAL_REUSE[@]} -gt 0 ]]; then
   if [[ -n "$EVAL_TIMEOUT" ]]; then
     [[ "$EVAL_TIMEOUT" =~ ^[0-9]+(\.[0-9]+)?$ && "$EVAL_TIMEOUT" =~ [1-9] ]] || { echo "Positive eval timeout required" >&2; exit 2; }
@@ -70,7 +80,13 @@ if [[ -n "$EVAL_SUITE$EVAL_POLICY$EVAL_VARIANTS$EVAL_OUTPUT$EVAL_BASELINE_ID$EVA
   uv run oc eval release-preflight "${EVAL_ARGS[@]}" "${EVAL_REUSE[@]}"
   [[ -s "$EVAL_OUTPUT/release-preflight.json" ]] || { echo "Evaluation preflight artifact missing" >&2; exit 2; }
 fi
-uv run pytest -q
+if [[ "$ISOLATE_BACKEND_TESTS" -eq 1 ]]; then
+  uv run python -m scripts.test_selection.backend_gate --output "$BACKEND_OUTPUT"
+  backend_receipt="$(uv run python -m scripts.test_selection.backend_gate --output "$BACKEND_OUTPUT" --verify)"
+  [[ "$backend_receipt" =~ ^BACKEND_FULL_VERIFIED\ [a-f0-9]{64}$ ]] || { echo 'Full backend execution receipt missing or invalid' >&2; exit 2; }
+else
+  uv run pytest -q
+fi
 uv run ruff check .
 uv run mypy src
 
