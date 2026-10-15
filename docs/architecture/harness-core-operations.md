@@ -77,7 +77,9 @@ oc eval review-pack --run <real-run目录> --output <新评审目录> --audit-ou
 oc eval judge-preflight --run <real-run目录> --review <真实人工记录.json>
 ```
 
-review-pack 使用原冻结评估器重新评分，随机展示样本并隐藏 A/B 标签，audit 必须保存到评审目录之外；交给评审人的仅是评审目录，维护者负责 audit 的本地访问权限。包含原请求、最终回答、实际选中来源和四维 0–3 rubric：针对性、依据性、可行动性、交互负担。audit 保存 trial/evidence hash 和原 safety fail；人工结论追加保存，不能修改 raw TrialResult。仓库可见题目不声称秘密盲测。
+review-pack 使用原冻结评估器重新评分，随机展示样本并隐藏 A/B 标签，audit 必须保存到评审目录之外；交给评审人的仅是评审目录，维护者负责 audit 的本地访问权限。schema 2 包含原请求、最终回答、实际选中来源、按调用排列的真实模型输入消息和四维 0–3 rubric：针对性、依据性、可行动性、交互负担。岗位、页面上下文及相关历史来自封存的最终传输请求，不从数据库夹具或回答反推；缺少 JD、简历等信息仍标为不可得。输入文件必须同时匹配封存文件与传输 payload hash；未采集时明确 not_captured，绑定损坏则拒绝导出。只公开消息字段，不导出 provider/model 配置、请求头或私有运行身份。
+
+audit 保存 trial/evidence hash、各次模型输入绑定、导出器 hash 和原 safety fail。已有评审包补充上下文时另存新版本并保留原样本关联、旧包 hash 与原始人工提交，不能将旧包上的 abstain 自动升级。历史 run 仍由原冻结评估器回读，新导出器仅生成展示材料，不追溯改分或据此证明撤回、抗注入及零写入全流程。人工结论追加保存，不能修改 raw TrialResult。仓库可见题目不声称秘密盲测。
 
 judge-preflight 为零网络条件检查：至少 20 个不同、有效、证据 hash 绑定的人工样本，且包含正反例；重复、冲突、abstain、过期或引用损坏不能凑数。每项引用必须是 `kind=human-rubric-record` 的结构化 JSON，包含与 Adjudication 完全相同的 adjudication_id/run_id/trial_key/evidence_hash/rubric/reviewer/decision/reason/dimensions/created_at/expires_at，schema_version=1；通用文本文件不能充当标注。run_id 必须与 trial key 一致，ID 不得重复。本地 attestation 仍不能认证实际作者，维护者须核对人工来源。即使满足，仍须单独授权实际校准并记录误报/漏报，judge_release_enabled=false。当前没有绑定真实运行的人工校准集，正式裁判保持关闭。平台适配器仅在实际导出需求及授权成立后开发，本任务没有上传动作。
 

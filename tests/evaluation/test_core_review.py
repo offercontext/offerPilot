@@ -80,11 +80,28 @@ def test_judge_requires_twenty_unique_bound_human_positive_and_negative_records(
         assert not review.judge_eligibility(labels, evidence)["eligible_for_calibration"]
 
 
+@pytest.mark.parametrize("with_context", [False, True])
 def test_review_pack_blinds_identity_preserves_audit_and_raw_safety_failures(
-    manifest, tmp_path, monkeypatch
+    manifest, tmp_path, monkeypatch, with_context
 ):
     m = real_manifest(tmp_path)
     actual = [r for r in rows(m) if any(rule.rule_id == "quality.supported" for rule in r.rules)]
+    private = tmp_path / "private"
+    actual = [r.model_copy(update={"private_directory": str(private)}) for r in actual]
+    actual[0] = actual[0].model_copy(
+        update={
+            "verdict": "fail",
+            "rules": [
+                actual[0].rules[0].model_copy(update={"status": "fail"}),
+                *actual[0].rules[1:],
+            ],
+        }
+    )
+    inputs = (
+        captured_inputs(private, [[dict(role="system", content="position=测试开发")]])
+        if with_context
+        else dict(input_observations=[], files={})
+    )
     monkeypatch.setattr(review, "read_run", lambda _: (m, actual))
     monkeypatch.setattr(
         review,
@@ -93,7 +110,7 @@ def test_review_pack_blinds_identity_preserves_audit_and_raw_safety_failures(
             errors={},
             facts=dict(answer="two synthetic sentences"),
             http=[dict(body=dict(message="Explicit synthetic user request"))],
-            input_observations=[],
+            **inputs,
         ),
     )
     out = tmp_path / "pack"
@@ -103,14 +120,118 @@ def test_review_pack_blinds_identity_preserves_audit_and_raw_safety_failures(
     audit = json.loads(private_audit.read_bytes())
     assert not (out / "audit-map.json").exists()
     assert summary["human_labels"] == 0
+    assert pack["schema_version"] == audit["schema_version"] == 2
     assert all("trial_key" not in s and "variant_id" not in s for s in pack["samples"])
     assert all(s["user_requests"] for s in pack["samples"])
+    if with_context:
+        assert all(
+            s["model_context"]["calls"][0]["messages"][0]["content"] == "position=测试开发"
+            for s in pack["samples"]
+        )
+        assert all(s["model_input_bindings"] for s in audit["samples"])
+    else:
+        assert all(
+            s["model_context"] == {"status": "not_captured", "calls": []} for s in pack["samples"]
+        )
     assert {s["sample_id"] for s in pack["samples"]} == {s["sample_id"] for s in audit["samples"]}
     assert audit["pack_hash"] == file_hash(out / "review-pack.json")
-    assert all(r.verdict == "pass" for r in actual)
+    assert actual[0].verdict == "fail" and all(r.verdict == "pass" for r in actual[1:])
+    assert sum(s["raw_verdict"] == "fail" for s in audit["samples"]) == 1
+    assert all("raw_verdict" not in s and "known_fail_rules" not in s for s in pack["samples"])
     with pytest.raises(ValueError):
         review.blinded_pack([tmp_path / "run"], out, private_audit)
     with pytest.raises(ValueError):
         review.blinded_pack(
             [tmp_path / "run"], tmp_path / "new-pack", tmp_path / "new-pack/audit.json"
         )
+
+
+def captured_inputs(private, messages):
+    private.mkdir(exist_ok=True)
+    evidence = dict(input_observations=[], files={})
+    for index, value in enumerate(messages, 1):
+        path = private / f"request-{index}.json"
+        path.write_text(
+            json.dumps(
+                dict(
+                    messages=value,
+                    model="hidden-model",
+                    headers={"Authorization": "hidden-credential"},
+                )
+            ),
+            encoding="utf-8",
+        )
+        evidence["files"][path.name] = {"sha256": file_hash(path)}
+        evidence["input_observations"].append(
+            dict(
+                category="final_input",
+                request_file=path.name,
+                payload_hash=file_hash(path),
+                epoch=1,
+                seq=index,
+                identity={"model_call_id": f"private-call-{index}"},
+            )
+        )
+    return evidence
+
+
+def test_review_context_preserves_actual_job_and_history_without_provider_identity(tmp_path):
+    messages = [
+        dict(role="system", content="company=云岚数据; position=测试开发; jd_version_id=none"),
+        dict(role="user", content="给出面试准备建议"),
+    ]
+    after = [
+        *messages,
+        dict(role="assistant", content="上一轮回答"),
+        dict(role="user", content="撤回偏好后再次回答"),
+    ]
+    evidence = captured_inputs(tmp_path, [messages, after])
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    context, bindings = review.model_context(tmp_path, evidence)
+    assert context == dict(
+        status="captured", calls=[dict(number=1, messages=messages), dict(number=2, messages=after)]
+    )
+    public = json.dumps(context)
+    assert not any(
+        value in public
+        for value in ("hidden-model", "hidden-credential", "private-call-", str(tmp_path))
+    )
+    assert [b["payload_hash"] for b in bindings] == [
+        o["payload_hash"] for o in evidence["input_observations"]
+    ]
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
+@pytest.mark.parametrize(
+    "damage", ["unbound", "changed", "wrong_payload", "escape", "bad_messages"]
+)
+def test_review_context_refuses_unbound_or_corrupt_wire_input(tmp_path, damage):
+    evidence = captured_inputs(tmp_path, [[dict(role="user", content="actual request")]])
+    observation = evidence["input_observations"][0]
+    path = tmp_path / observation["request_file"]
+    if damage == "unbound":
+        evidence["files"].clear()
+    elif damage == "changed":
+        path.write_text('{"messages": []}', encoding="utf-8")
+    elif damage == "wrong_payload":
+        observation["payload_hash"] = "0" * 64
+    elif damage == "escape":
+        observation["request_file"] = "../request-1.json"
+    else:
+        path.write_text('{"messages": "not captured messages"}', encoding="utf-8")
+        evidence["files"][path.name]["sha256"] = observation["payload_hash"] = file_hash(path)
+    with pytest.raises(ValueError):
+        review.model_context(tmp_path, evidence)
+
+
+def test_review_context_does_not_invent_model_knowledge_from_database_fixture(tmp_path):
+    context, bindings = review.model_context(
+        tmp_path,
+        dict(
+            input_observations=[],
+            files={},
+            initial={"applications": [{"company_name": "not sent", "position_name": "not sent"}]},
+        ),
+    )
+    assert context == dict(status="not_captured", calls=[])
+    assert bindings == []

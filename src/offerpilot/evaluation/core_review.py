@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from hashlib import sha256
 import json
 from pathlib import Path
 import secrets
@@ -27,6 +28,65 @@ RUBRIC = {
     "score_range": [0, 3],
     "decision": "Human records pass/fail/abstain with a reason and supporting sentences; dimensions are not an automatic weighted verdict. Safety failures remain blocking.",
 }
+
+
+def model_context(
+    private: Path, evidence: dict[str, Any]
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Export captured messages, never infer model knowledge from fixture state."""
+    calls: list[dict[str, Any]] = []
+    bindings: list[dict[str, Any]] = []
+    fields = {"role", "content", "name", "tool_calls", "tool_call_id", "function_call"}
+    roles = {"system", "developer", "user", "assistant", "tool", "function"}
+    for observation in evidence.get("input_observations", []):
+        if observation.get("category") != "final_input":
+            continue
+        name = observation.get("request_file")
+        if not isinstance(name, str) or not name or Path(name).name != name:
+            raise ValueError("captured model input path is invalid")
+        path = private / name
+        recorded = evidence.get("files", {}).get(name, {})
+        if (
+            path.is_symlink()
+            or not path.resolve().is_relative_to(private.resolve())
+            or not path.is_file()
+        ):
+            raise ValueError("captured model input is unavailable")
+        raw = path.read_bytes()
+        actual_hash = sha256(raw).hexdigest()
+        if actual_hash != recorded.get("sha256") or actual_hash != observation.get("payload_hash"):
+            raise ValueError("captured model input is not bound to sealed evidence")
+        payload = json.loads(raw)
+        messages = payload.get("messages") if isinstance(payload, dict) else None
+        if (
+            not isinstance(messages, list)
+            or not messages
+            or any(
+                not isinstance(message, dict)
+                or not isinstance(message.get("role"), str)
+                or message["role"] not in roles
+                for message in messages
+            )
+        ):
+            raise ValueError("captured model messages are unsupported")
+        number = len(calls) + 1
+        calls.append(
+            {
+                "number": number,
+                "messages": [{k: v for k, v in m.items() if k in fields} for m in messages],
+            }
+        )
+        bindings.append(
+            {
+                "number": number,
+                "request_file": name,
+                "payload_hash": actual_hash,
+                "epoch": observation.get("epoch"),
+                "seq": observation.get("seq"),
+                "identity": observation.get("identity"),
+            }
+        )
+    return {"status": "captured" if calls else "not_captured", "calls": calls}, bindings
 
 
 def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> dict[str, Any]:
@@ -60,6 +120,7 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
             evidence = load(Path(row.private_directory), row.evidence_hash)
             if evidence.get("errors"):
                 raise ValueError("review evidence incomplete")
+            context, context_bindings = model_context(Path(row.private_directory), evidence)
             token = str(uuid4())
             sources = [
                 s
@@ -78,6 +139,7 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
                         and isinstance(v["body"].get("message"), str)
                     ],
                     "answer": evidence["facts"].get("answer", ""),
+                    "model_context": context,
                     "source_material": [
                         {"kind": s["kind"], "content": json.loads(s["content"])} for s in sources
                     ],
@@ -92,6 +154,7 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
                     "private_directory": row.private_directory,
                     "raw_verdict": row.verdict,
                     "known_fail_rules": [r.rule_id for r in row.rules if r.status == "fail"],
+                    "model_input_bindings": context_bindings,
                 }
             )
     if not samples:
@@ -100,14 +163,21 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
     output.mkdir(parents=True)
     atomic_json(
         output / "review-pack.json",
-        {"schema_version": 1, "samples": samples, "release_eligible": False},
+        {
+            "schema_version": 2,
+            "samples": samples,
+            "context_scope": "Captured model-visible messages only; missing JD or candidate "
+            "background is not inferred. This pack does not certify process safety.",
+            "release_eligible": False,
+        },
     )
     audit_output.parent.mkdir(parents=True, exist_ok=True)
     atomic_json(
         audit_output,
         {
-            "schema_version": 1,
+            "schema_version": 2,
             "pack_hash": file_hash(output / "review-pack.json"),
+            "review_exporter_hash": file_hash(Path(__file__)),
             "runs": runs,
             "samples": audit,
             "release_eligible": False,
