@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from offerpilot.evaluation.core_governance import Adjudication, verified_reference
+from offerpilot.evaluation.core_review_evidence import review_evidence
 from offerpilot.evaluation.core_runner import read_run
 from offerpilot.evaluation.core_storage import load
 from offerpilot.evaluation.registry import digest, file_hash
@@ -121,13 +122,8 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
             if evidence.get("errors"):
                 raise ValueError("review evidence incomplete")
             context, context_bindings = model_context(Path(row.private_directory), evidence)
+            provenance, execution, process_audit = review_evidence(evidence, context_bindings)
             token = str(uuid4())
-            sources = [
-                s
-                for v in evidence["input_observations"]
-                if v.get("category") == "sources"
-                for s in v.get("sources", [])
-            ]
             samples.append(
                 {
                     "sample_id": token,
@@ -140,9 +136,8 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
                     ],
                     "answer": evidence["facts"].get("answer", ""),
                     "model_context": context,
-                    "source_material": [
-                        {"kind": s["kind"], "content": json.loads(s["content"])} for s in sources
-                    ],
+                    "source_provenance": provenance,
+                    "execution_observation": execution,
                     "rubric": RUBRIC,
                 }
             )
@@ -155,6 +150,7 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
                     "raw_verdict": row.verdict,
                     "known_fail_rules": [r.rule_id for r in row.rules if r.status == "fail"],
                     "model_input_bindings": context_bindings,
+                    **process_audit,
                 }
             )
     if not samples:
@@ -164,10 +160,11 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
     atomic_json(
         output / "review-pack.json",
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "samples": samples,
-            "context_scope": "Captured model-visible messages only; missing JD or candidate "
-            "background is not inferred. This pack does not certify process safety.",
+            "context_scope": "Captured model-visible messages, call-bound source/version observations "
+            "and sealed process observations; missing JD or candidate background is not inferred. "
+            "Observed process data does not automatically certify functional success or safety.",
             "release_eligible": False,
         },
     )
@@ -175,9 +172,10 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
     atomic_json(
         audit_output,
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "pack_hash": file_hash(output / "review-pack.json"),
             "review_exporter_hash": file_hash(Path(__file__)),
+            "process_exporter_hash": file_hash(Path(review_evidence.__code__.co_filename)),
             "runs": runs,
             "samples": audit,
             "release_eligible": False,

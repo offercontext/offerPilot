@@ -120,7 +120,16 @@ def test_review_pack_blinds_identity_preserves_audit_and_raw_safety_failures(
     audit = json.loads(private_audit.read_bytes())
     assert not (out / "audit-map.json").exists()
     assert summary["human_labels"] == 0
-    assert pack["schema_version"] == audit["schema_version"] == 2
+    assert pack["schema_version"] == audit["schema_version"] == 3
+    assert all("source_material" not in s for s in pack["samples"])
+    assert all(s["execution_observation"]["status"] == "not_captured" for s in pack["samples"])
+    assert (
+        all(s["source_provenance"] == [] for s in pack["samples"])
+        if not with_context
+        else all(
+            s["source_provenance"][0]["selection_status"] == "not_captured" for s in pack["samples"]
+        )
+    )
     assert all("trial_key" not in s and "variant_id" not in s for s in pack["samples"])
     assert all(s["user_requests"] for s in pack["samples"])
     if with_context:
