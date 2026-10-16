@@ -57,6 +57,17 @@ def reviews(tmp_path):
         (process, "process_evidence", parents),
         (quality, "answer_quality", samples),
     ]:
+        process_ref = (
+            dict(
+                path=str(process / "review-pack.json"),
+                sha256=hashlib.sha256((process / "review-pack.json").read_bytes()).hexdigest(),
+            )
+            if kind == "answer_quality"
+            else None
+        )
+        if process_ref:
+            for row in rows:
+                row["source_process_pack"] = process_ref.copy()
         pack = dict(
             schema_version=3,
             kind="human-review-pack",
@@ -66,6 +77,8 @@ def reviews(tmp_path):
             sample_count=len(rows),
             samples=rows,
         )
+        if process_ref:
+            pack["source_process_pack"] = process_ref.copy()
         pack_hash = save(directory / "review-pack.json", pack)
         labels = []
         for sample in rows:
@@ -100,6 +113,7 @@ def reviews(tmp_path):
                 ]
             else:
                 label.update(
+                    source_process_pack=process_ref.copy(),
                     process_sample_id=sample["parent_sample_id"],
                     request_number=sample["request_number"],
                     call_numbers=sample["call_numbers"],
@@ -134,6 +148,48 @@ def reviews(tmp_path):
         )
         save(directory / "human.json", human)
     return process / "human.json", quality / "human.json"
+
+
+def rehash_review(path):
+    """Keep all container hashes valid when testing a semantic source mismatch."""
+    folder = path.parent
+    pack_hash = hashlib.sha256((folder / "review-pack.json").read_bytes()).hexdigest()
+    ai = json.loads((folder / "ai-review-for-human.json").read_bytes())
+    ai["pack_sha256"] = pack_hash
+    for label in ai["labels"]:
+        label["pack_sha256"] = pack_hash
+    ai_hash = save(folder / "ai-review-for-human.json", ai)
+    human = json.loads(path.read_bytes())
+    human.update(pack_sha256=pack_hash, ai_draft_sha256=ai_hash)
+    for label in human["labels"]:
+        label.update(pack_sha256=pack_hash, ai_draft_sha256=ai_hash)
+    save(path, human)
+
+
+@pytest.mark.parametrize("level", ["pack", "sample", "label", "path", "new_context"])
+def test_quality_review_cannot_move_between_same_commit_contexts(reviews, level):
+    process, quality = reviews
+    pack_path = quality.parent / "review-pack.json"
+    pack = json.loads(pack_path.read_bytes())
+    if level == "label":
+        human = json.loads(quality.read_bytes())
+        human["labels"][0]["source_process_pack"]["sha256"] = "0" * 64
+        save(quality, human)
+    elif level == "new_context":
+        process_pack_path = process.parent / "review-pack.json"
+        changed = json.loads(process_pack_path.read_bytes())
+        changed["samples"][0]["model_context"] = {"messages": ["different context, same answer"]}
+        save(process_pack_path, changed)
+        rehash_review(process)
+    else:
+        target = pack["samples"][0] if level == "sample" else pack
+        target["source_process_pack"]["path" if level == "path" else "sha256"] = (
+            "another-pack.json" if level == "path" else "0" * 64
+        )
+        save(pack_path, pack)
+        rehash_review(quality)
+    with pytest.raises(ValueError, match="quality process pack binding mismatch"):
+        validate(reviews)
 
 
 def validate(paths):

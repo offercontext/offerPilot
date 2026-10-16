@@ -157,6 +157,16 @@ def validate_reviews(process_path: Path, quality_path: Path) -> dict[str, Any]:
         process["pack"]["source_commit"] == quality["pack"]["source_commit"],
         "review snapshot mismatch",
     )
+    source = process["sources"]["pack"]
+    for value in [quality["pack"], *quality["samples"].values(), *quality["labels"].values()]:
+        binding = value.get("source_process_pack", {})
+        require(
+            isinstance(binding, dict)
+            and binding.get("sha256") == source["sha256"]
+            and isinstance(binding.get("path"), str)
+            and Path(binding["path"]).resolve() == Path(source["path"]).resolve(),
+            "quality process pack binding mismatch",
+        )
     parents = process["samples"]
     process_rows, quality_rows = [], []
     expected = {(name, n) for name, sample in parents.items() for n in outputs(sample)}
@@ -265,9 +275,7 @@ def verify_raw(accepted: dict[str, Any], audit_path: Path) -> list[dict[str, Any
     raw_records = []
     for sample in pack["samples"]:
         entry = indexed[sample["sample_id"]]
-        require(
-            entry["parent_sample_id"] == sample["parent_sample_id"], "audit parent mismatch"
-        )
+        require(entry["parent_sample_id"] == sample["parent_sample_id"], "audit parent mismatch")
         ref, index = entry["trial_result"], entry["index"]
         require(
             Path(index["path"]).resolve()
