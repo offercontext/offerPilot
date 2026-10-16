@@ -87,6 +87,8 @@ assistant_proposals 从实际 Agent Loop 原始模型返回（工具筛选及 HI
 
 audit 保存 trial/evidence hash、各次模型输入及选择绑定、主导出器、过程展示及三态归约模块 hash、过程片段 hash 和原 safety fail。已有评审包补充上下文时另存新版本并保留原样本关联、旧包 hash 与原始人工提交，不能将旧包上的 abstain 自动升级。历史 run 仍由原冻结评估器回读，新导出器仅生成展示材料，不追溯改分或据此证明撤回、抗注入及零写入全流程。人工结论追加保存，不能修改 raw TrialResult；AI 辅助人工的回答质量结论也不能写成独立盲评、正式裁判校准或发布门禁通过。仓库可见题目不声称秘密盲测。
 
+`oc eval acceptance-summary --process-review <过程人工提交.json> --quality-review <质量人工提交.json> --audit <独立audit.json> --output <新目录>` 离线核对 schema 3 的评审包、实际审阅的 AI 初评、原始 AI 引用、人工状态、输出及原始封存证据，追加逐样本验收记录。质量按 `(process_sample_id, request_number, call_numbers, answer_sha256)` 对应，R04 两次回复各保留独立身份与分数；缺失、重复、错绑或哈希错误拒绝汇总。原始 trial、规则及历史评审不修改。这些独立回执不是 trial 级 Adjudication，也不自动进入正式 gate、基线或裁判校准；只说明对应人工已确认的范围。
+
 judge-preflight 为零网络条件检查：至少 20 个不同、有效、证据 hash 绑定的人工样本，且包含正反例；重复、冲突、abstain、过期或引用损坏不能凑数。每项引用必须是 `kind=human-rubric-record` 的结构化 JSON，包含与 Adjudication 完全相同的 adjudication_id/run_id/trial_key/evidence_hash/rubric/reviewer/decision/reason/dimensions/created_at/expires_at，schema_version=1；通用文本文件不能充当标注。run_id 必须与 trial key 一致，ID 不得重复。本地 attestation 仍不能认证实际作者，维护者须核对人工来源。即使满足，仍须单独授权实际校准并记录误报/漏报，judge_release_enabled=false。当前没有绑定真实运行的人工校准集，正式裁判保持关闭。平台适配器仅在实际导出需求及授权成立后开发，本任务没有上传动作。
 
 ## 6 S5 选测

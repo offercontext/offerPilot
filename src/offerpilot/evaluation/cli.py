@@ -53,6 +53,22 @@ def review_pack(
         configuration_error(exc)
 
 
+@app.command("acceptance-summary")
+def acceptance_summary(
+    process_review: Path = typer.Option(..., "--process-review"),
+    quality_review: Path = typer.Option(..., "--quality-review"),
+    audit: Path = typer.Option(..., "--audit"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    from offerpilot.evaluation.core_acceptance import append_summary
+
+    try:
+        result = append_summary(process_review, quality_review, audit, output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(dict(counts=result["counts"], network_requests=0, release_eligible=False)))
+
+
 @app.command("judge-preflight")
 def judge_preflight(
     run: list[Path] = typer.Option(..., "--run"), review: Path = typer.Option(..., "--review")
