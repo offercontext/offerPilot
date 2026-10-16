@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from offerpilot.evaluation.registry import digest
+from offerpilot.evaluation.core_process_signals import process_summary
 
 IDENTITY = ("model_call_id", "segment_id", "surface_fingerprint")
 
@@ -42,10 +43,6 @@ def _source_key(source: dict[str, Any]) -> tuple[str, str, str] | None:
 
 def _project(values: Any, names: str) -> list[dict[str, Any]] | None:
     return [_fields(v, names) for v in values] if isinstance(values, list) else None
-
-
-def _presence(value: Any) -> bool | None:
-    return bool(value) if isinstance(value, (bool, list, dict)) else None
 
 
 def review_evidence(
@@ -184,11 +181,12 @@ def review_evidence(
                 else None,
             }
         )
+    process = process_summary(evidence)
     execution = dict(
         status="captured" if observer_active else "not_captured",
         scope="Captured observations only; missing evidence stays unknown. No automatic functional verdict.",
         coordinates=dict(
-            journal="Input/source/call seq and withdrawal_journal_seq share the runtime journal.",
+            journal="Input/source/call/process seq and withdrawal_journal_seq share the trial subject control journal; they are not product agent_events.seq.",
             database_observer="Database markers/deltas, control start/end and observer_high_water share the DB observer; these seq values are not journal seq.",
         ),
         calls=calls if isinstance(recorded_calls, list) else None,
@@ -197,9 +195,9 @@ def review_evidence(
             withdrawal_journal_seq=_positive(facts.get("withdraw_control_seq")),
             receipts=controls if isinstance(recorded_controls, list) else None,
         ),
+        assistant_proposals=process,
         signals=dict(
-            write_intent_present=_presence(facts.get("write_intent")),
-            pending_present=_presence(facts.get("pending")),
+            **process["signals"],
             observation_closed=facts.get("control_closed")
             if type(facts.get("control_closed")) is bool
             else None,

@@ -567,9 +567,14 @@ def serve(channel: Channel) -> None:
                 "conversation_id": handle.conversation_id,
                 "request_id": handle.request_id,
             }
+            channel.emit("model_observation", dict(category="process_worker", event="started",
+                         version="process-signals-v1", execution=EXECUTION_IDENTITY.value), ack=True)
             try:
                 return original_worker(handle)
             finally:
+                channel.emit("model_observation", dict(category="process_worker", event="finished",
+                             version="process-signals-v1", execution=EXECUTION_IDENTITY.value,
+                             worker_done=handle.worker_done, state=handle.state), ack=True)
                 EXECUTION_IDENTITY.value = None
 
         from types import MethodType
@@ -770,7 +775,10 @@ def serve(channel: Channel) -> None:
                 )
 
         threading.Thread(target=ready, daemon=True).start()
-        loop.run_until_complete(server.serve(sockets=[listener]))
+        from scripts.evaluation_subject.core_process import observe as observe_process
+
+        with observe_process(channel):
+            loop.run_until_complete(server.serve(sockets=[listener]))
         if provider_server:
             provider_server.shutdown()
             provider_server.server_close()

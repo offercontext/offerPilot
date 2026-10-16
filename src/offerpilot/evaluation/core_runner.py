@@ -179,7 +179,7 @@ def run_trial(
             v
             for v in events
             if v.get("category")
-            in {"sources", "final_input", "usage", "provider_response", "provider_error"}
+            in {"sources", "final_input", "usage", "provider_response", "provider_error", "process", "process_worker"}
         ]
         e["provider_attempts"] = [v for v in events if v.get("purpose") == "provider_send"]
         e["budget_events"] = [

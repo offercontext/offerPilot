@@ -12,6 +12,7 @@ from uuid import uuid4
 
 from offerpilot.evaluation.core_governance import Adjudication, verified_reference
 from offerpilot.evaluation.core_review_evidence import review_evidence
+from offerpilot.evaluation.core_process_signals import process_summary
 from offerpilot.evaluation.core_runner import read_run
 from offerpilot.evaluation.core_storage import load
 from offerpilot.evaluation.registry import digest, file_hash
@@ -176,6 +177,7 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
             "pack_hash": file_hash(output / "review-pack.json"),
             "review_exporter_hash": file_hash(Path(__file__)),
             "process_exporter_hash": file_hash(Path(review_evidence.__code__.co_filename)),
+            "process_signal_exporter_hash": file_hash(Path(process_summary.__code__.co_filename)),
             "runs": runs,
             "samples": audit,
             "release_eligible": False,

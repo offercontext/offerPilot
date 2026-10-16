@@ -81,7 +81,9 @@ review-pack 使用原冻结评估器重新评分，随机展示样本并隐藏 A
 
 source_provenance 按展示调用编号关联此前同 epoch、完整 model_call/segment/surface 身份一致的最近唯一选择记录，保留 source_id、revision、单元版本和最终输入范围；无法关联为 unbound，未采集为 not_captured，不从其他调用借用来源。schema 3 移除无调用坐标的 source_material 平铺字段，来源内容仅在各调用的 selected_sources 中展示；显式空选择与缺失选择分别保留 [] 和 null。execution_observation 展示实际控制回执、写意图/pending 信号、调用与数据库观察水位、数据库 coverage/markers/deltas。journal 序号与数据库 observer 序号分别标明，不能直接比较；缺失信号及未启用 observer 的零水位保留 null，不能补成零写入。捕获数据支持进一步人工核验，不自动产生功能通过结论。
 
-audit 保存 trial/evidence hash、各次模型输入及选择绑定、主导出器与过程展示模块 hash、过程片段 hash 和原 safety fail。已有评审包补充上下文时另存新版本并保留原样本关联、旧包 hash 与原始人工提交，不能将旧包上的 abstain 自动升级。历史 run 仍由原冻结评估器回读，新导出器仅生成展示材料，不追溯改分或据此证明撤回、抗注入及零写入全流程。人工结论追加保存，不能修改 raw TrialResult；AI 辅助人工的回答质量结论也不能写成独立盲评、正式裁判校准或发布门禁通过。仓库可见题目不声称秘密盲测。
+assistant_proposals 从实际 Agent Loop 原始模型返回（工具筛选及 HITL 前）、Pending 对象产生和真实 worker 起止采集；按请求、turn/generation、Segment/ModelCall 及 subject control 区间绑定。write_intent_present 与 pending_present 为三态：直接正例可为 true；只有全部调用与 loop 被覆盖、请求 worker 结束、控制通道闭合无错误且未见正例时才为 false；未采集、缺口、未知工具或未闭合保持 null。Pending 产生不保证持久化或展示成功，HITL 拦截也不会抹除写意图。subject control、产品 agent_events 和数据库 observer 是不同序号坐标。观测随既有 input_observations 片段哈希封存；历史缺失数据不回填为 false。
+
+audit 保存 trial/evidence hash、各次模型输入及选择绑定、主导出器、过程展示及三态归约模块 hash、过程片段 hash 和原 safety fail。已有评审包补充上下文时另存新版本并保留原样本关联、旧包 hash 与原始人工提交，不能将旧包上的 abstain 自动升级。历史 run 仍由原冻结评估器回读，新导出器仅生成展示材料，不追溯改分或据此证明撤回、抗注入及零写入全流程。人工结论追加保存，不能修改 raw TrialResult；AI 辅助人工的回答质量结论也不能写成独立盲评、正式裁判校准或发布门禁通过。仓库可见题目不声称秘密盲测。
 
 judge-preflight 为零网络条件检查：至少 20 个不同、有效、证据 hash 绑定的人工样本，且包含正反例；重复、冲突、abstain、过期或引用损坏不能凑数。每项引用必须是 `kind=human-rubric-record` 的结构化 JSON，包含与 Adjudication 完全相同的 adjudication_id/run_id/trial_key/evidence_hash/rubric/reviewer/decision/reason/dimensions/created_at/expires_at，schema_version=1；通用文本文件不能充当标注。run_id 必须与 trial key 一致，ID 不得重复。本地 attestation 仍不能认证实际作者，维护者须核对人工来源。即使满足，仍须单独授权实际校准并记录误报/漏报，judge_release_enabled=false。当前没有绑定真实运行的人工校准集，正式裁判保持关闭。平台适配器仅在实际导出需求及授权成立后开发，本任务没有上传动作。
 
