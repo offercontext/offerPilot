@@ -199,15 +199,32 @@ def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> N
     target = urlsplit(provider_endpoint) if provider_endpoint else None
     hosts = {"127.0.0.1", "::1"}
     endpoints = {("127.0.0.1", p) for p in ports} | {("::1", p) for p in ports}
-    provider_addresses: set[tuple[str, int]] = set()
+    provider_port = target.port or (443 if target.scheme == "https" else 80) if target else None
     if target:
         hosts.add(str(target.hostname))
-        provider_addresses.update(
-            (str(r[4][0]), target.port or 443)
-            for r in socket.getaddrinfo(
-                target.hostname, target.port or 443, type=socket.SOCK_STREAM
-            )
-        )
+        # The old setup lookup also warmed this codec before audit/traceback re-entry.
+        # Preserve that initialization without freezing a DNS answer.
+        str(target.hostname).encode("idna")
+    original_resolve = socket.getaddrinfo
+
+    def resolve(host: Any, port: Any, *args: Any, **kwargs: Any) -> Any:
+        provider = target is not None and host == target.hostname
+        if provider:
+            SEND_PERMISSION.addresses = set()
+        answers = original_resolve(host, port, *args, **kwargs)
+        if provider and getattr(SEND_PERMISSION, "permitted", False):
+            addresses = {
+                (str(row[4][0]), row[4][1])
+                for row in answers
+                if row[1] == socket.SOCK_STREAM and row[4][1] == provider_port
+            }
+            SEND_PERMISSION.addresses = addresses
+            channel.attempt("network", blocked=False, boundary="socket.getaddrinfo",
+                            host=host, port=provider_port, addresses=sorted(addresses),
+                            attempt=getattr(SEND_PERMISSION, "attempt", None))
+        return answers
+
+    socket.getaddrinfo = resolve
     original_pair = socket.socketpair
     local = threading.local()
 
@@ -229,7 +246,7 @@ def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> N
                 and (
                     address[:2] in endpoints
                     or (
-                        address[:2] in provider_addresses
+                        address[:2] in getattr(SEND_PERMISSION, "addresses", set())
                         and getattr(SEND_PERMISSION, "permitted", False)
                     )
                     or (getattr(local, "pair", False) and address[0] in {"127.0.0.1", "::1"})

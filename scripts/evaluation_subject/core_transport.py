@@ -6,6 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 import threading
+import time
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -195,9 +196,10 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                     # rather than assigning its identity to matching history text.
                     for ascii_only in (False, True):
                         for compact in (False, True):
+                            options: dict[str, Any] = {"separators": (",", ":")} if compact else {}
                             serialized = json.dumps(
                                 root_unit, ensure_ascii=ascii_only, sort_keys=compact,
-                                **({"separators": (",", ":")} if compact else {}),
+                                **options,
                             ).encode()
                             cursor = 0
                             while (found := encoded.find(serialized, cursor)) >= 0:
@@ -258,12 +260,33 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             state.stream_barrier_reached = True
             channel.emit("fault_reached", {"boundary": "http_before_send"}, ack=True)
         kwargs["follow_redirects"] = False
+        started = time.monotonic()
+        trace_events: list[dict[str, Any]] = []
+        previous_trace = request.extensions.get("trace")
+
+        def trace(name: str, info: Any) -> None:
+            if len(trace_events) < 64:
+                trace_events.append(dict(event=name, elapsed_seconds=round(time.monotonic() - started, 6)))
+            if previous_trace is not None:
+                previous_trace(name, info)
+
+        request.extensions["trace"] = trace
+        responded = False
         try:
             SEND_PERMISSION.permitted = True
+            SEND_PERMISSION.addresses = set()
+            SEND_PERMISSION.attempt = attempt
             try:
                 response = original_send(self, request, *args, **kwargs)
             finally:
                 SEND_PERMISSION.permitted = False
+                SEND_PERMISSION.addresses = set()
+                SEND_PERMISSION.attempt = None
+                if previous_trace is None:
+                    request.extensions.pop("trace", None)
+                else:
+                    request.extensions["trace"] = previous_trace
+            responded = True
             channel.emit(
                 "model_observation",
                 {
@@ -279,6 +302,7 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                     "wire_stream": bool(payload.get("stream")),
                     "content_encoding": response.headers.get("content-encoding"),
                     "content_type": response.headers.get("content-type"),
+                    "transport_events": trace_events,
                 },
                 ack=True,
             )
@@ -344,12 +368,26 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                 setattr(response, "iter_bytes", observed_iterator)
             return response
         except Exception as exc:
+            chain: list[dict[str, Any]] = []
+            seen: set[int] = set()
+            current: BaseException | None = exc
+            while current is not None and id(current) not in seen and len(chain) < 8:
+                seen.add(id(current))
+                chain.append(dict(type=type(current).__name__, module=type(current).__module__,
+                                  errno=getattr(current, "errno", None),
+                                  winerror=getattr(current, "winerror", None)))
+                current = current.__cause__ or current.__context__
             channel.emit(
                 "model_observation",
                 {
                     "category": "provider_error",
                     "attempt": attempt,
                     "error_type": type(exc).__name__,
+                    "exception_chain": chain,
+                    "http_response_received": responded,
+                    "failure_stage": "response_capture" if responded else
+                    trace_events[-1]["event"] if trace_events else "http_send",
+                    "transport_events": trace_events,
                 },
                 ack=True,
             )
