@@ -120,6 +120,38 @@ def test_durable_timeout_keeps_timeout_receipt_without_accepting_late_model_outp
         model.release.set()
 
 
+def test_durable_timeout_saves_receipt_when_initial_terminal_probe_misses(tmp_path, monkeypatch):
+    import offerpilot.api as api
+    from offerpilot.pilot_control import PilotControlRepository
+
+    monkeypatch.setattr(api, 'CHAT_AGENT_TIMEOUT_SECONDS', 0.05)
+    original = PilotControlRepository.try_finish
+    missed = []
+
+    def miss_once(self, lease, state, **kwargs):
+        if not missed:
+            missed.append(state)
+            return False
+        return original(self, lease, state, **kwargs)
+
+    monkeypatch.setattr(PilotControlRepository, 'try_finish', miss_once)
+    model = BarrierModel()
+    try:
+        with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+            response = client.post('/api/chat', json={'message': '超时应有已保存说明'})
+            assert response.status_code == 200, response.text
+            turn = client.get(f"/api/chat/turns/{response.json()['turn_id']}").json()
+            messages = client.get(f"/api/chat/conversations/{turn['conversation_id']}").json()
+            assert missed == ['interrupted']
+            assert [m['role'] for m in messages] == ['user', 'assistant']
+            assert '处理时间过长' in messages[-1]['content']
+            assert turn['state'] == 'interrupted'
+            model.release.set()
+            assert client.get(f"/api/chat/conversations/{turn['conversation_id']}").json() == messages
+    finally:
+        model.release.set()
+
+
 def test_control_endpoints_require_existing_api_auth(tmp_path):
     from offerpilot.config import Config, save_config
     save_config(tmp_path, Config(auth_enabled=True, auth_token='control-api-test-token'))

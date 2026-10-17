@@ -16,7 +16,7 @@ from typing import Any
 from uuid import UUID, uuid4
 from weakref import WeakSet
 
-from sqlalchemy import event, func, select, text, update
+from sqlalchemy import case, event, func, select, text, update
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -47,6 +47,7 @@ class ExecutionScope:
     revoked: Event = field(default_factory=Event, repr=False)
     on_claim: Callable[[ExecutionLease], None] | None = field(default=None, repr=False)
     terminal_states: tuple[str, ...] = ()
+    recover_timed_out_execution: bool = False
 
 
 _EXECUTION_SCOPE: ContextVar[ExecutionScope | None] = ContextVar("pilot_execution_scope", default=None)
@@ -102,6 +103,23 @@ def _commit_fence(connection: Connection) -> None:
             PilotExecution.conversation_id == lease.conversation_id,
             PilotExecution.owner_token == lease.owner_token,
         ]
+        if scope.recover_timed_out_execution:
+            # The non-blocking timeout probe may have lost a short writer race.
+            # Converge only this exact owner when the trusted recovery actually
+            # commits. The terminal/latest-sequence fence below still applies;
+            # any failure rolls this transition and the delivery back together.
+            if scope.terminal_states != ("interrupted", "result_unknown"):
+                raise TurnExecutionFenced("Invalid timeout recovery scope")
+            recovered = connection.execute(update(PilotExecution).where(
+                *conditions, PilotExecution.state == "running",
+            ).values(state=case((
+                (PilotExecution.renewed_at_ms <= now) & (PilotExecution.lease_until_ms > now),
+                "interrupted",
+            ), else_="result_unknown")).returning(PilotExecution.state)).first()
+            if recovered is not None:
+                connection.execute(update(PilotTurnRecord).where(
+                    PilotTurnRecord.id == lease.turn_id,
+                ).values(state="incomplete" if recovered.state == "result_unknown" else "interrupted"))
         if scope.terminal_states:
             # A separate, trusted source-only delivery may finish after timeout.
             # It cannot revive the worker or overwrite a newer execution.

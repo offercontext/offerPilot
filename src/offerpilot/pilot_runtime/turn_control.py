@@ -105,7 +105,8 @@ class DurableRuntimeInvocationControl:
             # Only Runtime's fixed timeout/delivery convergence uses this entry.
             # A fresh scope prevents a late worker from inheriting this grant.
             recovery = ExecutionScope(self.repository, self.lease, terminal_states=("interrupted", "result_unknown"),
-                                      locally_active=lambda: self._inner.state is InvocationState.TIMED_OUT)
+                                      locally_active=lambda: self._inner.state is InvocationState.TIMED_OUT,
+                                      recover_timed_out_execution=True)
             if recovery.lease is None:
                 return False, None
             with bind_execution_scope(recovery):

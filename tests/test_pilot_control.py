@@ -321,6 +321,80 @@ def test_timeout_finish_remains_unknown_when_initial_terminal_probe_misses(
         control.finish('interrupted')
 
 
+@pytest.mark.parametrize('offset, execution_state, turn_state', [
+    (0, 'interrupted', 'interrupted'),
+    (30_001, 'result_unknown', 'incomplete'),
+    (-1, 'result_unknown', 'incomplete'),
+])
+def test_timeout_receipt_recovers_after_a_busy_terminal_probe(control_store, offset, execution_state, turn_state):
+    from offerpilot.models import PilotTurnRecord
+    from offerpilot.pilot_control import bind_execution_scope
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    factory, controls, turns, now = control_store
+    turn = admit(turns)
+    lease = controls.claim_start(turn.turn_id)
+    control = DurableRuntimeInvocationControl(controls, lease, monotonic_clock=lambda: 10.0)
+    holder = factory.kw['bind'].connect()
+    holder.exec_driver_sql('BEGIN IMMEDIATE')
+    try:
+        assert control.request_timeout()
+    finally:
+        holder.rollback()
+        holder.close()
+    try:
+        assert controls.get_execution(turn.turn_id)['state'] == 'running'
+        now[0] += offset
+        allowed, message = control.run_if_active(lambda: ChatRepository(factory).append_message(
+            turn.conversation_id, 'assistant', content='fixed timeout receipt',
+        ), allow_timeout=True)
+        assert allowed and message is not None
+        assert controls.get_execution(turn.turn_id)['state'] == execution_state
+        assert turns.get_turn(turn.turn_id)['state'] == execution_state
+        with factory() as session:
+            assert session.scalar(select(PilotTurnRecord.state).where(PilotTurnRecord.id == turn.turn_id)) == turn_state
+        with bind_execution_scope(control.execution_scope), pytest.raises(TurnExecutionFenced):
+            ChatRepository(factory).append_message(turn.conversation_id, 'assistant', content='late worker')
+        assert [m.content for m in ChatRepository(factory).list_messages(turn.conversation_id)] == [
+            '测试执行', 'fixed timeout receipt',
+        ]
+    finally:
+        control.finish('interrupted')
+
+
+def test_timeout_recovery_transition_rolls_back_with_failed_receipt(control_store, monkeypatch):
+    from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
+
+    factory, controls, turns, _ = control_store
+    turn = admit(turns)
+    control = DurableRuntimeInvocationControl(controls, controls.claim_start(turn.turn_id))
+    monkeypatch.setattr(controls, 'try_finish', lambda *_args, **_kwargs: False)
+    assert control.request_timeout()
+    engine = factory.kw['bind']
+
+    def fail_transition(_connection, _cursor, statement, _parameters, _context, _many):
+        if statement.startswith('UPDATE pilot_turns'):
+            raise RuntimeError('recovery transition failed')
+
+    event.listen(engine, 'after_cursor_execute', fail_transition)
+    try:
+        with pytest.raises(RuntimeError, match='recovery transition failed'):
+            control.run_if_active(lambda: ChatRepository(factory).append_message(
+                turn.conversation_id, 'assistant', content='uncommitted timeout',
+            ), allow_timeout=True)
+    finally:
+        event.remove(engine, 'after_cursor_execute', fail_transition)
+    try:
+        assert controls.get_execution(turn.turn_id)['state'] == 'running'
+        assert [m.content for m in ChatRepository(factory).list_messages(turn.conversation_id)] == ['测试执行']
+        allowed, _ = control.run_if_active(lambda: ChatRepository(factory).append_message(
+            turn.conversation_id, 'assistant', content='fixed timeout receipt',
+        ), allow_timeout=True)
+        assert allowed and controls.get_execution(turn.turn_id)['state'] == 'interrupted'
+    finally:
+        control.finish('interrupted')
+
+
 def test_finish_waiting_for_sqlite_does_not_prevent_timeout_from_winning(control_store):
     from offerpilot.pilot_runtime.turn_control import DurableRuntimeInvocationControl
 
