@@ -4601,10 +4601,18 @@ class PilotRuntime:
     def _metadata_operation_ports(
         self,
     ) -> tuple[ToolOperationMetadataPort, PendingPersistenceRoutePort]:
+        # Composition imports Runtime, so resolve this exact production type
+        # only at the invocation boundary, after composition has completed.
+        from offerpilot.pilot_runtime.composition import ProductionToolMetadataComponents
+
         components = self._dependencies.metadata_components
+        bundle = self._dependencies.metadata_bundle
+        if type(components) is ProductionToolMetadataComponents:
+            if type(bundle) is not ToolMetadataBundleV1:
+                raise RuntimeError("Runtime Tool Metadata Port provenance mismatch")
+            return components.pending_persistence_ports(bundle)
         operation_port = getattr(components, "operation_port", None)
         pending_port = getattr(components, "pending_persistence_route_port", None)
-        bundle = self._dependencies.metadata_bundle
         if type(operation_port) is not ToolOperationMetadataPort:
             raise RuntimeError("Runtime Tool Operation Metadata Port is unavailable")
         if type(pending_port) is not PendingPersistenceRoutePort:
