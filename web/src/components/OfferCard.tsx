@@ -48,12 +48,12 @@ export default function OfferCard({ offer, selectable = true, selected, onToggle
       title={
         <Space className={styles.heading}>
           {selectable ? <Checkbox aria-label={`选择 Offer：${offer.company_name}｜${offer.position_name}`} checked={selected} onChange={() => onToggleSelect(offer.id)} /> : null}
-          <Text strong>{offer.company_name}</Text>
+          <Text strong className={styles.company} title={offer.company_name}>{offer.company_name}</Text>
         </Space>
       }
       extra={<Tag color={OFFER_STATUS_COLORS[offer.status]}>{OFFER_STATUS_LABELS[offer.status]}</Tag>}
     >
-      <div className={styles.position}>{offer.position_name}</div>
+      <div className={styles.position} title={offer.position_name}>{offer.position_name}</div>
       <div className={styles.salary}>
         {offer.base_monthly > 0 ? `${offer.base_monthly / 1000}K` : '月薪待确认'}
         {offer.months_per_year > 0 ? ` × ${offer.months_per_year} 薪` : ' · 年薪月数待确认'}

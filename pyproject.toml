@@ -41,7 +41,8 @@ packages = ["src/offerpilot"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
+addopts = "-p tests._offline_network_guard"
 
 [tool.ruff]
 line-length = 100

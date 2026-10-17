@@ -15,8 +15,8 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
   currentValues.current = { conversationId, turns, pending, revision };
   const [requestState, setRequestState] = useState<{ conversationId: number; failed: boolean; refreshing: boolean } | null>(null);
   const refreshPresentation = useCallback(() => setRevision((value) => value + 1), []);
-  const acceptRuntimeSnapshot = useCallback(async (page: PilotTimelinePage, isCurrent: () => boolean = () => true) => {
-    if (!isCurrent() || currentValues.current.conversationId !== page.conversation_id) return;
+  const acceptRuntimeSnapshot = useCallback(async (page: PilotTimelinePage, isCurrent: () => boolean = () => true): Promise<PilotPresentationSnapshot | null> => {
+    if (!isCurrent() || currentValues.current.conversationId !== page.conversation_id) return null;
     const epoch = ++snapshotEpoch.current;
     let snapshot: PilotPresentationSnapshot;
     try { snapshot = await getPilotPresentationFromPage(page); }
@@ -26,13 +26,16 @@ export function usePilotPresentation(conversationId: number | undefined, turns: 
         setLoaded(null);
         setRequestState({ conversationId: page.conversation_id, failed: true, refreshing: false });
       }
-      return;
+      return null;
     }
-    if (!isCurrent() || epoch !== snapshotEpoch.current || currentValues.current.conversationId !== page.conversation_id) return;
+    if (!isCurrent() || epoch !== snapshotEpoch.current || currentValues.current.conversationId !== page.conversation_id) return null;
     latestSnapshot.current = snapshot;
     const current = currentValues.current;
     setLoaded({ snapshot, turns: current.turns, pending: current.pending, revision: current.revision });
     setRequestState({ conversationId: page.conversation_id, failed: false, refreshing: false });
+    // The authorized boundary is available before React commits these state
+    // writes. Recovery must not infer it from a possibly stale render ref.
+    return snapshot;
   }, []);
   useEffect(() => {
     let current = true;

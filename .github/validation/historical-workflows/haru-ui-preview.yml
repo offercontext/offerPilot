@@ -1,0 +1,93 @@
+name: Haru Windows browser and source Electron validation
+
+# Independent feature branch. No dispatch, EXE, packaging, paid provider,
+# protected environment, secrets, full gate or cross-workflow trigger.
+on:
+  push:
+    branches: [feat/20261012-haru-dark-window]
+    paths:
+      - 'desktop/haru-ui-preview/**'
+      - '.github/workflows/haru-ui-preview.yml'
+      - 'web/src/features/assistantSurface/**'
+      - 'web/src/layout/**'
+      - 'web/src/theme/**'
+      - 'desktop/haru.cjs'
+      - 'desktop/haru-protocol.cjs'
+      - 'desktop/preload.cjs'
+      - 'desktop/capabilities.cjs'
+      - 'desktop/package.json'
+      - 'desktop/package-lock.json'
+      - 'web/src/features/pilotMascot/**'
+      - 'web/public/live2d/**'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - 'desktop/installed-ui/package.json'
+      - 'desktop/installed-ui/package-lock.json'
+
+permissions: {}
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  preview:
+    if: ${{ github.repository == 'offercontext/offerPilot' && github.ref == 'refs/heads/feat/20261012-haru-dark-window' && github.run_attempt == 1 }}
+    runs-on: windows-2022
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22.23.3'
+      - name: Install only locked dependencies without lifecycle scripts
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+        run: |
+          npm.cmd ci --prefix web --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Locked web dependency installation failed' }
+          npm.cmd ci --prefix desktop/installed-ui --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Locked browser helper installation failed' }
+          npm.cmd ci --prefix desktop --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw 'Locked Electron dependency installation failed' }
+      - name: Install the locked official Electron runtime only
+        timeout-minutes: 3
+        run: |
+          node desktop/node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Locked official Electron runtime installation failed' }
+      - name: Validate fixture boundaries and build the complete production frontend
+        id: frontend
+        timeout-minutes: 4
+        run: |
+          node --test desktop/haru-ui-preview/fixture-api.test.cjs desktop/haru-ui-preview/visual.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Read-only fixture contract tests failed' }
+          npm.cmd run build --prefix web
+          if ($LASTEXITCODE -ne 0) { throw 'Production frontend build failed' }
+      - name: Capture actual sandboxed Edge rendering against loopback fixtures
+        timeout-minutes: 7
+        run: |
+          node web/node_modules/typescript/bin/tsc --project desktop/haru-ui-preview/tsconfig.json
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated preview TypeScript validation failed' }
+          node desktop/haru-ui-preview/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Synthetic UI preview failed; inspect result.json and actual failure pixels' }
+      - name: Verify native Windows windows and production AppShell routing
+        if: ${{ !cancelled() && steps.frontend.outcome == 'success' }}
+        timeout-minutes: 6
+        run: |
+          node desktop/haru-ui-preview/run-native.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Source Electron validation failed; inspect native-result.json and failure pixels' }
+      - name: Retain only synthetic report and actual viewport PNGs
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: haru-ui-preview-${{ github.sha }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            desktop/haru-ui-preview/evidence/result.json
+            desktop/haru-ui-preview/evidence/native-result.json
+            desktop/haru-ui-preview/evidence/*.png

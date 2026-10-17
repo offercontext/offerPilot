@@ -50,10 +50,10 @@ export default function ResumeCard({ resume, onEdit, onSetMaster, onCopy, onDele
     : undefined;
 
   return (
-    <Card hoverable styles={{ body: { padding: 14 } }} {...resumeDragBinding}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <Tag color={isBase ? 'blue' : lineage.kind === 'relationship_unknown' ? 'warning' : 'default'} style={{ borderRadius: 8 }}>{lineageLabel}</Tag>
+    <Card hoverable style={{ minWidth: 0 }} styles={{ body: { padding: 14 } }} {...resumeDragBinding}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ display: 'flex', minWidth: 0, flex: '1 1 180px', gap: 6, flexWrap: 'wrap' }}>
+          <Tag color={isBase ? 'blue' : lineage.kind === 'relationship_unknown' ? 'warning' : 'default'} style={{ borderRadius: 8, maxWidth: '100%', whiteSpace: 'normal', overflowWrap: 'anywhere' }} title={lineageLabel}>{lineageLabel}</Tag>
           <Tag color={sourceColor(resume.source)} style={{ borderRadius: 8 }}>{sourceLabel}</Tag>
         </div>
         <span style={{ fontSize: 11, color: 'var(--op-muted)', whiteSpace: 'nowrap' }}>
@@ -61,7 +61,7 @@ export default function ResumeCard({ resume, onEdit, onSetMaster, onCopy, onDele
         </span>
       </div>
 
-      <div style={{ fontSize: 15, fontWeight: 600, margin: '10px 0 8px', color: 'var(--op-text)', textWrap: 'pretty' as const }}>
+      <div style={{ fontSize: 15, fontWeight: 600, margin: '10px 0 8px', color: 'var(--op-ink)', overflowWrap: 'anywhere', textWrap: 'pretty' as const }}>
         {title}
       </div>
 
@@ -70,7 +70,7 @@ export default function ResumeCard({ resume, onEdit, onSetMaster, onCopy, onDele
         <span style={{ fontSize: 12, color: 'var(--op-text)', fontVariantNumeric: 'tabular-nums', minWidth: 34 }}>{completion}%</span>
       </div>
 
-      <div style={{ fontSize: 12, color: 'var(--op-muted)', lineHeight: 1.5, minHeight: 36, overflow: 'hidden', textWrap: 'pretty' as const }}>
+      <div style={{ fontSize: 12, color: 'var(--op-muted)', lineHeight: 1.5, minHeight: 36, overflow: 'hidden', overflowWrap: 'anywhere', textWrap: 'pretty' as const }}>
         {preview}
       </div>
 

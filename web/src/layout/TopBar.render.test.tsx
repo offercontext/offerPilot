@@ -29,6 +29,8 @@ describe('TopBar detail presentation', () => {
     act(() => container.querySelector<HTMLButtonElement>('button[aria-label="设置"]')?.click());
     expect(onSearch).toHaveBeenCalledOnce();
     expect(onSettings).toHaveBeenCalledOnce();
+    expect(container.querySelector('[data-pilot-mascot-global-dock]')).not.toBeNull();
+    expect(search?.getAttribute('aria-label')).toBe('快速打开');
   });
 
   it('keeps the existing greeting outside the compact detail mode', () => {

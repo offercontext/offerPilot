@@ -1,3 +1,5 @@
+import { createPortal } from 'react-dom';
+import { classifyMascotFailure, type MascotFailureReason } from './mascotFailure';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent, type RefObject } from 'react';
 import { CloseOutlined, MessageOutlined, MinusOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons';
 import {
@@ -20,6 +22,7 @@ import {
   type PilotMascotPlacement,
   type PilotMascotPosition,
 } from './pilotMascotPreference';
+import { useMascotVisibility } from './useMascotVisibility';
 import styles from './PilotMascot.module.css';
 
 export type { PilotMascotActivity, PilotMascotRuntime } from './live2dRuntime';
@@ -69,6 +72,7 @@ const MASCOT_FRAME = {
   expanded: { width: 238, height: 370 },
   narrowDesktop: { width: 150, height: 238 },
   compact: { width: 116, height: 174 },
+  fallback: { width: 156, height: 48 },
 } as const;
 
 function notificationCopy(notification: PilotMascotNotification | null | undefined) {
@@ -97,6 +101,7 @@ export default function PilotMascot({
   runtime = live2dPilotMascotRuntime,
   triggerRef: externalTriggerRef,
 }: Props) {
+  const pageVisible = useMascotVisibility();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const internalTriggerRef = useRef<HTMLButtonElement>(null);
   const triggerRef = externalTriggerRef ?? internalTriggerRef;
@@ -106,6 +111,11 @@ export default function PilotMascot({
   const latestActivityRef = useRef(activity);
   const [menuOpen, setMenuOpen] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [runtimeReady, setRuntimeReady] = useState(false);
+  const [loadFailureReason, setLoadFailureReason] = useState<MascotFailureReason>();
+  const [fallbackDock, setFallbackDock] = useState<HTMLElement | null>(null);
+  const [globalFallbackDock, setGlobalFallbackDock] = useState<HTMLElement | null>(null);
+  const [sidebarDock, setSidebarDock] = useState<HTMLElement | null>(null);
   const [localPosition, setLocalPosition] = useState<PilotMascotPosition>(() => {
     const key = placement === 'interview-studio' ? 'interview_studio' : 'normal';
     return readPilotMascotPositions()[key];
@@ -126,11 +136,17 @@ export default function PilotMascot({
   const placementKey: PilotMascotPlacement = studioPlacement ? 'interview_studio' : 'normal';
 
   useEffect(() => {
+    setLoadFailed(false);
+    setLoadFailureReason(undefined);
+  }, [animationLevel, reducedMotionRevision, runtime]);
+
+  useEffect(() => {
+    setRuntimeReady(false);
+    if (loadFailed || !pageVisible) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const abortController = new AbortController();
     let disposed = false;
-    setLoadFailed(false);
     void runtime.mount(canvas, abortController.signal, animationLevel).then((controller) => {
       if (disposed) {
         controller.dispose();
@@ -141,8 +157,13 @@ export default function PilotMascot({
       // Animated hair and limbs therefore keep a safe render boundary.
       controller.setZoom(1);
       controller.setActivity(latestActivityRef.current);
-    }).catch(() => {
-      if (!disposed && !abortController.signal.aborted) setLoadFailed(true);
+      setRuntimeReady(true);
+    }).catch((error: unknown) => {
+      if (!disposed && !abortController.signal.aborted) {
+        setRuntimeReady(false);
+        setLoadFailureReason(classifyMascotFailure(error));
+        setLoadFailed(true);
+      }
     });
     return () => {
       disposed = true;
@@ -150,7 +171,7 @@ export default function PilotMascot({
       runtimeControllerRef.current?.dispose();
       runtimeControllerRef.current = undefined;
     };
-  }, [animationLevel, reducedMotionRevision, runtime]);
+  }, [animationLevel, loadFailed, reducedMotionRevision, runtime, pageVisible]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -194,15 +215,38 @@ export default function PilotMascot({
     : placement === 'pilot-page'
       ? '聚焦 Pilot 输入框'
       : panelOpen ? '收起 OfferPilot 领航员' : '打开 OfferPilot 领航员';
-  const buttonLabel = loadFailed ? `${actionLabel}（Haru 暂时休息中）` : actionLabel;
+  const buttonLabel = loadFailed ? `${actionLabel}（Haru 模型未加载，Pilot 仍可使用）` : actionLabel;
 
-  const frame = compact || panelOpen || placement === 'pilot-page' || (studioPlacement && viewport.height < 740)
+  // Reserve the sidebar's real free space instead of covering global controls.
+  // Keep the canvas in its original React tree so navigation does not remount it.
+  const sidebarBounds = !studioPlacement && !fallbackDock && !loadFailed
+    ? sidebarDock?.getBoundingClientRect() : undefined;
+  const sidebarRect = sidebarBounds && sidebarBounds.width > 0 && sidebarBounds.height > 0 ? sidebarBounds : undefined;
+  const frame = loadFailed ? MASCOT_FRAME.fallback : sidebarRect || fallbackDock || compact || panelOpen || placement === 'pilot-page' || (studioPlacement && viewport.height < 740)
     ? MASCOT_FRAME.compact
     : viewport.width <= 900
       ? MASCOT_FRAME.narrowDesktop
       : MASCOT_FRAME.expanded;
-  const frameWidth = Math.round(frame.width * normalizedZoom * 10) / 10;
-  const frameHeight = Math.round(frame.height * normalizedZoom * 10) / 10;
+  const fitZoom = sidebarRect ? Math.min(normalizedZoom, sidebarRect.width / frame.width, sidebarRect.height / frame.height) : normalizedZoom;
+  const frameWidth = Math.round(frame.width * (loadFailed ? 1 : fitZoom) * 10) / 10;
+  const frameHeight = Math.round(frame.height * (loadFailed ? 1 : fitZoom) * 10) / 10;
+  const listTable = fallbackDock && !loadFailed
+    ? document.querySelector<HTMLElement>('[data-pilot-mascot-safe-area]')
+    : null;
+  const listTableRect = listTable?.getBoundingClientRect();
+  const scrollContent = listTable?.querySelector<HTMLElement>('.ant-table-content');
+  const scrollHint = listTable?.querySelector<HTMLElement>('[data-pilot-mascot-scroll-hint]');
+  const renderedScrollSpace = (scrollHint ? scrollHint.getBoundingClientRect().height + 8 : 0)
+    + (scrollContent ? scrollContent.offsetHeight - scrollContent.clientHeight : 0);
+  const fullWidthWouldScroll = Boolean(listTable && listTable.parentElement
+    && listTable.parentElement.clientWidth < Number(listTable.dataset.pilotTableMinWidth));
+  // Decide from the full-width layout, not the lane's own added hint/scrollbar.
+  // Otherwise filtering/paginating a long list can retain an unnecessary lane.
+  const fullWidthTableBottom = listTableRect
+    ? listTableRect.bottom - renderedScrollSpace + (fullWidthWouldScroll ? 36 : 0)
+    : 0;
+  const needsListGutter = Boolean(viewport.width >= 768 && listTableRect
+    && fullWidthTableBottom + frameHeight + 32 > viewport.height);
   const activePosition = position ?? localPosition;
   void safeAreaRevision;
   const measuredSafeAreas = typeof document !== 'undefined' && studioPlacement
@@ -218,11 +262,17 @@ export default function PilotMascot({
       )),
     ].map((element) => element?.getBoundingClientRect())
       .filter((rect): rect is DOMRect => Boolean(rect && rect.width > 0 && rect.height > 0))
-    : [];
+    : fallbackDock && !loadFailed
+      ? Array.from(document.querySelectorAll<HTMLElement>(
+        '[data-pilot-mascot-safe-area], [data-pilot-mascot-toolbar], .op-topbar, .op-sidebar',
+      )).map((element) => element.getBoundingClientRect()).filter((rect) => rect.width > 0 && rect.height > 0)
+      : [];
   const safeAreas: PilotMascotRect[] = measuredSafeAreas.map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }));
   const constrainedPosition = positionPilotMascotOutsideSafeAreas(activePosition, viewport, { width: frameWidth, height: frameHeight }, safeAreas);
-  const frameLeft = constrainedPosition.xRatio * viewport.width - frameWidth / 2;
-  const frameTop = constrainedPosition.yRatio * viewport.height - frameHeight / 2;
+  const frameLeft = sidebarRect ? sidebarRect.left + Math.max(0, sidebarRect.width - frameWidth) * activePosition.xRatio
+    : constrainedPosition.xRatio * viewport.width - frameWidth / 2;
+  const frameTop = sidebarRect ? sidebarRect.top + Math.max(0, sidebarRect.height - frameHeight) * activePosition.yRatio
+    : constrainedPosition.yRatio * viewport.height - frameHeight / 2;
 
   const reportAnchorRect = useCallback(() => {
     const anchor = triggerRef.current;
@@ -249,8 +299,28 @@ export default function PilotMascot({
     if (!anchor || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => reportAnchorRect());
     observer.observe(anchor);
+    if (anchor.parentElement) observer.observe(anchor.parentElement);
+    if (anchor.parentElement?.parentElement) observer.observe(anchor.parentElement.parentElement);
+    if (fallbackDock?.parentElement) observer.observe(fallbackDock.parentElement);
+    if (globalFallbackDock?.parentElement) observer.observe(globalFallbackDock.parentElement);
+    if (globalFallbackDock?.parentElement?.parentElement) observer.observe(globalFallbackDock.parentElement.parentElement, { box: 'border-box' });
     return () => observer.disconnect();
-  }, [frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
+  }, [compact, fallbackDock, globalFallbackDock, loadFailed, frameHeight, frameLeft, frameTop, frameWidth, reportAnchorRect, safeAreaRevision, triggerRef, viewport.height, viewport.width]);
+
+  useEffect(() => {
+    if (!fallbackDock && !sidebarDock && !(loadFailed && globalFallbackDock)) return;
+    const update = () => {
+      if (loadFailed) reportAnchorRect();
+      else setSafeAreaRevision((revision) => revision + 1);
+    };
+    document.addEventListener('scroll', update, true);
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    document.querySelectorAll('[data-pilot-mascot-safe-area], [data-pilot-mascot-toolbar], [data-pilot-mascot-sidebar-dock]').forEach((element) => observer?.observe(element));
+    return () => {
+      document.removeEventListener('scroll', update, true);
+      observer?.disconnect();
+    };
+  }, [fallbackDock, globalFallbackDock, sidebarDock, loadFailed, reportAnchorRect]);
 
   useEffect(() => {
     if (!studioPlacement || typeof document === 'undefined' || typeof ResizeObserver === 'undefined') return;
@@ -284,11 +354,12 @@ export default function PilotMascot({
   };
 
   useEffect(() => {
+    if (loadFailed || sidebarRect) return;
     if (Math.abs(constrainedPosition.xRatio - activePosition.xRatio) < 0.001 && Math.abs(constrainedPosition.yRatio - activePosition.yRatio) < 0.001) return;
     setLocalPosition(constrainedPosition);
     writePilotMascotPosition(placementKey, constrainedPosition);
     onPositionChange?.(constrainedPosition);
-  }, [activePosition.xRatio, activePosition.yRatio, constrainedPosition.xRatio, constrainedPosition.yRatio, onPositionChange]);
+  }, [activePosition.xRatio, activePosition.yRatio, constrainedPosition.xRatio, constrainedPosition.yRatio, loadFailed, Boolean(sidebarRect), onPositionChange]);
 
   const finishDrag = (event?: PointerEvent<HTMLButtonElement>) => {
     const drag = dragRef.current;
@@ -303,7 +374,7 @@ export default function PilotMascot({
 
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
-    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startPosition: activePosition, moved: false };
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, startPosition: sidebarRect ? activePosition : constrainedPosition, moved: false };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
 
@@ -314,7 +385,9 @@ export default function PilotMascot({
     const dy = event.clientY - drag.startY;
     if (!drag.moved && Math.hypot(dx, dy) <= 6) return;
     drag.moved = true;
-    setPosition({ xRatio: drag.startPosition.xRatio + dx / viewport.width, yRatio: drag.startPosition.yRatio + dy / viewport.height });
+    const moveWidth = sidebarRect ? Math.max(1, sidebarRect.width - frameWidth) : viewport.width;
+    const moveHeight = sidebarRect ? Math.max(1, sidebarRect.height - frameHeight) : viewport.height;
+    setPosition({ xRatio: drag.startPosition.xRatio + dx / moveWidth, yRatio: drag.startPosition.yRatio + dy / moveHeight });
   };
 
   useEffect(() => {
@@ -332,17 +405,43 @@ export default function PilotMascot({
     setMenuOpen(false);
   };
 
-  return (
+  useLayoutEffect(() => {
+    if (studioPlacement) {
+      setFallbackDock(null);
+      setGlobalFallbackDock(null);
+      setSidebarDock(null);
+      return;
+    }
+    const updateDock = () => {
+      setFallbackDock(document.querySelector<HTMLElement>('[data-pilot-mascot-fallback-dock]'));
+      setGlobalFallbackDock(document.querySelector<HTMLElement>('[data-pilot-mascot-global-dock]'));
+      setSidebarDock(document.querySelector<HTMLElement>('[data-pilot-mascot-sidebar-dock]'));
+    };
+    updateDock();
+    const observer = new MutationObserver(updateDock);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [studioPlacement]);
+  const dockedFallback = loadFailed ? fallbackDock ?? globalFallbackDock : null;
+  const mascot = (
     <aside
-      className={`${styles.mascot} ${panelOpen ? styles.compact : ''} ${
+      className={`${styles.mascot} ${panelOpen ? styles.compact : ''} ${loadFailed ? styles.loadFailed : ''} ${
         placement === 'pilot-page' ? styles.pilotPage : ''
-      } ${studioPlacement ? styles.interviewStudio : styles.normalLayout} ${dragRef.current?.moved ? styles.dragging : ''}`}
+      } ${studioPlacement ? styles.interviewStudio : styles.normalLayout} ${sidebarRect ? styles.sidebarDock : ''} ${dragRef.current?.moved ? styles.dragging : ''}`}
+      data-sidebar-docked={sidebarRect ? 'true' : undefined}
+      data-runtime-ready={runtimeReady ? 'true' : undefined}
+      data-load-failed={loadFailed ? 'true' : undefined}
+      data-load-failure-reason={loadFailed ? loadFailureReason : undefined}
+      data-global-fallback={loadFailed && !fallbackDock && globalFallbackDock ? 'true' : undefined}
+      data-pilot-list-character={needsListGutter ? 'true' : undefined}
       data-activity={activity}
       data-notification={notification?.status}
       data-animation-level={animationLevel}
       data-interview-studio-companion={studioPlacement ? 'true' : undefined}
       aria-label="Haru 助手"
-      style={{ width: frameWidth, height: frameHeight, left: `${frameLeft}px`, top: `${frameTop}px`, right: 'auto', bottom: 'auto' }}
+      style={dockedFallback
+        ? { position: 'relative', width: frameWidth, height: frameHeight, inset: 'auto', zIndex: 1 }
+        : { width: frameWidth, height: frameHeight, left: `${frameLeft}px`, top: `${frameTop}px`, right: 'auto', bottom: 'auto' }}
     >
       {notification || (!panelOpen && activity !== 'idle') ? (
         <div className={styles.bubble} role="status" aria-live="polite">
@@ -355,11 +454,12 @@ export default function PilotMascot({
         className={styles.characterButton}
         ref={triggerRef}
         aria-label={buttonLabel}
+        title={loadFailed ? 'Haru 模型未加载，点击仍可使用 Pilot；右键可隐藏角色' : undefined}
         aria-expanded={placement === 'pilot-page' ? undefined : panelOpen}
         aria-haspopup={menuOpen ? 'menu' : placement === 'contextual' ? 'dialog' : undefined}
         aria-controls={panelOpen ? 'haru-chat-window' : menuOpen ? 'pilot-mascot-menu' : undefined}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
+        onPointerDown={dockedFallback ? undefined : handlePointerDown}
+        onPointerMove={dockedFallback ? undefined : handlePointerMove}
         onPointerUp={(event) => finishDrag(event)}
         onPointerCancel={(event) => finishDrag(event)}
         onClick={() => { if (!suppressClickRef.current) onTogglePilot(); }}
@@ -381,7 +481,7 @@ export default function PilotMascot({
         {loadFailed ? (
           <span className={styles.fallback} role="status" aria-live="polite">
             <MessageOutlined />
-            <span>Haru 暂时休息中</span>
+            <span>打开 Pilot<small>Haru 模型未加载</small></span>
           </span>
         ) : null}
         <span className={styles.nameplate} aria-hidden="true">
@@ -390,7 +490,8 @@ export default function PilotMascot({
         </span>
       </button>
       {menuOpen ? (
-        <div id="pilot-mascot-menu" className={styles.contextMenu} role="menu" ref={menuRef}>
+        <div id="pilot-mascot-menu" className={styles.contextMenu} role="menu" ref={menuRef}
+          style={loadFailed && (dockedFallback || frameTop < 300) ? { top: 56, bottom: 'auto' } : undefined}>
           <div className={styles.zoomHeading} aria-hidden="true">
             <span>角色大小</span>
             <strong>{zoomPercent}%</strong>
@@ -454,4 +555,5 @@ export default function PilotMascot({
       ) : null}
     </aside>
   );
+  return dockedFallback ? createPortal(mascot, dockedFallback) : mascot;
 }

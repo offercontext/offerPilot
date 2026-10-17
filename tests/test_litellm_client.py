@@ -73,7 +73,7 @@ def test_client_audits_request_metadata_without_prompt_or_secret(monkeypatch, tm
     assert record["model"] == "model-secret"
     assert record["litellm_model"] == "openai/model-secret"
     assert record["response_mode"] == "json_schema"
-    assert record["explicit_max_tokens"] is None
+    assert record["explicit_max_tokens"] == 4096
     assert record["explicit_timeout_seconds"] is None
     assert record["request_body_bytes"] > 0
     assert len(record["input_fingerprint_sha256"]) == 64

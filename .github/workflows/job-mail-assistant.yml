@@ -142,7 +142,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install isolated test runner
-        run: python -m pip install pytest==9.1.1
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.8.22'
+      - name: Install locked test and offline-guard dependencies
+        run: uv sync --frozen
       - name: Verify native lock exclusion and crash release
-        run: python -m pytest --noconftest -q tests/test_job_mail_process_lock.py
+        run: uv run --frozen pytest --noconftest -q tests/test_job_mail_process_lock.py

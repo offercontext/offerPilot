@@ -55,6 +55,9 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
   const callback = useRef(onStopped);
   const inFlight = useRef(new Set<number>());
   const revision = useRef(0);
+  // Keep one exact terminal proof across missing/stale polls. A new execution
+  // identity can run, but the same generation can never return to running.
+  const terminalProof = useRef<PilotExecution | null>(null);
   current.current = conversationId;
   executionRef.current = execution;
   callback.current = onStopped;
@@ -62,6 +65,7 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    if (terminalProof.current?.conversation_id !== conversationId) terminalProof.current = null;
     setExecution((value) => value?.conversation_id === conversationId ? value : null);
     setRetry(conversationId === undefined ? undefined : readCommand(conversationId));
     setStopMessage('');
@@ -71,7 +75,8 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
       const startedAt = revision.current;
       try {
         const value = await getPilotExecution(conversationId);
-        if (!cancelled && startedAt === revision.current) {
+        if (!cancelled && startedAt === revision.current
+          && !(value?.state === 'running' && sameExecution(terminalProof.current, value))) {
           const terminalTransition = value !== null && value.state !== 'running' && (
             !executionRef.current
             || !sameExecution(executionRef.current, value)
@@ -82,6 +87,7 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
             setStopMessage(value.state === 'stopped' ? messages.stopped : value.state === 'result_unknown'
               ? messages.result_unknown : value.state === 'interrupted' ? '执行已中断，已保存的记录仍保留。' : '');
           }
+          if (value && value.state !== 'running' && value.state !== 'result_unknown') terminalProof.current = value;
           setExecution(value);
           setRetry(readCommand(conversationId));
         }
@@ -93,10 +99,26 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
   }, [conversationId]);
 
   const acceptExecution = useCallback((value: PilotExecution) => {
+    if (value.state === 'running' && sameExecution(terminalProof.current, value)) return;
+    if (value.state !== 'running' && value.state !== 'result_unknown') terminalProof.current = value;
     revision.current += 1;
     executionRef.current = value;
     setExecution(value);
     setStopMessage('');
+  }, []);
+
+  // A validated runtime completion is stronger than a stale or unavailable
+  // poll. The accepted ref updates synchronously, even before React commits
+  // a newly assigned conversation ID; never settle another turn/generation.
+  const settleExecution = useCallback((target: PilotExecution, state: Exclude<PilotExecution['state'], 'running' | 'result_unknown'>): boolean => {
+    const active = executionRef.current;
+    if (!active || !sameExecution(active, target) || active.state !== 'running') return false;
+    revision.current += 1;
+    const terminal = { ...active, state };
+    terminalProof.current = terminal;
+    executionRef.current = terminal;
+    setExecution(terminal);
+    return true;
   }, []);
 
   const stop = useCallback(async () => {
@@ -131,6 +153,8 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
             ...command.target,
             state: result.status === 'stopped' ? 'stopped' as const : 'completed' as const,
           };
+          terminalProof.current = terminalTarget;
+          executionRef.current = terminalTarget;
           setExecution(terminalTarget);
           callback.current(terminalTarget);
         }
@@ -143,6 +167,6 @@ export function usePilotExecution(conversationId: number | undefined, onStopped:
     }
   }, []);
 
-  return useMemo(() => ({ execution, stopping, stopMessage, stop, acceptExecution, retryingStop: Boolean(retry),
-    canStop: Boolean(retry) || execution?.state === 'running' }), [execution, stopping, stopMessage, stop, acceptExecution, retry]);
+  return useMemo(() => ({ execution, stopping, stopMessage, stop, acceptExecution, settleExecution, retryingStop: Boolean(retry),
+    canStop: Boolean(retry) || execution?.state === 'running' }), [execution, stopping, stopMessage, stop, acceptExecution, settleExecution, retry]);
 }

@@ -14,6 +14,11 @@ describe('SettingsView localization', () => {
     expect(source).not.toContain('onOpenAISettings');
   });
 
+  it('keeps mail and desktop update sections reachable together', () => {
+    expect(source).toContain('<JobMailSettings />');
+    expect(source).toContain('<DesktopUpdatesCard />');
+  });
+
   it('uses Chinese product copy for settings and diagnostics', () => {
     expect(source).toContain('设置');
     expect(source).toContain('AI 与模型');

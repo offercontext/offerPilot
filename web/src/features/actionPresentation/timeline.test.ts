@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { applyTimelinePage, timelinePresentation } from './timeline';
 import { getPilotPresentation, getPilotPresentationFromPage } from './service';
+import { mergePresentationTurns } from './model';
 import type { PilotTimelineItem, PilotTimelinePage } from './contracts';
 
 const api = vi.hoisted(() => ({ get: vi.fn() }));
@@ -25,6 +26,66 @@ function page(items: PilotTimelineItem[], high = 1, mode: 'snapshot' | 'changes'
 beforeEach(() => api.get.mockReset());
 
 describe('durable timeline merge', () => {
+  it.each(['completed', '0:completed', '1:completed', '12:completed'])('hides only the completed boundary in a real turn-shaped page: %s', (sourceRevision) => {
+    const boundary: PilotTimelineItem = {
+      ...item(), item_id: 'turn:turn-1:run:turn-1', item_type: 'run_boundary',
+      source_refs: ['turn:turn-1'], source_revision: sourceRevision,
+      payload: { schema_version: 1, item_id: 'run:turn-1', kind: 'run_boundary',
+        message_id: null, operation_id: null, content: '本轮记录已保存。', action: null },
+    };
+    const user: PilotTimelineItem = {
+      ...item(), item_id: 'turn:turn-1:message:9', item_type: 'user_message',
+      ordinal: 2, change_seq: 2, source_refs: ['message:9'],
+      payload: { ...item().payload!, item_id: 'message:9', message_id: 9, kind: 'user_message', content: '独立任务' },
+    };
+    const reply = { ...item(), ordinal: 3, change_seq: 3 };
+    // The backend inserts the boundary before the turn's user and assistant.
+    const cache = applyTimelinePage(null, page([reply, boundary, user], 3));
+    const before = structuredClone(cache);
+    const presentation = timelinePresentation(cache);
+    expect(mergePresentationTurns([], presentation).map(({ role, content }) => ({ role, content }))).toEqual([
+      { role: 'user', content: '独立任务' }, { role: 'assistant', content: '版本 1' },
+    ]);
+    expect(presentation.timeline).toBe(cache);
+    expect(cache).toEqual(before);
+    expect(cache.items[boundary.item_id]).toEqual(boundary);
+    expect(presentation.items.map(({ timeline_item_id }) => timeline_item_id)).toEqual([user.item_id, reply.item_id]);
+  });
+
+  it.each([
+    'failed', 'interrupted', 'result_unknown', '0:failed', '1:interrupted', '12:result_unknown',
+    '1:running', '1:waiting_confirmation', '1:stopped', '0:incomplete',
+    '-1:completed', '-0:completed', '01:completed', '00:completed', '+1:completed',
+    '1.0:completed', '1e1:completed', ':completed', '1:completed:extra', '1:completed-extra',
+    '1:completed\n', '1:completed\r\n', '1:completed\u2028', '1\n:completed', ' completed', 'completed\n',
+    ' 1:completed', '1:completed ', '1:Completed', '１:completed', '',
+  ])('keeps uncertain or noncanonical boundary revision visible: %j', (sourceRevision) => {
+    const boundary: PilotTimelineItem = {
+      ...item(), item_id: 'turn:turn-1:run:turn-1', item_type: 'run_boundary', source_revision: sourceRevision,
+      payload: { ...item().payload!, item_id: 'run:turn-1', kind: 'run_boundary', message_id: null, content: '本轮状态' },
+    };
+    expect(timelinePresentation(applyTimelinePage(null, page([boundary]))).items).toMatchObject([
+      { kind: 'run_boundary', content: '本轮状态' },
+    ]);
+  });
+
+  it.each((['user_message', 'assistant_message', 'action', 'error_info'] as const).flatMap(kind =>
+    ['completed', '0:completed', '1:completed'].map(sourceRevision => ({ kind, sourceRevision })),
+  ))('does not suppress $kind with completed-looking revision: $sourceRevision', ({ kind, sourceRevision }) => {
+    const reply = { ...item(), item_type: kind, source_revision: sourceRevision, payload: { ...item().payload!, kind } };
+    expect(timelinePresentation(applyTimelinePage(null, page([reply]))).items).toMatchObject([
+      { kind, content: '版本 1' },
+    ]);
+  });
+
+  it.each([undefined, null, 1])('does not suppress an untyped boundary revision: %j', (sourceRevision) => {
+    const boundary: PilotTimelineItem = {
+      ...item(), item_id: 'turn:turn-1:run:turn-1', item_type: 'run_boundary', source_revision: sourceRevision as unknown as string,
+      payload: { ...item().payload!, item_id: 'run:turn-1', kind: 'run_boundary', message_id: null },
+    };
+    expect(timelinePresentation(applyTimelinePage(null, page([boundary]))).items).toHaveLength(1);
+  });
+
   it('completes a runtime snapshot at its original watermark before reading later changes', async () => {
     api.get.mockResolvedValueOnce({ data: page([], 1) })
       .mockResolvedValueOnce({ data: page([item(2)], 2, 'changes') });

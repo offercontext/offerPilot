@@ -3,6 +3,7 @@ import ContextPolicySettings from './ContextPolicySettings';
 import ConfirmedMemorySettings from './ConfirmedMemorySettings';
 import ProactiveSettings from './ProactiveSettings';
 import ProactiveInbox from './ProactiveInbox';
+import DesktopUpdatesCard from './DesktopUpdatesCard';
 import { ApiOutlined, CopyOutlined, DownloadOutlined, FileSearchOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Divider, Empty, Input, Modal, Pagination, Select, Skeleton, Space, Spin, Switch, Tag, Typography, message } from 'antd';
@@ -16,6 +17,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 const AISettingsDrawer = lazy(() => import('./AISettingsDrawer'));
 
 interface Props {
+  aiSettingsRequest?: number;
   pilotMascotVisible: boolean;
   onPilotMascotVisibleChange: (visible: boolean) => void;
   pilotMascotZoom?: number;
@@ -29,6 +31,7 @@ interface Props {
 const LOG_PAGE_SIZE = 20;
 
 export default function SettingsView({
+  aiSettingsRequest = 0,
   pilotMascotVisible,
   onPilotMascotVisibleChange,
   pilotMascotZoom = 1,
@@ -43,6 +46,7 @@ export default function SettingsView({
   const [logPage, setLogPage] = useState(1);
   const [lastLogsPage, setLastLogsPage] = useState<LogsPage>();
   const [aiSettingsOpen, setAISettingsOpen] = useState(false);
+  useEffect(() => { if (aiSettingsRequest > 0) setAISettingsOpen(true); }, [aiSettingsRequest]);
   const logOffset = (logPage - 1) * LOG_PAGE_SIZE;
   const settingsQuery = useQuery({
     queryKey: ['settings-summary'],
@@ -157,7 +161,7 @@ export default function SettingsView({
           }}
         >
           <RuntimeField label="运行模式" value={formatRuntimeMode(settings?.runtime_mode)} />
-          <RuntimeField label="版本" value={settings?.version ?? '-'} />
+          <RuntimeField label="后端版本" value={settings?.version ?? '-'} />
           <RuntimeField label="密钥状态" value={settings?.has_api_key ? '已配置' : '未配置'} />
         </div>
         <details style={detailsStyle}>
@@ -179,6 +183,8 @@ export default function SettingsView({
       </section>
 
       <JobMailSettings />
+      <DesktopUpdatesCard />
+
       <ContextPolicySettings />
       <ConfirmedMemorySettings />
       <ProactiveSettings />

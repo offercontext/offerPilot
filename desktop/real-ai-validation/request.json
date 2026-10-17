@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "requestId": "offerpilot-fixed-exe-real-ai-20261008",
+  "environment": "offerpilot-real-ai-validation",
+  "workflow": ".github/workflows/desktop-real-ai.yml",
+  "limits": {
+    "currency": "CNY",
+    "budget": 10,
+    "requests": 8,
+    "seconds": 600,
+    "retries": 0
+  },
+  "cases": [
+    "pilot-stream"
+  ],
+  "transport": "fixed-exe-ui-loopback-budget-broker-real-provider",
+  "profile": "single-synthetic-fresh-profile",
+  "rawEvidence": false,
+  "screenshots": false,
+  "reruns": false,
+  "scope": "pilot-haru-carry-forward-only",
+  "carryForward": {
+    "runId": 38694575612,
+    "artifactId": 11953258616,
+    "digest": "8a31c0a40981a543b85103217b7d3c2a5cd9ebeb080b43664a4c81bd9ad3e917"
+  },
+  "execution": {
+    "additionalRequests": 1,
+    "seconds": 120
+  }
+}

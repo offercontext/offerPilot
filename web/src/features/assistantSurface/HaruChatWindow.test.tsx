@@ -8,11 +8,12 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 import HaruChatWindow from './HaruChatWindow';
+import { getPilotExecution } from '@/services/chat';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 vi.mock('@/services/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/chat')>(),
-  getPilotExecution: vi.fn().mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' }),
+  getPilotExecution: vi.fn().mockResolvedValue(null),
   interruptPilotExecution: vi.fn().mockImplementation(async (target, commandId) => ({
     command_id: commandId, turn_id: target.turn_id, execution_generation: target.execution_generation, status: 'stopped',
   })),
@@ -111,14 +112,18 @@ function SharedDraftHarness() {
 
 describe('HaruChatWindow', () => {
   it('blocks keyboard submission when only a remote execution is running', async () => {
+    vi.mocked(getPilotExecution).mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' });
     await act(async () => root?.render(
       <AssistantSurfaceProvider><ContextHarness /></AssistantSurfaceProvider>,
     ));
     expect(host!.querySelector('textarea')!.disabled).toBe(true);
+    expect(host!.querySelector('[data-task-state="running"]')).not.toBeNull();
     expect(host!.querySelector('[aria-label="停止生成"]')).not.toBeNull();
   });
 
   beforeEach(() => {
+    vi.mocked(getPilotExecution).mockReset().mockResolvedValue(null);
+    vi.mocked(getPilotPresentation).mockReset().mockRejectedValue(new Error('legacy server'));
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -182,6 +187,8 @@ describe('HaruChatWindow', () => {
     ));
     expect(host!.querySelector('[role="dialog"]')?.textContent).toContain('先准备项目案例。');
     expect(host!.textContent).toContain('星河科技 · 前端工程师 · 1 个附件');
+    expect(host!.querySelector('[aria-label="当前上下文"] b')?.getAttribute('title'))
+      .toBe('星河科技 · 前端工程师 · 1 个附件');
     expect(host!.textContent).toContain('这一步会修改「星河科技 · 前端工程师」的内容');
     expect(host!.textContent).toContain('查看修改内容');
 
@@ -191,6 +198,7 @@ describe('HaruChatWindow', () => {
   });
 
   it('stops the single active request only when explicitly requested', async () => {
+    vi.mocked(getPilotExecution).mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' });
     const stop = vi.fn();
     await act(async () => root?.render(
       <AssistantSurfaceProvider><Harness stop={stop} /></AssistantSurfaceProvider>,

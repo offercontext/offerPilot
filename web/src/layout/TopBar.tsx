@@ -41,7 +41,7 @@ export default function TopBar({ primaryAction, onSearch, onOpenSettings, summar
         </div>
       </div> : null}
       <div className={`${styles.actions} op-topbar-actions`}>
-        <Button className={styles.actionButton} icon={<SearchOutlined />} onClick={onSearch}>
+        <Button className={styles.actionButton} icon={<SearchOutlined />} onClick={onSearch} aria-label="快速打开">
           快速打开 <span style={{ opacity: 0.6, marginLeft: 4 }}>{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'}</span>
         </Button>
         <Button
@@ -62,6 +62,7 @@ export default function TopBar({ primaryAction, onSearch, onOpenSettings, summar
             {primaryAction.label}
           </Button>
         ) : null}
+        <div className={styles.fallbackDock} data-pilot-mascot-global-dock />
       </div>
     </header>
   );

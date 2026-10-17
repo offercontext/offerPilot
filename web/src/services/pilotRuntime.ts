@@ -9,11 +9,17 @@ export interface RuntimeIdentity {
   conversation_id: number;
   execution_generation: number;
 }
+/** Ephemeral text only; canonical messages and action authority stay in P2. */
+export interface RuntimeAssistantProgress extends RuntimeIdentity {
+  sequence: number;
+  content: string;
+}
 export interface RuntimeObserveOptions {
   signal?: AbortSignal;
   onAccepted?: (identity: { conversationId: number; turnId: string; executionGeneration: number; protocol: typeof protocol }) => void;
   onEvent?: (event: ChatStreamEvent) => void;
   onSnapshot?: (page: PilotTimelinePage) => void | Promise<void>;
+  onAssistantProgress?: (progress: RuntimeAssistantProgress) => void;
 }
 type RuntimeState = Partial<RuntimeIdentity> & {
   protocol_version?: string;
@@ -156,12 +162,22 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
   const url = `${base}/turns/${encodeURIComponent(target.turn_id)}`;
   let high = 0;
   let completed: ChatResponse | undefined;
+  let progressText = '';
+  let progressUnavailable = false;
+  const publishProgress = () => {
+    // A presentation callback must not create transport retries or commands.
+    try { options?.onAssistantProgress?.({ ...target, sequence: high, content: progressText }); }
+    catch { /* Optional, read-only UI projection. */ }
+  };
+  const clearProgress = () => { progressText = ''; publishProgress(); };
   const consume = (raw: ChatStreamEvent & { event_seq?: number; kind?: string }, snapshotEvent = false) => {
     if (completed) return;
     if (raw.turn_id !== target.turn_id || raw.conversation_id !== target.conversation_id
       || raw.execution_generation !== target.execution_generation) return;
     const kind = raw.event ?? raw.kind;
     if (kind === 'resync_required') {
+      progressUnavailable = true;
+      clearProgress();
       options?.onEvent?.({ ...raw, event: 'status', seq: raw.event_seq ?? raw.seq ?? high,
         data: { phase: 'resync', label: '部分实时进度已省略，正在恢复已保存记录。' } });
       throw new Error('runtime_resync_required');
@@ -169,13 +185,32 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
     if (kind === 'subscribed' || kind === 'heartbeat') return;
     const seq = raw.event_seq ?? raw.seq;
     if (!Number.isSafeInteger(seq) || seq <= high) return;
-    if (seq > high + 1 && !snapshotEvent) throw new Error('runtime_event_gap');
+    if (seq > high + 1) {
+      progressText = ''; progressUnavailable = true;
+      if (!snapshotEvent) { publishProgress(); throw new Error('runtime_event_gap'); }
+    }
     high = seq;
     if (!kind) throw new Error('runtime_event_kind_missing');
     const event = { ...raw, event: kind, seq };
+    if (options?.onAssistantProgress && !snapshotEvent) {
+      if (kind === 'assistant_delta' && !progressUnavailable) {
+        const delta = (event.data as { delta?: unknown })?.delta;
+        if (typeof delta === 'string') {
+          if (progressText.length + delta.length <= 1_048_576) progressText += delta;
+          else { progressText = ''; progressUnavailable = true; }
+        }
+      } else if (['assistant_message', 'confirmation_required', 'completed', 'error'].includes(kind)) {
+        // A committed message/pending/terminal event replaces the segment,
+        // never appends canonical text to its replayed delta prefix.
+        progressText = '';
+        progressUnavailable = false;
+      }
+      publishProgress();
+    }
     if (event.event === 'completed') completed = result({ terminal: event.data as { response?: ChatResponse } }, target);
     options?.onEvent?.(event);
   };
+  try {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     options?.signal?.throwIfAborted();
     try {
@@ -185,6 +220,12 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
         const response = result(saved, target);
         if (response) return response;
       }
+      // Recovery progress is deliberately a live, partial segment. Snapshot
+      // replay belongs to canonical history, never to a second text bubble.
+      // On a real reconnect discard the old segment instead of concatenating
+      // across an unavailable/replayed event interval. The final P2 message
+      // still supplies the complete reply.
+      clearProgress();
       let snapshot = await readJson(`${url}/snapshot`, options);
       requireTarget(snapshot, target);
       if (snapshot.terminal?.response) {
@@ -211,6 +252,9 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
         if (response) return response;
         throw new RuntimeEndedError(target, snapshot.state);
       }
+      // Only contiguous new SSE frames after the complete snapshot watermark
+      // may populate this new segment, even when the retained history had gaps.
+      progressText = ''; progressUnavailable = false;
       const cursor = snapshot.event_cursor ?? snapshot.snapshot_cursor;
       if (!cursor) throw new Error('runtime_snapshot_cursor_missing');
       const responseStream = await fetch(`${url}/events?after=${encodeURIComponent(cursor)}`, {
@@ -247,4 +291,5 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
     }
   }
   throw new RuntimeSubscriptionError(target);
+  } finally { clearProgress(); }
 }

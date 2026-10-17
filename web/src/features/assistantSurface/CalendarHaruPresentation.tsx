@@ -4,6 +4,7 @@ import { CheckOutlined, EllipsisOutlined, MessageOutlined } from '@ant-design/ic
 import { live2dPilotMascotRuntime, type PilotMascotActivity, type PilotMascotRuntimeController } from '@/features/pilotMascot/live2dRuntime';
 import type { PilotMascotAnimationLevel, PilotMascotRect } from '@/features/pilotMascot/pilotMascotPreference';
 import { effectiveHaruPresentation, readHaruPresentation, writeHaruPresentation, type HaruPresentationMode } from './haruPresentationPreference';
+import { useMascotVisibility } from '@/features/pilotMascot/useMascotVisibility';
 import styles from './CalendarHaruPresentation.module.css';
 
 interface Props {
@@ -21,6 +22,7 @@ const ACTIVITY_LABELS: Record<PilotMascotActivity, string> = {
   success: '处理完成', error: '需要查看',
 };
 export default function CalendarHaruPresentation({ activity, panelOpen, onToggle, triggerRef, onAnchorRectChange, animationLevel = 'minimal' }: Props) {
+  const pageVisible = useMascotVisibility();
   const [mode, setMode] = useState(readHaruPresentation);
   const [viewport, setViewport] = useState(() => ({ width: typeof window === 'undefined' ? 1440 : window.innerWidth, height: typeof window === 'undefined' ? 900 : window.innerHeight }));
   const [menuOwner, setMenuOwner] = useState<'context' | 'more' | null>(null);
@@ -50,14 +52,14 @@ export default function CalendarHaruPresentation({ activity, panelOpen, onToggle
     return () => document.removeEventListener('keydown', close, true);
   }, [menuOwner, triggerRef]);
   useEffect(() => {
-    if (!canvas.current) return;
+    if (!canvas.current || !pageVisible) return;
     const abort = new AbortController(); let disposed = false; setFailed(false);
     void live2dPilotMascotRuntime.mount(canvas.current, abort.signal, animationLevel).then((runtime) => {
       if (disposed) { runtime.dispose(); return; }
       controller.current = runtime; runtime.setZoom(1); runtime.setActivity(latestActivity.current);
     }).catch(() => { if (!disposed) setFailed(true); });
     return () => { disposed = true; abort.abort(); controller.current?.dispose(); controller.current = undefined; };
-  }, [animationLevel, motionRevision]);
+  }, [animationLevel, motionRevision, pageVisible]);
   useEffect(() => { controller.current?.setActivity(activity); }, [activity]);
   useLayoutEffect(() => {
     const report = () => { const rect = triggerRef.current?.getBoundingClientRect(); if (rect && rect.width > 0) onAnchorRectChange({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }); };

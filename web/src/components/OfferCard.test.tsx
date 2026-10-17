@@ -80,6 +80,22 @@ describe('OfferCard', () => {
     expect(onOpenApplication).toHaveBeenCalledWith(42);
   });
 
+  it('preserves complete long company and position labels without shortening accessible text', () => {
+    const longOffer = { ...offer,
+      company_name: 'InternationalInfrastructureAndReliabilityCompany'.repeat(3),
+      position_name: 'SeniorSoftwareEngineerWithLongUnbrokenEnglishPosition'.repeat(3),
+    };
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root?.render(<OfferCard offer={longOffer} selected={false} onToggleSelect={vi.fn()} onCoach={vi.fn()} onView={vi.fn()} />));
+    for (const text of [longOffer.company_name, longOffer.position_name]) {
+      const labelled = [...host.querySelectorAll('[title]')].find(node => node.getAttribute('title') === text);
+      expect(labelled?.textContent).toBe(text);
+    }
+    expect(host.querySelector('input[aria-label]')?.getAttribute('aria-label')).toContain(longOffer.position_name);
+  });
+
   it('keeps one preparation entry when the host only provides the legacy coach callback', () => {
     const onCoach = vi.fn();
     host = document.createElement('div');

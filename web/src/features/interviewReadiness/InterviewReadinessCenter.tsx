@@ -566,7 +566,7 @@ export default function InterviewReadinessCenter({
             <div className={styles.controls}>
               <label>岗位名称<Input value={quickDraft.positionName} maxLength={200} placeholder="例如：后端工程师" onChange={(event) => setQuickDraft((current) => ({ ...current, positionName: event.target.value }))} /></label>
               <label>粘贴 JD<TextArea id="quick-readiness-jd" value={quickDraft.jdText} rows={5} placeholder="粘贴你已核对的岗位描述原文，不抓取 URL。" onChange={(event) => setQuickDraft((current) => ({ ...current, jdText: event.target.value }))} /></label>
-              <label className={styles.confirmLabel}><Checkbox checked={quickDraft.jdConfirmed} onChange={(event) => setQuickDraft((current) => ({ ...current, jdConfirmed: event.target.checked }))}>已核对，本次按此岗位资料练习</Checkbox></label>
+              <div className={styles.confirmLabel}><Checkbox checked={quickDraft.jdConfirmed} onChange={(event) => setQuickDraft((current) => ({ ...current, jdConfirmed: event.target.checked }))}>已核对，本次按此岗位资料练习</Checkbox></div>
               <label>选择简历<Select id="quick-readiness-resume" value={quickDraft.resumeId} placeholder="请选择已保存简历" allowClear onChange={(value) => setQuickDraft((current) => ({ ...current, resumeId: value }))} options={quickResumeRows.map((resume) => ({ value: resume.id, label: resumeLabel(resume, quickResumeRows) }))} /></label>
             </div>
             <Checklist items={quickReadiness.items} onAction={(item) => item.key === 'resume' ? focusControl('quick-readiness-resume') : item.key === 'jd' ? focusControl('quick-readiness-jd') : undefined} />

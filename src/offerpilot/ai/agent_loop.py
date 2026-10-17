@@ -10,6 +10,8 @@ from types import MappingProxyType
 from typing import Any, cast
 from uuid import uuid4
 
+from offerpilot.ai.provider_stream import provider_control_scope
+
 from offerpilot.ai.agent_contracts import (
     _ASDICT_GUARD as _TRANSIENT_ASDICT_GUARD,
     AgentAssistantDelta,
@@ -978,23 +980,24 @@ class _LoopServices:
         try:
             self.require_active()
             before_provider_attempt = self._before_provider_attempt
-            if is_stream:
-                if not callable(stream_surface):
-                    raise TypeError("surface streaming model is missing")
-                bound = stream_surface(
-                    surface,
-                    buffer_delta,
-                    invocation_identity=invocation_identity,
-                    before_attempt=before_provider_attempt,
-                )
-            else:
-                if not callable(complete_surface):
-                    raise TypeError("surface completion model is missing")
-                bound = complete_surface(
-                    surface,
-                    invocation_identity=invocation_identity,
-                    before_attempt=before_provider_attempt,
-                )
+            with provider_control_scope(self.require_active):
+                if is_stream:
+                    if not callable(stream_surface):
+                        raise TypeError("surface streaming model is missing")
+                    bound = stream_surface(
+                        surface,
+                        buffer_delta,
+                        invocation_identity=invocation_identity,
+                        before_attempt=before_provider_attempt,
+                    )
+                else:
+                    if not callable(complete_surface):
+                        raise TypeError("surface completion model is missing")
+                    bound = complete_surface(
+                        surface,
+                        invocation_identity=invocation_identity,
+                        before_attempt=before_provider_attempt,
+                    )
             attempt_validator = getattr(model, "consume_agent_provider_attempt", None)
             if not callable(attempt_validator):
                 raise TypeError("Agent Provider Gateway attempt validator is missing")

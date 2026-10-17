@@ -27,6 +27,13 @@ export function applyTimelinePage(cache: PilotTimelineCache | null, page: PilotT
   return { conversation_id: page.conversation_id, high_watermark: page.high_watermark, cursor: page.cursor, items };
 }
 
+function isCompletedBoundaryRevision(sourceRevision: string): boolean {
+  // The backend prefixes the state with its execution generation (0 for none).
+  // Compare the whole match because JavaScript's $ also accepts a final newline.
+  return typeof sourceRevision === 'string' && (sourceRevision === 'completed'
+    || /^(?:0|[1-9][0-9]*):completed$/.exec(sourceRevision)?.[0] === sourceRevision);
+}
+
 export function timelinePresentation(cache: PilotTimelineCache): PilotPresentationSnapshot {
   return {
     schema_version: 1, conversation_id: cache.conversation_id, timeline: cache,
@@ -34,7 +41,7 @@ export function timelinePresentation(cache: PilotTimelineCache): PilotPresentati
       .filter((item) => !item.deleted && item.payload
         // A completed boundary is still durable, but repeating a success line
         // beside every reply adds noise. Uncertainty and interruption stay visible.
-        && !(item.item_type === 'run_boundary' && item.source_revision === 'completed'))
+        && !(item.item_type === 'run_boundary' && isCompletedBoundaryRevision(item.source_revision)))
       .sort((left, right) => left.ordinal - right.ordinal)
       .map((item) => ({ ...item.payload!, timeline_item_id: item.item_id, turn_id: item.turn_id, revision: item.revision })),
   };

@@ -4,6 +4,7 @@ import re
 import sqlite3
 import time
 from collections import Counter
+from contextlib import closing
 from datetime import datetime, timezone
 from io import BytesIO
 from pathlib import Path
@@ -17,8 +18,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, text, update
 from sqlalchemy.exc import OperationalError
 
-import offerpilot.agent_runtime.journal as journal_module
 import offerpilot.chat_transport as transport_module
+from offerpilot.agent_runtime.budget import (
+    JOURNAL_DISPOSITION_BUDGET_SECONDS,
+    JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS,
+)
 from offerpilot.ai.types import Assistant, Message, ToolCall
 from offerpilot.ai.agent_contracts import PendingAction, StalePendingActionError
 from offerpilot.ai.tool_runtime.catalog import compile_tool_metadata_manifest
@@ -82,42 +86,16 @@ from offerpilot.pilot_runtime.persistence import (
     PersistenceStatus,
 )
 from offerpilot.pilot_runtime.compensation import prepare_compensation_handler_components
+from offerpilot.pilot_control import PilotControlRepository
 from offerpilot.repositories.applications import ApplicationsRepository
 from offerpilot.repositories.agent_runs import AgentRunRepository, JournalConflictError
 from offerpilot.repositories.chat import ChatRepository, ConversationScopeMutationSnapshot
 from offerpilot.pilot_runtime.service import PilotRuntime, _has_write_attempt, _write_outcome
+from tests._agent_timeout import timeout_after_signal
 
 _LEGACY_JD_EXECUTION_EVENTS: list[str] | None = None
 _LEGACY_JD_EXECUTION_ORIGINAL: Any = None
 _TEST_TOOL_CATALOG = build_model_tool_catalog()
-
-
-def _timeout_after_agent_signal_host(signal: Event, worker_done: Event | None = None):
-    """Return a deterministic non-joining host that times out after Agent work starts."""
-
-    class TimeoutAfterAgentSignalHost:
-        def __init__(self, *_args: object, **_kwargs: object) -> None:
-            pass
-
-        def run(self, thunk, invocation_control):
-            executor = transport_module.ThreadPoolExecutor(max_workers=1)
-
-            def run_worker():
-                try:
-                    return thunk()
-                finally:
-                    if worker_done is not None:
-                        worker_done.set()
-
-            executor.submit(transport_module.copy_context().run, run_worker)
-            try:
-                assert signal.wait(timeout=5), "Agent work did not reach the timeout probe"
-                assert invocation_control.request_timeout()
-                raise RuntimeAgentTimedOut()
-            finally:
-                executor.shutdown(wait=False, cancel_futures=False)
-
-    return TimeoutAfterAgentSignalHost
 
 
 def _record_legacy_jd_execution(service: Any, encoded_args: str) -> str:
@@ -341,12 +319,34 @@ def _non_advancing_journal_clock():
     return 0.0
 
 
+class ProviderGapClock:
+    """Expose real provider waits to Journal without timing unrelated host work."""
+
+    def __init__(self):
+        self.elapsed = 0.0
+        self.sampled_values = set()
+
+    def __call__(self):
+        self.sampled_values.add(self.elapsed)
+        return self.elapsed
+
+    def wait(self, delay):
+        # Windows Python 3.12's monotonic clock can miss a whole short sleep.
+        # perf_counter measures real elapsed waits at the highest resolution.
+        started = time.perf_counter()
+        time.sleep(delay)
+        elapsed = time.perf_counter() - started
+        self.elapsed += elapsed
+        return elapsed
+
+
 def _stable_journal_factory(
     data_dir,
     *,
     segment_budget_seconds=2.0,
     disposition_budget_seconds=0.5,
     clock=_non_advancing_journal_clock,
+    diagnostic_sink=None,
 ):
     repository = AgentRunRepository(journal_session_factory_for_data_dir(data_dir))
     key = load_or_create_journal_key(data_dir)
@@ -357,6 +357,7 @@ def _stable_journal_factory(
         clock=clock,
         segment_budget_seconds=segment_budget_seconds,
         disposition_budget_seconds=disposition_budget_seconds,
+        diagnostic_sink=diagnostic_sink,
     )
 
 
@@ -401,15 +402,21 @@ class FailAfterWriteModel:
 
 
 class SlowModel:
+    def __init__(self):
+        self.entered = Event()
+        self.release = Event()
+
     def complete(self, messages, tools):
-        time.sleep(0.2)
+        self.entered.set()
+        assert self.release.wait(20)
         return Assistant(content="late reply")
 
 
 class SlowFinalModel:
     """A real provider wall-time gap must not consume Journal active budget."""
 
-    def __init__(self, reply="stable slow reply", delay=2.05):
+    def __init__(self, journal_clock, reply="stable slow reply", delay=2.05):
+        self.journal_clock = journal_clock
         self.reply = reply
         self.delay = delay
         self.calls = 0
@@ -418,16 +425,15 @@ class SlowFinalModel:
     def complete(self, messages, tools):
         del messages, tools
         self.calls += 1
-        started = time.monotonic()
-        time.sleep(self.delay)
-        self.elapsed = time.monotonic() - started
+        self.elapsed = self.journal_clock.wait(self.delay)
         return Assistant(content=self.reply)
 
 
 class SlowReadThenFinalModel:
     """Wait before a read-tool turn, then finish on the next provider call."""
 
-    def __init__(self, reply="stable read reply", delay=2.05):
+    def __init__(self, journal_clock, reply="stable read reply", delay=2.05):
+        self.journal_clock = journal_clock
         self.reply = reply
         self.delay = delay
         self.calls = 0
@@ -437,9 +443,7 @@ class SlowReadThenFinalModel:
         del messages, tools
         self.calls += 1
         if self.calls == 1:
-            started = time.monotonic()
-            time.sleep(self.delay)
-            self.elapsed = time.monotonic() - started
+            self.elapsed = self.journal_clock.wait(self.delay)
             return Assistant(
                 tool_calls=[
                     ToolCall(
@@ -454,7 +458,7 @@ class SlowReadThenFinalModel:
         raise AssertionError("unexpected provider call")
 
 
-class SlowAfterPendingModel:
+class NoContinuationAfterPendingModel:
     def __init__(self, tool_call: ToolCall):
         self.tool_call = tool_call
         self.calls = 0
@@ -463,8 +467,7 @@ class SlowAfterPendingModel:
         self.calls += 1
         if self.calls == 1:
             return Assistant(tool_calls=[self.tool_call])
-        time.sleep(1.0)
-        return Assistant(content="late reply")
+        raise AssertionError("Rejecting a pending write must not call the provider again")
 
 
 class TimeoutAfterPendingModel:
@@ -1131,20 +1134,22 @@ def test_shutdown_cleanup_continues_after_knowledge_stop_failure(tmp_path, monke
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
-def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeypatch, endpoint):
-    # This test isolates the provider wall-time gap from the independently tested
-    # 50 ms per-operation default; the 0.5 s cap remains far below the 3.05 s gap.
-    monkeypatch.setattr(journal_module, "JOURNAL_OPERATION_HARD_CAP_SECONDS", 0.5)
+def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, endpoint):
+    # Project the actual provider wait into Journal's injected clock. SQLite and
+    # host scheduling have separate hard-cap tests and must not decide this probe.
+    journal_clock = ProviderGapClock()
+    diagnostics = []
     session_factory_for_data_dir(tmp_path)
-    model = SlowFinalModel(reply="stable slow final", delay=3.05)
+    model = SlowFinalModel(journal_clock, reply="stable slow final", delay=3.05)
     client = TestClient(
         create_app(
             data_dir=tmp_path,
             run_recorder_factory=_stable_journal_factory(
                 tmp_path,
-                segment_budget_seconds=3.0,
-                disposition_budget_seconds=0.5,
-                clock=time.monotonic,
+                segment_budget_seconds=JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS,
+                disposition_budget_seconds=JOURNAL_DISPOSITION_BUDGET_SECONDS,
+                clock=journal_clock,
+                diagnostic_sink=diagnostics.append,
             ),
             chat_model=model,
             title_model=ScriptedModel([Assistant(content="title")]),
@@ -1160,6 +1165,9 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
 
     assert elapsed >= 2.0
     assert model.elapsed >= 2.0
+    assert journal_clock.sampled_values == {0.0, model.elapsed}
+    assert journal_clock() == model.elapsed
+    assert journal_clock() > JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         events = _parse_sse_events(response.text)
@@ -1186,7 +1194,7 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
     )
     assert len(runs) == 1
     assert runs[0].status == "completed"
-    assert runs[0].recording_status == "healthy"
+    assert runs[0].recording_status == "healthy", diagnostics
     assert [event.event_type for event in events] == [
         "run.started",
         "segment.started",
@@ -1214,11 +1222,10 @@ def test_journal_active_budget_ignores_slow_final_provider_gap(tmp_path, monkeyp
 
 @pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
 def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
-    tmp_path, monkeypatch, endpoint
+    tmp_path, endpoint
 ):
-    # Keep the real monotonic clock and provider delay while isolating Journal
-    # operation scheduling jitter from the separate hard-cap unit contract.
-    monkeypatch.setattr(journal_module, "JOURNAL_OPERATION_HARD_CAP_SECONDS", 0.5)
+    journal_clock = ProviderGapClock()
+    diagnostics = []
     seed = TestClient(create_app(data_dir=tmp_path))
     application = seed.post(
         "/api/applications",
@@ -1229,15 +1236,16 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
         },
     ).json()
     seed.close()
-    model = SlowReadThenFinalModel(reply="stable read final", delay=3.05)
+    model = SlowReadThenFinalModel(journal_clock, reply="stable read final", delay=3.05)
     client = TestClient(
         create_app(
             data_dir=tmp_path,
             run_recorder_factory=_stable_journal_factory(
                 tmp_path,
-                segment_budget_seconds=3.0,
-                disposition_budget_seconds=0.5,
-                clock=time.monotonic,
+                segment_budget_seconds=JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS,
+                disposition_budget_seconds=JOURNAL_DISPOSITION_BUDGET_SECONDS,
+                clock=journal_clock,
+                diagnostic_sink=diagnostics.append,
             ),
             chat_model=model,
             title_model=ScriptedModel([Assistant(content="title")]),
@@ -1253,6 +1261,9 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
 
     assert elapsed >= 2.0
     assert model.elapsed >= 2.0
+    assert journal_clock.sampled_values == {0.0, model.elapsed}
+    assert journal_clock() == model.elapsed
+    assert journal_clock() > JOURNAL_SEGMENT_ACTIVE_BUDGET_SECONDS
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         transport_events = _parse_sse_events(response.text)
@@ -1309,7 +1320,7 @@ def test_journal_active_budget_ignores_slow_provider_before_read_then_final(
     )
     assert len(runs) == 1
     assert runs[0].status == "completed"
-    assert runs[0].recording_status == "healthy"
+    assert runs[0].recording_status == "healthy", diagnostics
     event_types = [event.event_type for event in events]
     assert event_types.count("model.requested") == 2
     assert event_types.count("model.completed") == 2
@@ -3573,11 +3584,48 @@ def test_stable_journal_clock_contract_keeps_real_time_probes_explicit():
     assert inspect.signature(_stable_journal_factory).parameters["clock"].default is (
         _non_advancing_journal_clock
     )
-    for probe in (
-        test_journal_active_budget_ignores_slow_final_provider_gap,
-        test_journal_active_budget_ignores_slow_provider_before_read_then_final,
-    ):
-        assert "clock=time.monotonic" in inspect.getsource(probe)
+    clock = ProviderGapClock()
+    assert clock() == 0.0
+    first_gap = clock.wait(0.01)
+    assert first_gap >= 0.01
+    assert clock() == first_gap
+    time.sleep(0.01)
+    assert clock() == first_gap
+    second_gap = clock.wait(0.01)
+    assert second_gap >= 0.01
+    assert clock() == first_gap + second_gap
+
+
+def test_provider_gap_clock_measures_short_waits_with_coarse_monotonic(monkeypatch):
+    now_ns = 11_000_000
+    durations_ns = iter((12_000_000, 10_000_000, 11_000_000))
+    sleep_requests = []
+
+    def sleep(delay):
+        nonlocal now_ns
+        sleep_requests.append(delay)
+        now_ns += next(durations_ns)
+
+    coarse_time = SimpleNamespace(
+        monotonic=lambda: (now_ns // 15_625_000) * 0.015625,
+        perf_counter=lambda: now_ns / 1_000_000_000,
+        sleep=sleep,
+    )
+    # Replace only this module's time binding, not the process-wide time module.
+    monkeypatch.setitem(ProviderGapClock.wait.__globals__, "time", coarse_time)
+    clock = ProviderGapClock()
+    assert clock() == 0.0
+    first_gap = clock.wait(0.01)
+    assert first_gap == pytest.approx(0.012)
+    assert clock() == first_gap
+    coarse_time.sleep(0.01)
+    assert clock() == first_gap
+    second_gap = clock.wait(0.01)
+    assert second_gap == pytest.approx(0.011)
+    assert clock() == first_gap + second_gap
+    assert clock.sampled_values == {0.0, first_gap, first_gap + second_gap}
+    assert sleep_requests == [0.01, 0.01, 0.01]
+    assert ProviderGapClock()() == 0.0
 
 
 def _checked_turn_identity(payload, *, required=False):
@@ -5273,19 +5321,24 @@ def test_chat_returns_bad_gateway_when_model_fails(tmp_path):
 
 
 def test_chat_returns_recoverable_message_when_agent_times_out(tmp_path, monkeypatch):
-    import offerpilot.api as api_module
-
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 0.01)
-    client = TestClient(create_app(data_dir=tmp_path, chat_model=SlowModel()))
-
-    response = client.post("/api/chat", json={"message": "帮我总结最近复盘", "conversation_id": 0})
-
-    assert response.status_code == 200
+    model = SlowModel()
+    worker_done = timeout_after_signal(monkeypatch, model.entered)
+    client = TestClient(create_app(data_dir=tmp_path, chat_model=model))
+    try:
+        response = client.post("/api/chat", json={"message": "帮我总结最近复盘", "conversation_id": 0})
+        assert response.status_code == 200, response.text
+        assert model.entered.is_set()
+        assert not worker_done.is_set()
+    finally:
+        model.release.set()
+        assert worker_done.wait(20), "Timed-out Agent worker did not exit"
     assert response.json()["type"] == "message"
     assert response.json()["message"] == "这次处理时间过长，已停止。你可以重试或换一种问法。"
     stored = client.get(f"/api/chat/conversations/{response.json()['conversation_id']}").json()
     assert stored[-1]["role"] == "assistant"
     assert stored[-1]["content"] == "这次处理时间过长，已停止。你可以重试或换一种问法。"
+    assert [message["role"] for message in stored] == ["user", "assistant"]
+    assert all(message["content"] != "late reply" for message in stored)
 
 
 def test_chat_asks_followup_when_pending_event_missing_required_info(tmp_path):
@@ -7633,7 +7686,39 @@ def test_chat_confirm_result_cas_loss_stays_stale_on_followup_failure(
         if failure_kind == "provider"
         else TimeoutAfterPendingModel(tool_call)
     )
-    _, client, _, pending = _create_status_confirmation(tmp_path, model, stable_journal=True)
+    app_client, client, application, pending = _create_status_confirmation(
+        tmp_path, model, stable_journal=True
+    )
+    followup_calls = []
+    original_complete = model.complete
+
+    def failing_followup(messages, tools):
+        followup_calls.append(messages)
+        return original_complete(messages, tools)
+
+    monkeypatch.setattr(model, "complete", failing_followup)
+    timeout_transitions = []
+    if failure_kind == "timeout":
+        original_try_finish = PilotControlRepository.try_finish
+
+        def settle_timeout(repository, lease, state):
+            if state != "interrupted" or timeout_transitions:
+                return original_try_finish(repository, lease, state)
+            # This case targets delivery CAS after the origin and provider have
+            # exited. Establish its durable timeout precondition explicitly:
+            # a zero-wait try_finish may lose to another SQLite writer and make
+            # the earlier delivery fence fail before lose_cas is ever called.
+            assert len(followup_calls) == 1
+            with repository.session_factory() as session:
+                operation = session.get(WriteOperation, pending["pending_action"]["operation_id"])
+                assert operation is not None and operation.status == "committed"
+            if not original_try_finish(repository, lease, state):
+                repository.finish(lease, state)
+            timeout_transitions.append(state)
+            return True
+
+        monkeypatch.setattr(PilotControlRepository, "try_finish", settle_timeout)
+    delivery_attempts = []
 
     def lose_cas(
         self,
@@ -7648,6 +7733,7 @@ def test_chat_confirm_result_cas_loss_stays_stale_on_followup_failure(
     ):
         del origin_tool_message, continuation, chained_pending, kwargs
         assert route_handle is None
+        delivery_attempts.append(ownership.operation_id)
         _force_replace_claimed_pending_for_cas_test(self._chat, conversation_id, newer)
         return PersistenceResult(
             PersistenceStatus.CAS_LOST,
@@ -7668,12 +7754,17 @@ def test_chat_confirm_result_cas_loss_stays_stale_on_followup_failure(
         },
     )
 
+    assert len(followup_calls) == 1, response.text
+    assert delivery_attempts == [pending["pending_action"]["operation_id"]], response.text
+    assert timeout_transitions == (["interrupted"] if failure_kind == "timeout" else [])
+    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
     if endpoint.endswith("/stream"):
         error = _parse_sse_events(response.text)[-1]
         assert error["event"] == "error"
         assert error["data"]["data"]["code"] == "stale_pending_action"
     else:
         assert response.status_code == 409
+        assert response.json()["error_code"] == "stale_pending_action"
     conversation = client.get("/api/chat/conversations").json()[0]
     assert conversation["pending_action"]["args"]["closed_reason"] == "newer"
     runs, events, _ = _wait_for_journal_observation(
@@ -7707,6 +7798,78 @@ def test_chat_confirm_result_cas_loss_stays_stale_on_followup_failure(
         anomaly.startswith(("lifecycle_event_conflict", "segment_missing_finish"))
         for anomaly in trace.anomalies
     )
+
+
+@pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
+def test_chat_confirm_followup_timeout_busy_transition_preserves_original_pending(
+    tmp_path, monkeypatch, endpoint
+):
+    model = TimeoutAfterPendingModel(
+        ToolCall(
+            id="busy-timeout-transition",
+            name="update_application_status",
+            args=json.dumps({"id": 1, "status": "offer"}),
+        )
+    )
+    app_client, client, application, pending = _create_status_confirmation(
+        tmp_path, model, stable_journal=True
+    )
+    original_try_finish = PilotControlRepository.try_finish
+    busy_results = []
+
+    def finish_with_busy_writer(repository, lease, state):
+        if state != "interrupted" or busy_results:
+            return original_try_finish(repository, lease, state)
+        assert model.calls == 2
+        database = repository.session_factory.kw["bind"].url.database
+        with closing(sqlite3.connect(str(database))) as writer:
+            try:
+                writer.execute("BEGIN IMMEDIATE")
+                result = original_try_finish(repository, lease, state)
+                busy_results.append(result)
+                return result
+            finally:
+                writer.rollback()
+
+    delivery_attempts = []
+    original_delivery = ChatPersistenceCoordinator.persist_confirmation_delivery
+
+    def observe_delivery(self, *args, **kwargs):
+        delivery_attempts.append(True)
+        return original_delivery(self, *args, **kwargs)
+
+    monkeypatch.setattr(PilotControlRepository, "try_finish", finish_with_busy_writer)
+    monkeypatch.setattr(ChatPersistenceCoordinator, "persist_confirmation_delivery", observe_delivery)
+    response = client.post(
+        endpoint,
+        json={
+            "conversation_id": pending["conversation_id"],
+            "approved": True,
+            "confirmation_token": pending["pending_action"]["confirmation_token"],
+        },
+    )
+
+    assert model.calls == 2, response.text
+    assert busy_results == [False]
+    assert delivery_attempts == [], response.text
+    if endpoint.endswith("/stream"):
+        error = _parse_sse_events(response.text)[-1]
+        assert error["event"] == "error"
+        assert error["data"]["data"]["code"] == "stale_pending_action"
+    else:
+        assert response.status_code == 409
+        assert response.json()["error_code"] == "stale_pending_action"
+    conversation = client.get("/api/chat/conversations").json()[0]
+    for key in ("tool_name", "args", "operation_id", "confirmation_token"):
+        assert conversation["pending_action"][key] == pending["pending_action"][key]
+    assert conversation["last_write_undo"] is None
+    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+    stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+    assert sum(message["role"] == "tool" for message in stored) == 0
+    operations, _ = _ledger_rows(tmp_path)
+    assert len(operations) == 1
+    assert operations[0].status == "committed"
+    assert operations[0].delivery_status == "pending"
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
@@ -7810,23 +7973,17 @@ def test_chat_confirm_timeout_during_handler_rejects_late_write_and_allows_retry
     )
     handler_started = Event()
     release_handler = Event()
-    worker_done = Event()
+    original_executor = transport_module.ThreadPoolExecutor
+    worker_done = timeout_after_signal(monkeypatch, handler_started)
     original_update = ApplicationsRepository.update_application_status_scoped
 
     def blocked_update(self, constraint, app_id, status, closed_reason=""):
         handler_started.set()
-        assert release_handler.wait(timeout=5)
+        assert release_handler.wait(20), "Test did not release the blocked handler"
         return original_update(self, constraint, app_id, status, closed_reason)
 
     monkeypatch.setattr(ApplicationsRepository, "update_application_status_scoped", blocked_update)
-    original_host = transport_module.SyncAgentExecutionHost
-    monkeypatch.setattr(
-        transport_module,
-        "SyncAgentExecutionHost",
-        _timeout_after_agent_signal_host(handler_started, worker_done),
-    )
-
-    started_at = time.monotonic()
+    response = None
     try:
         response = client.post(
             endpoint,
@@ -7836,13 +7993,16 @@ def test_chat_confirm_timeout_during_handler_rejects_late_write_and_allows_retry
                 "confirmation_token": pending["pending_action"]["confirmation_token"],
             },
         )
-        assert handler_started.is_set()
-        # The handler is held for five seconds; the timeout response must
-        # return before that wait is released by the test.
-        assert time.monotonic() - started_at < 4
+        assert handler_started.is_set(), (response.status_code, response.text)
+        # A returned response while the real Agent remains blocked proves
+        # non-joining timeout behavior without timing request setup or I/O.
+        assert not worker_done.is_set(), "Agent exited before the handler was released"
     finally:
         release_handler.set()
-    assert worker_done.wait(timeout=5)
+        assert worker_done.wait(20), (
+            "Timed-out Agent worker did not exit",
+            (response.status_code, response.text) if response is not None else None,
+        )
 
     if endpoint.endswith("/stream"):
         error = _parse_sse_events(response.text)[-1]
@@ -7883,7 +8043,7 @@ def test_chat_confirm_timeout_during_handler_rejects_late_write_and_allows_retry
 
     # The timed-out lease owns no further writes.  A user retry gets a new
     # generation and can commit the still-proposed operation exactly once.
-    monkeypatch.setattr(transport_module, "SyncAgentExecutionHost", original_host)
+    monkeypatch.setattr(transport_module, "ThreadPoolExecutor", original_executor)
     retry = client.post(
         endpoint,
         json={
@@ -7919,9 +8079,7 @@ def test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuati
 ):
     handler_started = Event()
     release_handler = Event()
-    worker_done = Event()
     continuation_started = Event()
-    release_continuation = Event()
 
     class WouldChainModel:
         calls = 0
@@ -7939,7 +8097,6 @@ def test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuati
                     ]
                 )
             continuation_started.set()
-            assert release_continuation.wait(timeout=5)
             return Assistant(
                 tool_calls=[
                     ToolCall(
@@ -7952,21 +8109,16 @@ def test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuati
 
     model = WouldChainModel()
     app_client, client, application, pending = _create_status_confirmation(tmp_path, model)
+    worker_done = timeout_after_signal(monkeypatch, handler_started)
     original_update = ApplicationsRepository.update_application_status_scoped
 
     def blocked_update(self, constraint, app_id, status, closed_reason=""):
         handler_started.set()
-        assert release_handler.wait(timeout=5)
+        assert release_handler.wait(20), "Test did not release the blocked handler"
         return original_update(self, constraint, app_id, status, closed_reason)
 
     monkeypatch.setattr(ApplicationsRepository, "update_application_status_scoped", blocked_update)
-    monkeypatch.setattr(
-        transport_module,
-        "SyncAgentExecutionHost",
-        _timeout_after_agent_signal_host(handler_started, worker_done),
-    )
-
-    started_at = time.monotonic()
+    response = None
     try:
         response = client.post(
             endpoint,
@@ -7976,10 +8128,8 @@ def test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuati
                 "confirmation_token": pending["pending_action"]["confirmation_token"],
             },
         )
-        assert handler_started.is_set()
-        # The handler is held for five seconds; timeout must win before the
-        # test releases that wait.
-        assert time.monotonic() - started_at < 4
+        assert handler_started.is_set(), (response.status_code, response.text)
+        assert not worker_done.is_set(), "Agent exited before the handler was released"
         if endpoint.endswith("/stream"):
             error = _parse_sse_events(response.text)[-1]
             assert error["data"]["data"]["code"] == "confirmation_in_progress"
@@ -7995,7 +8145,10 @@ def test_chat_confirm_slow_handler_rejects_late_write_without_chained_continuati
         )
     finally:
         release_handler.set()
-    assert worker_done.wait(timeout=5)
+        assert worker_done.wait(20), (
+            "Timed-out Agent worker did not exit",
+            (response.status_code, response.text) if response is not None else None,
+        )
 
     assert continuation_started.is_set() is False
     assert model.calls == 1
@@ -8066,10 +8219,10 @@ def test_chat_confirm_rejection_provider_failure_records_cancellation_once(tmp_p
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
-def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, monkeypatch, endpoint):
-    import offerpilot.api as api_module
-
-    model = SlowAfterPendingModel(
+def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, endpoint):
+    # Retain the historical node ID. Ledger rejection is now provider-free,
+    # so the old short Agent deadline never exercised a timeout here.
+    model = NoContinuationAfterPendingModel(
         ToolCall(
             id="reject-timeout",
             name="update_application_status",
@@ -8077,8 +8230,6 @@ def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, monk
         )
     )
     app_client, client, application, pending = _create_status_confirmation(tmp_path, model)
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 0.25)
-
     response = client.post(
         endpoint,
         json={
@@ -8092,16 +8243,19 @@ def test_chat_confirm_rejection_timeout_returns_recorded_fallback(tmp_path, monk
         body = _parse_sse_events(response.text)[-1]["data"]["data"]["response"]
     else:
         body = response.json()
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert "已取消" in body["message"]
     assert "undo" not in body
     assert client.get("/api/chat/conversations").json()[0]["pending_action"] is None
     assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "interview"
+    stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+    assert all(message["content"] != "late reply" for message in stored)
+    assert sum(message["content"] == body["message"] for message in stored) == 1
+    assert model.calls == 1
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
 def test_chat_confirm_timeout_before_result_sink_keeps_pending(tmp_path, monkeypatch, endpoint):
-    import offerpilot.api as api_module
     import offerpilot.pilot_runtime.composition as composition_module
 
     model = ScriptedModel(
@@ -8118,24 +8272,31 @@ def test_chat_confirm_timeout_before_result_sink_keeps_pending(tmp_path, monkeyp
         ]
     )
     _, client, _, pending = _create_status_confirmation(tmp_path, model)
-    monkeypatch.setattr(api_module, "CHAT_AGENT_TIMEOUT_SECONDS", 0.01)
-
+    execute_entered = Event()
+    release_execute = Event()
+    worker_done = timeout_after_signal(monkeypatch, execute_entered)
     original_execute = composition_module._AgentDriver.execute
 
     def late_execute(driver, invocation):
-        time.sleep(0.2)
+        execute_entered.set()
+        assert release_execute.wait(20)
         return original_execute(driver, invocation)
 
     monkeypatch.setattr(composition_module._AgentDriver, "execute", late_execute)
-    response = client.post(
-        endpoint,
-        json={
-            "conversation_id": pending["conversation_id"],
-            "approved": True,
-            "confirmation_token": pending["pending_action"]["confirmation_token"],
-        },
-    )
-    time.sleep(0.25)
+    try:
+        response = client.post(
+            endpoint,
+            json={
+                "conversation_id": pending["conversation_id"],
+                "approved": True,
+                "confirmation_token": pending["pending_action"]["confirmation_token"],
+            },
+        )
+        assert execute_entered.is_set()
+        assert not worker_done.is_set()
+    finally:
+        release_execute.set()
+        assert worker_done.wait(20), "Timed-out Agent worker did not exit"
 
     if endpoint.endswith("/stream"):
         assert _parse_sse_events(response.text)[-1]["event"] == "error"
@@ -8172,6 +8333,8 @@ def test_chat_confirm_fallback_timeout_before_handler_keeps_retry_claim(
     assert not (tmp_path / "agent_checkpoints.sqlite").exists()
     validation_started = Event()
     release_validation = Event()
+    original_executor = transport_module.ThreadPoolExecutor
+    worker_done = timeout_after_signal(monkeypatch, validation_started)
     original_prepare = agent_module.prepare_call
     original_update = ApplicationsRepository.update_application_status_scoped
     handler_calls = []
@@ -8179,7 +8342,7 @@ def test_chat_confirm_fallback_timeout_before_handler_keeps_retry_claim(
     def block_first_prepare(*args, **kwargs):
         if not validation_started.is_set():
             validation_started.set()
-            assert release_validation.wait(timeout=5)
+            assert release_validation.wait(20), "Test did not release validation"
         return original_prepare(*args, **kwargs)
 
     def record_update(self, constraint, app_id, status, closed_reason=""):
@@ -8188,35 +8351,35 @@ def test_chat_confirm_fallback_timeout_before_handler_keeps_retry_claim(
 
     monkeypatch.setattr(agent_module, "prepare_call", block_first_prepare)
     monkeypatch.setattr(ApplicationsRepository, "update_application_status_scoped", record_update)
-    monkeypatch.setattr(
-        transport_module,
-        "SyncAgentExecutionHost",
-        _timeout_after_agent_signal_host(validation_started),
-    )
+    first = None
+    try:
+        first = client.post(
+            endpoint,
+            json={
+                "conversation_id": pending["conversation_id"],
+                "approved": True,
+                "confirmation_token": pending["pending_action"]["confirmation_token"],
+            },
+        )
+        assert validation_started.is_set(), (first.status_code, first.text)
+        assert not worker_done.is_set(), "Agent exited before validation was released"
+        if endpoint.endswith("/stream"):
+            timeout_error = _parse_sse_events(first.text)[-1]
+            assert timeout_error["data"]["data"]["code"] == "chat_agent_timeout"
+            assert timeout_error["data"]["data"]["retryable"] is True
+        else:
+            assert first.status_code == 504
+        assert handler_calls == []
+        assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "interview"
+        assert client.get("/api/chat/conversations").json()[0]["pending_action"] is not None
+    finally:
+        release_validation.set()
+        assert worker_done.wait(20), (
+            "Timed-out Agent worker did not exit",
+            (first.status_code, first.text) if first is not None else None,
+        )
 
-    first = client.post(
-        endpoint,
-        json={
-            "conversation_id": pending["conversation_id"],
-            "approved": True,
-            "confirmation_token": pending["pending_action"]["confirmation_token"],
-        },
-    )
-    assert validation_started.is_set()
-    if endpoint.endswith("/stream"):
-        timeout_error = _parse_sse_events(first.text)[-1]
-        assert timeout_error["data"]["data"]["code"] == "chat_agent_timeout"
-        assert timeout_error["data"]["data"]["retryable"] is True
-    else:
-        assert first.status_code == 504
-    assert handler_calls == []
-    assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "interview"
-    assert client.get("/api/chat/conversations").json()[0]["pending_action"] is not None
-
-    release_validation.set()
-    monkeypatch.undo()
-    monkeypatch.setattr(agent_module, "prepare_call", block_first_prepare)
-    monkeypatch.setattr(ApplicationsRepository, "update_application_status_scoped", record_update)
+    monkeypatch.setattr(transport_module, "ThreadPoolExecutor", original_executor)
     retry = client.post(
         endpoint,
         json={

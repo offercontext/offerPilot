@@ -153,16 +153,256 @@ describe('PilotMascot', () => {
     expect(document.activeElement?.textContent).toContain('隐藏角色');
   });
 
+  it('keeps a normal model inside reserved sidebar space without remounting on dock changes', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-sidebar-dock', '');
+    let bounds = { left: 12, top: 340, width: 190, height: 150, right: 202, bottom: 490 };
+    vi.spyOn(dock, 'getBoundingClientRect').mockImplementation(() => bounds as DOMRect);
+    document.body.append(dock);
+    const mounted = runtime();
+    const props = await renderMascot({ runtime: mounted, zoom: 1.4 });
+    const assertInside = () => {
+      const aside = container.querySelector<HTMLElement>('aside')!;
+      expect(aside.dataset.sidebarDocked).toBe('true');
+      const left = parseFloat(aside.style.left); const top = parseFloat(aside.style.top);
+      expect(left).toBeGreaterThanOrEqual(bounds.left);
+      expect(top).toBeGreaterThanOrEqual(bounds.top);
+      expect(left + parseFloat(aside.style.width)).toBeLessThanOrEqual(bounds.right + 0.1);
+      expect(top + parseFloat(aside.style.height)).toBeLessThanOrEqual(bounds.bottom + 0.1);
+    };
+    assertInside();
+    const originalLeft = container.querySelector<HTMLElement>('aside')!.style.left;
+    act(() => container.querySelector('button')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })));
+    act(() => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === '左下')!.click());
+    assertInside();
+    expect(container.querySelector<HTMLElement>('aside')!.style.left).not.toBe(originalLeft);
+    bounds = { left: 12, top: 340, width: 160, height: 120, right: 172, bottom: 460 };
+    await act(async () => { window.dispatchEvent(new Event('resize')); });
+    assertInside();
+    expect(mounted.mount).toHaveBeenCalledTimes(1);
+    await act(async () => { dock.remove(); });
+    expect(container.querySelector<HTMLElement>('aside')?.dataset.sidebarDocked).toBeUndefined();
+    expect(mounted.mount).toHaveBeenCalledTimes(1);
+    expect(props.onTogglePilot).not.toHaveBeenCalled();
+  });
+
   it('keeps Pilot usable when the Live2D runtime fails', async () => {
     const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
     const props = await renderMascot({ runtime: broken });
-    expect(container.textContent).toContain('Haru 暂时休息中');
+    expect(container.textContent).toContain('Haru 模型未加载');
+    expect(container.querySelector('aside')?.getAttribute('data-runtime-ready')).toBeNull();
+    expect(container.querySelector('aside')?.getAttribute('data-load-failure-reason')).toBe('unknown');
+    expect(container.querySelector<HTMLElement>('aside')?.style.width).toBe('156px');
+    expect(container.querySelector<HTMLElement>('aside')?.style.height).toBe('48px');
     expect(container.querySelector('[role="status"]')?.getAttribute('aria-hidden')).toBeNull();
     const fallbackTrigger = container.querySelector<HTMLButtonElement>('.characterButton')
       ?? container.querySelector<HTMLButtonElement>('button');
     expect(fallbackTrigger?.getAttribute('aria-haspopup')).toBe('dialog');
     act(() => container.querySelector('button')!.click());
     expect(props.onTogglePilot).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes only a bounded mount-failure category without raw error details', async () => {
+    const message = 'Current environment does not allow unsafe-eval secret-token=not-for-dom';
+    await renderMascot({ runtime: { mount: vi.fn().mockRejectedValue(new Error(message)) } });
+    expect(container.querySelector('aside')?.getAttribute('data-load-failure-reason')).toBe('dynamic-code-policy');
+    expect(container.innerHTML).not.toContain('secret-token');
+    expect(container.innerHTML).not.toContain(message);
+  });
+
+  it('keeps a normal list character compact and outside a tall table at maximum zoom', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.getBoundingClientRect = () => ({ left: 240, top: 200, right: 800, bottom: 1200, width: 560, height: 1000, x: 240, y: 200, toJSON: () => ({}) });
+    document.body.append(dock, table);
+    try {
+      await renderMascot({ zoom: 1.3, position: { xRatio: 0.9, yRatio: 0.8 } });
+      const mascot = container.querySelector<HTMLElement>('aside')!;
+      expect(mascot.style.width).toBe('150.8px');
+      expect(mascot.style.height).toBe('226.2px');
+      expect(mascot.dataset.pilotListCharacter).toBe('true');
+      expect(Number.parseFloat(mascot.style.left)).toBeGreaterThanOrEqual(800);
+      expect(dock.querySelector('canvas')).toBeNull();
+    } finally {
+      await act(async () => { dock.remove(); table.remove(); });
+    }
+  });
+
+  it('releases a lane when only its own scrolling chrome prevents the full-width table from fitting', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const list = document.createElement('section');
+    Object.defineProperty(list, 'clientWidth', { value: 1016 });
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.dataset.pilotTableMinWidth = '982';
+    const bottom = window.innerHeight - 190;
+    table.getBoundingClientRect = () => ({ left: 240, top: 200, right: 800, bottom, width: 560, height: bottom - 200, x: 240, y: 200, toJSON: () => ({}) });
+    const scroll = document.createElement('div');
+    scroll.className = 'ant-table-content';
+    Object.defineProperties(scroll, { offsetHeight: { value: 200 }, clientHeight: { value: 192 } });
+    const hint = document.createElement('p');
+    hint.setAttribute('data-pilot-mascot-scroll-hint', '');
+    hint.getBoundingClientRect = () => ({ height: 18 } as DOMRect);
+    table.append(hint, scroll);
+    list.append(table);
+    document.body.append(dock, list);
+    try {
+      await renderMascot();
+      expect(container.querySelector<HTMLElement>('aside')?.dataset.pilotListCharacter).toBeUndefined();
+    } finally {
+      await act(async () => { dock.remove(); list.remove(); });
+    }
+  });
+
+  it('does not reserve desktop space for the hidden mobile character', async () => {
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.getBoundingClientRect = () => ({ left: 16, top: 200, right: 359, bottom: 1200, width: 343, height: 1000, x: 16, y: 200, toJSON: () => ({}) });
+    document.body.append(dock, table);
+    try {
+      await renderMascot();
+      expect(container.querySelector<HTMLElement>('aside')?.dataset.pilotListCharacter).toBeUndefined();
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth });
+      await act(async () => { dock.remove(); table.remove(); });
+    }
+  });
+
+  it('does not reserve a side lane when the normal character fits below a short list', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    const table = document.createElement('div');
+    table.setAttribute('data-pilot-mascot-safe-area', '');
+    table.getBoundingClientRect = () => ({ left: 240, top: 200, right: 984, bottom: 300, width: 744, height: 100, x: 240, y: 200, toJSON: () => ({}) });
+    document.body.append(dock, table);
+    try {
+      await renderMascot({ position: { xRatio: 0.9, yRatio: 0.8 } });
+      const mascot = container.querySelector<HTMLElement>('aside')!;
+      expect(mascot.style.width).toBe('116px');
+      expect(mascot.dataset.pilotListCharacter).toBeUndefined();
+      expect(Number.parseFloat(mascot.style.top)).toBeGreaterThanOrEqual(300);
+    } finally {
+      await act(async () => { dock.remove(); table.remove(); });
+    }
+  });
+
+  it('keeps a failed model in the global header outside the list, below modal overlays', async () => {
+    const header = document.createElement('div');
+    header.setAttribute('data-pilot-mascot-global-dock', '');
+    document.body.append(header);
+    try {
+      const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
+      const props = await renderMascot({ runtime: broken });
+      const mascot = header.querySelector<HTMLElement>('aside')!;
+      expect(mascot.style.position).toBe('relative');
+      expect(mascot.style.zIndex).toBe('1');
+      expect(mascot.dataset.globalFallback).toBe('true');
+      expect(mascot.style.height).toBe('48px');
+      act(() => header.querySelector('button')!.click());
+      expect(props.onTogglePilot).toHaveBeenCalledOnce();
+      const list = document.createElement('div');
+      list.setAttribute('data-pilot-mascot-fallback-dock', '');
+      await act(async () => { document.body.append(list); });
+      expect(list.querySelector('aside')).not.toBeNull();
+      expect(header.querySelector('aside')).toBeNull();
+      await act(async () => { list.remove(); });
+      expect(header.querySelector('aside')).not.toBeNull();
+      await act(async () => { root.render(<PilotMascot {...props} runtime={runtime()} />); });
+      expect(header.querySelector('aside')).toBeNull();
+      expect(container.querySelector<HTMLElement>('aside')?.style.width).toBe('238px');
+      expect(container.querySelector('canvas')?.isConnected).toBe(true);
+    } finally {
+      await act(async () => { header.remove(); });
+    }
+  });
+
+  it('observes the header actions so a wrapped global dock reports its new anchor', async () => {
+    const header = document.createElement('header');
+    const actions = document.createElement('div');
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-global-dock', '');
+    actions.append(dock); header.append(actions); document.body.append(header);
+    const observed: Element[] = [];
+    const callbacks: (() => void)[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { callbacks.push(callback); }
+      observe(element: Element) { observed.push(element); }
+      disconnect() {}
+    });
+    let left = 500;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return this.tagName === 'BUTTON'
+        ? { left, top: 18, right: left + 156, bottom: 66, width: 156, height: 48, x: left, y: 18, toJSON: () => ({}) }
+        : { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) };
+    });
+    try {
+      const onAnchorRectChange = vi.fn();
+      await renderMascot({ runtime: { mount: vi.fn().mockRejectedValue(new Error('model failed')) }, onAnchorRectChange });
+      expect(observed).toContain(actions); expect(observed).toContain(header);
+      left = 320;
+      act(() => callbacks.forEach((callback) => callback()));
+      expect(onAnchorRectChange).toHaveBeenLastCalledWith({ left: 320, top: 18, right: 476, bottom: 66 });
+    } finally {
+      await act(async () => { header.remove(); });
+    }
+  });
+
+  it('docks the failed entrance when the list appears and restores it when the list leaves', async () => {
+    const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
+    await renderMascot({ runtime: broken });
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    await act(async () => { document.body.append(dock); });
+    expect(dock.querySelector('aside')?.getAttribute('data-load-failed')).toBe('true');
+    expect(dock.querySelector<HTMLElement>('aside')?.style.position).toBe('relative');
+    await act(async () => { dock.remove(); });
+    expect(container.querySelector('aside')?.getAttribute('data-load-failed')).toBe('true');
+    expect(dock.querySelector('aside')).toBeNull();
+  });
+
+  it('reports the new dock anchor and updates it when the content scrolls', async () => {
+    const original = HTMLElement.prototype.getBoundingClientRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.tagName !== 'BUTTON') return original.call(this);
+      const left = this.closest('[data-pilot-mascot-fallback-dock]') ? 400 : 800;
+      return { x: left, y: 100, left, top: 100, right: left + 156, bottom: 148, width: 156, height: 48, toJSON: () => ({}) };
+    });
+    const onAnchorRectChange = vi.fn();
+    const broken: PilotMascotRuntime = { mount: vi.fn().mockRejectedValue(new Error('model failed')) };
+    await renderMascot({ runtime: broken, onAnchorRectChange });
+    expect(onAnchorRectChange).toHaveBeenLastCalledWith({ left: 800, top: 100, right: 956, bottom: 148 });
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    await act(async () => { document.body.append(dock); });
+    expect(onAnchorRectChange).toHaveBeenLastCalledWith({ left: 400, top: 100, right: 556, bottom: 148 });
+    onAnchorRectChange.mockClear();
+    act(() => dock.dispatchEvent(new Event('scroll')));
+    expect(onAnchorRectChange).toHaveBeenCalledOnce();
+    await act(async () => { dock.remove(); });
+  });
+
+  it('retries with the connected canvas after leaving the failure dock', async () => {
+    const dock = document.createElement('div');
+    dock.setAttribute('data-pilot-mascot-fallback-dock', '');
+    document.body.append(dock);
+    const mount = vi.fn().mockRejectedValueOnce(new Error('model failed')).mockResolvedValue(runtimeController());
+    const props = await renderMascot({ runtime: { mount } });
+    expect(dock.querySelector('aside')).not.toBeNull();
+    await act(async () => { root.render(<PilotMascot {...props} animationLevel="minimal" />); });
+    const mountedCanvas = mount.mock.calls[mount.mock.calls.length - 1]?.[0] as HTMLCanvasElement;
+    expect(mountedCanvas.isConnected).toBe(true);
+    expect(mountedCanvas).toBe(container.querySelector('canvas'));
+    expect(container.querySelector('[data-load-failed]')).toBeNull();
+    expect(container.querySelector('aside')?.getAttribute('data-runtime-ready')).toBe('true');
+    expect(dock.querySelector('aside')).toBeNull();
+    dock.remove();
   });
 
   it('reports the real trigger rect after position, size, and viewport changes', async () => {

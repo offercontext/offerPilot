@@ -188,3 +188,22 @@ def test_mail_origin_fence_does_not_trust_forwarded_headers_or_override_auth(tmp
         assert client.get("/api/job-mail/status", headers=authenticated).status_code == 200
         assert client.get("/api/job-mail/status", headers={**authenticated, "Origin": "http://testserver"}).status_code == 200
         assert client.get("/api/job-mail/status", headers={**authenticated, **forged}).status_code == 403
+
+
+@pytest.mark.parametrize("authenticated", [False, True])
+def test_transport_authentication_never_bypasses_mail_origin_guard(tmp_path, authenticated):
+    save_config(tmp_path, Config(auth_enabled=True, auth_token="web-secret"))
+    with TestClient(create_app(
+        data_dir=tmp_path, transport_authenticator=lambda request: authenticated,
+    )) as client:
+        expected = 200 if authenticated else 401
+        assert client.get("/api/job-mail/status").status_code == expected
+        foreign = client.get("/api/job-mail/status", headers={"Origin": "https://foreign.example"})
+        assert foreign.status_code == (403 if authenticated else 401)
+        if authenticated:
+            assert foreign.json()["error_code"] == "job_mail_origin_denied"
+            assert client.post("/api/job-mail/imports", headers={"Origin": "https://foreign.example"},
+                               json={"body_text": "must not import"}).status_code == 403
+        assert client.options("/api/job-mail/imports", headers={
+            "Origin": "https://foreign.example",
+        }).status_code == 403

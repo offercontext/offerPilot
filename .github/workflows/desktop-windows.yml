@@ -1,0 +1,428 @@
+name: Windows desktop validation (unsigned)
+
+# Experimental validation only. Packaging never implies release readiness.
+# PR merge candidates always run the complete gate. Historical
+# package-only routing is retained only for the original validation branch.
+on:
+  push:
+    branches:
+      - feat/20261005-windows-desktop-validation
+  pull_request:
+    branches: [master]
+    # No paths filter: every PR receives the complete required status.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Do not cancel existing runs implicitly; supersession needs explicit approval.
+
+# Package-only is opt-in on push, from the first-line commit prefix including
+# its trailing space. GitHub startsWith is case-insensitive: uppercase/lowercase
+# variants are deliberately accepted. Missing markers and dispatch use full mode.
+# https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#startswith
+# Skipping full regression must never produce a successful validation-status.
+env:
+  WINDOWS_PACKAGE_ONLY: "${{ github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ') }}"
+  LITELLM_LOCAL_MODEL_COST_MAP: "True"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  validation-package:
+    name: Experimental installer and desktop smoke
+    runs-on: windows-2022
+    timeout-minutes: 60
+    # Intentionally independent of full-regression. Its artifact is NOT a release.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Record validation scope and run identity
+        run: |
+          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          $validationMode = "Full validation (default)"
+          $regressionScope = "Full regression runs independently and is required for release readiness."
+          if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
+            $validationMode = "EXPERIMENTAL PACKAGE-ONLY"
+            $regressionScope = "Full regression: NOT RUN. Manifest, shards and full release gate are intentionally skipped. NOT RELEASE READY."
+          }
+          @(
+            "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT RELEASE READY.",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Validation mode: $validationMode",
+            $regressionScope,
+            "This job must pass every focused, build and frozen smoke check before uploading an installer.",
+            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
+          ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+      - name: Install locked validation dependencies
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/01-install.log
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
+          npm.cmd ci --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop install failed" }
+          npm.cmd ci --prefix desktop/installed-ui --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Isolated layout helper install failed" }
+          npm.cmd ci --prefix desktop/real-ai-validation --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "Offline safety helper install failed" }
+          Stop-Transcript
+      - name: Required desktop, auth and static regression tests
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/02-focused-tests.log
+          uv run --frozen pytest -v tests/test_desktop.py tests/test_auth_api.py tests/test_static_frontend.py tests/test_desktop_job_mail_integration.py tests/test_job_mail_master_upgrade.py tests/test_offline_socketpair_guard.py --durations=15 --junitxml=desktop/ci-evidence/focused-pytest.xml
+          if ($LASTEXITCODE -ne 0) { throw "Focused desktop regression tests failed" }
+          npm.cmd test --prefix web -- src/components/AddApplicationForm.test.tsx
+          if ($LASTEXITCODE -ne 0) { throw "Application intake lifecycle regression failed" }
+          npm.cmd test --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop lifecycle tests failed" }
+          Stop-Transcript
+      - name: Required isolated helper and offline safety regression
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/02b-offline-helpers.log
+          npm.cmd test --prefix desktop/installed-ui
+          if ($LASTEXITCODE -ne 0) { throw "Installed helper regression failed" }
+          npm.cmd test --prefix desktop/real-ai-validation
+          if ($LASTEXITCODE -ne 0) { throw "Offline AI safety regression failed" }
+          node web/node_modules/vitest/vitest.mjs run --config desktop/real-ai-validation/test-ui/vitest.config.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Offline helper React regression failed" }
+          node --test desktop/browser-cleanup-diagnostic/test-routing.mjs desktop/haru-ui-preview/fixture-api.test.cjs desktop/haru-ui-preview/visual.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Historical routing and preview fixture regression failed" }
+          uv run --frozen pytest -q desktop/browser-cleanup-diagnostic/test_diagnostic.py
+          if ($LASTEXITCODE -ne 0) { throw "Offline cleanup diagnostic regression failed" }
+          Stop-Transcript
+      - name: Required lint, desktop types and frontend build
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03-static-checks.log
+          uv run --frozen ruff check .
+          if ($LASTEXITCODE -ne 0) { throw "Ruff failed" }
+          uv run --frozen mypy src/offerpilot/desktop.py src/offerpilot/api.py
+          if ($LASTEXITCODE -ne 0) { throw "Desktop type check failed" }
+          npm.cmd run build --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+          Stop-Transcript
+      - name: Required rendered viewport and interaction regression
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03b-layout.log
+          node web/node_modules/typescript/bin/tsc --project web/tests/desktop-layout/tsconfig.json
+          if ($LASTEXITCODE -ne 0) { throw "Layout fixture types failed" }
+          node web/tests/desktop-layout/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Rendered layout regression failed" }
+          Stop-Transcript
+      - name: Freeze existing Python backend
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/04-freeze.log
+          uv run --frozen --with pyinstaller==6.16.0 --with pyinstaller-hooks-contrib==2025.9 python desktop/build-backend.py
+          if ($LASTEXITCODE -ne 0) { throw "Frozen backend build failed" }
+          Stop-Transcript
+      - name: Required frozen process persistence and security smoke
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/05-frozen-smoke.log
+          python desktop/smoke-backend.py --backend desktop/backend-dist/offerpilot-backend/offerpilot-backend.exe --static-dir web/dist
+          if ($LASTEXITCODE -ne 0) { throw "Frozen backend smoke failed" }
+          Stop-Transcript
+      - name: Build unsigned NSIS installer without publishing
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/06-nsis.log
+          npm.cmd run build:win --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
+          Stop-Transcript
+      - name: Required packaged resource layout and backend smoke
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/07-packaged-smoke.log
+          python desktop/smoke-backend.py --backend desktop/dist/win-unpacked/resources/backend/offerpilot-backend.exe --static-dir desktop/dist/win-unpacked/resources/web
+          if ($LASTEXITCODE -ne 0) { throw "Packaged resource smoke failed" }
+          Stop-Transcript
+      - name: Required current NSIS installation and installed-backend smoke
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/08-installed-backend-smoke.log
+          powershell -NoProfile -ExecutionPolicy Bypass -File desktop/smoke-install.ps1 -InstallerDirectory desktop/dist
+          if ($LASTEXITCODE -ne 0) { throw "Current NSIS installation and installed backend smoke failed" }
+          Stop-Transcript
+      - name: Hash installers and disclose validation-only scope
+        run: |
+          $installers = @(Get-ChildItem -Path desktop/dist -Filter '*-setup.exe')
+          if ($installers.Count -eq 0) { throw "No Windows installer produced" }
+          foreach ($installer in $installers) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)" | Set-Content -Encoding ascii -LiteralPath "$($installer.FullName).sha256"
+          }
+          $validationMode = "Full validation (default)"
+          $regressionScope = "Full release/regression gate: separate job in the same run; NOT certified by this artifact."
+          if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
+            $validationMode = "EXPERIMENTAL PACKAGE-ONLY"
+            $regressionScope = "Full regression: NOT RUN. Manifest, shards and full release gate are intentionally skipped. NOT RELEASE READY."
+          }
+          @(
+            "EXPERIMENTAL, UNSIGNED WINDOWS VALIDATION BUILD. NOT RELEASE READY.",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, rendered component viewport regressions, frozen/packaged/installed-backend smoke, silent NSIS install and uninstall passed.",
+            "Validation mode: $validationMode",
+            $regressionScope,
+            "Check 'Full release regression (required for release)' and the final status job for its actual result.",
+            "Pending, failed, cancelled, timed-out or skipped full regression is not a pass.",
+            "Silent NSIS install and installed-backend smoke do not validate desktop CSP or the installed Electron UI.",
+            "Complete docs/architecture/desktop-validation.md on a clean Windows account before claiming desktop acceptance."
+          ) | Tee-Object -FilePath desktop/dist/VALIDATION-NOTES.txt
+          Get-Content desktop/dist/VALIDATION-NOTES.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Upload experimental validation installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: offerpilot-windows-experimental-validation-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/dist/*-setup.exe
+            desktop/dist/*-setup.exe.sha256
+            desktop/dist/VALIDATION-NOTES.txt
+      - name: Preserve validation evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: desktop/ci-evidence/
+
+  pytest-manifest:
+    name: Collect complete pytest manifest
+    if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Collection uses HEAD/index only, but fail before launching 20 shards
+          # if the historical backend/frontend source gates cannot run.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Verify immutable regression history before collection
+        run: |
+          python scripts/test_shards/check_history.py
+          if ($LASTEXITCODE -ne 0) { throw "Required regression Git history is unavailable" }
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend dependency install failed" }
+          uv run --frozen python scripts/test_shards/gate.py collect --count 20 --manifest pytest-evidence/manifest.json
+          if ($LASTEXITCODE -ne 0) { throw "Complete pytest collection failed" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pytest-manifest-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence/manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  # Capacity planning, not a measured guarantee: run 38937939551 used
+  # 729.25 total job-minutes across 12 shards. Twenty shards add eight startups,
+  # roughly 16-27 minutes at observed overhead, plus repeated fixture costs.
+  # Twenty was chosen for planning-scenario margin; estimates are not guarantees.
+  # Two shards run at once; packaging can be a third runner. Each shard retains
+  # its 120-minute limit (2400 aggregate shard-minute ceiling).
+  # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
+  # duration-lpt-v1 uses pinned historical durations only to balance scheduling;
+  # every collected node still runs exactly once under the full manifest gate.
+  # Whole-file isolation and the reviewed chat-node exception remain unchanged.
+  # Estimates do not certify passing tests; each shard keeps its 120-minute limit
+  # and at most two pytest shards run concurrently.
+  pytest-shards:
+    name: Complete pytest shard ${{ matrix.shard }} of 20
+    if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    needs: pytest-manifest
+    runs-on: windows-2022
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Immutable asset tests read historical source blobs with git show.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Verify immutable regression history before pytest
+        run: |
+          python scripts/test_shards/check_history.py
+          if ($LASTEXITCODE -ne 0) { throw "Required regression Git history is unavailable" }
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: pytest-manifest-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence
+      - name: Execute exact manifest partition in isolated process
+        run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend dependency install failed" }
+          # No global PYTEST_ADDOPTS: nested pytest collection/parsing is unchanged.
+          uv run --frozen python scripts/test_shards/gate.py run --manifest pytest-evidence/manifest.json --index ${{ matrix.shard }} --output pytest-evidence
+          if ($LASTEXITCODE -ne 0) { throw "Full pytest shard failed" }
+      - name: Preserve shard evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence/shard-*.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  full-regression:
+    name: Full release regression (required for release)
+    if: "${{ always() && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    needs: [pytest-manifest, pytest-shards]
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Frontend source gates audit historical ranges and HEAD ancestry.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - name: Verify immutable regression history before release gate
+        run: |
+          python scripts/test_shards/check_history.py
+          if ($LASTEXITCODE -ne 0) { throw "Required regression Git history is unavailable" }
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pytest-*-${{ github.sha }}-${{ github.run_attempt }}
+          path: pytest-evidence
+          merge-multiple: true
+      - name: Install locked regression dependencies
+        run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
+      - name: Verify full pytest evidence and complete every remaining release phase
+        env:
+          SHARD_RESULT: ${{ needs.pytest-shards.result }}
+          MANIFEST_RESULT: ${{ needs.pytest-manifest.result }}
+        run: |
+          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          Start-Transcript -Path desktop/ci-evidence/full-release-gate.log
+          if ($env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success') {
+            throw "Collection and all shards must succeed; timeout/cancellation/skipped is not success"
+          }
+          # This verifies exact execution coverage before ruff, mypy, frontend
+          # tests/build, real CLI/HTTP smoke, local verification and install gate.
+          # Runtime skips remain explicitly disclosed as skips, never passed tests.
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence
+          if ($LASTEXITCODE -ne 0) { throw "Complete repository release gate failed" }
+          Stop-Transcript
+      - name: Preserve full gate evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-full-regression-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            desktop/ci-evidence/
+            pytest-evidence/
+
+  validation-status:
+    name: Validation results (both jobs must pass)
+    if: ${{ always() }}
+    needs: [validation-package, full-regression]
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - name: Report actual results without promoting the artifact to a release
+        env:
+          PACKAGE_RESULT: ${{ needs.validation-package.result }}
+          REGRESSION_RESULT: ${{ needs.full-regression.result }}
+        run: |
+          $regressionScope = "Full regression is required; see its actual job result above."
+          if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
+            $regressionScope = "Full regression: NOT RUN (EXPERIMENTAL PACKAGE-ONLY). NOT RELEASE READY."
+          }
+          $report = @(
+            "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT A PRODUCTION RELEASE.",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Validation package job: $env:PACKAGE_RESULT",
+            "Required full regression job: $env:REGRESSION_RESULT",
+            $regressionScope,
+            "An installer artifact alone does not establish a full regression pass.",
+            "Ordinary-user/UAC/SmartScreen behavior and installed Electron UI acceptance still require separate evidence."
+          )
+          $report | Tee-Object -FilePath WINDOWS-VALIDATION-STATUS.txt
+          $report | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ($env:PACKAGE_RESULT -ne 'success' -or $env:REGRESSION_RESULT -ne 'success') {
+            throw "Validation is incomplete: both jobs must pass; failure, cancellation and skipped jobs are not success."
+          }
+      - name: Preserve actual workflow status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-validation-status-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: WINDOWS-VALIDATION-STATUS.txt

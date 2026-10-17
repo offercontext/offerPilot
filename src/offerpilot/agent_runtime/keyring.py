@@ -5,6 +5,7 @@ import ctypes
 import json
 import os
 import secrets
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -159,6 +160,9 @@ def _process_is_alive(pid: int, *, platform_name: str) -> bool | None:
 
 
 def _windows_process_is_alive(pid: int) -> bool | None:
+    if sys.platform != "win32":
+        # An unavailable Windows probe is unknown, never proof of a dead owner.
+        return None
     process_synchronize = 0x00100000
     wait_object_0 = 0x00000000
     wait_timeout = 0x00000102

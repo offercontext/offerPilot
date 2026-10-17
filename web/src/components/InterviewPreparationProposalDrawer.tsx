@@ -139,8 +139,12 @@ export default function InterviewPreparationProposalDrawer({
   const [proposal, setProposal] = useState<InterviewPreparationProposal | null>(initialProposal);
   const [attemptKey, setAttemptKey] = useState(() => draft?.attemptState.key ?? attemptState?.key ?? newAttemptKey());
   const [resumeId, setResumeId] = useState(draft?.resumeId ?? context.resumeId);
-  const [jdText, setJdTextState] = useState(draft?.jdText ?? context.jdText);
-  const [jdVersionId] = useState<number | null>(draft?.jdVersionId ?? context.jdVersionId ?? null);
+  const [{ jdText, jdVersionId }, setJdSource] = useState(() => ({
+    jdText: draft?.jdText ?? context.jdText,
+    // A draft's text and version are one source, including legacy/unknown
+    // drafts with no version. Never pair that text with the current version.
+    jdVersionId: draft ? draft.jdVersionId ?? null : context.jdVersionId ?? null,
+  }));
   const [assertionsText, setAssertionsText] = useState(draft?.assertionsText ?? context.userAssertions.join('\n'));
   const [history, setHistory] = useState<InterviewPreparationProposal[]>([]);
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(() =>
@@ -175,6 +179,14 @@ export default function InterviewPreparationProposalDrawer({
   const isSafeEmpty = proposal?.proposal_status === 'safe_empty';
 
   useEffect(() => {
+    // The owner may mount before its current-JD query resolves. Fill only a
+    // missing source; selected versions and unknown attempts stay frozen.
+    if (!open || busy || resultUnknown || jdText !== '' || jdVersionId !== null) return;
+    if (!context.jdText.trim() || !context.jdVersionId) return;
+    setJdSource({ jdText: context.jdText, jdVersionId: context.jdVersionId });
+  }, [busy, context.jdText, context.jdVersionId, jdText, jdVersionId, open, resultUnknown]);
+
+  useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => headingRef.current?.focus());
@@ -185,7 +197,7 @@ export default function InterviewPreparationProposalDrawer({
     };
   }, [context.applicationId, context.eventId, open]);
   const setJdText = (value: string) => {
-    if (!jdVersionId) setJdTextState(value);
+    if (!jdVersionId) setJdSource({ jdText: value, jdVersionId: null });
   };
   const input = useMemo<CreateInterviewPreparationProposalInput>(() => {
     const base = {
@@ -264,7 +276,7 @@ export default function InterviewPreparationProposalDrawer({
       return;
     }
     onDraftChange({
-      attemptState: { key: attemptKey, result_unknown: attemptState?.result_unknown ?? false },
+      attemptState: { key: attemptKey, result_unknown: resultUnknown },
       resumeId,
       jdText,
       jdVersionId,
@@ -274,7 +286,7 @@ export default function InterviewPreparationProposalDrawer({
         ? { readinessFeedbackSelection: { present: true as const, orderedVersionIds: [...selectedReadinessVersionIds] } }
         : {}),
     });
-  }, [assertionsText, attemptKey, attemptState?.result_unknown, input.knowledge_selections, jdText, jdVersionId, onDraftChange, open, readinessSelectionPresent, resumeId, selectedReadinessVersionIds]);
+  }, [assertionsText, attemptKey, input.knowledge_selections, jdText, jdVersionId, onDraftChange, open, readinessSelectionPresent, resultUnknown, resumeId, selectedReadinessVersionIds]);
 
   if (!open) return null;
 

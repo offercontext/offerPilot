@@ -3,16 +3,18 @@ import threading
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from offerpilot.db import init_database
+from offerpilot.job_mail import sync as sync_module
 from offerpilot.job_mail.extraction import ParsedMail
 from offerpilot.job_mail.models import JobMailConnection, JobMailSuggestion, JobMailSyncRun
 from offerpilot.job_mail.review import JobMailError
 from offerpilot.job_mail.sync import JobMailSyncService
-from offerpilot.job_mail.transport import FakeIMAPTransport, TransportUnavailable
+from offerpilot.job_mail.transport import DisabledTransport, FakeIMAPTransport, TransportUnavailable
 
 
 def mail(uid=1, folder="INBOX", generation="1", fingerprint=None):
@@ -145,6 +147,135 @@ def test_budget_shared_and_cursor_does_not_skip_deferred(setup):
         assert json.loads(connection.cursor_json)["INBOX"]["uid"] == 1
     service.tick()
     assert len(transport.read_calls) == 1
+
+
+def test_status_keeps_budget_and_run_in_one_read_snapshot(setup, monkeypatch):
+    sessions, transport, service = setup
+    now = datetime(2026, 10, 16, 12, tzinfo=timezone.utc)
+    monkeypatch.setattr(sync_module, "_now", lambda: now.replace(tzinfo=None))
+    connect(service)
+    transport.messages = [replace(mail(uid), received_at=now.isoformat()) for uid in (1, 2)]
+    with sessions() as session:
+        connection = session.scalar(select(JobMailConnection))
+        connection.budget_json = json.dumps({"day": now.date().isoformat(), "used": 99})
+        session.commit()
+    # Test-only WAL permits the worker to commit while the reader is paused.
+    # DELETE journal would make joining the writer inside its reader deadlock.
+    with sessions.kw["bind"].connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA journal_mode=WAL").scalar_one() == "wal"
+    entered, release = threading.Event(), threading.Event()
+    original_read = transport.read
+
+    def blocked_read(*args, **kwargs):
+        entered.set()
+        assert release.wait(10), "test did not release synthetic mail read"
+        return original_read(*args, **kwargs)
+
+    monkeypatch.setattr(transport, "read", blocked_read)
+    workers = []
+    transaction_states = []
+    original_connection = service._connection
+
+    def finish_worker_after_connection_snapshot(session):
+        connection = original_connection(session)
+        if not transaction_states:
+            transaction_states.append(session.connection().connection.driver_connection.in_transaction)
+            release.set()
+            for worker in workers:
+                worker.join(timeout=5)
+                assert not worker.is_alive(), "mail worker did not finish"
+        return connection
+
+    try:
+        service.start_sync()
+        with service._thread_lock:
+            workers = list(service._threads)
+        assert entered.wait(5), "synthetic mail read did not start"
+        monkeypatch.setattr(service, "_connection", finish_worker_after_connection_snapshot)
+        observed = service.status()
+        # A stale, coherent running snapshot is allowed; completed + 99 is not.
+        assert observed["budget"]["used"] == 99
+        assert observed["run"]["status"] == "running", observed
+        assert transaction_states == [True]
+        current = service.status()
+        assert current["run"]["status"] == "completed", current
+        assert current["budget"]["used"] == 100
+        assert current["run"]["progress"]["deferred"] == 1
+        with sessions() as session:
+            connection = session.scalar(select(JobMailConnection))
+            assert json.loads(connection.cursor_json)["INBOX"]["uid"] == 1
+    finally:
+        release.set()
+        for worker in workers:
+            worker.join(timeout=5)
+            assert not worker.is_alive(), "mail worker remained alive after cleanup"
+
+
+@pytest.mark.parametrize("external_reader", ["folders", "catalog"])
+def test_status_releases_read_snapshot_before_external_catalog(setup, monkeypatch, external_reader):
+    sessions, transport, service = setup
+    connect(service)
+    with sessions.kw["bind"].connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one() == "delete"
+    drivers = []
+    original_connection = service._connection
+
+    def capture_reader(session):
+        connection = original_connection(session)
+        drivers.append(session.connection().connection.driver_connection)
+        return connection
+
+    def catalog_with_independent_writer():
+        assert drivers and not drivers[-1].in_transaction
+        # A writer must be able to commit before this external callback returns.
+        with sessions() as writer:
+            writer.execute(text("BEGIN IMMEDIATE"))
+            connection = writer.scalar(select(JobMailConnection))
+            connection.interval_minutes = 30
+            writer.commit()
+        return ["INBOX"]
+
+    monkeypatch.setattr(service, "_connection", capture_reader)
+    if external_reader == "folders":
+        monkeypatch.setattr(transport, "folders", catalog_with_independent_writer)
+    else:
+        service.transport = DisabledTransport()
+        service.secure_setup = SimpleNamespace(catalog=catalog_with_independent_writer)
+    result = service.status()
+    assert result["available_folders"] == ["INBOX"]
+    assert result["connection"]["interval_minutes"] == 15
+    with sessions() as session:
+        assert session.scalar(select(JobMailConnection)).interval_minutes == 30
+
+
+def test_status_rolls_back_read_snapshot_when_projection_raises(setup, monkeypatch):
+    sessions, _, service = setup
+    connect(service)
+    with sessions.kw["bind"].connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar_one() == "delete"
+    drivers = []
+    original_connection = service._connection
+
+    def capture_reader(session):
+        connection = original_connection(session)
+        drivers.append(session.connection().connection.driver_connection)
+        return connection
+
+    def fail_projection(run):
+        raise ValueError("synthetic status projection failed")
+
+    monkeypatch.setattr(service, "_connection", capture_reader)
+    monkeypatch.setattr(service, "_run", fail_projection)
+    with pytest.raises(ValueError, match="synthetic status projection failed"):
+        service.status()
+    assert drivers and not drivers[-1].in_transaction
+    with sessions() as writer:
+        writer.execute(text("BEGIN IMMEDIATE"))
+        connection = writer.scalar(select(JobMailConnection))
+        connection.interval_minutes = 30
+        writer.commit()
+    with sessions() as session:
+        assert session.scalar(select(JobMailConnection)).interval_minutes == 30
 
 
 def test_uidvalidity_reset_rescans_bounded_and_dedups(setup):

@@ -4,6 +4,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
@@ -181,3 +182,19 @@ def test_journal_key_does_not_swallow_base_exception(tmp_path: Path) -> None:
 
 def test_default_platform_matches_os_name() -> None:
     assert os.name in {"nt", "posix"}
+
+
+def test_unavailable_windows_probe_cannot_reclaim_an_existing_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(journal_keyring, "sys", SimpleNamespace(platform="linux"))
+    assert journal_keyring._windows_process_is_alive(999999) is None
+    lock = tmp_path / f".{JOURNAL_KEY_FILENAME}.lock"
+    original = json.dumps({"pid": 999999})
+    lock.write_text(original, encoding="ascii")
+    stale = time.time() - 60
+    os.utime(lock, (stale, stale))
+
+    assert load_or_create_journal_key(tmp_path, platform_name="nt") is None
+    assert lock.read_text(encoding="ascii") == original
+    assert not (tmp_path / JOURNAL_KEY_FILENAME).exists()

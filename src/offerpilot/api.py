@@ -1253,6 +1253,7 @@ def create_app(
     job_mail_transport: MailTransport | None = None,
     job_mail_extractor: Extractor | None = None,
     job_mail_local_setup_enabled: bool = False,
+    transport_authenticator: Callable[[Request], bool] | None = None,
 ) -> FastAPI:
     resolved_data_dir = data_dir or resolve_data_dir()
     resolved_static_dir = static_dir or _find_static_dir()
@@ -1496,7 +1497,15 @@ def create_app(
         if request.method == "OPTIONS":
             response = mail_origin_response if mail_origin_response is not None else Response(status_code=200)
         else:
-            auth_response = _auth_guard_response(request, resolved_data_dir)
+            # A separately secured transport may authenticate this request without
+            # changing the persisted web-login configuration. Ordinary web apps
+            # never receive this callback and keep their existing auth behavior.
+            transport_authenticated = (
+                transport_authenticator is not None and transport_authenticator(request)
+            )
+            auth_response = (
+                None if transport_authenticated else _auth_guard_response(request, resolved_data_dir)
+            )
             if auth_response is not None:
                 response = auth_response
             elif mail_origin_response is not None:
@@ -2400,6 +2409,7 @@ def create_app(
         return {
             "auth_enabled": cfg.auth_enabled,
             "authenticated": (not cfg.auth_enabled)
+            or (transport_authenticator is not None and transport_authenticator(request))
             or _request_has_valid_auth_token(request, cfg.auth_token),
         }
 
@@ -6454,7 +6464,14 @@ def create_app(
             if not isinstance(command_id, str) or not isinstance(generation, int) or isinstance(generation, bool):
                 raise ValueError("Invalid interrupt identity")
             result = pilot_controls.interrupt(command_id, turn_id, generation)
-            if result["status"] == "stopped":
+            if result["status"] in {"stopped", "result_unknown"}:
+                # The UI's stable interrupt route also controls detached Runtime
+                # turns. Keep its exact-generation in-memory owner in sync with
+                # the durable receipt before the provider worker unwinds.
+                try:
+                    runtime_manager.interrupt(turn_id, generation=generation)
+                except RuntimeTurnNotFound:
+                    pass
                 turn_control_registry.interrupted(turn_id, result["execution_generation"])
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except TurnControlConflict:
@@ -8986,7 +9003,7 @@ def create_app(
         try:
             ConfiguredAIClient(
                 Config(active_provider_id=provider.id, providers=[provider]),
-            ).complete([Message(role="user", content="Reply with OK.")], [])
+            ).test_connection()
         except Exception as exc:
             message = _safe_provider_error(exc, [provider])
             append_log_entry(
@@ -9696,7 +9713,14 @@ def create_app(
             root = resolved_static_dir.resolve()
             requested = (root / full_path).resolve()
             if _is_relative_to(requested, root) and requested.is_file():
-                return FileResponse(requested)
+                # Host MIME databases (including the Windows registry) can label
+                # executable web assets as text/plain and block module loading.
+                media_type = {
+                    ".js": "text/javascript",
+                    ".mjs": "text/javascript",
+                    ".wasm": "application/wasm",
+                }.get(requested.suffix.lower())
+                return FileResponse(requested, media_type=media_type)
             index = root / "index.html"
             if index.is_file():
                 return FileResponse(index)

@@ -67,44 +67,54 @@ class JobMailSyncService:
 
     def status(self) -> dict[str, Any]:
         with self.sessions() as session:
-            connection = self._connection(session)
-            summary = None
-            run = None
-            used = 0
-            if connection:
-                used = int(self._budget(connection).get("used", 0))
-                email = connection.email
-                summary = {"id": connection.id, "email_masked":
-                           (email[:2] + "***@" + email.split("@")[-1]) if "@" in email else "合成邮箱",
-                           "provider": connection.provider, "status": connection.status,
-                           "folders": json.loads(connection.folders_json),
-                           "scope_version": connection.scope_version, "sync_mode": connection.sync_mode,
-                           "interval_minutes": connection.interval_minutes, "ai_enabled": False,
-                           "start_at": _iso(connection.start_at),
-                           "next_run_at": _iso(connection.next_run_at),
-                           "last_attempt_at": _iso(connection.last_attempt_at),
-                           "last_success_at": _iso(connection.last_success_at),
-                           "not_before_at": _iso(connection.not_before_at)}
-                run = session.scalar(select(JobMailSyncRun).where(
-                    JobMailSyncRun.connection_id == connection.id).order_by(
-                    JobMailSyncRun.started_at.desc(), JobMailSyncRun.id.desc()).limit(1))
-            synthetic = isinstance(self.transport, FakeIMAPTransport)
-            real_available = bool(connection and connection.provider == "qq" and connection.status == "connected"
-                                  and self.secure_setup is not None and self.secure_setup.enabled
-                                  and not isinstance(self.transport, DisabledTransport))
-            notice = "识别默认离线规则；QQ连接由本机安全配置页管理，外部AI尚未开放。后端停止时不检查邮件。"
-            if connection and connection.provider == "qq" and connection.status == "connected" and not real_available:
-                notice = "已保存QQ配置，但本次后端未开启本机安全入口或原生安全库不可用；不会读取邮件。"
-            return {"capabilities": {"real_connection": real_available, "ai_recognition": False,
-                                      "synthetic_connection": synthetic},
+            try:
+                # Pysqlite's legacy mode does not BEGIN for SELECT. Keep the
+                # budget and latest run in one snapshot without a writer lock.
+                session.execute(text("BEGIN"))
+                connection = self._connection(session)
+                summary = None
+                run = None
+                used = 0
+                if connection:
+                    used = int(self._budget(connection).get("used", 0))
+                    email = connection.email
+                    summary = {"id": connection.id, "email_masked":
+                               (email[:2] + "***@" + email.split("@")[-1]) if "@" in email else "合成邮箱",
+                               "provider": connection.provider, "status": connection.status,
+                               "folders": json.loads(connection.folders_json),
+                               "scope_version": connection.scope_version, "sync_mode": connection.sync_mode,
+                               "interval_minutes": connection.interval_minutes, "ai_enabled": False,
+                               "start_at": _iso(connection.start_at),
+                               "next_run_at": _iso(connection.next_run_at),
+                               "last_attempt_at": _iso(connection.last_attempt_at),
+                               "last_success_at": _iso(connection.last_success_at),
+                               "not_before_at": _iso(connection.not_before_at)}
+                    run = session.scalar(select(JobMailSyncRun).where(
+                        JobMailSyncRun.connection_id == connection.id).order_by(
+                        JobMailSyncRun.started_at.desc(), JobMailSyncRun.id.desc()).limit(1))
+                synthetic = isinstance(self.transport, FakeIMAPTransport)
+                real_available = bool(connection and connection.provider == "qq" and connection.status == "connected"
+                                      and self.secure_setup is not None and self.secure_setup.enabled
+                                      and not isinstance(self.transport, DisabledTransport))
+                notice = "识别默认离线规则；QQ连接由本机安全配置页管理，外部AI尚未开放。后端停止时不检查邮件。"
+                if connection and connection.provider == "qq" and connection.status == "connected" and not real_available:
+                    notice = "已保存QQ配置，但本次后端未开启本机安全入口或原生安全库不可用；不会读取邮件。"
+                result: dict[str, Any] = {"capabilities": {"real_connection": real_available, "ai_recognition": False,
+                                           "synthetic_connection": synthetic},
                     "connection": summary, "run": self._run(run),
                     "budget": {"limit": DAILY_LIMIT, "used": used,
                                "remaining": max(0, DAILY_LIMIT - used)},
                     "execution_location": "本地/自托管后端",
-                    "available_folders": self.transport.folders() if synthetic else self.secure_setup.catalog() if self.secure_setup else [],
                     "recognition_mode": "offline_rules",
                     "retention": {"pending_days": 90, "processed_days": 30},
                     "notice": notice}
+            finally:
+                if session.in_transaction():
+                    session.rollback()
+        # Materialize the DB projection before any transport/catalog callback.
+        result["available_folders"] = (self.transport.folders() if synthetic
+                                       else self.secure_setup.catalog() if self.secure_setup else [])
+        return result
 
     @staticmethod
     def _folders(value: Any) -> list[str]:

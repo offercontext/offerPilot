@@ -1,5 +1,6 @@
 .surface {
   min-height: calc(100vh - 160px);
+  container: interview-readiness / inline-size;
   padding: 34px 36px 46px;
   color: var(--op-ink);
   background: radial-gradient(circle at 86% 8%, color-mix(in srgb, var(--op-primary) 10%, transparent), transparent 27%), var(--op-surface);
@@ -29,16 +30,15 @@
 .panelHeader { display: flex; justify-content: space-between; align-items: start; gap: 14px; margin-bottom: 20px; }
 .panelHeader h2 { margin: 7px 0 0; color: var(--op-ink); font-size: 28px; letter-spacing: -.03em; }
 .roundBadge { padding: 7px 10px; border: 1px solid var(--op-border); border-radius: 999px; color: var(--op-muted); font-size: 11px; font-weight: 700; }
-.controls { display: grid; gap: 12px; margin-bottom: 18px; }
-.controls label { display: grid; gap: 6px; color: var(--op-muted); font-size: 12px; font-weight: 700; }
-.controls select, .controls input, .controls textarea { width: 100%; min-height: 42px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--op-border); border-radius: 10px; background: var(--op-surface); color: var(--op-ink); font: inherit; font-size: 14px; font-weight: 400; outline: none; }
-.controls textarea { resize: vertical; line-height: 1.6; }
-.controls select:focus, .controls input:focus, .controls textarea:focus { border-color: var(--op-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-primary) 14%, transparent); }
+.controls { display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 18px; }
+.controls > label { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; color: var(--op-muted); font-size: 12px; font-weight: 700; }
+.controls > label > select, .controls > label > input, .controls > label > textarea { width: 100%; min-width: 0; min-height: 42px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--op-border); border-radius: 10px; background: var(--op-surface); color: var(--op-ink); font: inherit; font-size: 14px; font-weight: 400; outline: none; }
+.controls > label > textarea { resize: vertical; line-height: 1.6; }
+.controls > label > select:focus, .controls > label > input:focus, .controls > label > textarea:focus { border-color: var(--op-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-primary) 14%, transparent); }
 .readOnlyJd { display: grid; gap: 6px; padding: 14px 16px; border: 1px solid var(--op-border); background: color-mix(in srgb, var(--op-layout-bg) 68%, var(--op-surface)); }
 .readOnlyJd span { color: var(--op-muted); font-size: 11px; font-weight: 800; letter-spacing: .08em; }
 .readOnlyJd p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; margin: 0; overflow: hidden; color: var(--op-ink); font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
-.confirmLabel { grid-template-columns: auto 1fr !important; align-items: center; color: var(--op-ink) !important; font-weight: 600 !important; }
-.confirmLabel input { width: 18px; min-height: 18px; accent-color: var(--op-primary); }
+.confirmLabel { min-width: 0; }
 
 .checklist { display: grid; gap: 8px; }
 .checkItem { display: flex; align-items: start; gap: 11px; padding: 12px 13px; border: 1px solid color-mix(in srgb, var(--op-border) 80%, transparent); border-radius: 14px; background: var(--op-surface); }
@@ -69,6 +69,12 @@
 .sideBlock h3 { margin: 9px 0 7px; color: var(--op-ink); font-size: 20px; font-weight: 700; }
 .sideBlock p { margin: 0; color: var(--op-muted); font-size: 12px; line-height: 1.7; }
 
+@container interview-readiness (max-width: 760px) {
+  .workspaceGrid { grid-template-columns: minmax(0, 1fr); gap: 13px; }
+  .hero { display: grid; }
+  .heroNote { justify-self: start; }
+}
+
 @media (max-width: 900px) { .surface { padding: 24px 18px 32px; border-radius: 18px; } .hero, .workspaceGrid { grid-template-columns: 1fr; display: grid; } .heroNote { justify-self: start; } .workspaceGrid { gap: 13px; } }
 @media (max-width: 620px) { .modeGrid { grid-template-columns: 1fr; } .prepPanel, .sidePanel { padding: 18px; } .checkItem { flex-wrap: wrap; } .inlineAction { margin-left: 34px; } }
 @media (prefers-reduced-motion: reduce) {
@@ -78,7 +84,7 @@
   .secondaryAction:hover:not(:disabled), .secondaryAction:focus-visible:not(:disabled), .secondaryAction:active:not(:disabled) { transform: none; }
 }
 
-.controls :global(.ant-select) { width: 100%; }
+.controls > label > :global(.ant-select) { width: 100%; min-width: 0; }
 .controls :global(.ant-select-selector) { min-height: 42px !important; padding: 5px 12px !important; border-color: var(--op-border) !important; border-radius: 10px !important; background: var(--op-surface) !important; color: var(--op-ink) !important; box-shadow: none !important; }
 .controls :global(.ant-select-focused .ant-select-selector), .controls :global(.ant-select:hover .ant-select-selector) { border-color: var(--op-primary) !important; box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-primary) 14%, transparent) !important; }
 .controls :global(.ant-input), .controls :global(.ant-input-affix-wrapper) { border-color: var(--op-border); border-radius: 10px; background: var(--op-surface); color: var(--op-ink); }

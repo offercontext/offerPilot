@@ -1,0 +1,81 @@
+{
+  "repository": "offercontext/offerPilot",
+  "branch": "feat/20261005-windows-desktop-validation",
+  "parentCommit": "a1009e8064588f6f2a4bc77b29172594de968463",
+  "productBaseline": {
+    "commit": "a1009e8064588f6f2a4bc77b29172594de968463",
+    "tree": "26efd6a60ca601c6c416420a21a87ee2e3cbdfcc"
+  },
+  "reason": "对已完成且失败的 Windows 验收执行一次普通完整恢复。保留原失败；两项有界诊断未复现，根因尚未确认。本次仅更新本请求记录，产品、依赖锁、测试、工作流及超时均不变。",
+  "previousFullGate": {
+    "run": 38344457267,
+    "attempt": 1,
+    "url": "https://github.com/offercontext/offerPilot/actions/runs/38344457267",
+    "outcome": "failure",
+    "startedAt": "2026-10-13T04:01:24Z",
+    "finishedAt": "2026-10-13T11:57:02Z",
+    "pytest": {
+      "nodes": 6771,
+      "passed": 6757,
+      "skipped": 13,
+      "failed": 1
+    },
+    "failures": [
+      {
+        "job": 115122498834,
+        "node": "tests/test_desktop.py::test_process_ready_security_persistence_and_parent_eof",
+        "observed": "首次后端启动未在原40秒内提供ready协议；stderr为空。58项通过、1项失败，尚未构建EXE。",
+        "sameRunEvidence": "同一未修改节点在原完整回归第2组通过，call39.69105秒；不替代package检查。",
+        "diagnostic": {
+          "run": 38346615702,
+          "outcome": "1 passed",
+          "callSeconds": 30.67,
+          "meaning": "未复现；不能声称根因已修复。"
+        }
+      },
+      {
+        "job": 115123055395,
+        "node": "tests/test_interview_story_browser_harness.py::test_story_browser_harness_cleans_all_local_resources_when_auditor_startup_fails",
+        "observed": "PowerShell在原180秒上限超时，stdout/stderr为空；该组564通过、1失败。",
+        "diagnostic": {
+          "run": 38349121431,
+          "commit": "2de50d70e5a61d6f4b63766e47e6c6131b8a8dfe",
+          "outcome": "1 passed",
+          "callSeconds": 32.029,
+          "meaning": "239条连续阶段记录、6个离线guard记录及4个根进程退出已核；未复现原超时，不替代完整分组证据。"
+        }
+      }
+    ],
+    "postGate": "full-release因分组失败关闭；最终validation-status因package和full失败关闭，未通过其余后置验收。"
+  },
+  "change": {
+    "files": [
+      ".github/validation/windows-full-request.json"
+    ],
+    "scope": "除本请求记录外，所有跟踪文件逐字节保持parent；不引入诊断脚本、邮件功能或跨attempt证据协议。"
+  },
+  "workflowRouting": {
+    "workflow": ".github/workflows/desktop-windows.yml",
+    "mode": "ordinary-full",
+    "activation": "本路径不在paths-ignore中，提交标题不含package-only或real-AI激活前缀。JSON仅是可读请求记录，不是工作流输入。",
+    "shards": 12,
+    "maxParallel": 2,
+    "failFast": false,
+    "shardTimeoutMinutes": 120,
+    "requiredJobs": [
+      "pytest-manifest",
+      "pytest-shards",
+      "full-regression",
+      "validation-package",
+      "validation-status"
+    ],
+    "paid": false
+  },
+  "requiredAcceptance": [
+    "新提交的完整门禁、安装包及后置检查均需成功；不以旧提交或诊断结果代替。",
+    "产包后固定新source、run、attempt、artifact和EXE SHA256；helper独审及全测试归零后可并行同包免费non-AI与7项MOCK，最终结论仍等待完整门禁。",
+    "实装验证Haru连续动态帧、全局动画设置及系统减少动态效果、无key可编辑草稿和模型配置跳转、图标与已有窗口交互。",
+    "仅此一次普通完整恢复；若相同失败复发，保留阶段证据并调查根因，不再无修改全量重跑。",
+    "不启动真实AI或配置凭据；累计10元预算不重置，后续安全配置及精确激活独立处理。"
+  ]
+}

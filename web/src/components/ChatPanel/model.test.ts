@@ -101,12 +101,33 @@ describe('evidence selection', () => {
   });
 
   it('formats embedded valid timestamps without changing invalid metadata', () => {
-    expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:59+08:00')).toBe('scheduled 2026-07-10 09:05');
+    // The display follows the host timezone; derive expected calendar fields
+    // from explicit instants without reusing the production Day.js formatter.
+    const localDisplay = (instant: number) => {
+      const date = new Date(instant);
+      const pad = (value: number) => String(value).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    };
+    expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:59+08:00')).toBe(
+      `scheduled ${localDisplay(Date.UTC(2026, 6, 10, 1, 5, 59))}`,
+    );
+    expect(formatEvidenceMeta('scheduled 2026-07-10T00:05:59+08:00')).toBe(
+      `scheduled ${localDisplay(Date.UTC(2026, 6, 9, 16, 5, 59))}`,
+    );
+    expect(formatEvidenceMeta('scheduled 2026-07-10T23:05:59-05:00')).toBe(
+      `scheduled ${localDisplay(Date.UTC(2026, 6, 11, 4, 5, 59))}`,
+    );
     expect(formatEvidenceMeta('scheduled 2026-02-30T09:05:00Z')).toBe('scheduled 2026-02-30T09:05:00Z');
     expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:00Z+08:00')).toBe(
       'scheduled 2026-07-10T09:05:00Z+08:00',
     );
-    expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:00Z.')).toBe('scheduled 2026-07-10 17:05.');
+    expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:00Z.')).toBe(
+      `scheduled ${localDisplay(Date.UTC(2026, 6, 10, 9, 5))}.`,
+    );
+    expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:59.123Z')).toBe(
+      `scheduled ${localDisplay(Date.UTC(2026, 6, 10, 9, 5, 59, 123))}`,
+    );
+    expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:59')).toBe('scheduled 2026-07-10 09:05');
     expect(formatEvidenceMeta('scheduled 2026-07-10T09:05.123')).toBe('scheduled 2026-07-10T09:05.123');
     expect(formatEvidenceMeta('scheduled 2026-07-10T09:05:00.abc')).toBe(
       'scheduled 2026-07-10T09:05:00.abc',

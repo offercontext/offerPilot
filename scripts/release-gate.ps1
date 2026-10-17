@@ -2,6 +2,7 @@ param(
     [switch]$RealAi,
     [switch]$Docker,
     [switch]$Install,
+    [string]$PytestEvidence,
     [int]$Port = 18765
 )
 
@@ -10,8 +11,14 @@ $ErrorActionPreference = "Stop"
 $Repo = Split-Path -Parent $PSScriptRoot
 Push-Location $Repo
 try {
-    uv run pytest -q
-    if ($LASTEXITCODE -ne 0) { throw "pytest failed (exit $LASTEXITCODE)." }
+    if ($PytestEvidence) {
+        # Substitution requires complete, matching evidence; never a skip switch.
+        uv run --frozen python scripts/test_shards/gate.py aggregate --manifest "$PytestEvidence/manifest.json" --output $PytestEvidence
+        if ($LASTEXITCODE -ne 0) { throw "Full pytest evidence verification failed (exit $LASTEXITCODE)." }
+    } else {
+        uv run pytest -q
+        if ($LASTEXITCODE -ne 0) { throw "pytest failed (exit $LASTEXITCODE)." }
+    }
     uv run ruff check .
     if ($LASTEXITCODE -ne 0) { throw "ruff failed (exit $LASTEXITCODE)." }
     uv run mypy src

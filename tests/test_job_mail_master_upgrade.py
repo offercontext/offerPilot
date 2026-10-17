@@ -18,6 +18,7 @@ import zipfile
 import pytest
 from fastapi.testclient import TestClient
 
+from _offline_socketpair import socketpair_only_connect
 from offerpilot.api import create_app
 from offerpilot.ai.write_operations import (
     LEDGER_KEY_FILENAME, load_or_create_ledger_key, payload_from_operation,
@@ -133,7 +134,9 @@ def test_pinned_master_upgrade_preserves_business_receipts_and_safe_defaults(
         attempted.append("network, credential store, or model")
         raise AssertionError("Upgrade must remain offline and credential-free")
 
-    monkeypatch.setattr(socket.socket, "connect", forbidden)
+    monkeypatch.setattr(socket.socket, "connect", socketpair_only_connect(forbidden))
+    monkeypatch.setattr(socket.socket, "connect_ex", forbidden)
+    monkeypatch.setattr(socket.socket, "sendto", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
     monkeypatch.setattr(socket, "getaddrinfo", forbidden)
     monkeypatch.setattr(OSVault, "__init__", forbidden)

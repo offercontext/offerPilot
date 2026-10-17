@@ -1,3 +1,4 @@
+import { configureOfflineWhisperAssets } from './offlineWhisperAssets';
 import { OFFLINE_WHISPER_MANIFEST } from './offlineWhisperManifest';
 import type { OfflineWhisperBackend } from './offlineWhisperTypes';
 
@@ -126,6 +127,7 @@ export async function createTransformersPipeline(
 ): Promise<WhisperPipelineLike> {
   const transformers = await import('@huggingface/transformers');
   const { env, pipeline } = transformers;
+  configureOfflineWhisperAssets(env);
   if (typeof caches !== 'undefined') {
     env.useBrowserCache = false;
     env.useCustomCache = true;

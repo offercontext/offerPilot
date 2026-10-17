@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from offerpilot.ai.types import Assistant
 from offerpilot.api import create_app
+from tests._agent_timeout import timeout_after_signal
 from tests.test_action_presentation import _Model
 
 
@@ -103,21 +104,69 @@ def test_confirmation_resumes_same_turn_but_terminal_replay_has_no_new_generatio
 
 
 def test_durable_timeout_keeps_timeout_receipt_without_accepting_late_model_output(tmp_path, monkeypatch):
-    import offerpilot.api as api
-    monkeypatch.setattr(api, 'CHAT_AGENT_TIMEOUT_SECONDS', 0.05)
     model = BarrierModel()
-    try:
-        with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+    worker_done = timeout_after_signal(monkeypatch, model.entered)
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        try:
             response = client.post('/api/chat', json={'message': '超时应有已保存说明'})
-            assert response.status_code == 200
+            assert response.status_code == 200, response.text
+            assert model.entered.is_set()
+            assert not worker_done.is_set()
             turn_id = response.json()['turn_id']
             turn = client.get(f'/api/chat/turns/{turn_id}').json()
             messages = client.get(f"/api/chat/conversations/{turn['conversation_id']}").json()
             assert [message['role'] for message in messages] == ['user', 'assistant']
             assert '处理时间过长' in messages[-1]['content']
             assert turn['state'] == 'interrupted'
-    finally:
-        model.release.set()
+        finally:
+            model.release.set()
+            assert worker_done.wait(20), 'Timed-out Agent worker did not exit'
+        assert client.get(f"/api/chat/conversations/{turn['conversation_id']}").json() == messages
+        assert client.get(f'/api/chat/turns/{turn_id}').json() == turn
+        assert model.calls == 1
+
+
+def test_timeout_receipt_fails_closed_when_execution_terminal_write_is_busy(tmp_path, monkeypatch):
+    import sqlite3
+    from contextlib import closing
+
+    from offerpilot.pilot_control import PilotControlRepository
+
+    model = BarrierModel()
+    worker_done = timeout_after_signal(monkeypatch, model.entered)
+    original_finish = PilotControlRepository.try_finish
+    busy_results = []
+
+    def finish_with_busy_writer(repository, lease, state):
+        if state != 'interrupted' or busy_results:
+            return original_finish(repository, lease, state)
+        engine = repository.session_factory.kw['bind']
+        with closing(sqlite3.connect(str(engine.url.database))) as writer:
+            try:
+                writer.execute('BEGIN IMMEDIATE')
+                result = original_finish(repository, lease, state)
+                busy_results.append(result)
+                return result
+            finally:
+                writer.rollback()
+
+    monkeypatch.setattr(PilotControlRepository, 'try_finish', finish_with_busy_writer)
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        try:
+            response = client.post('/api/chat', json={'message': '不能伪称超时说明已保存'})
+            assert busy_results == [False]
+            assert response.status_code == 503, response.text
+            assert response.json()['error_code'] == 'operation_failed'
+            assert not worker_done.is_set()
+        finally:
+            model.release.set()
+            assert worker_done.wait(20), 'Timed-out Agent worker did not exit'
+        conversation_id = response.json()['conversation_id']
+        messages = client.get(f'/api/chat/conversations/{conversation_id}').json()
+        assert [message['role'] for message in messages] == ['user']
+        turn = client.get(f"/api/chat/turns/{response.json()['turn_id']}").json()
+        assert turn['state'] == 'failed'
+        assert model.calls == 1
 
 
 def test_control_endpoints_require_existing_api_auth(tmp_path):
