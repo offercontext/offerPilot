@@ -50,7 +50,7 @@ def review_evidence(
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     frames = evidence.get("input_observations", [])
     selections = [f for f in frames if f.get("category") == "sources"]
-    provenance, audit_bindings = [], []
+    provenance, selection_audit_records = [], []
     for binding in bindings:
         preceding = [
             f
@@ -118,7 +118,7 @@ def review_evidence(
                 final_input_sources=wire,
             )
         )
-        audit_bindings.append(
+        selection_audit_records.append(
             dict(
                 call_number=binding["number"],
                 status=status,
@@ -205,7 +205,7 @@ def review_evidence(
         ),
     )
     audit = dict(
-        source_selection_bindings=audit_bindings,
+        source_selection_bindings=selection_audit_records,
         process_fragment_hashes={
             key: digest(evidence.get(key))
             for key in ("calls", "observed", "facts", "input_observations")
