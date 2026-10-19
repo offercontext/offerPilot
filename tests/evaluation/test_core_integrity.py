@@ -445,7 +445,16 @@ from scripts.evaluation_subject.bootstrap import network_guard
 # Model the public metadata seam's native process audit boundary; no actual
 # command or live WMI service is needed to exercise the cold fallback.
 platform._uname_cache = None
+metadata_calls = []
+# Make the fallback independent of live WMI availability and the host's missing
+# PROCESSOR_* variables; these changes exist only in this synthetic subprocess.
+def missing_wmi(*args, **kwargs):
+    raise OSError("synthetic unavailable WMI")
+platform._wmi_query = missing_wmi
+os.environ.pop("PROCESSOR_ARCHITEW6432", None)
+os.environ["PROCESSOR_ARCHITECTURE"] = "AMD64"
 def metadata_version(*args, **kwargs):
+    metadata_calls.append(True)
     sys.audit("subprocess.Popen", "cmd.exe", ["cmd.exe", "/c", "ver"], None, None)
     return "10", "10.0.19045", "", "Multiprocessor"
 platform.win32_ver = metadata_version
@@ -471,6 +480,7 @@ try:
 except PermissionError:
     forbidden_blocked = True
 print(json.dumps({"machine": machine, "metadata_error": metadata_error,
+                  "metadata_calls": len(metadata_calls),
                   "metadata_blocked": metadata_blocked,
                   "forbidden_blocked": forbidden_blocked,
                   "blocked_after_product_attempt": len(channel.calls)}), file=sys.__stdout__)
@@ -481,7 +491,8 @@ print(json.dumps({"machine": machine, "metadata_error": metadata_error,
     )
     assert process.returncode == 0, process.stderr
     result = json.loads(process.stdout)
-    assert result["machine"] and result["metadata_error"] is None
+    assert result["machine"] == "AMD64" and result["metadata_error"] is None
+    assert result["metadata_calls"] == 1
     assert result["metadata_blocked"] == 0
     assert result["forbidden_blocked"] and result["blocked_after_product_attempt"] == 1
 

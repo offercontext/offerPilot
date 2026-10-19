@@ -77,6 +77,58 @@ def targeted_offline_run(plan: Path = typer.Option(..., "--plan")) -> None:
     raise typer.Exit(result["exit_code"])
 
 
+@app.command("targeted-plan")
+def targeted_plan(
+    suite: Path = typer.Option(..., "--suite"),
+    variants: Path = typer.Option(..., "--variants"),
+    profile: Path = typer.Option(..., "--profile"),
+    grant: Path = typer.Option(..., "--grant"),
+    price_audit: Path = typer.Option(..., "--price-audit"),
+    gate_receipt: Path = typer.Option(..., "--gate-receipt"),
+    authority: str = typer.Option(..., "--authority"),
+    authorization: str = typer.Option(..., "--authorization"),
+    output: Path = typer.Option(..., "--output"),
+    select: list[str] = typer.Option(..., "--select"),
+) -> None:
+    """Freeze nine targets/all13 parents. Authority registration is a separate trusted action."""
+    from offerpilot.evaluation.core_authorized import prepare
+
+    try:
+        result = prepare(suite, variants, profile, grant, price_audit, gate_receipt, output,
+                         select, authority, authorization)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(result))
+
+
+@app.command("targeted-preflight")
+def targeted_preflight(plan: Path = typer.Option(..., "--plan")) -> None:
+    """Read-only authority/account/plan checks; never loads credentials or sends requests."""
+    from offerpilot.evaluation.core_authorized import preflight
+
+    try:
+        result = preflight(plan)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(result))
+
+
+@app.command("targeted-run")
+def targeted_run(plan: Path = typer.Option(..., "--plan")) -> None:
+    """Run/resume only the registered authorization, using the one shared budget account."""
+    from offerpilot.evaluation.core_authorized import execute
+
+    try:
+        result = execute(plan)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps({k: result.get(k) for k in (
+        "simulation_only", "parent_denominator", "selected_count", "selected_status",
+        "allowed_requests", "transport_observation", "allocation_state", "release_eligible",
+    )}))
+    raise typer.Exit(result["exit_code"])
+
+
 @app.command("review-pack")
 def review_pack(
     run: list[Path] = typer.Option(..., "--run"),

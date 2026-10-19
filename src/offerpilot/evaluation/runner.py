@@ -201,6 +201,7 @@ class Subject:
         if self.closed:
             return
         graceful = False
+        self.owned_tree_exit_proven = False
         shutdown_deadline = min(self.deadline, time.monotonic() + self.config["limits"]["shutdown_seconds"])
         try:
             if self.process.poll() is None:
@@ -211,6 +212,7 @@ class Subject:
                     self.wait("shutdown_complete", max(0, shutdown_deadline - time.monotonic()))
                     graceful = True
             self.tree.wait(timeout=max(0.01, shutdown_deadline - time.monotonic()))
+            self.owned_tree_exit_proven = True
         except Exception:
             self.errors.append("shutdown_timeout")
             try:
@@ -219,6 +221,7 @@ class Subject:
                 self.errors.append("kill_failed")
             try:
                 self.tree.wait(timeout=10)
+                self.owned_tree_exit_proven = True
             except Exception:
                 self.errors.append("exit_unverified")
         finally:

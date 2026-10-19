@@ -33,6 +33,7 @@ def run_trial(
     manifest: RunManifestV2, plan: PlannedTrial, private: Path, ledger: RunLedger,
     *, offline_simulation: Literal["probe", "target"] | None = None,
     offline_fault: str | None = None,
+    diagnostic_probe: bool = False,
 ) -> TrialResultV2:
     if offline_fault and (not offline_simulation or offline_fault not in {"http_error", "timeout", "extra_reads"}):
         raise ValueError("fault is offline-only")
@@ -155,7 +156,7 @@ def run_trial(
         e["initial"] = prepared["initial"]
         f["aliases"] = prepared["aliases"]
         driver = handshake(subject)
-        if offline_simulation == "probe":
+        if diagnostic_probe or offline_simulation == "probe":
             submitted = driver.request("POST", "/api/pilot/runtime/v1/turns", {
                 "request_id": str(uuid4()), "conversation_id": 0,
                 "context_type": "application", "context_ref": str(f["aliases"]["target_application"]),
@@ -190,6 +191,12 @@ def run_trial(
         if driver:
             driver.close()
         f["control_closed"] = bool(subjects) and all(s.closed and not s.errors for s in subjects)
+        f["owned_subjects_exited"] = bool(subjects) and all(
+            getattr(s, "owned_tree_exit_proven", False) for s in subjects
+        )
+        f["control_readers_exited"] = bool(subjects) and all(
+            not s.reader.is_alive() for s in subjects
+        )
         if not f["control_closed"] and status == "completed":
             status = "eval_error"
         if (private / "data.db").exists():

@@ -586,6 +586,7 @@ def test_recovery_regrades_sealed_result_and_rejects_misbindings(inputs, damage)
         assert row["result"] == raw and row["stage_status"] == "interrupted_unknown"
         assert report["exit_code"] != 0
         if damage == "unknown_attempt_partial":
+            assert row["control_records_closed"] is True
             assert row["request_observation_binding"] == dict(
                 coverage="partial",
                 observed_attempts=2,

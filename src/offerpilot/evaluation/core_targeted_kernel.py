@@ -16,6 +16,7 @@ from offerpilot.evaluation.core_targeted_evidence import (
     checked_result,
     check_request_bindings,
     probe_succeeded,
+    recovered_request_bindings,
 )
 from offerpilot.evaluation.registry import file_hash
 from offerpilot.evaluation.reporting import atomic_json
@@ -62,6 +63,7 @@ def run_session(
         if child_path.is_symlink() or not child_path.resolve().is_relative_to(directory):
             raise ValueError("targeted session must not contain linked/escaped files")
     with store_lock(directory / "session-lock"):
+        require_owned_exit = getattr(backend, "require_owned_exit", not backend.simulation_only)
         state_path = directory / "session-state.json"
         existing = state_path.exists()
         if existing:
@@ -138,8 +140,10 @@ def run_session(
                 if actual.model_dump(mode="json") != saved.get("result"):
                     raise ValueError("saved simulation result/evidence binding differs")
                 closed = evidence.get("facts", {}).get("control_closed") is True
+                exited = evidence.get("facts", {}).get("owned_subjects_exited")
+                completed = closed and (not require_owned_exit or exited is True)
                 if (
-                    (saved["status"] == "completed" and not closed)
+                    (saved["status"] == "completed" and not completed)
                     or (
                         "control_records_closed" in saved
                         and saved["control_records_closed"] is not closed
@@ -156,10 +160,11 @@ def run_session(
                 for attempt in evidence.get("provider_attempts", []):
                     if not attempt.get("blocked"):
                         ledger.validate_event(stage, attempt)
-                binding = check_request_bindings(
-                    stage, evidence, ledger.rows, complete=closed
+                binding = recovered_request_bindings(
+                    stage, evidence, ledger.rows, stage_completed=saved["status"] == "completed"
                 )
-                known = dict(control_records_closed=closed, request_observation_binding=binding)
+                known = dict(control_records_closed=closed, request_observation_binding=binding,
+                             owned_subjects_exited=exited)
                 if stage == "probe":
                     known["probe_ok"] = probe_succeeded(actual, evidence)
                 if any(saved.get(k) != v for k, v in known.items()):
@@ -173,6 +178,8 @@ def run_session(
         for stage in stages:
             if stage in state["stages"]:
                 # An interrupted claim is never resubmitted, even if ACK/send outcome is unknown.
+                if require_owned_exit and state["stages"][stage].get("owned_subjects_exited") is not True:
+                    break
                 if stage == "probe" and (
                     state["stages"][stage]["status"] != "completed"
                     or not state["stages"][stage].get("probe_ok")
@@ -199,15 +206,18 @@ def run_session(
             private = directory / backend.private_root / stage
             result = backend.run(stage, manifest, child, private, ledger)
             evidence = load(private, result.evidence_hash)
-            complete = evidence.get("facts", {}).get("control_closed") is True
-            binding = check_request_bindings(stage, evidence, ledger.rows, complete=complete)
+            closed = evidence.get("facts", {}).get("control_closed") is True
+            exited = evidence.get("facts", {}).get("owned_subjects_exited")
+            complete = closed and (not require_owned_exit or exited is True)
+            binding = check_request_bindings(stage, evidence, ledger.rows, complete=closed)
             state["stages"][stage].update(
                 status="completed" if complete else "interrupted_unknown",
                 result=result.model_dump(mode="json"),
                 result_file=str(private / "trial-result.json"),
                 result_file_hash=file_hash(private / "trial-result.json"),
                 probe_ok=probe_succeeded(result, evidence),
-                control_records_closed=complete,
+                control_records_closed=closed,
+                owned_subjects_exited=exited,
                 request_observation_binding=binding,
             )
             state["ledger"] = ledger.receipt()

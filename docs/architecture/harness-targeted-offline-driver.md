@@ -38,6 +38,32 @@ oc eval targeted-offline-run --plan artifacts/harness/new-offline-session/target
 
 局部模拟故障仅用于离线测试，不能改变产品 HITL、业务逻辑、评分规则或阈值。合法确认流程仍由原 driver 驱动；假 Provider 只能连接试验进程的 loopback 端点。
 
+## 正式授权入口与离线验证范围
+
+`oc eval targeted-plan`、`targeted-preflight`、`targeted-run` 共用上述调度、证据核验和持久请求算法。正式后端使用原 real 父身份，探测通过独立的 `diagnostic_probe` 参数和独立诊断 run ID 执行，不能伪装成 offline profile，也不把完整 E01 当探测。正式结果仍保留13项，其他四项保持未执行。该入口的存在不表示已经运行或获准发布。
+
+生产装配只从 OS 账户目录下 `.codex/evaluation` 的权威注册表读取账户与授权；不接受账户路径、注册表根或 grant claim 根的 CLI / 环境变量覆盖。当前阶段没有安装真实注册记录，也没有预留真实费用。未配置、目录可被其他主体写入或证据不齐时，只读预检返回配置错误。权限检查只读取 owner/DACL、拒绝 symlink/junction；测试仅调整新建的空临时目录权限，不改变全局或真实账户 ACL。该信任边界不抵抗同一 OS 用户或管理员主动伪造授权，哈希也不是人工身份认证。
+
+权威配置以安全标识符命名，绑定规范绝对 `account_path`、其已批准 genesis hash、10元总授权、单会话上限及授权原文引用。相对路径、账户副本或配置迁移不能沿用旧计划。审批记录另以稳定 `authorization_id` 绑定整份计划 hash、grant hash/ID、到期及原始授权证据，不能换 grant UUID 消除同一次授权占用。配置必须来自已有可信授权，入口不自行注册或扩充额度。
+
+冻结计划命令必须提供 `--suite`、`--variants`、`--profile`、`--grant`、`--price-audit`、`--gate-receipt`、`--authority`、`--authorization`、`--output` 和九项 `--select`。它不加载凭据或发送请求；按当前快照验证13父项、8次局部保护、最多27次总请求与零重试，并复制 grant、核价与本地完整 gate 回执。核价需匹配完整 profile、源资料 hash 和有效期；gate 必须有同一代码/锁文件快照的完整原生命令成功回执。模拟回执不能通过生产预检。现有估价草案不满足这些新运行条件。
+
+运行前使用 `targeted-preflight --plan <新目录>/targeted-authorized-plan.json` 只读核对全部绑定、最新账户余额与独立授权记录。实际 `targeted-run` 先取得原共享账户 `task-budget-paid.lock` 的同一个内核字节锁，再取得会话锁，持有到全部子进程处理结束。账户总授权仍为10元，每次 cap 不超过最新可用余额及2.394210元，不创建新额度。
+
+双 authorization/grant claim 在发送前持久化到权威根，仅相同计划、run 和目录可以恢复；部分 claim 不自动补齐。账户分配先写 intent，再原子替换原账户，最后写 receipt。中途断裂、账本缺失/截尾、配置或历史 hash 不符一律停止并保留分配，不通过新 session 解锁。旧 schema 的所有 closed_runs 和未知计费预留逐项只读核对；旧行不改写、不当作实际账单或退款。
+
+每次 pre-ACK 都重查授权、核价、代码、账户版本及权威 spend anchor；本地请求行和 anchor 持久化后，再提交权威 anchor，全部成功才 ACK。允许发送数、HTTP响应数、transport header 观察数和无响应的未知窗口分别报告；预留不证明实际发送或服务端接收。失败、超时或 ACK 结果未知的允许请求全额保留。
+
+`control_records_closed`、`owned_subjects_exited`、control reader 退出与功能 verdict 独立记录。正式后端及测试中的授权后端恢复时，任一旧阶段的进程退出无法证明就停止新阶段；已证明退出的 unknown 阶段仍不重发、不改判通过。功能九项通过但控制/账户尚未安全收口时，保留 `selected_status=pass`，会话为 `session_status=incomplete`、退出码3。
+
+只有全部已启动的受拥有进程树及 control reader 退出得到证明、ledger/权威锚及封存证据一致，才追加 closed_run 和关闭账户分配。释放的是未使用分配差额，已允许的未知费用不退。先保存派生报告，并将其 hash 与 ledger hash 一同绑定进账户 close 事务；报告必须有对应已提交账户 receipt 才证明闭账。closed 会话恢复为只读，篡改 stage、矩阵、结论、金额或 transport 字段都会失败。若该账户后来又完成其他会话，旧 session 当前安全拒绝恢复，需用封存证据进行只读审计。
+
+空账本/权威初始锚写齐前中断也会保留 allocation；当前没有自动补初始化或人工解锁命令，需独立审计授权后另行处理。此限制阻止继续付费，不会重置已预留请求。完整关闭事务的部分写入同样保留为审计阻塞。
+
+正式导出只在准备安全结账时先写完整13项 `run-manifest.json` / `trial-results.json`，再将两文件的精确路径和 hash 绑定进报告与账户关闭事务。closed 恢复只读核对文件、hash及计划/矩阵内容，缺失或冲突均拒绝，不重建。若账户仍 open 而正式导出或其临时文件已开始写入，当前直接保留 allocation 并要求审计，既不覆盖冲突文件，也不继续发送。本阶段只用不可导入的 toy 数据测试封存原语，真实 Provider 的正式导出分支尚未实际执行；模拟集成仍不生成真实父结果集合。
+
+零费用集成通过内部装配注入同一账户/claim实现的临时根和 loopback 后端；不提供生产绕过开关。模拟子身份与真实父身份始终隔离，不导出可冒充真实父运行的结果集合，真实请求数为0。集成需要实际九项 CLI、27次边界、原生竞争控制器、父进程中断与恢复；原语及合成证据测试只作补充。
+
 ## 发布边界
 
 当前 `core-release-v5.json` 要求19项 deterministic 各3轮、独立审查、严格基线比较；`review_rules=[]`。裁判在设计 §10 中为可选能力，校准0/20不是所有发布的自动必经阻塞。完整本地 gate 与发布政策仍分别需要对应快照的实际证据。

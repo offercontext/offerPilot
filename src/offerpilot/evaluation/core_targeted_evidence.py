@@ -98,3 +98,17 @@ def probe_succeeded(result: TrialResultV2, evidence: dict[str, Any]) -> bool:
             for v in evidence.get("input_observations", [])
         )
     )
+
+
+def recovered_request_bindings(
+    stage: str, evidence: dict[str, Any], rows: list[dict[str, Any]], *, stage_completed: bool
+) -> dict[str, Any]:
+    """Preserve unknown pre-ACK intents; EOF alone is not full proposal coverage."""
+    binding = check_request_bindings(stage, evidence, rows, complete=stage_completed)
+    if (
+        evidence.get("facts", {}).get("control_closed") is True
+        and not binding["denied_reservations"]
+        and not binding["unreserved_pre_ack_intents"]
+    ):
+        binding["coverage"] = "complete"
+    return binding
