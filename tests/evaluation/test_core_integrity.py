@@ -432,7 +432,8 @@ def test_budget_failed_state_requires_actual_product_budget_origin():
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows platform version fallback")
-def test_windows_metadata_fallback_does_not_weaken_product_process_fence(tmp_path):
+@pytest.mark.parametrize("guard_id", ["core", "p0"])
+def test_windows_metadata_fallback_does_not_weaken_product_process_fence(tmp_path, guard_id):
     code = r'''
 import json, os, platform, sys
 from pathlib import Path
@@ -440,6 +441,7 @@ root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
 sys.path.insert(0, str(root / "src"))
 from scripts.evaluation_subject.core_bootstrap import fence
+from scripts.evaluation_subject.bootstrap import network_guard
 # Model the public metadata seam's native process audit boundary; no actual
 # command or live WMI service is needed to exercise the cold fallback.
 platform._uname_cache = None
@@ -453,7 +455,10 @@ class Channel:
     def attempt(self, purpose, **fields):
         self.calls.append({"purpose": purpose, **fields})
 channel = Channel()
-fence(channel, set(), None)
+if sys.argv[3] == "core":
+    fence(channel, set(), None)
+else:
+    network_guard(channel, 12345)
 try:
     machine = platform.machine()
     metadata_error = None
@@ -471,7 +476,7 @@ print(json.dumps({"machine": machine, "metadata_error": metadata_error,
                   "blocked_after_product_attempt": len(channel.calls)}), file=sys.__stdout__)
 '''
     process = subprocess.run(
-        [sys.executable, "-c", code, str(ROOT), str(tmp_path)],
+        [sys.executable, "-c", code, str(ROOT), str(tmp_path), guard_id],
         cwd=ROOT, capture_output=True, text=True, timeout=60, check=False,
     )
     assert process.returncode == 0, process.stderr

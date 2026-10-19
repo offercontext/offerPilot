@@ -108,6 +108,64 @@ def wait(driver: HTTPDriver, turn: str, states: set[str], facts: dict[str, Any])
     raise TimeoutError("product status did not converge")
 
 
+def unknown_durable_terminal(
+    driver: HTTPDriver,
+    first: dict[str, Any],
+    turn: str,
+    conversation: int,
+    generation: int,
+    facts: dict[str, Any],
+) -> dict[str, Any]:
+    """Establish the durable fence before releasing the held late primary result.
+
+    A manager's result_unknown projection can precede its control transaction.
+    This existing product GET may reconcile an expired lease in a trusted
+    control transaction; it is not a side-effect-free database observation.
+    No worker completion, new generation, or additional wall allowance is used.
+    """
+    identity = dict(
+        turn_id=turn,
+        conversation_id=conversation,
+        execution_generation=generation,
+        protocol_version="pilot-runtime-v1",
+    )
+
+    def check(value: Any) -> dict[str, Any]:
+        if not isinstance(value, dict) or any(
+            type(value.get(key)) is not type(expected) or value.get(key) != expected
+            for key, expected in identity.items()
+        ):
+            raise ProductFailure("unknown fence execution identity missing or changed")
+        return value
+
+    check(first)
+    facts["unknown_first_projection"] = first
+    facts["unknown_control_read_scope"] = dict(
+        identity=identity,
+        path=f"/api/chat/conversations/{conversation}/execution",
+        trusted_control_reconciliation=True,
+        side_effect_free=False,
+    )
+    reads = facts.setdefault("unknown_control_reads", [])
+    while time.monotonic() < driver.deadline:
+        receipt = driver.request("GET", f"/api/chat/conversations/{conversation}/execution")
+        reads.append(receipt)
+        durable = check(receipt.get("execution"))
+        state = durable.get("state")
+        if state in {"interrupted", "result_unknown"}:
+            status = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")
+            facts["unknown_before_release"] = status
+            check(status)
+            check(status.get("execution"))
+            if status.get("state") != state or status["execution"].get("state") != state:
+                raise ProductFailure("unknown fence durable and Runtime terminal disagree")
+            return status
+        if state != "running":
+            raise ProductFailure("unknown fence reached an unexpected durable terminal")
+        time.sleep(0.05)
+    raise TimeoutError("unknown durable fence did not converge within trial watchdog")
+
+
 def drive(
     item: str,
     driver: CoreHTTPDriver,
@@ -501,19 +559,26 @@ def drive(
         f["terminal_state"] = terminal["state"]
         f["answer"] = terminal.get("terminal", {}).get("response", {}).get("message", "")
         if item == "E08.runtime_unknown":
-            f["primary_barrier"] = any(
-                x.get("boundary") == "accepted_primary_tool"
+            barriers = [
+                x
+                for x in subject.events
+                if x.get("type") == "fault_reached"
+                and x.get("boundary") == "accepted_primary_tool"
                 and x.get("stage") == "primary_committed_before_result_delivery"
                 and x.get("operation_id") == operation
-                for x in subject.events
+            ]
+            if len(barriers) != 1:
+                raise ProductFailure("unknown fence needs exactly one bound primary barrier")
+            barrier = barriers[0]
+            terminal = unknown_durable_terminal(
+                driver, terminal, turn, conversation, f["generation"], f
             )
-            for barrier in subject.events:
-                if (
-                    barrier.get("type") == "fault_reached"
-                    and barrier.get("boundary") == "accepted_primary_tool"
-                ):
-                    f["primary_barrier_high_water"] = barrier["observer_high_water"]
-                    subject.send({"command": "ack", "seq": barrier["seq"]})
+            f["terminal_state"] = terminal["state"]
+            f["answer"] = terminal.get("terminal", {}).get("response", {}).get("message", "")
+            f["primary_barrier"] = True
+            f["primary_barrier_high_water"] = barrier["observer_high_water"]
+            f["unknown_released_barrier"] = barrier
+            subject.send({"command": "ack", "seq": barrier["seq"]})
             time.sleep(3)
             late = driver.request("GET", f"/api/pilot/runtime/v1/turns/{turn}")
             f["late_state"] = late["state"]

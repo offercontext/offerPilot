@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import platform
 import socket
 import sqlite3
 import subprocess
@@ -76,6 +77,10 @@ class Channel:
 
 
 def network_guard(channel: Channel, port: int) -> None:
+    # Prepare neutral Windows metadata before product process isolation. A cold
+    # platform.machine() may otherwise fall back to a local `ver` subprocess.
+    # Later product process launches remain denied by the unchanged audit hook.
+    platform.uname()
     original = socket.socket.connect
     original_ex = socket.socket.connect_ex
     original_pair = socket.socketpair
