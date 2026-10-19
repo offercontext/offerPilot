@@ -39,10 +39,11 @@ def safe_path(path: Path) -> Path:
 
     absolute = path.absolute()
     for entry in [absolute, *absolute.parents]:
-        if not entry.exists():
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
             continue
-        info = entry.lstat()
-        require(not entry.is_symlink() and not (
+        require(not stat.S_ISLNK(info.st_mode) and not (
             getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 1024)
         ), "linked authority/account path")
     require(absolute.resolve() == absolute, "noncanonical authority/account path")
