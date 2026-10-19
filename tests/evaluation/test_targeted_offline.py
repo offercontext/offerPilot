@@ -431,6 +431,8 @@ t.execute(Path(sys.argv[1]))
     assert report["stage_states"]["E01.runtime_read"]["result_recovered_from_sealed_disk"] is True
     row = next(r for r in report["matrix"] if r["parent_trial_key"][2] == "E01.runtime_read")
     assert row["result"] == raw and row["stage_status"] == "interrupted_unknown"
+    assert row["control_records_closed"] is True
+    assert row["request_observation_binding"]["coverage"] == "complete"
     assert report["exit_code"] != 0 and (directory / "run-budget.jsonl").read_bytes() == before
 
 
@@ -640,3 +642,121 @@ def test_probe_requires_actual_runtime_completed_not_only_driver_or_http(termina
         input_observations=[dict(category="provider_response", status=200)],
     )
     assert targeted.probe_succeeded(driver_result, evidence) is (terminal == "completed")
+
+
+def test_shared_stage_identity_keeps_simulation_and_diagnostic_outside_real_parent(inputs):
+    from offerpilot.evaluation.core_targeted_ledger import stage_trial
+
+    targeted.prepare(*inputs, list(targeted.SELECTED))
+    manifest = read_plan(inputs[2] / "parent/run-plan.json")
+    parent = next(p for p in manifest.planned_trials if p.execution_item_id == targeted.SELECTED[0])
+    assert stage_trial(manifest, targeted.SELECTED[0], False).identity() == parent.identity()
+    diagnostic = stage_trial(manifest, "probe", False)
+    simulation = stage_trial(manifest, targeted.SELECTED[0], True)
+    assert diagnostic.mode == "real" and diagnostic.identity() != parent.identity()
+    assert simulation.mode == "deterministic" and simulation.identity() not in {
+        parent.identity(),
+        diagnostic.identity(),
+    }
+
+
+def test_shared_ledger_external_anchor_failure_is_before_ack_and_never_refunded(inputs):
+    import json
+    from offerpilot.evaluation.core_targeted_ledger import TargetedLedger, stage_trial
+
+    targeted.prepare(*inputs, list(targeted.SELECTED))
+    directory = inputs[2]
+    manifest = read_plan(directory / "parent/run-plan.json")
+    grant = RunGrant.model_validate_json((directory / "simulation-grant.json").read_bytes())
+    binding = targeted.read(directory / "targeted-plan.json")["plan_hash"]
+    events = []
+
+    def before(receipt):
+        assert receipt["requests"] == 0
+        events.append("checked")
+
+    def after(row, receipt):
+        assert json.loads((directory / "ledger-anchor.json").read_bytes()) == receipt
+        assert json.loads((directory / "run-budget.jsonl").read_text().splitlines()[-1]) == row
+        assert receipt["requests"] == 1 and row["allowed"] is True
+        events.append("local-durable-before-external")
+        raise OSError("injected external anchor failure before ACK")
+
+    ledger = TargetedLedger(
+        manifest, grant, directory, binding, initialize=True, before_send=before, after_record=after
+    )
+    ledger.stage = targeted.SELECTED[0]
+    child = stage_trial(manifest, ledger.stage, False)
+    key = child.model_dump(
+        mode="json", include={"run_id", "variant_id", "execution_item_id", "mode", "repeat_index"}
+    )
+    with pytest.raises(OSError, match="before ACK"):
+        ledger.reserve(
+            dict(
+                purpose="provider_send",
+                trial_key=key,
+                epoch=1,
+                seq=1,
+                input_bytes=100,
+                output_cap=10,
+            )
+        )
+    recovered = TargetedLedger(manifest, grant, directory, binding)
+    assert events == ["checked", "local-durable-before-external"]
+    assert recovered.requests == 1 and recovered.reserved_cny == ledger.reserved_cny > 0
+
+
+def test_shared_ledger_refuses_over27_before_initializing_any_budget(inputs):
+    from offerpilot.evaluation.core_targeted_ledger import TargetedLedger
+
+    targeted.prepare(*inputs, list(targeted.SELECTED))
+    directory = inputs[2]
+    manifest = read_plan(directory / "parent/run-plan.json")
+    grant = RunGrant.model_validate_json((directory / "simulation-grant.json").read_bytes())
+    with pytest.raises(ValueError, match="<=27"):
+        TargetedLedger(
+            manifest,
+            grant.model_copy(update={"max_requests": 28}),
+            directory,
+            "0" * 64,
+            initialize=True,
+        )
+    assert not (directory / "run-budget.jsonl").exists()
+
+
+def test_shared_ledger_concurrent_callbacks_cannot_cross_target8(inputs):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    from offerpilot.evaluation.core_targeted_ledger import TargetedLedger, stage_trial
+
+    targeted.prepare(*inputs, list(targeted.SELECTED))
+    directory = inputs[2]
+    manifest = read_plan(directory / "parent/run-plan.json")
+    grant = RunGrant.model_validate_json((directory / "simulation-grant.json").read_bytes())
+    ledger = TargetedLedger(manifest, grant, directory, "a" * 64, initialize=True)
+    ledger.stage = targeted.SELECTED[0]
+    key = stage_trial(manifest, ledger.stage, False).model_dump(
+        mode="json", include={"run_id", "variant_id", "execution_item_id", "mode", "repeat_index"}
+    )
+
+    def event(seq):
+        return dict(
+            purpose="provider_send", trial_key=key, epoch=1, seq=seq, input_bytes=100, output_cap=10
+        )
+
+    for seq in range(1, 8):
+        ledger.reserve(event(seq))
+    barrier = Barrier(2)
+
+    def reserve(seq):
+        barrier.wait(timeout=10)
+        try:
+            ledger.reserve(event(seq))
+        except TimeoutError:
+            return "denied"
+        return "allowed"
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        assert sorted(pool.map(reserve, [8, 9])) == ["allowed", "denied"]
+    recovered = TargetedLedger(manifest, grant, directory, "a" * 64)
+    assert recovered.requests == 8 and recovered.stage_counts[ledger.stage] == 8

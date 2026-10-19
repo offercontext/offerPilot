@@ -4,7 +4,7 @@
 
 ## 冻结与执行
 
-在待验 checkout 中创建仅包含 `candidate` 的 variants JSON，指定 checkout 和解释器绝对路径。调用正式 CLI：
+在待验 checkout 中创建仅包含 `candidate` 的 variants JSON，指定 checkout 和解释器绝对路径。调用离线 CLI：
 
 ```powershell
 oc eval targeted-offline-plan --suite evals/suites/harness-core-v1.json `
@@ -19,6 +19,8 @@ oc eval targeted-offline-run --plan artifacts/harness/new-offline-session/target
 父计划保留 `harness-core-v1` 的全部13个 real 身份、用例和 fixture hash、必需规则、代码/锁文件/依赖环境快照，单候选、单轮。九项选择必须精确匹配；未知、重复、越界或快照不匹配在发送前拒绝。另外四项在本计划中始终 `not_run/incomplete`，不迁移历史人工确认。
 
 模拟子进程使用另一个 run ID 和 `deterministic` mode，并显式记录 `simulation_only=true`。输出将父身份与子结果分别绑定；模拟行不能匹配正式父计划的试验身份。诊断探测不作场景成功判断。
+
+阶段调度与恢复位于 `core_targeted_kernel`，封存核验位于 `core_targeted_evidence`，持久请求算法为 `TargetedLedger`。离线入口只提供后端和模拟身份，复用同一个内核；`OfflineLedger`仅固定模拟标记。正式父试验身份、独立诊断身份和模拟子身份由同一解析函数区分。账本可在本地持久化后、ACK前调用外部权威锚；该锚写入失败仍保留已允许预留，不发ACK。
 
 `targeted-offline-run` 的退出码是选中九项的模拟结果：全部通过为0，存在已知失败为1，缺失/中断且没有已知失败为3；配置、账本或绑定错误为2。生成报告成功本身不代表九项完整通过。
 
