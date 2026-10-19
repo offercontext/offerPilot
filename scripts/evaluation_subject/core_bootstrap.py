@@ -85,11 +85,20 @@ class ScriptModel:
             raise AssertionError("recovery called model")
         if self.title:
             return Assistant(content="合成核心评估")
+        if self.channel.config.get("offline_simulation") == "probe":
+            return Assistant(content="离线模拟连接检查通过。")
+        if self.channel.config.get("offline_fault") == "extra_reads" and self.calls <= 3:
+            return Assistant(tool_calls=[ToolCall(
+                f"offline-read-{self.calls}", "list_application_events",
+                json.dumps({"month": "2026-10", "event_type": "interview"}),
+            )])
         item = self.channel.config.get(
             "action_id", self.channel.config["trial_key"]["execution_item_id"]
         )
         texts = [m.content for m in messages if m.role == "user"]
-        if item == "E08.runtime_deadline" or item == "E07.runtime_reattach":
+        if item == "E08.runtime_deadline" or (
+            item == "E07.runtime_reattach" and not self.channel.config.get("offline_simulation")
+        ):
             if self.calls == 1 or item == "E08.runtime_deadline":
                 self.channel.emit(
                     "fault_reached", {"boundary": "model_entered", "calls": self.calls}, ack=True
@@ -357,9 +366,15 @@ def serve(channel: Channel) -> None:
             else None
         )
         ports = {port}
-        if config["trial_key"]["mode"] == "deterministic" and action_id.startswith(
-            ("E09.", "E10.")
+        offline = config.get("offline_simulation")
+        if offline is not None and (
+            offline not in {"probe", "target"}
+            or config["trial_key"]["mode"] != "deterministic"
+            or config.get("provider_profile", {}).get("credential_ref") != "offline:no-credential"
         ):
+            raise ValueError("invalid offline subject")
+        if offline or (config["trial_key"]["mode"] == "deterministic"
+                       and action_id.startswith(("E09.", "E10."))):
             from scripts.evaluation_subject.core_loopback import start_provider
 
             provider_server, endpoint = start_provider(channel, model)
@@ -488,10 +503,10 @@ def serve(channel: Channel) -> None:
             if m and getattr(m, "execute_prepared", None) is original_tool:
                 setattr(m, "execute_prepared", tool)
         limits: dict[str, Any] = dict(config.get("provider_profile") or {})
-        if config["trial_key"]["mode"] == "real" or action_id.startswith(("E09.", "E10.")):
+        if offline or config["trial_key"]["mode"] == "real" or action_id.startswith(("E09.", "E10.")):
             if config["trial_key"]["mode"] == "deterministic":
                 key = "eval-fake-key"
-                limits = {
+                limits = dict(config["provider_profile"]) if offline else {
                     "model": "eval-core",
                     "max_input_bytes": 128000,
                     "max_output_tokens": 2048,

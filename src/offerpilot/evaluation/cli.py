@@ -39,6 +39,44 @@ def import_external(
     raise typer.Exit({"pass": 0, "fail": 1, "incomplete": 3}[result.verdict])
 
 
+@app.command("targeted-offline-plan")
+def targeted_offline_plan(
+    suite: Path = typer.Option(..., "--suite"),
+    variants: Path = typer.Option(..., "--variants"),
+    output: Path = typer.Option(..., "--output"),
+    select: list[str] = typer.Option(..., "--select"),
+    max_requests: int = typer.Option(27, "--max-requests"),
+    simulated_cny: float = typer.Option(1, "--simulated-cny"),
+    lifetime_seconds: int = typer.Option(3600, "--lifetime-seconds"),
+) -> None:
+    """Freeze all13 real parent identities; execution is simulation only, no key/grant loading."""
+    from offerpilot.evaluation.core_targeted import prepare
+
+    try:
+        result = prepare(suite, variants, output, select, max_requests=max_requests,
+                         simulated_cny=simulated_cny, lifetime_seconds=lifetime_seconds)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(result))
+
+
+@app.command("targeted-offline-run")
+def targeted_offline_run(plan: Path = typer.Option(..., "--plan")) -> None:
+    """Run/resume loopback simulation only. Never consumes a real account or provider grant."""
+    from offerpilot.evaluation.core_targeted import execute
+
+    try:
+        result = execute(plan)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps({k: result[k] for k in (
+        "simulation_only", "parent_denominator", "selected_count", "allowed_requests",
+        "real_provider_requests", "real_budget_reservation_cny", "release_eligible",
+        "simulation_status", "exit_code",
+    )}))
+    raise typer.Exit(result["exit_code"])
+
+
 @app.command("review-pack")
 def review_pack(
     run: list[Path] = typer.Option(..., "--run"),

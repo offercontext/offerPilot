@@ -57,12 +57,16 @@ class RunLedger:
             if not blocked:
                 self.requests += 1
                 self.reserved_cny += amount
-            with (self.directory / "run-budget.jsonl").open("a", encoding="utf-8") as f:
-                f.write(json.dumps(self.rows[-1]) + "\n")
-                f.flush()
-                os.fsync(f.fileno())
+            self.record(self.rows[-1], event)
             if blocked:
                 raise TimeoutError("authorized run request/fee reservation exhausted")
+
+    def record(self, row: dict[str, Any], event: dict[str, Any]) -> None:
+        """Durable before ACK; a specialized driver may add recovery bindings."""
+        with (self.directory / "run-budget.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
 
 
 class CoreSubject(Subject):

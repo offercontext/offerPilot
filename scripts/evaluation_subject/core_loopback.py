@@ -5,6 +5,7 @@ from __future__ import annotations
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import threading
+import time
 from typing import Any
 from uuid import uuid4
 
@@ -22,6 +23,19 @@ def start_provider(channel: Any, model: Any) -> tuple[Any, str]:
                 self.send_error(400)
                 return
             payload = json.loads(self.rfile.read(size))
+            if channel.config.get("offline_simulation"):
+                channel.emit("model_observation", {
+                    "category": "offline_provider_received", "simulation_only": True,
+                    "request_bytes": size,
+                }, ack=True)
+                fault = channel.config.get("offline_fault")
+                if fault == "http_error":
+                    self.send_error(503, "offline fault")
+                    return
+                if fault == "timeout":
+                    time.sleep(channel.config["provider_profile"]["timeout_seconds"] + 1)
+                    self.close_connection = True
+                    return
             messages = [
                 Message(
                     role=m["role"],

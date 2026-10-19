@@ -6,7 +6,8 @@ from pathlib import Path
 from statistics import median
 import secrets
 import time
-from typing import Any
+from typing import Any, Literal
+from uuid import uuid4
 
 from offerpilot.evaluation.adapters import ProductFailure
 from offerpilot.evaluation.contracts import PlannedTrial
@@ -29,8 +30,20 @@ from scripts.evaluation_subject import core_observer as observer
 
 
 def run_trial(
-    manifest: RunManifestV2, plan: PlannedTrial, private: Path, ledger: RunLedger
+    manifest: RunManifestV2, plan: PlannedTrial, private: Path, ledger: RunLedger,
+    *, offline_simulation: Literal["probe", "target"] | None = None,
+    offline_fault: str | None = None,
 ) -> TrialResultV2:
+    if offline_fault and (not offline_simulation or offline_fault not in {"http_error", "timeout", "extra_reads"}):
+        raise ValueError("fault is offline-only")
+    if offline_simulation is not None and (
+        plan.mode != "deterministic"
+        or manifest.provider_profile is None
+        or manifest.provider_profile.credential_ref != "offline:no-credential"
+        or manifest.provider_profile.endpoint != "https://offline.invalid/v1"
+        or manifest.provider_profile.model != "eval-core"
+    ):
+        raise ValueError("offline simulation requires a deterministic child and dummy profile")
     spec = CaseSpecV2.model_validate(case_definition(plan.execution_item_id))
     variant = CoreVariant.model_validate(
         {
@@ -61,6 +74,8 @@ def run_trial(
         "files": {},
     }
     f = e["facts"]
+    if offline_simulation:
+        f["simulation_only"] = True
     f["diagnostic_fault"] = variant.fault
     started = time.monotonic()
     deadline = started + spec.evaluator_limits.wall_seconds
@@ -87,6 +102,9 @@ def run_trial(
         if manifest.provider_profile
         else None,
     }
+    if offline_simulation:
+        config["offline_simulation"] = offline_simulation
+        config["offline_fault"] = offline_fault
 
     def start(epoch: int) -> CoreSubject:
         value = CoreSubject(variant, config | {"epoch": epoch}, private, events, deadline, ledger)
@@ -137,7 +155,19 @@ def run_trial(
         e["initial"] = prepared["initial"]
         f["aliases"] = prepared["aliases"]
         driver = handshake(subject)
-        subject, driver = drive(spec.action_id, driver, subject, private, e, restart)
+        if offline_simulation == "probe":
+            submitted = driver.request("POST", "/api/pilot/runtime/v1/turns", {
+                "request_id": str(uuid4()), "conversation_id": 0,
+                "context_type": "application", "context_ref": str(f["aliases"]["target_application"]),
+                "message": "只读连接探测；不要调用工具。",
+            })
+            from offerpilot.evaluation.core_actions import wait, TERMINAL
+
+            terminal = wait(driver, submitted["turn_id"], TERMINAL, f)
+            f.update(terminal_state=terminal["state"], diagnostic_only=True,
+                     answer=terminal.get("terminal", {}).get("response", {}).get("message", ""))
+        else:
+            subject, driver = drive(spec.action_id, driver, subject, private, e, restart)
         observer.marker(private / "data.db", "driver_finished", {"terminal_received": True})
     except Exception as exc:
         status = (
@@ -179,7 +209,7 @@ def run_trial(
             v
             for v in events
             if v.get("category")
-            in {"sources", "final_input", "usage", "provider_response", "provider_error", "process", "process_worker"}
+            in {"sources", "final_input", "usage", "provider_response", "provider_error", "process", "process_worker", "offline_provider_received"}
         ]
         e["provider_attempts"] = [v for v in events if v.get("purpose") == "provider_send"]
         e["budget_events"] = [
