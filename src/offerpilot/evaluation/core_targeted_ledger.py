@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 import json
 import os
 import threading
 from pathlib import Path
 from typing import Any, Callable
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from offerpilot.evaluation.core_contracts import RunGrant, RunManifestV2
 from offerpilot.evaluation.contracts import PlannedTrial
@@ -49,6 +50,31 @@ def stage_trial(manifest: RunManifestV2, stage: str, simulation_only: bool) -> P
     return parent
 
 
+@dataclass(frozen=True)
+class SendContextChallenge:
+    """Single pre-ACK scope, never persisted or accepted through files/CLI."""
+
+    nonce: str
+    plan_hash: str
+    manifest_hash: str
+    grant_hash: str
+    session_hash: str
+    stage: str
+    event_hash: str
+    receipt_hash: str
+
+
+@dataclass(frozen=True)
+class VerifiedSendContext:
+    """Internal verifier result; not a proof against an untrusted Python caller."""
+
+    challenge: SendContextChallenge
+    plan_hash: str
+    manifest_hash: str
+    grant_hash: str
+    session_hash: str
+
+
 class TargetedLedger(RunLedger):
     """Reuse pre-ACK reservation checks, retain all allowed sends across restarts."""
 
@@ -62,6 +88,9 @@ class TargetedLedger(RunLedger):
         initialize: bool = False,
         simulation_only: bool = False,
         before_send: Callable[[dict[str, Any]], None] | None = None,
+        full_context_verifier: Callable[
+            [SendContextChallenge, dict[str, Any]], VerifiedSendContext
+        ] | None = None,
         after_record: Callable[[dict[str, Any], dict[str, Any]], None] | None = None,
     ) -> None:
         if not 0 < grant.max_requests <= 27:
@@ -72,6 +101,7 @@ class TargetedLedger(RunLedger):
         self.reserve_lock = threading.Lock()
         self.simulation_only = simulation_only
         self.before_send = before_send
+        self.full_context_verifier = full_context_verifier
         self.after_record = after_record
         self.binding = binding
         self.stage = ""
@@ -170,15 +200,43 @@ class TargetedLedger(RunLedger):
             if not self.stage or identity in self.events:
                 raise ValueError("duplicate or unbound send; ACK refused")
             self.validate_event(self.stage, event)
-            for variant in self.manifest.variants.values():
-                current = snapshot(Path(variant["checkout"]))
-                if any(current[k] != variant[k] for k in current):
-                    raise ValueError("source snapshot changed before send")
+            # Only the dedicated full verifier owns this scan. Ordinary hooks and
+            # OfflineLedger retain their independent, per-request source check.
+            if self.full_context_verifier is None:
+                for variant in self.manifest.variants.values():
+                    current = snapshot(Path(variant["checkout"]))
+                    if any(current[k] != variant[k] for k in current):
+                        raise ValueError("source snapshot changed before send")
             if self.stage_counts.get(self.stage, 0) >= (1 if self.stage == "probe" else 8):
                 raise TimeoutError("simulation stage request limit exhausted")
             if self.before_send:
                 self.before_send(self.receipt())
+            if self.full_context_verifier is not None:
+                challenge = self.send_challenge(event)
+                proof = self.full_context_verifier(challenge, self.receipt())
+                if (
+                    not isinstance(proof, VerifiedSendContext)
+                    or proof.challenge is not challenge
+                    or self.send_challenge(event, nonce=challenge.nonce) != challenge
+                    or (proof.plan_hash, proof.manifest_hash, proof.grant_hash, proof.session_hash)
+                    != (challenge.plan_hash, challenge.manifest_hash,
+                        challenge.grant_hash, challenge.session_hash)
+                ):
+                    raise ValueError("fresh send context proof binding differs; ACK refused")
             super().reserve(event)
+
+    def send_challenge(self, event: dict[str, Any], *, nonce: str | None = None) -> SendContextChallenge:
+        assert self.grant is not None
+        return SendContextChallenge(
+            nonce or uuid4().hex,
+            self.binding,
+            digest(self.manifest.model_dump(mode="json")),
+            digest(self.grant.model_dump(mode="json")),
+            digest([self.binding, str(self.directory.resolve()), str(self.manifest.run_id)]),
+            self.stage,
+            digest(event),
+            digest(self.receipt()),
+        )
 
     def validate_event(self, stage: str, event: dict[str, Any]) -> None:
         if stage != "probe" and stage not in SELECTED:

@@ -54,6 +54,8 @@ oc eval targeted-offline-run --plan artifacts/harness/new-offline-session/target
 
 每次 pre-ACK 都重查授权、核价、代码、账户版本及权威 spend anchor；本地请求行和 anchor 持久化后，再提交权威 anchor，全部成功才 ACK。允许发送数、HTTP响应数、transport header 观察数和无响应的未知窗口分别报告；预留不证明实际发送或服务端接收。失败、超时或 ACK 结果未知的允许请求全额保留。
 
+授权控制器以内部 `full_context_verifier` 完成同一次 pre-ACK 的全量新鲜核验，避免 ledger 与晚端 `context` 重复扫描同一份源码。每次锁内生成新 challenge，绑定 nonce、plan/manifest/grant/session、阶段、完整事件及当前 receipt；返回值必须引用本次同一个 challenge，且新读上下文和写预留前重算值完全匹配。它只是内部调用约束，不是可从文件或 CLI 提供的安全证明，也不缓存跨请求信任。普通 `before_send` hook 和 `OfflineLedger` 仍逐请求独立扫描源码；完整晚端核验、异常失败关闭和所有阈值保持。核验至 ACK 间的 TOCTOU 仍存在。
+
 `control_records_closed`、`owned_subjects_exited`、control reader 退出与功能 verdict 独立记录。正式后端及测试中的授权后端恢复时，任一旧阶段的进程退出无法证明就停止新阶段；已证明退出的 unknown 阶段仍不重发、不改判通过。功能九项通过但控制/账户尚未安全收口时，保留 `selected_status=pass`，会话为 `session_status=incomplete`、退出码3。
 
 只有全部已启动的受拥有进程树及 control reader 退出得到证明、ledger/权威锚及封存证据一致，才追加 closed_run 和关闭账户分配。释放的是未使用分配差额，已允许的未知费用不退。先保存派生报告，并将其 hash 与 ledger hash 一同绑定进账户 close 事务；报告必须有对应已提交账户 receipt 才证明闭账。closed 会话恢复为只读，篡改 stage、矩阵、结论、金额或 transport 字段都会失败。若该账户后来又完成其他会话，旧 session 当前安全拒绝恢复，需用封存证据进行只读审计。

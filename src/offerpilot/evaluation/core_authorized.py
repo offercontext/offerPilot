@@ -26,7 +26,9 @@ from offerpilot.evaluation.core_targeted_evidence import (
     checked_result, recovered_request_bindings, read, probe_succeeded,
 )
 from offerpilot.evaluation.core_targeted_kernel import StageBackend, run_session
-from offerpilot.evaluation.core_targeted_ledger import SELECTED, TargetedLedger, stage_trial
+from offerpilot.evaluation.core_targeted_ledger import (
+    SELECTED, SendContextChallenge, TargetedLedger, VerifiedSendContext, stage_trial,
+)
 from offerpilot.evaluation.core_targeted_trust import require_owned
 from offerpilot.evaluation.registry import digest, file_hash
 from offerpilot.evaluation.reporting import atomic_json
@@ -296,11 +298,17 @@ def execute(path: Path) -> dict[str, Any]:
             require(anchor == dict(claim_hash=digest(claim), ledger=receipt),
                     "local ledger differs from trusted spend anchor; no reset/replay")
 
-        def before_send(receipt: dict[str, Any]) -> None:
+        def verify_send_context(challenge: SendContextChallenge,
+                                receipt: dict[str, Any]) -> VerifiedSendContext:
             # Recheck trusted approval, frozen code/profile/prices and account on every pre-ACK.
-            context(path, ports)
+            fresh, fresh_manifest, fresh_grant, _ = context(path, ports)
             account.assert_open(binding, cap)
             anchored(receipt)
+            return VerifiedSendContext(
+                challenge, fresh["plan_hash"], digest(fresh_manifest.model_dump(mode="json")),
+                digest(fresh_grant.model_dump(mode="json")),
+                digest([fresh["plan_hash"], str(path.parent.resolve()), str(fresh_manifest.run_id)]),
+            )
 
         def after_record(row: dict[str, Any], receipt: dict[str, Any]) -> None:
             account.checkpoint("before_spend_anchor")
@@ -315,7 +323,7 @@ def execute(path: Path) -> dict[str, Any]:
                 require(trusted.get("ledger") is None, "spent trusted anchor; local records missing")
             ledger = TargetedLedger(manifest, grant, directory, binding, initialize=initialize,
                                     simulation_only=ports.backend.simulation_only,
-                                    before_send=before_send, after_record=after_record)
+                                    full_context_verifier=verify_send_context, after_record=after_record)
             if initialize:
                 atomic_json(anchor_path, dict(claim_hash=digest(claim), ledger=ledger.receipt()))
             else:

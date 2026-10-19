@@ -743,3 +743,158 @@ with o.loopback_only():
         assert report["transport_observation"]["reserved_without_observed_response"] == 1
         assert account(setup).inspect()[0]["allocated_cny"] == "1.0"
     assert (path.parent / "run-budget.jsonl").read_bytes() == ledger_before
+
+
+
+def send_context_ledger(setup, *, verifier=None, before=None):
+    path = prepare(setup)
+    envelope, manifest, grant, _ = auth.context(path, setup["ports"])
+    ledger = TargetedLedger(manifest, grant, path.parent, envelope["plan_hash"],
+        initialize=True, simulation_only=True, full_context_verifier=verifier, before_send=before)
+    ledger.stage = offline.SELECTED[0]
+    child = stage_trial(manifest, ledger.stage, True)
+    key = child.model_dump(mode="json", include={"run_id","variant_id","execution_item_id","mode","repeat_index"})
+    event = dict(purpose="provider_send", trial_key=key, epoch=1, seq=1, input_bytes=100, output_cap=10)
+    return ledger, event, path
+
+
+def context_proof(challenge):
+    from offerpilot.evaluation.core_targeted_ledger import VerifiedSendContext
+    return VerifiedSendContext(challenge, challenge.plan_hash, challenge.manifest_hash,
+                               challenge.grant_hash, challenge.session_hash)
+
+
+def test_full_send_context_single_use_requires_exact_binding(setup, monkeypatch):
+    from offerpilot.evaluation import core_targeted_ledger as module
+    proofs = []
+    def verify(challenge, receipt):
+        if not proofs:
+            proofs.append(context_proof(challenge))
+        return proofs[0]
+    ledger, event, path = send_context_ledger(setup, verifier=verify)
+    monkeypatch.setattr(module, "snapshot", lambda root: pytest.fail("duplicate early source scan"))
+    ledger.reserve(event)
+    before = (path.parent / "run-budget.jsonl").read_bytes()
+    with pytest.raises(ValueError, match="context proof"):
+        ledger.reserve(dict(event, seq=2))
+    assert ledger.requests == 1 and (path.parent / "run-budget.jsonl").read_bytes() == before
+
+
+@pytest.mark.parametrize("damage", ["clone", "plan", "manifest", "grant", "session", "event", "receipt", "stage", "live_manifest", "live_grant", "type"])
+def test_full_send_context_mismatch_has_no_reservation(setup, damage):
+    from dataclasses import replace
+    def verify(challenge, receipt):
+        proof = context_proof(challenge)
+        if damage == "clone":
+            return replace(proof, challenge=replace(challenge))
+        if damage in {"plan","manifest","grant","session"}:
+            return replace(proof, **{damage+"_hash":"0"*64})
+        if damage == "event":
+            event["output_cap"] += 1
+        elif damage == "receipt":
+            ledger.requests += 1
+        elif damage == "stage":
+            ledger.stage = offline.SELECTED[1]
+        elif damage == "live_manifest":
+            ledger.manifest = ledger.manifest.model_copy(update={"run_max_requests": 1})
+        elif damage == "live_grant":
+            ledger.grant = ledger.grant.model_copy(update={"max_requests": 1})
+        elif damage == "type":
+            return None
+        return proof
+    ledger, event, path = send_context_ledger(setup, verifier=verify)
+    before = (path.parent / "run-budget.jsonl").read_bytes()
+    with pytest.raises(ValueError, match="context proof"):
+        ledger.reserve(event)
+    assert (path.parent / "run-budget.jsonl").read_bytes() == before
+    assert not ledger.rows
+
+
+def test_plain_before_send_does_not_skip_source_check(setup, monkeypatch):
+    from offerpilot.evaluation import core_targeted_ledger as module
+    seen = []
+    ledger, event, path = send_context_ledger(setup, before=lambda receipt: seen.append(receipt))
+    monkeypatch.setattr(module, "snapshot", lambda root: {"files_hash":"0"*64})
+    with pytest.raises(ValueError, match="source snapshot"):
+        ledger.reserve(event)
+    assert not seen and ledger.requests == 0 and (path.parent / "run-budget.jsonl").read_bytes() == b""
+
+
+@pytest.mark.parametrize("change", ["none","source","runtime","approval","plan","grant","profile","account","anchor","metadata_error"])
+def test_authorized_full_context_rechecks_every_send_before_reservation(setup, monkeypatch, change):
+    from offerpilot.evaluation import core_planning, core_targeted_ledger
+    path = prepare(setup)
+    original_context = auth.context
+    counts = dict(context=0, source=0)
+    def context(*args, **kwargs):
+        counts["context"] += 1
+        return original_context(*args, **kwargs)
+    original_snapshot = core_planning.snapshot
+    def source(root):
+        counts["source"] += 1
+        return original_snapshot(root)
+    monkeypatch.setattr(auth, "context", context)
+    monkeypatch.setattr(core_planning, "snapshot", source)
+    monkeypatch.setattr(core_targeted_ledger, "snapshot", lambda root: pytest.fail("duplicate early source scan"))
+    class Done(Exception):
+        pass
+    def session(manifest,grant,directory,binding,selected,backend,make_ledger):
+        ledger = make_ledger(True)
+        ledger.stage = offline.SELECTED[0]
+        child = stage_trial(manifest, ledger.stage, True)
+        key = child.model_dump(mode="json", include={"run_id","variant_id","execution_item_id","mode","repeat_index"})
+        event = dict(purpose="provider_send",trial_key=key,epoch=1,seq=1,input_bytes=100,output_cap=10)
+        previous = counts.copy()
+        ledger.reserve(event)
+        assert counts["source"]-previous["source"] == counts["context"]-previous["context"] == 1
+        before = (directory / "run-budget.jsonl").read_bytes()
+        anchor = setup["ports"].registry.root / "targeted-claims/test-authorization/spend-anchor.json"
+        anchor_before = anchor.read_bytes()
+        if change == "source":
+            monkeypatch.setattr(core_planning,"snapshot",lambda root: dict(original_snapshot(root),files_hash="0"*64))
+        elif change == "runtime":
+            monkeypatch.setattr(core_planning,"target_environment",lambda variant: dict(manifest.variants["candidate"]["runtime"],sqlite="changed"))
+        elif change == "approval":
+            approval = setup["ports"].registry.root / "targeted-approvals/test-authorization.json"
+            value = offline.read(approval)
+            value["plan_hash"] = "0"*64
+            atomic_json(approval,value)
+        elif change == "plan":
+            value = offline.read(path)
+            value["plan"]["parent_denominator"] = 12
+            atomic_json(path,value)
+        elif change == "grant":
+            value = offline.read(directory / "run-grant.json")
+            value["max_requests"] = 1
+            atomic_json(directory / "run-grant.json",value)
+        elif change == "profile":
+            value = offline.read(directory / "parent/run-plan.json")
+            value["manifest"]["provider_profile"]["max_output_tokens"] = 1
+            value["plan_hash"] = digest(value["manifest"])
+            atomic_json(directory / "parent/run-plan.json",value)
+        elif change == "account":
+            value = offline.read(setup["account"])
+            value["allocated_cny"] = "0"
+            atomic_json(setup["account"],value)
+        elif change == "anchor":
+            atomic_json(anchor,dict(foreign=True))
+            anchor_before = anchor.read_bytes()
+        elif change == "metadata_error":
+            def failed(variant):
+                raise subprocess.CalledProcessError(7,["SYNTHETIC-METADATA"],stderr=b"synthetic")
+            monkeypatch.setattr(core_planning,"target_environment",failed)
+        previous = counts.copy()
+        if change == "none":
+            ledger.reserve(dict(event,seq=2))
+            assert ledger.requests == 2
+            assert counts["source"]-previous["source"] == counts["context"]-previous["context"] == 1
+        else:
+            with pytest.raises((ValueError,subprocess.CalledProcessError)):
+                ledger.reserve(dict(event,seq=2))
+            assert counts["context"]-previous["context"] == 1
+            assert ledger.requests == 1 and (directory / "run-budget.jsonl").read_bytes() == before
+            assert anchor.read_bytes() == anchor_before
+        raise Done
+    monkeypatch.setattr(auth,"run_session",session)
+    with pytest.raises(Done):
+        auth.execute(path)
