@@ -1,6 +1,8 @@
 import subprocess
 import sys
 import json
+import os
+import py_compile
 import pytest
 
 from scripts.evaluation_subject.process_tree import ProcessTree
@@ -14,6 +16,67 @@ def test_credential_environment_is_not_inherited(monkeypatch) -> None:
     env = process_environment(ROOT, ROOT / ".codex")
     assert "OPENAI_API_KEY" not in env and "ANTHROPIC_API_KEY" not in env
     assert "OFFERPILOT_DATA" in env
+
+
+def test_subject_environment_disables_new_bytecode_without_parent_flags(tmp_path, monkeypatch):
+    checkout = tmp_path / "readonly-subject"
+    source = checkout / "src"
+    source.mkdir(parents=True)
+    module = source / "read_only_product.py"
+    module.write_text("VALUE = 42\n", encoding="utf-8")
+    before = {p.relative_to(checkout).as_posix(): p.read_bytes() for p in checkout.rglob("*") if p.is_file()}
+    monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "")
+    result = subprocess.run(
+        [sys.executable, "-c", "import sys,read_only_product; assert read_only_product.VALUE==42; print(sys.dont_write_bytecode)"],
+        cwd=checkout, env=process_environment(checkout, tmp_path / "data"),
+        capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0 and result.stdout.strip() == "True", result.stderr
+    assert not list(checkout.rglob("*.pyc")) and not (source / "__pycache__").exists()
+    assert {p.relative_to(checkout).as_posix(): p.read_bytes() for p in checkout.rglob("*") if p.is_file()} == before
+
+
+@pytest.mark.parametrize("entry", ["subject", "metadata"])
+def test_source_loading_ignores_valid_stale_checkout_bytecode(tmp_path, monkeypatch, entry):
+    from offerpilot.evaluation import runner
+    from offerpilot.evaluation.contracts import VariantConfig
+
+    checkout = tmp_path / "subject"
+    source = checkout / "src"
+    source.mkdir(parents=True)
+    module = source / "read_only_product.py"
+    module.write_bytes(b"VALUE = 41\n")
+    stamp = module.stat()
+    py_compile.compile(str(module), doraise=True,
+                       invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
+    module.write_bytes(b"VALUE = 42\n")
+    os.utime(module, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
+    before = {p.relative_to(checkout).as_posix(): p.read_bytes()
+              for p in checkout.rglob("*") if p.is_file()}
+    env = process_environment(checkout, tmp_path / "data")
+    negative = dict(env)
+    negative.pop("PYTHONPYCACHEPREFIX")
+    code = "import read_only_product; print(read_only_product.VALUE)"
+    assert subprocess.check_output([sys.executable, "-c", code], cwd=checkout,
+                                   env=negative, timeout=30).strip() == b"41"
+    if entry == "subject":
+        assert subprocess.check_output([sys.executable, "-c", code], cwd=checkout,
+                                       env=env, timeout=30).strip() == b"42"
+    else:
+        native = subprocess.check_output
+
+        def verify_source(argv, **kwargs):
+            actual = list(argv)
+            actual[-1] = (f"import sys; sys.path.insert(0,{str(source)!r}); "
+                          "import read_only_product; assert read_only_product.VALUE==42; "
+                          + actual[-1])
+            return native(actual, **kwargs)
+
+        monkeypatch.setattr(runner.subprocess, "check_output", verify_source)
+        assert runner.target_environment(VariantConfig(
+            variant_id="candidate", checkout=str(checkout), interpreter=sys.executable))["python"]
+    assert {p.relative_to(checkout).as_posix(): p.read_bytes()
+            for p in checkout.rglob("*") if p.is_file()} == before
 
 
 def test_process_tree_timeout_kills_owned_children(tmp_path) -> None:

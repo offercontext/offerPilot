@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.metadata
+import inspect
+import hashlib
 import json
 import os
 import platform
@@ -788,6 +790,13 @@ def serve(channel: Channel) -> None:
                     "ready",
                     {
                         "product_file": str(source),
+                        "bytecode_write_disabled": sys.dont_write_bytecode,
+                        "bytecode_cache_prefix": sys.pycache_prefix,
+                        "product_file_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+                        "product_factory_file": str(Path(inspect.getfile(create_app)).resolve()),
+                        "product_factory_sha256": hashlib.sha256(Path(inspect.getfile(create_app)).read_bytes()).hexdigest(),
+                        "evaluator_file": str(Path(__file__).resolve()),
+                        "evaluator_file_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                         "checkout_sha": config["actual_checkout_sha"],
                         "interpreter": sys.executable,
                         "python": sys.version,

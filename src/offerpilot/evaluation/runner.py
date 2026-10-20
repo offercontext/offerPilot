@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 from typing import Any, cast
 from uuid import uuid4
@@ -97,10 +98,20 @@ def environment() -> dict[str, Any]:
             "dependencies": {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()}}
 
 
+def source_cache_prefix(parent: Path | None = None) -> Path:
+    """A never-created cache namespace: ignore existing pyc while prohibiting new writes."""
+    root = parent.absolute() if parent is not None else Path(tempfile.gettempdir()).resolve()
+    path = root / ("source-only-" + uuid4().hex)
+    if path.exists():
+        raise ValueError("source-only cache namespace already exists")
+    return path
+
+
 def process_environment(checkout: Path, data: Path) -> dict[str, str]:
     allowed = {"PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}
     env = {k: v for k, v in os.environ.items() if k.upper() in allowed}
     env.update({"PYTHONPATH": str(checkout / "src"), "PYTHONIOENCODING": "utf-8",
+                "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPYCACHEPREFIX": str(source_cache_prefix(data)),
                 "PYTHONUNBUFFERED": "1", "OFFERPILOT_DATA": str(data),
                 "LITELLM_LOCAL_MODEL_COST_MAP": "True", "LITELLM_TELEMETRY": "False"})
     return env
@@ -110,7 +121,8 @@ def target_environment(variant: VariantConfig) -> dict[str, Any]:
     code = ("import sys,sqlite3,json,importlib.metadata; print(json.dumps({"
             "'python':sys.version,'sqlite':sqlite3.sqlite_version,'dependencies':{"
             "d.metadata['Name']:d.version for d in importlib.metadata.distributions()}}))")
-    raw = subprocess.check_output([variant.interpreter, "-I", "-c", code], cwd=variant.checkout,
+    raw = subprocess.check_output([variant.interpreter, "-I", "-B", "-X",
+        "pycache_prefix=" + str(source_cache_prefix()), "-c", code], cwd=variant.checkout,
         env=process_environment(Path(variant.checkout), Path(variant.checkout) / ".codex"),
         stdin=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=30)
     return cast(dict[str, Any], json.loads(raw))

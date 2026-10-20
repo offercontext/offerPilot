@@ -17,9 +17,9 @@ from offerpilot.evaluation.core_governance import (
     GatePolicyV2,
     ReviewBundle,
     gate_core,
-    load_baseline,
     product_hash,
 )
+from offerpilot.evaluation.core_refresh import resolve_baseline as load_baseline
 from offerpilot.evaluation.core_planning import (
     create_plan,
     load_core_suite,

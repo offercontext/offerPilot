@@ -375,7 +375,27 @@ def gate_core(
     baseline: list[tuple[RunManifestV2, list[TrialResultV2]]] | None = None,
     experiment: ExperimentSpec | None = None,
     baseline_records: dict[str, dict[str, Any]] | None = None,
+    *,
+    candidate_variant: Literal["candidate", "baseline"] = "candidate",
+    review_at: datetime | None = None,
 ) -> dict[str, Any]:
+    if candidate_variant not in {"candidate", "baseline"} or (
+        purpose == "release" and candidate_variant != "candidate"
+    ):
+        raise ValueError("release requires the true candidate arm")
+    if review_at is not None and (
+        candidate_variant != "baseline" or purpose != "initial_baseline"
+        or any(m.mode != "deterministic" for m in manifests)
+        or review_at.tzinfo is None or review_at > datetime.now(timezone.utc)
+    ):
+        raise ValueError("historical review time is only for deterministic refresh qualification")
+
+    def independent_active(created: datetime, expires: datetime) -> bool:
+        if review_at is None:
+            return aware_active(created, expires)
+        from offerpilot.evaluation.core_refresh_contracts import valid_at
+
+        return valid_at(created, expires, review_at)
     if purpose not in policy.purposes or mode not in {"enforce", "observe"}:
         raise ValueError("gate purpose/mode not permitted")
     if (
@@ -385,14 +405,14 @@ def gate_core(
     ):
         raise ValueError("one run per required mode")
     failures, errors, incomplete = [], [], []
-    snapshot_hash = product_hash(manifests[0])
+    snapshot_hash = product_hash(manifests[0], candidate_variant)
     selected: dict[tuple[str, str, int], TrialResultV2] = {}
     for manifest, rows in zip(manifests, results, strict=True):
         if manifest.suite_id != policy.suite_id or manifest.suite_hash != policy.suite_hash:
             errors.append("policy_suite_mismatch")
         if (
-            product_hash(manifest) != snapshot_hash
-            or manifest.variants["candidate"].get("fault") != "none"
+            product_hash(manifest, candidate_variant) != snapshot_hash
+            or manifest.variants[candidate_variant].get("fault") != "none"
         ):
             errors.append("candidate_snapshot_or_diagnostic_fault")
         aggregate(manifest, rows)
@@ -400,7 +420,7 @@ def gate_core(
             {
                 (r.execution_item_id, r.mode, r.repeat_index): r
                 for r in rows
-                if r.variant_id == "candidate"
+                if r.variant_id == candidate_variant
             }
         )
     required_modes = {r.mode for r in policy.absolute}
@@ -495,7 +515,7 @@ def gate_core(
         if r.candidate_snapshot_hash == snapshot_hash
         and r.evaluator_hash == manifests[0].evaluator_hash
         and r.disposition == "accepted"
-        and aware_active(r.created_at, r.expires_at)
+        and independent_active(r.created_at, r.expires_at)
         and verified_reference(r.record_ref, r.record_hash)
     ]
     if not accepted_reviews:
@@ -503,7 +523,7 @@ def gate_core(
     if any(
         r.disposition == "changes_required"
         and r.candidate_snapshot_hash == snapshot_hash
-        and aware_active(r.created_at, r.expires_at)
+        and independent_active(r.created_at, r.expires_at)
         for r in review.independent_reviews
     ):
         failures.append("independent_review_changes_required")
@@ -531,8 +551,11 @@ def gate_core(
                     incomplete.append("approved_baseline_record_missing_or_mismatched")
                 # Promotion approves the source run's candidate arm, including
                 # when EvalReuse returns that very same A/B run.
+                arm = (record or {}).get("source_variant", "candidate")
+                if arm not in {"baseline", "candidate"}:
+                    raise ValueError("approved baseline arm invalid")
                 comparison = compare_core(
-                    *old, candidate_manifest, candidate_rows, experiment, baseline_variant="candidate"
+                    *old, candidate_manifest, candidate_rows, experiment, baseline_variant=arm
                 )
                 if record and record.get("gate_path"):
                     old_gate_path = Path(record["gate_path"])
@@ -548,7 +571,7 @@ def gate_core(
                             candidate_manifest,
                             reviewed_trials(candidate_manifest, candidate_rows, policy, review),
                             experiment,
-                            baseline_variant="candidate",
+                            baseline_variant=arm,
                         )
                         comparison["derived_review_comparison"] = derived
                         comparison["raw_exit_code"] = comparison["exit_code"]
@@ -572,6 +595,7 @@ def gate_core(
         purpose=purpose,
         mode=mode,
         candidate_snapshot_hash=snapshot_hash,
+        candidate_variant=candidate_variant,
         evaluator_hash=manifests[0].evaluator_hash,
         sources=[
             dict(
@@ -727,6 +751,8 @@ def store_lock(store: Path) -> Iterator[None]:
 
 
 def store_events(store: Path) -> list[dict[str, Any]]:
+    if any((store / "events").glob("*.tmp")):
+        raise ValueError("partial baseline journal; audit required")
     values = [json.loads(p.read_bytes()) for p in sorted((store / "events").glob("*.json"))]
     if [v.get("sequence") for v in values] != list(range(1, len(values) + 1)):
         raise ValueError("baseline journal sequence invalid")
@@ -741,7 +767,9 @@ def current_from_journal(store: Path) -> tuple[str | None, list[dict[str, Any]]]
     events = store_events(store)
     for event in events:
         validate_baseline_id(event["baseline_id"])
-        if event["previous"] != current or event["action"] not in {"promote", "revoke"}:
+        if event["previous"] != current or event["action"] not in {
+            "promote", "revoke", "evaluator_evidence_refresh", "revoke_refresh"
+        }:
             raise ValueError("baseline journal transition invalid")
         path = store / "records" / (event["baseline_id"] + ".json")
         record = json.loads(path.read_bytes())
@@ -757,12 +785,17 @@ def current_from_journal(store: Path) -> tuple[str | None, list[dict[str, Any]]]
                 raise ValueError("baseline id reused")
             committed.add(event["baseline_id"])
             current = event["baseline_id"]
-        else:
+        elif event["action"] == "revoke":
             if event["baseline_id"] not in committed or event["baseline_id"] in revoked:
                 raise ValueError("revocation transition invalid")
             revoked.add(event["baseline_id"])
             if current == event["baseline_id"]:
                 current = None
+        elif event["baseline_id"] not in committed or event["baseline_id"] in revoked or event["baseline_id"] != current:
+            raise ValueError("generation requires current unrevoked product")
+    from offerpilot.evaluation.core_refresh_store import generation_state
+
+    generation_state(store, events)
     return current, events
 
 
@@ -824,6 +857,7 @@ def _promote_baseline(
         or gate.get("exit_code") != 0
         or gate.get("candidate_snapshot_hash") != product_hash(manifest)
         or gate.get("evaluator_hash") != manifest.evaluator_hash
+        or gate.get("candidate_variant", "candidate") != "candidate"
         or not any(
             s.get("manifest_hash") == approval.run_manifest_hash for s in gate.get("sources", [])
         )
@@ -847,7 +881,9 @@ def _promote_baseline(
     baseline_pairs = []
     baseline_records: dict[str, dict[str, Any]] = {}
     if expected_current is not None:
-        approved_record = load_baseline(store, expected_current)
+        from offerpilot.evaluation.core_refresh import resolve_baseline
+
+        approved_record = resolve_baseline(store, expected_current)
         for source in approved_record["sources"]:
             m, r = read_run(Path(source["directory"]))
             if digest(m.model_dump(mode="json")) != source["manifest_hash"]:

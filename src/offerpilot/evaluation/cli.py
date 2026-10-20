@@ -411,8 +411,8 @@ def gate(
         GatePolicyV2,
         ReviewBundle,
         gate_core,
-        load_baseline,
     )
+    from offerpilot.evaluation.core_refresh import resolve_baseline
 
     try:
         pairs = [read_run(p) for p in candidate]
@@ -421,7 +421,7 @@ def gate(
         if baseline_id:
             if not baseline_store:
                 raise ValueError("approved baseline requires store")
-            record = load_baseline(baseline_store, baseline_id)
+            record = resolve_baseline(baseline_store, baseline_id)
             baseline_paths = [Path(s["directory"]) for s in record["sources"]]
             records = {m.mode: record for m, _ in [read_run(p) for p in baseline_paths]}
         old_pairs = [read_run(p) for p in baseline_paths]
@@ -454,6 +454,64 @@ def gate(
         json.dumps({k: report[k] for k in ("gate_satisfied", "release_eligible", "exit_code")})
     )
     raise typer.Exit(report["exit_code"])
+
+
+@baselines.command("refresh-sources")
+def baseline_refresh_sources(
+    plan: Path = typer.Option(..., "--plan"), output: Path = typer.Option(..., "--output"),
+) -> None:
+    from offerpilot.evaluation.core_planning import read_plan
+    from offerpilot.evaluation.core_refresh_sources import freeze_sources
+
+    try:
+        freeze_sources(read_plan(plan), output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(dict(source_archive=str(output.resolve()), release_eligible=False)))
+
+
+@baselines.command("refresh-prepare")
+def baseline_refresh_prepare(
+    store: Path = typer.Option(..., "--store"), baseline_id: str = typer.Option(..., "--baseline-id"),
+    generation_id: str = typer.Option(..., "--generation-id"), run: Path = typer.Option(..., "--run"),
+    policy: Path = typer.Option(..., "--policy"), review: Path = typer.Option(..., "--review"),
+    experiment: Path = typer.Option(..., "--experiment"), history: Path = typer.Option(..., "--history"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    from offerpilot.evaluation.core_refresh import prepare_refresh
+
+    try:
+        value = prepare_refresh(store, baseline_id, generation_id, run, policy, review, experiment, history, output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(dict(request_hash=value["request_hash"], activatable=value["request"]["activatable"],
+                               release_eligible=False)))
+
+
+@baselines.command("refresh-activate")
+def baseline_refresh_activate(
+    request: Path = typer.Option(..., "--request"), approval: Path = typer.Option(..., "--approval"),
+) -> None:
+    from offerpilot.evaluation.core_refresh import activate_refresh
+
+    try:
+        value = activate_refresh(request, approval)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(dict(generation_id=value["generation_id"], release_eligible=False)))
+
+
+@baselines.command("refresh-revoke")
+def baseline_refresh_revoke(
+    store: Path = typer.Option(..., "--store"), revocation: Path = typer.Option(..., "--revocation"),
+) -> None:
+    from offerpilot.evaluation.core_refresh import revoke_refresh
+
+    try:
+        value = revoke_refresh(store, revocation)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(dict(generation_id=value["generation_id"], release_eligible=False)))
 
 
 @baselines.command("promote")
