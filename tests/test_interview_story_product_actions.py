@@ -4717,9 +4717,11 @@ def test_n_plus_one_response_loss_overlaps_terminal_decision(
     assert product_actions.load_bundle(operation_id).operation.status == expected
 
 
+@pytest.mark.parametrize("unrelated_commit", (False, True))
 def test_historical_bridge_commit_unknown_forces_replay_http_projection(
     story_client,
     monkeypatch: pytest.MonkeyPatch,
+    unrelated_commit: bool,
 ) -> None:
     client, data_dir = story_client
     note = _note(client)
@@ -4732,13 +4734,44 @@ def test_historical_bridge_commit_unknown_forces_replay_http_projection(
         attempt,
         token="story-historical-unknown-token-0001",
     )
+    repository = client.app.state.interview_stories_repository
+    product_actions = client.app.state.product_action_proposal_repository
+    original_publish = product_actions.publish_historical_story_bridge_in_session
+    original_reconcile = repository._reconcile_historical_story_bridge
     original_commit = Session.commit
     commits = 0
+    publication_session: Session | None = None
+    faulted_session: Session | None = None
+    owner_thread_id: int | None = None
+    reconciliations = 0
+
+    def capture_publication_session(
+        session: Session,
+        uow: Any,
+        **kwargs: Any,
+    ) -> ProductActionPublicationV1:
+        nonlocal publication_session, owner_thread_id
+        assert publication_session is None
+        publication_session = session
+        owner_thread_id = threading.get_ident()
+        return original_publish(session, uow, **kwargs)
+
+    def observe_reconciliation(**kwargs: Any) -> ProductActionPublicationV1:
+        nonlocal reconciliations
+        reconciliations += 1
+        return original_reconcile(**kwargs)
 
     def fail_before_first_commit(session: Session) -> None:
-        nonlocal commits
+        nonlocal commits, faulted_session
+        if (
+            threading.get_ident() != owner_thread_id
+            or (commits == 0 and session is not publication_session)
+        ):
+            original_commit(session)
+            return
         commits += 1
         if commits == 1:
+            faulted_session = session
             raise OperationalError(
                 "COMMIT",
                 {},
@@ -4746,13 +4779,31 @@ def test_historical_bridge_commit_unknown_forces_replay_http_projection(
             )
         original_commit(session)
 
-    monkeypatch.setattr(Session, "commit", fail_before_first_commit)
-    response = client.post(
-        f"/api/interview-story-proposals/{attempt['id']}/confirm",
-        json=request,
-    )
+    with monkeypatch.context() as commit_unknown:
+        commit_unknown.setattr(
+            product_actions,
+            "publish_historical_story_bridge_in_session",
+            capture_publication_session,
+        )
+        commit_unknown.setattr(repository, "_reconcile_historical_story_bridge", observe_reconciliation)
+        commit_unknown.setattr(Session, "commit", fail_before_first_commit)
+        if unrelated_commit:
+            def commit_background_session() -> bool:
+                with repository._session_factory() as session:
+                    session.commit()
+                return True
+
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                assert pool.submit(commit_background_session).result(timeout=10) is True
+            assert commits == 0, "unrelated commits must not consume the historical bridge fault"
+        response = client.post(
+            f"/api/interview-story-proposals/{attempt['id']}/confirm",
+            json=request,
+        )
     assert response.status_code == 200, response.json()
     assert response.json()["created"] is False
+    assert faulted_session is publication_session and faulted_session is not None
+    assert reconciliations == 1
     assert commits == 3
     with sqlite3.connect(data_dir / "data.db") as connection:
         assert connection.execute("SELECT COUNT(*) FROM interview_stories").fetchone() == (1,)
