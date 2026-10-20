@@ -12,7 +12,7 @@ import time
 from typing import Any
 
 from offerpilot.evaluation.core_contracts import RunGrant, RunManifestV2
-from offerpilot.evaluation.runner import ROOT, Subject, process_environment, process_tree
+from offerpilot.evaluation.runner import ROOT, Subject, process_environment, process_tree, subject_command
 from scripts.evaluation_subject import core_observer as observer
 
 
@@ -92,10 +92,12 @@ class CoreSubject(Subject):
         self.started = time.monotonic()
         self.lock = threading.Lock()
         self.stderr = (private / f"epoch-{config['epoch']}.stderr").open("w", encoding="utf-8")
+        environment = process_environment(Path(variant.checkout), private)
         self.tree = process_tree(
-            [variant.interpreter, "-u", str(ROOT / "scripts/evaluation_subject/core_bootstrap.py")],
+            subject_command(variant.interpreter, Path(variant.checkout),
+                            ROOT / "scripts/evaluation_subject/core_bootstrap.py", environment),
             cwd=variant.checkout,
-            env=process_environment(Path(variant.checkout), private),
+            env=environment,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=self.stderr,

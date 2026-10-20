@@ -339,6 +339,8 @@ def serve(channel: Channel) -> None:
     config = channel.config
     setup_started = time.monotonic()
     try:
+        policy_proof = sys.modules["fixed_evaluation_source_launcher"].policy_proof
+        policy_proof()
         checkout, data = Path(config["checkout"]).resolve(), Path(config["data_dir"]).resolve()
         if json.loads((data / ".eval-trial.json").read_bytes()) != config["trial_key"]:
             raise ValueError("trial marker mismatch")
@@ -792,6 +794,7 @@ def serve(channel: Channel) -> None:
                         "product_file": str(source),
                         "bytecode_write_disabled": sys.dont_write_bytecode,
                         "bytecode_cache_prefix": sys.pycache_prefix,
+                        "source_loading": policy_proof(),
                         "product_file_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
                         "product_factory_file": str(Path(inspect.getfile(create_app)).resolve()),
                         "product_factory_sha256": hashlib.sha256(Path(inspect.getfile(create_app)).read_bytes()).hexdigest(),

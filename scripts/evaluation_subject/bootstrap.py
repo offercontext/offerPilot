@@ -194,6 +194,8 @@ class FixedModel:
 def serve(channel: Channel) -> None:
     config = channel.config
     try:
+        policy_proof = sys.modules["fixed_evaluation_source_launcher"].policy_proof
+        policy_proof()
         checkout = Path(config["checkout"]).resolve(strict=True)
         data = Path(config["data_dir"]).resolve(strict=True)
         if not (data / ".eval-trial.json").is_file():
@@ -386,6 +388,7 @@ def serve(channel: Channel) -> None:
                     sqlite_settings = {name: connection.exec_driver_sql(f"PRAGMA {name}").scalar()
                         for name in ("journal_mode", "synchronous", "foreign_keys", "recursive_triggers")}
                 channel.emit("ready", {"bridge_version": "p0-v1", "product_file": str(source),
+                    "source_loading": policy_proof(),
                     "checkout_sha": sha, "python": sys.version, "interpreter": sys.executable,
                     "sqlite": sqlite3.sqlite_version, "sqlite_settings": sqlite_settings,
                     "dependencies": {d.metadata["Name"]: d.version for d in importlib.metadata.distributions()},

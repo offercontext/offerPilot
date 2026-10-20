@@ -86,12 +86,25 @@ def source_origins(
         checkout = Path(manifest.variants[row.variant_id]["checkout"]).resolve()
         files = archive["variants"][row.variant_id]["files"]
         for h in handshakes:
-            prefix = Path(h["bytecode_cache_prefix"])
+            policy = h.get("source_loading", {})
+            prefix = Path(policy.get("initial_empty_prefix", ""))
+            launcher = ROOT / "scripts/evaluation_subject/source_launcher.py"
+            expected_roots = sorted({str(checkout / "src"), str(ROOT / "src"), str(ROOT / "scripts")})
             require(
                 h["bytecode_write_disabled"] is True
+                and h["bytecode_cache_prefix"] is None
                 and prefix.is_absolute()
                 and prefix.is_relative_to(Path(row.private_directory).resolve())
-                and not prefix.exists(),
+                and not prefix.exists()
+                and policy.get("policy") == "bound-source-loader-v1"
+                and policy.get("protected_roots") == expected_roots
+                and policy.get("installed_before_project_imports") is True
+                and policy.get("guard_active") is True
+                and policy.get("sourceless_bound_modules_blocked") is True
+                and policy.get("bytecode_writes_disabled") is True
+                and policy.get("dependency_cache_prefix") is None
+                and Path(policy.get("launcher_file", "")).resolve() == launcher.resolve()
+                and policy.get("launcher_sha256") == file_hash(launcher),
                 "refresh source-only import policy was not observed",
             )
             product, factory = (

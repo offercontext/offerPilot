@@ -117,6 +117,15 @@ def process_environment(checkout: Path, data: Path) -> dict[str, str]:
     return env
 
 
+def subject_command(interpreter: str, checkout: Path, bridge: Path,
+                    environment: dict[str, str]) -> list[str]:
+    """Install the current evaluator's source guard before importing either checkout."""
+    config = json.dumps(dict(checkout=str(checkout), evaluator=str(ROOT), bridge=str(bridge)))
+    return [interpreter, "-I", "-B", "-u", "-X", "utf8", "-X",
+            "pycache_prefix=" + environment["PYTHONPYCACHEPREFIX"],
+            str(ROOT / "scripts/evaluation_subject/source_launcher.py"), config]
+
+
 def target_environment(variant: VariantConfig) -> dict[str, Any]:
     code = ("import sys,sqlite3,json,importlib.metadata; print(json.dumps({"
             "'python':sys.version,'sqlite':sqlite3.sqlite_version,'dependencies':{"
@@ -137,8 +146,9 @@ class Subject:
         self.closed = False
         self.lock = threading.Lock()
         self.stderr = (private / f"epoch-{config['epoch']}.stderr").open("w", encoding="utf-8")
-        self.tree = process_tree([variant.interpreter, "-u", str(BRIDGE)],
-            cwd=variant.checkout, env=process_environment(Path(variant.checkout), private),
+        environment = process_environment(Path(variant.checkout), private)
+        self.tree = process_tree(subject_command(variant.interpreter, Path(variant.checkout), BRIDGE, environment),
+            cwd=variant.checkout, env=environment,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr,
             text=True, encoding="utf-8", bufsize=1)
         self.process = self.tree.process

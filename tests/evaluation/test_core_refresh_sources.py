@@ -34,7 +34,19 @@ def origins(manifest, tmp_path, monkeypatch):
         )
         observed[arm] = dict(
             bytecode_write_disabled=True,
-            bytecode_cache_prefix=str(tmp_path / arm / "unused-cache"),
+            bytecode_cache_prefix=None,
+            source_loading=dict(
+                policy="bound-source-loader-v1",
+                protected_roots=sorted({str((checkout / "src").resolve()), str(ROOT / "src"), str(ROOT / "scripts")}),
+                initial_empty_prefix=str(tmp_path / arm / "unused-cache"),
+                installed_before_project_imports=True,
+                guard_active=True,
+                sourceless_bound_modules_blocked=True,
+                bytecode_writes_disabled=True,
+                dependency_cache_prefix=None,
+                launcher_file=str(ROOT / "scripts/evaluation_subject/source_launcher.py"),
+                launcher_sha256=file_hash(ROOT / "scripts/evaluation_subject/source_launcher.py"),
+            ),
             product_file=str(package),
             product_file_sha256=file_hash(package),
             product_factory_file=str(factory),
@@ -83,6 +95,11 @@ def test_original_imports_survive_later_candidate_file_changes(origins):
         "archive_hash",
         "missing_origin",
         "cache_policy",
+        "missing_source_policy",
+        "guard_inactive",
+        "wrong_source_root",
+        "launcher_hash",
+        "used_initial_prefix",
     ],
 )
 def test_unbound_observed_origin_is_rejected(origins, monkeypatch, mutation):
@@ -101,6 +118,16 @@ def test_unbound_observed_origin_is_rejected(origins, monkeypatch, mutation):
         (directory / "source-files.json").write_text(json.dumps(archive), encoding="utf-8")
     elif mutation == "cache_policy":
         h["bytecode_write_disabled"] = False
+    elif mutation == "missing_source_policy":
+        del h["source_loading"]
+    elif mutation == "guard_inactive":
+        h["source_loading"]["guard_active"] = False
+    elif mutation == "wrong_source_root":
+        h["source_loading"]["protected_roots"] = []
+    elif mutation == "launcher_hash":
+        h["source_loading"]["launcher_sha256"] = "0" * 64
+    elif mutation == "used_initial_prefix":
+        Path(h["source_loading"]["initial_empty_prefix"]).mkdir(parents=True)
     else:
         monkeypatch.setattr(sources, "load", lambda *_: dict(errors={}, facts=dict(handshakes=[])))
     with pytest.raises(ValueError):
