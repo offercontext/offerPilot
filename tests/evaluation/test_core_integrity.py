@@ -433,7 +433,10 @@ def test_budget_failed_state_requires_actual_product_budget_origin():
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows platform version fallback")
 @pytest.mark.parametrize("guard_id", ["core", "p0"])
-def test_windows_metadata_fallback_does_not_weaken_product_process_fence(tmp_path, guard_id):
+@pytest.mark.parametrize("consumer", ["machine", "sdk_headers"])
+def test_windows_metadata_fallback_does_not_weaken_product_process_fence(
+    tmp_path, guard_id, consumer
+):
     code = r'''
 import json, os, platform, sys
 from pathlib import Path
@@ -442,9 +445,12 @@ sys.path.insert(0, str(root))
 sys.path.insert(0, str(root / "src"))
 from scripts.evaluation_subject.core_bootstrap import fence
 from scripts.evaluation_subject.bootstrap import network_guard
+from openai._base_client import platform_headers
 # Model the public metadata seam's native process audit boundary; no actual
 # command or live WMI service is needed to exercise the cold fallback.
 platform._uname_cache = None
+platform._platform_cache.clear()
+platform_headers.cache_clear()
 metadata_calls = []
 # Make the fallback independent of live WMI availability and the host's missing
 # PROCESSOR_* variables; these changes exist only in this synthetic subprocess.
@@ -458,6 +464,10 @@ def metadata_version(*args, **kwargs):
     sys.audit("subprocess.Popen", "cmd.exe", ["cmd.exe", "/c", "ver"], None, None)
     return "10", "10.0.19045", "", "Multiprocessor"
 platform.win32_ver = metadata_version
+# The observed SDK path may start with uname warm and the independent complete
+# platform cache cold. Exercise actual SDK header construction without HTTP.
+platform.uname()
+assert not platform._platform_cache
 class Channel:
     config = {"data_dir": sys.argv[2]}
     calls = []
@@ -468,8 +478,10 @@ if sys.argv[3] == "core":
     fence(channel, set(), None)
 else:
     network_guard(channel, 12345)
+prepared_calls = len(metadata_calls)
 try:
-    machine = platform.machine()
+    machine = (platform.machine() if sys.argv[4] == "machine" else
+               platform_headers("offline-regression", platform=None)["X-Stainless-OS"])
     metadata_error = None
 except PermissionError:
     machine, metadata_error = None, "PermissionError"
@@ -480,19 +492,22 @@ try:
 except PermissionError:
     forbidden_blocked = True
 print(json.dumps({"machine": machine, "metadata_error": metadata_error,
+                  "prepared_calls": prepared_calls,
                   "metadata_calls": len(metadata_calls),
                   "metadata_blocked": metadata_blocked,
                   "forbidden_blocked": forbidden_blocked,
                   "blocked_after_product_attempt": len(channel.calls)}), file=sys.__stdout__)
 '''
     process = subprocess.run(
-        [sys.executable, "-c", code, str(ROOT), str(tmp_path), guard_id],
+        [sys.executable, "-c", code, str(ROOT), str(tmp_path), guard_id, consumer],
         cwd=ROOT, capture_output=True, text=True, timeout=60, check=False,
     )
     assert process.returncode == 0, process.stderr
     result = json.loads(process.stdout)
-    assert result["machine"] == "AMD64" and result["metadata_error"] is None
-    assert result["metadata_calls"] == 1
+    assert result["machine"] == (
+        "AMD64" if consumer == "machine" else "Windows"
+    ) and result["metadata_error"] is None, result
+    assert result["metadata_calls"] == result["prepared_calls"], result
     assert result["metadata_blocked"] == 0
     assert result["forbidden_blocked"] and result["blocked_after_product_attempt"] == 1
 

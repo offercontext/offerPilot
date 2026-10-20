@@ -203,10 +203,10 @@ class StreamBurstModel(ScriptModel):
 def fence(channel: Channel, ports: set[int], provider_endpoint: str | None) -> None:
     from scripts.evaluation_subject.core_transport import SEND_PERMISSION
 
-    # Windows uname may fall back to a local `ver` subprocess when WMI is
-    # unavailable. Prepare this neutral metadata before fencing product code;
-    # later platform.machine() reads must not become false isolation violations.
-    platform.uname()
+    # SDK headers use platform.platform(), whose cache is independent of uname.
+    # Prepare full neutral metadata before product isolation; its Windows
+    # version fallback can use `ver` even when uname is already warm.
+    platform.platform()
     target = urlsplit(provider_endpoint) if provider_endpoint else None
     hosts = {"127.0.0.1", "::1"}
     endpoints = {("127.0.0.1", p) for p in ports} | {("::1", p) for p in ports}

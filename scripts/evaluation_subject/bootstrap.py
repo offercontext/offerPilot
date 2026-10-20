@@ -77,10 +77,10 @@ class Channel:
 
 
 def network_guard(channel: Channel, port: int) -> None:
-    # Prepare neutral Windows metadata before product process isolation. A cold
-    # platform.machine() may otherwise fall back to a local `ver` subprocess.
+    # Prepare full neutral metadata for SDK headers, not only uname's cache.
+    # Windows version reads can fall back to a local `ver` subprocess.
     # Later product process launches remain denied by the unchanged audit hook.
-    platform.uname()
+    platform.platform()
     original = socket.socket.connect
     original_ex = socket.socket.connect_ex
     original_pair = socket.socketpair
