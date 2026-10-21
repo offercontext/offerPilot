@@ -1,6 +1,8 @@
 """Release contribution regrades evidence and rejects false zero exits."""
 
 import json
+from threading import Event
+from uuid import uuid4
 
 import pytest
 
@@ -40,6 +42,8 @@ def setup_release(manifest, tmp_path, monkeypatch):
     changed = changed.model_copy(update={"suite_hash": file_hash(paths["suite"])})
     record = dict(
         baseline_id="synthetic",
+        run_directory=str(tmp_path / "baseline"),
+        gate_path=str(tmp_path / "baseline-gate.json"),
         sources=[
             dict(
                 directory=str(tmp_path / "baseline"),
@@ -47,10 +51,25 @@ def setup_release(manifest, tmp_path, monkeypatch):
             )
         ],
     )
-    monkeypatch.setattr(release, "load_baseline", lambda *_: record)
+    baseline_directory = tmp_path / "baseline"
+    baseline_directory.mkdir()
+    (baseline_directory / "run-manifest.json").write_text('{"variants": {}}', encoding="utf-8")
+    (baseline_directory / "trial-results.json").write_text('[]', encoding="utf-8")
+    old_gate = {"frozen_review": inputs["review"], "frozen_policy": policy(changed).model_dump(mode="json")}
+    (tmp_path / "baseline-gate.json").write_text(json.dumps(old_gate), encoding="utf-8")
+    record["gate_hash"] = digest(old_gate)
+    (tmp_path / "store" / "records").mkdir(parents=True)
+    (tmp_path / "store" / "records" / "synthetic.json").write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.setattr(release, "load_baseline", lambda *_, **kwargs: record)
     monkeypatch.setattr(release, "read_run", lambda *_: (changed, rows(changed)))
-    monkeypatch.setattr(release, "read_plan", lambda *_: changed)
-    monkeypatch.setattr(release, "create_plan", lambda *_: changed)
+    monkeypatch.setattr(release, "read_plan", lambda *_, **kwargs: changed)
+    def create(*args):
+        output = args[2]
+        output.mkdir(parents=True)
+        (output / "run-manifest.json").write_text('{"variants": {}}', encoding="utf-8")
+        (output / "trial-results.json").write_text('[]', encoding="utf-8")
+        return changed
+    monkeypatch.setattr(release, "create_plan", create)
     monkeypatch.setattr(release, "snapshot", lambda *_: {"synthetic_snapshot": True})
     monkeypatch.setattr(release, "environment", lambda: {"synthetic_environment": True})
     monkeypatch.setattr(release, "evaluator_hash", lambda: changed.evaluator_hash)
@@ -165,6 +184,142 @@ def test_execute_and_receipt_require_regraded_enforce_result(manifest, tmp_path,
     report = release.execute(path)
     assert len(called) == 1 and report["gate_satisfied"] and not report["release_eligible"]
     assert release.verify_receipt(path)["evaluation_satisfied"]
+
+
+def test_one_strict_baseline_and_run_read_per_command(manifest, tmp_path, monkeypatch):
+    _, _, args = setup_release(manifest, tmp_path, monkeypatch)
+    release.preflight(*args, reuse=[tmp_path / "baseline"])
+    baseline_reader, run_reader = release.load_baseline, release.read_run
+    calls = []
+    def baseline(*values, **kwargs):
+        calls.append("baseline")
+        return baseline_reader(*values, **kwargs)
+    def run(*values):
+        calls.append("run")
+        return run_reader(*values)
+    monkeypatch.setattr(release, "load_baseline", baseline)
+    monkeypatch.setattr(release, "read_run", run)
+    path = args[3] / "release-preflight.json"
+    assert release.execute(path)["gate_satisfied"]
+    assert calls == ["baseline", "run"]
+    assert release.verify_receipt(path)["evaluation_satisfied"]
+    assert calls == ["baseline", "run", "baseline", "run"]
+
+
+@pytest.mark.parametrize("mutation", ["private", "review_record", "event", "source", "receipt"])
+@pytest.mark.parametrize("command", ["execute", "receipt"])
+def test_changes_after_gate_before_return_are_rejected(
+    manifest, tmp_path, monkeypatch, mutation, command
+):
+    _, _, args = setup_release(manifest, tmp_path, monkeypatch)
+    private = tmp_path / "baseline" / "private"
+    private.mkdir()
+    payload = private / "original.txt"
+    payload.write_bytes(b"first")
+    release.preflight(*args, reuse=[tmp_path / "baseline"])
+    path = args[3] / "release-preflight.json"
+    receipt = path.parent / "release-evaluation.json"
+    if command == "receipt":
+        release.execute(path)
+    original_gate = release.gate_core
+    def mutate(*values, **kwargs):
+        result = original_gate(*values, **kwargs)
+        if mutation == "private":
+            payload.write_bytes(b"other")
+        elif mutation == "review_record":
+            (tmp_path / "independent.txt").write_text("Changed review", encoding="utf-8")
+        elif mutation == "event":
+            folder = tmp_path / "store" / "events"
+            folder.mkdir()
+            (folder / "new.json").write_text('{"action":"revoke"}', encoding="utf-8")
+        elif mutation == "source":
+            monkeypatch.setattr(release, "snapshot", lambda *_: {"changed": True})
+        elif command == "receipt":
+            receipt.write_text('{"changed":true}', encoding="utf-8")
+        else:
+            payload.write_bytes(b"other")
+        return result
+    monkeypatch.setattr(release, "gate_core", mutate)
+    with pytest.raises(ValueError, match="changed"):
+        (release.execute if command == "execute" else release.verify_receipt)(path)
+    if command == "execute":
+        assert not receipt.exists()
+
+
+@pytest.mark.parametrize("failure", ["header", "guard", "both"])
+def test_final_boundary_joins_checks_and_propagates_failure(tmp_path, monkeypatch, failure):
+    header_started, guard_started = Event(), Event()
+    completed = []
+    value = {"value": True}
+    def header(*_):
+        header_started.set()
+        assert guard_started.wait(2)
+        completed.append("header")
+        if failure in {"header", "both"}:
+            raise ValueError("header changed")
+        return value
+    class Guard:
+        def check(self):
+            guard_started.set()
+            assert header_started.wait(2)
+            completed.append("guard")
+            if failure in {"guard", "both"}:
+                raise ValueError("guard changed")
+    monkeypatch.setattr(release, "_read_header", header)
+    with pytest.raises(ValueError, match="changed") as failure_info:
+        release._finish_reads(tmp_path / "preflight.json", value, Guard())
+    assert sorted(completed) == ["guard", "header"]
+    if failure == "both":
+        assert isinstance(failure_info.value.__cause__, ValueError)
+        assert "guard changed" in str(failure_info.value.__cause__)
+
+
+def test_nonreuse_never_executes_trial_before_baseline_postguard(manifest, tmp_path, monkeypatch):
+    _, _, args = setup_release(manifest, tmp_path, monkeypatch)
+    release.preflight(*args)
+    called = []
+    def baseline(*_, **kwargs):
+        called.append("baseline")
+        raise ValueError("baseline trust failed")
+    monkeypatch.setattr(release, "load_baseline", baseline)
+    monkeypatch.setattr(release, "run_plan", lambda *_: pytest.fail("trial started before trust"))
+    with pytest.raises(ValueError, match="baseline trust failed"):
+        release.execute(args[3] / "release-preflight.json")
+    assert called == ["baseline"] and not (args[3] / "release-evaluation.json").exists()
+
+
+def test_execute_rejects_valid_but_foreign_executed_manifest(manifest, tmp_path, monkeypatch):
+    m, _, args = setup_release(manifest, tmp_path, monkeypatch)
+    release.preflight(*args, reuse=[tmp_path / "baseline"])
+    run_id = uuid4()
+    payload = m.model_dump(mode="json")
+    payload["run_id"] = str(run_id)
+    for plan in payload["planned_trials"]:
+        plan["run_id"] = str(run_id)
+    for identity in payload["execution_order"]:
+        identity[0] = str(run_id)
+    foreign = type(m).model_validate(payload)
+    monkeypatch.setattr(release, "read_run", lambda *_: (foreign, rows(foreign)))
+    with pytest.raises(ValueError, match="manifest differs|baseline run differs"):
+        release.execute(args[3] / "release-preflight.json")
+    assert not (args[3] / "release-evaluation.json").exists()
+
+
+def test_nonreuse_blocks_trial_after_strict_success_but_changed_closure(manifest, tmp_path, monkeypatch):
+    _, _, args = setup_release(manifest, tmp_path, monkeypatch)
+    release.preflight(*args)
+    original = release.load_baseline
+    returned = []
+    def changed(*values, **kwargs):
+        record = original(*values, **kwargs)
+        returned.append(True)
+        (tmp_path / "baseline" / "late-raw.txt").write_bytes(b"changed after strict return")
+        return record
+    monkeypatch.setattr(release, "load_baseline", changed)
+    monkeypatch.setattr(release, "run_plan", lambda *_: pytest.fail("trial started before postguard"))
+    with pytest.raises(ValueError, match="changed"):
+        release.execute(args[3] / "release-preflight.json")
+    assert returned == [True] and not (args[3] / "release-evaluation.json").exists()
 
 
 @pytest.mark.parametrize("mutation", ["outer_release", "gate_release", "statistics", "extra_field"])

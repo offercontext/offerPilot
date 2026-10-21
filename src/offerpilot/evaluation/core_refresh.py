@@ -5,10 +5,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 import os
-from typing import Any
+from typing import Any, Callable
 
 from offerpilot.evaluation import core_governance as gov
 from offerpilot.evaluation.core_contracts import RunManifestV2, TrialResultV2
+from offerpilot.evaluation.core_origin_reads import OriginReads, OriginScope
 from offerpilot.evaluation.core_planning import read_plan
 from offerpilot.evaluation.core_refresh_contracts import (
     BoundFile,
@@ -32,6 +33,8 @@ from offerpilot.evaluation.core_targeted_account import safe_path
 from offerpilot.evaluation.registry import digest
 from offerpilot.evaluation.reporting import atomic_json
 from offerpilot.evaluation.runner import ROOT, evaluator_hash
+
+CaptureQualifiedRun = Callable[[Path, RunManifestV2, list[TrialResultV2]], None]
 
 
 def strict_state(store: Path) -> tuple[str | None, list[dict[str, Any]], dict[str, dict[str, Any]]]:
@@ -75,9 +78,12 @@ def evidence_fingerprint(manifest: RunManifestV2, rows: list[TrialResultV2]) -> 
 
 
 def fresh_run(
-    directory: Path, original: dict[str, Any]
+    directory: Path, original: dict[str, Any], *, _origin: OriginReads | None = None
 ) -> tuple[RunManifestV2, list[TrialResultV2]]:
-    manifest, rows = read_run(directory)  # Current strict reader, never a hash waiver.
+    # Current strict reader, never a hash waiver. Default callers retain the
+    # original call signature and the subsequent independent storage load.
+    manifest, rows = (read_run(directory) if _origin is None else
+        read_run(directory, _capture_origin=_origin.capture))
     plan = read_plan(directory / "run-plan.json", check_targets=False)
     require(
         digest(plan.model_dump(mode="json")) == digest(manifest.model_dump(mode="json")),
@@ -165,8 +171,25 @@ def qualification(
     review_path: Path,
     experiment_path: Path,
     at: datetime,
+    *,
+    _capture: CaptureQualifiedRun | None = None,
+    _origin_scope: OriginScope | None = None,
 ) -> dict[str, Any]:
-    manifest, rows = fresh_run(directory, original)
+    if _origin_scope is not None:
+        with _origin_scope(directory) as origin:
+            return _qualification(directory, original, policy_path, review_path, experiment_path,
+                at, _capture=_capture, _origin=origin)
+    return _qualification(directory, original, policy_path, review_path, experiment_path,
+        at, _capture=_capture)
+
+
+def _qualification(
+    directory: Path, original: dict[str, Any], policy_path: Path, review_path: Path,
+    experiment_path: Path, at: datetime, *, _capture: CaptureQualifiedRun | None = None,
+    _origin: OriginReads | None = None,
+) -> dict[str, Any]:
+    manifest, rows = (fresh_run(directory, original) if _origin is None else
+        fresh_run(directory, original, _origin=_origin))
     policy = gov.GatePolicyV2.model_validate(read(policy_path))
     canonical = gov.GatePolicyV2.model_validate(
         read(ROOT / "evals/policies/core-initial-baseline-v5.json")
@@ -180,7 +203,8 @@ def qualification(
         manifest, rows, manifest, rows, experiment, baseline_variant="baseline"
     )
     require(comparison["exit_code"] != 2, "refresh comparison variables are not declared")
-    origins = source_origins(manifest, rows, directory)
+    origins = (source_origins(manifest, rows, directory) if _origin is None else
+        source_origins(manifest, rows, directory, _origin=_origin))
     gate = gov.gate_core(
         [manifest],
         [rows],
@@ -197,7 +221,7 @@ def qualification(
     hard_pass = all(
         r.verdict == "pass" and all(v.status == "pass" for v in r.rules) for r in baseline_rows
     )
-    return dict(
+    measured = dict(
         manifest_hash=digest(manifest.model_dump(mode="json")),
         baseline_product_hash=gov.product_hash(manifest, "baseline"),
         candidate_product_hash=gov.product_hash(manifest),
@@ -211,6 +235,9 @@ def qualification(
         all114_completed=complete,
         baseline57_hard_pass=hard_pass,
     )
+    if _capture is not None:
+        _capture(directory, manifest.model_copy(deep=True), [row.model_copy(deep=True) for row in rows])
+    return measured
 
 
 def prepare_refresh(
@@ -301,7 +328,8 @@ def prepare_refresh(
 
 
 def check_request(
-    path: Path, at: datetime
+    path: Path, at: datetime, *, _capture: CaptureQualifiedRun | None = None,
+    _origin_scope: OriginScope | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     envelope = read(path)
     require(
@@ -360,6 +388,9 @@ def check_request(
         },
         "refresh raw file binding missing",
     )
+    capture_options: dict[str, Any] = {"_capture": _capture} if _capture is not None else {}
+    if _origin_scope is not None:
+        capture_options["_origin_scope"] = _origin_scope
     measured = qualification(
         Path(request["run_directory"]),
         original,
@@ -367,6 +398,7 @@ def check_request(
         bound_file(request["review"]),
         bound_file(request["experiment"]),
         at,
+        **capture_options,
     )
     saved = read(bound_file(request["measurement"]))
     saved_gate = read(bound_file(request["gate"]))
@@ -517,7 +549,10 @@ def activate_refresh(request_path: Path, approval_path: Path) -> dict[str, Any]:
         return value
 
 
-def resolve_baseline(store: Path, baseline_id: str) -> dict[str, Any]:
+def resolve_baseline(
+    store: Path, baseline_id: str, *, _capture: CaptureQualifiedRun | None = None,
+    _origin_scope: OriginScope | None = None,
+) -> dict[str, Any]:
     """The only approved-evidence view used by release, CLI gate and promotion."""
     current, events, heads = strict_state(store)
     require(current == baseline_id, "approved product is not current")
@@ -532,8 +567,11 @@ def resolve_baseline(store: Path, baseline_id: str) -> dict[str, Any]:
     record_path = store / "evaluator-refreshes" / (str(generation) + ".json")
     record = GenerationRecord.model_validate(read(record_path))
     event = next(e for e in events if e["action"] == REFRESH and e["generation_id"] == generation)
+    capture_options: dict[str, Any] = {"_capture": _capture} if _capture is not None else {}
+    if _origin_scope is not None:
+        capture_options["_origin_scope"] = _origin_scope
     request, _, measured = check_request(
-        bound_file(record.request), datetime.fromisoformat(event["committed_at"])
+        bound_file(record.request), datetime.fromisoformat(event["committed_at"]), **capture_options
     )
     require(strict_state(store) == (current, events, heads), "baseline changed while resolving")
     return original | dict(

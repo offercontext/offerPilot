@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 from pathlib import Path
@@ -20,6 +21,7 @@ from offerpilot.evaluation.core_governance import (
     product_hash,
 )
 from offerpilot.evaluation.core_refresh import resolve_baseline as load_baseline
+from offerpilot.evaluation.core_release_reads import CommandReads
 from offerpilot.evaluation.core_planning import (
     create_plan,
     load_core_suite,
@@ -203,7 +205,7 @@ def preflight(
     return value
 
 
-def read_preflight(path: Path) -> dict[str, Any]:
+def _read_header(path: Path) -> dict[str, Any]:
     raw = json.loads(path.read_bytes())
     value: dict[str, Any] = raw["value"]
     if raw["hash"] != digest(value) or value["phase"] != "preflight":
@@ -217,19 +219,93 @@ def read_preflight(path: Path) -> dict[str, Any]:
     for ref in value["inputs"].values():
         if reference(Path(ref["path"])) != ref:
             raise ValueError("release input changed")
-    record = load_baseline(Path(value["baseline_store"]), value["baseline_id"])
-    if digest(record) != value["baseline_record_hash"]:
-        raise ValueError("approved baseline changed")
     return value
 
 
+def _checked_baseline(value: dict[str, Any], reads: CommandReads | None = None) -> dict[str, Any]:
+    store, baseline_id = Path(value["baseline_store"]), value["baseline_id"]
+    def collect(store: Path, baseline_id: str) -> dict[str, Any]:
+        assert reads is not None
+        record = load_baseline(store, baseline_id, _capture=reads.collect_qualified_run,
+            _origin_scope=reads.origin_scope)
+        if digest(record) != value["baseline_record_hash"]:
+            raise ValueError("approved baseline changed")
+        return record
+    record = reads.baseline(store, baseline_id, collect) if reads else load_baseline(store, baseline_id)
+    if digest(record) != value["baseline_record_hash"]:
+        raise ValueError("approved baseline changed")
+    return record
+
+
+def _checked_batch(value: dict[str, Any], reads: CommandReads) -> tuple[dict[str, Any], dict[Path, Any]]:
+    def collect(store: Path, baseline_id: str) -> dict[str, Any]:
+        record = load_baseline(store, baseline_id, _capture=reads.collect_qualified_run,
+            _origin_scope=reads.origin_scope)
+        if digest(record) != value["baseline_record_hash"]:
+            raise ValueError("approved baseline changed")
+        return record
+    return reads.baseline_and_runs(Path(value["baseline_store"]), value["baseline_id"], collect,
+        [Path(run["directory"]) for run in value["runs"]], read_run)
+
+
+def _bind_runs(value: dict[str, Any], checked: dict[Path, Any]) -> None:
+    for run in value["runs"]:
+        manifest, _ = checked[Path(run["directory"]).absolute()]
+        if digest(manifest.model_dump(mode="json")) != run["manifest_hash"]:
+            raise ValueError("executed manifest differs from frozen release plan")
+
+
+def read_preflight(path: Path) -> dict[str, Any]:
+    value = _read_header(path)
+    _checked_baseline(value)
+    return value
+
+
+def _finish_reads(path: Path, value: dict[str, Any], reads: CommandReads) -> None:
+    # One final boundary: independent header and complete dependency checks both
+    # finish before publication. Preserve the primary error and any second cause.
+    errors: list[Exception] = []
+    current = None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        header = pool.submit(_read_header, path)
+        freshness = pool.submit(reads.check)
+        try:
+            current = header.result()
+        except Exception as exc:
+            errors.append(exc)
+        try:
+            freshness.result()
+        except Exception as exc:
+            errors.append(exc)
+    if errors:
+        if len(errors) > 1:
+            raise errors[0] from errors[1]
+        raise errors[0]
+    if current != value:
+        raise ValueError("release preflight changed during execution")
+
+
 def execute(path: Path) -> dict[str, Any]:
-    value = read_preflight(path)
+    reads = CommandReads()
+    reads.inputs(path)
+    value = _read_header(path)
     inputs = value["inputs"]
     policy = GatePolicyV2.model_validate_json(Path(inputs["policy"]["path"]).read_bytes())
     review = ReviewBundle.model_validate_json(Path(inputs["review"]["path"]).read_bytes())
     experiment = ExperimentSpec.model_validate_json(Path(inputs["experiment"]["path"]).read_bytes())
-    pairs = []
+    readonly = all(run["reuse"] for run in value["runs"])
+    if readonly:
+        # Validate frozen plan identity without running an untrusted target.
+        # The full, unchanged check_targets=True call remains below, after the
+        # complete baseline trust check and the read-only batch's postguard.
+        for run in value["runs"]:
+            planned = read_plan(Path(run["directory"]) / "run-plan.json", check_targets=False)
+            if digest(planned.model_dump(mode="json")) != run["manifest_hash"]:
+                raise ValueError("frozen release plan changed")
+        record, checked = _checked_batch(value, reads)
+    else:
+        # A baseline must be completely trusted before any trial can send.
+        record = _checked_baseline(value, reads)
     for run in value["runs"]:
         directory = Path(run["directory"])
         manifest = read_plan(directory / "run-plan.json")
@@ -240,10 +316,15 @@ def execute(path: Path) -> dict[str, Any]:
                 directory / "run-plan.json",
                 Path(inputs["grant"]["path"]) if manifest.mode == "real" else None,
             )
-        pairs.append(read_run(directory))
-    read_preflight(path)
-    record = load_baseline(Path(value["baseline_store"]), value["baseline_id"])
-    baseline = [read_run(Path(s["directory"])) for s in record["sources"]]
+    # Resolve the union once. A reused candidate and baseline may point to the
+    # same frozen run; handing its parsed rows to both sides is one read batch.
+    if not readonly:
+        directories = {Path(run["directory"]) for run in value["runs"]} | {
+            Path(source["directory"]) for source in record["sources"]}
+        checked = {directory: reads.run(directory, read_run) for directory in directories}
+    _bind_runs(value, checked)
+    pairs = [checked[Path(run["directory"])] for run in value["runs"]]
+    baseline = [checked[Path(source["directory"])] for source in record["sources"]]
     report = gate_core(
         [m for m, _ in pairs],
         [r for _, r in pairs],
@@ -263,6 +344,7 @@ def execute(path: Path) -> dict[str, Any]:
         "gate_hash": digest(report),
         "release_eligible": False,
     }
+    _finish_reads(path, value, reads)
     atomic_json(path.parent / "release-evaluation.json", receipt)
     return report
 
@@ -323,8 +405,12 @@ def execute_bounded(path: Path, timeout: float | None = None) -> dict[str, Any]:
 
 
 def verify_receipt(path: Path) -> dict[str, Any]:
-    value = read_preflight(path)
-    receipt = json.loads((path.parent / "release-evaluation.json").read_bytes())
+    reads = CommandReads()
+    reads.inputs(path)
+    value = _read_header(path)
+    record, checked_runs = _checked_batch(value, reads)
+    _bind_runs(value, checked_runs)
+    receipt, receipt_hash = reads.receipt(path.parent / "release-evaluation.json")
     saved = receipt["evaluation_gate"]
     inputs = value["inputs"]
     policy = GatePolicyV2.model_validate_json(Path(inputs["policy"]["path"]).read_bytes())
@@ -349,9 +435,8 @@ def verify_receipt(path: Path) -> dict[str, Any]:
     ):
         raise ValueError("release evaluation absent, observe, incomplete or failing")
     # Regrade saved private evidence without re-executing or spending.
-    pairs = [read_run(Path(r["directory"])) for r in value["runs"]]
-    record = load_baseline(Path(value["baseline_store"]), value["baseline_id"])
-    baseline = [read_run(Path(s["directory"])) for s in record["sources"]]
+    pairs = [checked_runs[Path(run["directory"])] for run in value["runs"]]
+    baseline = [checked_runs[Path(source["directory"])] for source in record["sources"]]
     checked = gate_core(
         [m for m, _ in pairs],
         [r for _, r in pairs],
@@ -380,8 +465,9 @@ def verify_receipt(path: Path) -> dict[str, Any]:
         or digest(saved) != digest(checked)
     ):
         raise ValueError("release evidence no longer satisfies enforce gate")
+    _finish_reads(path, value, reads)
     return {
         "evaluation_satisfied": True,
         "release_eligible": False,
-        "receipt_hash": file_hash(path.parent / "release-evaluation.json"),
+        "receipt_hash": receipt_hash,
     }

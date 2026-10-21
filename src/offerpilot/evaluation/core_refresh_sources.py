@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from offerpilot.evaluation.core_contracts import RunManifestV2, TrialResultV2
+from offerpilot.evaluation.core_origin_reads import OriginReads
 from offerpilot.evaluation.core_refresh_contracts import read, require
 from offerpilot.evaluation.core_targeted_account import safe_path
 from offerpilot.evaluation.core_storage import load
@@ -55,9 +56,12 @@ def freeze_sources(manifest: RunManifestV2, path: Path) -> dict[str, Any]:
 
 
 def source_origins(
-    manifest: RunManifestV2, rows: list[TrialResultV2], directory: Path
+    manifest: RunManifestV2, rows: list[TrialResultV2], directory: Path,
+    *, _origin: OriginReads | None = None,
 ) -> dict[str, Any]:
     """Only new sealed handshakes and archived identities; no historical backfilling."""
+    if _origin is not None:
+        _origin.validate(directory, manifest)
     archive = read(directory / "source-files.json")
     require(
         archive.get("schema_version") == 3
@@ -78,7 +82,9 @@ def source_origins(
     origins = []
     bridge = ROOT / "scripts/evaluation_subject/core_bootstrap.py"
     for row in rows:
-        evidence = load(Path(row.private_directory), row.evidence_hash)
+        evidence = _origin.evidence(directory, manifest, row) if _origin is not None else None
+        if evidence is None:
+            evidence = load(Path(row.private_directory), row.evidence_hash)
         require(not evidence.get("errors"), "refresh private evidence incomplete")
         handshakes = evidence.get("facts", {}).get("handshakes", [])
         if row.execution_status == "completed":

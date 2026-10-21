@@ -19,6 +19,7 @@ from offerpilot.evaluation.core_contracts import (
     TrialResultV2,
 )
 from offerpilot.evaluation.core_graders import grade
+from offerpilot.evaluation.core_origin_reads import CaptureOrigin
 from offerpilot.evaluation.core_planning import read_plan, validate_grant
 from offerpilot.evaluation.core_registry import case_definition
 from offerpilot.evaluation.core_storage import load, seal
@@ -474,7 +475,9 @@ def run_plan(path: Path, grant_path: Path | None = None) -> dict[str, Any]:
     return summary
 
 
-def read_run(directory: Path) -> tuple[RunManifestV2, list[TrialResultV2]]:
+def read_run(
+    directory: Path, *, _capture_origin: CaptureOrigin | None = None
+) -> tuple[RunManifestV2, list[TrialResultV2]]:
     manifest = RunManifestV2.model_validate_json((directory / "run-manifest.json").read_bytes())
     from offerpilot.evaluation.runner import evaluator_hash
 
@@ -509,6 +512,8 @@ def read_run(directory: Path) -> tuple[RunManifestV2, list[TrialResultV2]]:
         ):
             raise ValueError("private evidence path escapes run")
         evidence = load(private, result.evidence_hash)
+        if _capture_origin is not None:
+            _capture_origin(directory, manifest, result, evidence)
         key = plan.model_dump(
             mode="json",
             include={"run_id", "variant_id", "execution_item_id", "mode", "repeat_index"},
