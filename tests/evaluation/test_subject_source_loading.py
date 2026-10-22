@@ -25,7 +25,8 @@ def test_subject_uses_valid_dependency_cache_but_loads_bound_source(tmp_path, mo
     product = source / 'source_policy_product.py'
     product.write_bytes(b'VALUE = 41\n')
     stamp = product.stat()
-    py_compile.compile(str(product), doraise=True,
+    product_cache = product.parent / '__pycache__' / f'{product.stem}.{sys.implementation.cache_tag}.pyc'
+    py_compile.compile(str(product), cfile=str(product_cache), doraise=True,
                        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
     product.write_bytes(b'VALUE = 42\n')
     os.utime(product, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
@@ -34,7 +35,8 @@ def test_subject_uses_valid_dependency_cache_but_loads_bound_source(tmp_path, mo
     dependency_root.mkdir()
     dependency = dependency_root / 'source_policy_dependency.py'
     dependency.write_text('VALUE = 19\n', encoding='utf-8')
-    py_compile.compile(str(dependency), doraise=True,
+    dependency_cache = dependency.parent / '__pycache__' / f'{dependency.stem}.{sys.implementation.cache_tag}.pyc'
+    py_compile.compile(str(dependency), cfile=str(dependency_cache), doraise=True,
                        invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH)
     bridge = tmp_path / 'bridge.py'
     bridge.write_text('''import sys,json
@@ -111,7 +113,9 @@ def valid_stale(path: Path, old: bytes, new: bytes):
     assert len(old) == len(new)
     path.write_bytes(old)
     stamp = path.stat()
-    py_compile.compile(str(path), doraise=True,
+    # Keep the lexical alias: the isolated control ignores the parent's prefix.
+    cache = path.parent / '__pycache__' / f'{path.stem}.{sys.implementation.cache_tag}.pyc'
+    py_compile.compile(str(path), cfile=str(cache), doraise=True,
                        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
     path.write_bytes(new)
     os.utime(path, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))

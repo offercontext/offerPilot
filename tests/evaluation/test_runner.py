@@ -47,7 +47,9 @@ def test_source_loading_ignores_valid_stale_checkout_bytecode(tmp_path, monkeypa
     module = source / "read_only_product.py"
     module.write_bytes(b"VALUE = 41\n")
     stamp = module.stat()
-    py_compile.compile(str(module), doraise=True,
+    # The negative control removes the parent's prefix and reads this location.
+    cache = module.parent / "__pycache__" / f"{module.stem}.{sys.implementation.cache_tag}.pyc"
+    py_compile.compile(str(module), cfile=str(cache), doraise=True,
                        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP)
     module.write_bytes(b"VALUE = 42\n")
     os.utime(module, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
