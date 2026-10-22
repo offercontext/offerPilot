@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 import os
@@ -327,6 +328,34 @@ def prepare_refresh(
     return envelope
 
 
+def _join_refresh_reads(
+    historical: Callable[[], None], current: Callable[[], dict[str, Any]],
+) -> dict[str, Any]:
+    """Join both complete read branches, preserving history as the primary error."""
+    history_error: BaseException | None = None
+    current_error: BaseException | None = None
+    measured: dict[str, Any] | None = None
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        history_future = pool.submit(historical)
+        current_future = pool.submit(current)
+        try:
+            history_future.result()
+        except BaseException as exc:
+            history_error = exc
+        try:
+            measured = current_future.result()
+        except BaseException as exc:
+            current_error = exc
+        if history_error is not None:
+            if current_error is not None:
+                raise history_error from current_error
+            raise history_error
+        if current_error is not None:
+            raise current_error
+    assert measured is not None
+    return measured
+
+
 def check_request(
     path: Path, at: datetime, *, _capture: CaptureQualifiedRun | None = None,
     _origin_scope: OriginScope | None = None,
@@ -365,14 +394,6 @@ def check_request(
         and request["evaluator_hash"] == evaluator_hash(),
         "refresh original/evaluator binding changed",
     )
-    historical = audit_history(store, original, bound_file(request["history_descriptor"]))
-    old_proof = read(bound_file(request["historical_proof"]))
-    require(
-        historical["proof"] == old_proof["proof"]
-        and historical["child"] == old_proof["child"]
-        and historical["descriptor"] == old_proof["descriptor"],
-        "historical proof identity changed",
-    )
     for name, value in request["raw_files"].items():
         require(
             bound_file(value) == Path(request["run_directory"]) / name, "refresh raw file moved"
@@ -388,18 +409,41 @@ def check_request(
         },
         "refresh raw file binding missing",
     )
-    capture_options: dict[str, Any] = {"_capture": _capture} if _capture is not None else {}
+    # Both branches only read declared evidence. No candidate target or trial may start
+    # until the entire resolver, saved checks and its caller's postguard pass.
+    for name in (
+        "history_descriptor", "historical_proof", "policy", "review", "experiment",
+        "measurement", "gate",
+    ):
+        bound_file(request[name])
+    staged: list[tuple[Path, RunManifestV2, list[TrialResultV2]]] = []
+
+    def stage_capture(directory: Path, manifest: RunManifestV2, rows: list[TrialResultV2]) -> None:
+        require(not staged, "duplicate qualification capture")
+        staged.append((directory, manifest, rows))
+
+    capture_options: dict[str, Any] = {"_capture": stage_capture} if _capture is not None else {}
     if _origin_scope is not None:
         capture_options["_origin_scope"] = _origin_scope
-    measured = qualification(
-        Path(request["run_directory"]),
-        original,
-        bound_file(request["policy"]),
-        bound_file(request["review"]),
-        bound_file(request["experiment"]),
-        at,
-        **capture_options,
-    )
+
+    def read_history() -> None:
+        historical = audit_history(store, original, bound_file(request["history_descriptor"]))
+        old_proof = read(bound_file(request["historical_proof"]))
+        require(
+            historical["proof"] == old_proof["proof"]
+            and historical["child"] == old_proof["child"]
+            and historical["descriptor"] == old_proof["descriptor"],
+            "historical proof identity changed",
+        )
+
+    def current() -> dict[str, Any]:
+        return qualification(
+            Path(request["run_directory"]), original, bound_file(request["policy"]),
+            bound_file(request["review"]), bound_file(request["experiment"]), at,
+            **capture_options,
+        )
+
+    measured = _join_refresh_reads(read_history, current)
     saved = read(bound_file(request["measurement"]))
     saved_gate = read(bound_file(request["gate"]))
     checked_gate = measured["gate"] | {k: saved_gate[k] for k in ("gate_id", "created_at")}
@@ -414,6 +458,16 @@ def check_request(
         and request["activatable"] is True,
         "new raw qualification or independent review no longer supports activation",
     )
+    if _capture is not None:
+        require(len(staged) == 1, "missing qualification capture")
+        directory, manifest, rows = staged[0]
+        require(
+            directory.absolute() == Path(request["run_directory"]).absolute()
+            and digest(manifest.model_dump(mode="json")) == measured["manifest_hash"]
+            and evidence_fingerprint(manifest, rows) == measured["fingerprint"],
+            "qualification capture binding differs",
+        )
+        _capture(directory, manifest, rows)
     return request, original, measured
 
 

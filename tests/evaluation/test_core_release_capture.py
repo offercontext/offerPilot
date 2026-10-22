@@ -105,7 +105,9 @@ def test_capture_after_later_failure_is_never_registered(refresh_case, monkeypat
         return value
     with pytest.raises(ValueError):
         command.baseline(case.store, "original", strict)
-    assert collected == [case.run]
+    # The complete frozen request must qualify before a capture can leave it.
+    # Later resolver/CAS/postguard failures still discard the staged result.
+    assert collected == ([] if phase == "qualification_binding" else [case.run])
     assert command._pending_runs == {} and command._runs == {} and command._baselines == {}
     summary.write_bytes(original_summary)
     fallback = []

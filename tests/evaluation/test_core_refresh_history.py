@@ -147,8 +147,12 @@ def test_historical_launcher_ignores_valid_stale_checkout_bytecode(tmp_path, mon
     module = checkout / "src/read_only_product.py"
     module.write_bytes(b"VALUE = 41\n")
     stamp = module.stat()
+    # -I ignores the parent's cache prefix. Put the malicious control where
+    # that isolated normal interpreter actually looks; retain the 41/42 checks.
+    cache = module.parent / "__pycache__" / f"{module.stem}.{sys.implementation.cache_tag}.pyc"
     py_compile.compile(
-        str(module), doraise=True, invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP
+        str(module), cfile=str(cache), doraise=True,
+        invalidation_mode=py_compile.PycInvalidationMode.TIMESTAMP,
     )
     module.write_bytes(b"VALUE = 42\n")
     os.utime(module, ns=(stamp.st_atime_ns, stamp.st_mtime_ns))
