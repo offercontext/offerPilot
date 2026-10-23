@@ -9,6 +9,7 @@ import threading
 import time
 from typing import Any, Callable
 from uuid import uuid4
+from urllib.parse import urlsplit
 
 from offerpilot.evaluation.adapters import DriverError, HTTPDriver, ProductFailure
 from offerpilot.evaluation.graders.p0 import instant
@@ -33,6 +34,41 @@ class CoreHTTPDriver(HTTPDriver):
         super().__init__(address, token, deadline, observations)
         self.max_replies = replies
         self.reply_counter = reply_counter if reply_counter is not None else [0]
+        self.request_errors: list[dict[str, Any]] = []
+        self.request_error_capture_errors: list[str] = []
+        self._diagnostic_lock = threading.Lock()
+        self._request_index = 0
+
+    def request_error_observations(self) -> list[dict[str, Any]]:
+        with self._diagnostic_lock:
+            return [dict(value, error_chain_types=list(value["error_chain_types"]))
+                    for value in self.request_errors]
+
+    def _record_request_error(self, exc: Exception, method: str, path: str,
+                              started: float, started_at: str, timeout: float,
+                              request_index: int) -> None:
+        chain: list[str] = []
+        seen: set[int] = set()
+        current: BaseException | None = exc
+        while current is not None and id(current) not in seen and len(chain) < 8:
+            seen.add(id(current))
+            chain.append(type(current).__name__)
+            current = current.__cause__ if current.__cause__ is not None else current.__context__
+        logical_path: str | None
+        try:
+            logical_path = urlsplit(path).path
+        except Exception:
+            logical_path = None
+        record = dict(observation_id=uuid4().hex, driver_request_index=request_index,
+            method=method, path=logical_path, started_at=started_at,
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            elapsed_seconds=time.monotonic() - started, timeout_seconds=timeout,
+            error_type=type(exc).__name__, error_chain_types=chain,
+            error_chain_truncated=current is not None,
+            error_chain_cycle=current is not None and id(current) in seen,
+            response_received=None, response_status=None)
+        with self._diagnostic_lock:
+            self.request_errors.append(record)
 
     def request(
         self,
@@ -41,7 +77,8 @@ class CoreHTTPDriver(HTTPDriver):
         body: dict[str, Any] | None = None,
         allowed: tuple[int, ...] = (200, 202),
     ) -> dict[str, Any]:
-        remaining = self.deadline - time.monotonic()
+        started = time.monotonic()
+        remaining = self.deadline - started
         if remaining <= 0:
             raise TimeoutError("trial watchdog")
         if method == "POST":
@@ -49,7 +86,19 @@ class CoreHTTPDriver(HTTPDriver):
             self.script_replies = self.reply_counter[0]
             if self.reply_counter[0] > self.max_replies:
                 raise TimeoutError("script reply watchdog")
-        response = self.client.request(method, path, json=body, timeout=min(30, remaining))
+        timeout = min(30, remaining)
+        started_at = datetime.now(timezone.utc).isoformat()
+        with self._diagnostic_lock:
+            self._request_index += 1
+            request_index = self._request_index
+        try:
+            response = self.client.request(method, path, json=body, timeout=timeout)
+        except Exception as exc:
+            try:
+                self._record_request_error(exc, method, path, started, started_at, timeout, request_index)
+            except Exception as capture_error:
+                self.request_error_capture_errors.append(type(capture_error).__name__)
+            raise
         try:
             payload = response.json()
         except ValueError as exc:

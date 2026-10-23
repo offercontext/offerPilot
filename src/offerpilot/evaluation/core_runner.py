@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import copy
 import json
 from pathlib import Path
 from statistics import median
@@ -28,6 +29,44 @@ from offerpilot.evaluation.registry import file_hash
 from offerpilot.evaluation.reporting import atomic_json
 from offerpilot.evaluation.runner import snapshot
 from scripts.evaluation_subject import core_observer as observer
+
+
+def _control_observations(subjects: list[CoreSubject]) -> list[dict[str, Any] | None]:
+    result = []
+    for subject in subjects:
+        getter = getattr(subject, "control_observation", None)
+        try:
+            value = getter() if callable(getter) else None
+            result.append(copy.deepcopy(value) if isinstance(value, dict) else None)
+        except Exception:
+            result.append(None)  # A missing diagnostic must not replace the primary failure.
+    return result
+
+
+def _http_observations(drivers: list[tuple[CoreSubject, CoreHTTPDriver]]) -> list[dict[str, Any]]:
+    result = []
+    for subject, driver in drivers:
+        getter = getattr(driver, "request_error_observations", None)
+        errors: list[dict[str, Any]] | None = None
+        capture_errors: list[str] | None = None
+        epoch, trial_key = None, None
+        try:
+            config = getattr(subject, "config", {})
+            epoch = config.get("epoch")
+            key = config.get("trial_key")
+            if isinstance(key, dict):
+                trial_key = {name: key.get(name) for name in (
+                    "run_id", "variant_id", "execution_item_id", "mode", "repeat_index")}
+            observed = getter() if callable(getter) else None
+            if isinstance(observed, list) and all(isinstance(value, dict) for value in observed):
+                errors = copy.deepcopy(observed)
+            failed = getattr(driver, "request_error_capture_errors", None)
+            capture_errors = list(failed) if isinstance(failed, list) else None
+        except Exception as exc:
+            capture_errors = [type(exc).__name__]
+        result.append(dict(epoch=epoch, trial_key=trial_key,
+            request_errors=errors, capture_errors=capture_errors))
+    return result
 
 
 def run_trial(
@@ -86,6 +125,7 @@ def run_trial(
     driver = None
     status = "completed"
     subjects = []
+    drivers: list[tuple[CoreSubject, CoreHTTPDriver]] = []
     script_replies = [0]
     config = {
         "command": "prepare",
@@ -134,7 +174,7 @@ def run_trial(
         f.setdefault("handshakes", []).append(ready)
         f["budget_effective"] = ready["product_budget_effective"]
         f["budget_requested"] = spec.product_budget.model_dump(exclude_none=True)
-        return CoreHTTPDriver(
+        value_driver = CoreHTTPDriver(
             ready["address"],
             token,
             deadline,
@@ -142,6 +182,8 @@ def run_trial(
             spec.evaluator_limits.script_replies,
             script_replies,
         )
+        drivers.append((value, value_driver))
+        return value_driver
 
     def restart() -> tuple[CoreSubject, CoreHTTPDriver]:
         epoch = observer.next_epoch(private / "data.db")
@@ -172,6 +214,11 @@ def run_trial(
             subject, driver = drive(spec.action_id, driver, subject, private, e, restart)
         observer.marker(private / "data.db", "driver_finished", {"terminal_received": True})
     except Exception as exc:
+        f["driver_failure_observation"] = dict(
+            captured_at_monotonic=time.monotonic(), error_type=type(exc).__name__,
+            subjects=_control_observations(subjects), drivers=_http_observations(drivers),
+        )
+        f["driver_failure_observation"]["capture_finished_monotonic"] = time.monotonic()
         status = (
             "product_failed"
             if isinstance(exc, ProductFailure)
@@ -191,6 +238,16 @@ def run_trial(
                 value.stop()
         if driver:
             driver.close()
+        f["control_observations_after_stop"] = _control_observations(subjects)
+        http_diagnostics = _http_observations(drivers)
+        errors = [dict(error, epoch=value["epoch"], trial_key=value["trial_key"])
+                  for value in http_diagnostics for error in value["request_errors"] or []]
+        if errors:
+            f["http_request_errors"] = errors
+        capture_errors = [dict(epoch=value["epoch"], error_types=value["capture_errors"])
+                          for value in http_diagnostics if value["capture_errors"]]
+        if capture_errors:
+            f["http_diagnostic_capture_errors"] = capture_errors
         f["control_closed"] = bool(subjects) and all(s.closed and not s.errors for s in subjects)
         f["owned_subjects_exited"] = bool(subjects) and all(
             getattr(s, "owned_tree_exit_proven", False) for s in subjects

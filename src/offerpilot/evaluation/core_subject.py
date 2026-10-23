@@ -9,7 +9,7 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Any
+from typing import Any, TextIO, cast
 
 from offerpilot.evaluation.core_contracts import RunGrant, RunManifestV2
 from offerpilot.evaluation.runner import ROOT, Subject, process_environment, process_tree, subject_command
@@ -88,6 +88,10 @@ class CoreSubject(Subject):
         )
         self.messages: queue.Queue[dict[str, Any]] = queue.Queue()
         self.errors: list[str] = []
+        self._control_state: dict[str, Any] = dict(
+            phase=None, reader_started=False, reader_exited=False, exit_reason=None,
+            error_type=None, last_validated_seq=0, last_persisted_seq=0, last_ack_seq=0,
+        )
         self.closed = False
         self.started = time.monotonic()
         self.lock = threading.Lock()
@@ -110,7 +114,22 @@ class CoreSubject(Subject):
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.reader.start()
 
+    def _observe_control(self, **values: Any) -> None:
+        # Publish one detached state; never derive an epoch cursor from shared events.
+        self._control_state = self._control_state | values
+
+    def control_observation(self) -> dict[str, Any]:
+        """Identity, fsync and ACK-send cursors; none of them means a send was authorized."""
+        state = self._control_state
+        return dict(state, epoch=self.config["epoch"],
+            trial_key={key: self.config["trial_key"][key] for key in (
+                "run_id", "variant_id", "execution_item_id", "mode", "repeat_index")},
+            errors=list(self.errors), reader_alive=self.reader.is_alive(),
+            subject_closed=self.closed,
+            owned_tree_exit_proven=getattr(self, "owned_tree_exit_proven", None))
+
     def _read(self) -> None:
+        self._observe_control(reader_started=True, phase="receive")
         seq = 0
         allowed = {
             "prepared",
@@ -125,13 +144,19 @@ class CoreSubject(Subject):
             "executor_observation",
         }
         try:
-            assert self.process.stdout
+            stdout = cast(TextIO, self.process.stdout)
+            assert stdout
+            def read_line() -> str:
+                self._observe_control(phase="receive")
+                return stdout.readline(1024 * 1024 + 1)
+
             with (self.private / f"epoch-{self.config['epoch']}.control.jsonl").open(
                 "w", encoding="utf-8"
             ) as log:
-                for line in iter(lambda: self.process.stdout.readline(1024 * 1024 + 1), ""):
+                for line in iter(read_line, ""):
                     if not line.endswith("\n") or len(line.encode()) > 1024 * 1024:
                         raise ValueError("partial/oversized control message")
+                    self._observe_control(phase="identity")
                     event = json.loads(line)
                     if (
                         event.get("schema_version") != 1
@@ -142,7 +167,9 @@ class CoreSubject(Subject):
                     ):
                         raise ValueError("invalid control identity")
                     seq += 1
+                    self._observe_control(last_validated_seq=seq)
                     if event["type"] == "call_attempt":
+                        self._observe_control(phase="observer")
                         db = self.private / "data.db"
                         active = False
                         if db.exists():
@@ -156,11 +183,14 @@ class CoreSubject(Subject):
                         event["observer_high_water"] = (
                             observer.read(db)["high_water"] if active else 0
                         )
+                    self._observe_control(phase="persist")
                     log.write(json.dumps(event, ensure_ascii=False) + "\n")
                     log.flush()
                     os.fsync(log.fileno())
+                    self._observe_control(last_persisted_seq=seq)
                     self.events.append(event)
                     if event["type"] == "call_attempt":
+                        self._observe_control(phase="reserve")
                         calls = [c for c in self.events if c["type"] == "call_attempt"]
                         if (
                             sum(
@@ -195,9 +225,13 @@ class CoreSubject(Subject):
                         and not held_stream_barrier
                         and not held_budget_barrier
                     ):
+                        self._observe_control(phase="ack")
                         self.send({"command": "ack", "seq": seq})
+                        self._observe_control(last_ack_seq=seq)
                     self.messages.put(event)
+            self._observe_control(exit_reason="eof")
         except Exception as exc:
+            self._observe_control(error_type=type(exc).__name__, exit_reason="error")
             self.errors.append("control:" + type(exc).__name__)
             self.messages.put(
                 {
@@ -206,3 +240,5 @@ class CoreSubject(Subject):
                     "message": str(exc) if isinstance(exc, TimeoutError) else type(exc).__name__,
                 }
             )
+        finally:
+            self._observe_control(reader_exited=True)
