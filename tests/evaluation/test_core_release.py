@@ -322,6 +322,40 @@ def test_nonreuse_blocks_trial_after_strict_success_but_changed_closure(manifest
     assert returned == [True] and not (args[3] / "release-evaluation.json").exists()
 
 
+@pytest.mark.parametrize("failure", ["strict", "postguard"])
+def test_reuse_blocks_full_target_check_until_baseline_trust_and_postguard(
+    manifest, tmp_path, monkeypatch, failure
+):
+    _, _, args = setup_release(manifest, tmp_path, monkeypatch)
+    release.preflight(*args, reuse=[tmp_path / "baseline"])
+    original_plan, original_reader = release.read_plan, release.read_run
+    target_checks = []
+
+    def read_plan(*values, check_targets=True):
+        target_checks.append(check_targets)
+        if check_targets:
+            pytest.fail("full target check started before baseline trust and postguard")
+        return original_plan(*values, check_targets=check_targets)
+
+    def strict(*_, **kwargs):
+        raise ValueError("synthetic strict trust failure")
+
+    def changed(*values):
+        result = original_reader(*values)
+        (tmp_path / "baseline/trial-results.json").write_text("[1]", encoding="utf-8")
+        return result
+
+    monkeypatch.setattr(release, "read_plan", read_plan)
+    if failure == "strict":
+        monkeypatch.setattr(release, "load_baseline", strict)
+    else:
+        monkeypatch.setattr(release, "read_run", changed)
+    with pytest.raises(ValueError, match="trust failure|changed"):
+        release.execute(args[3] / "release-preflight.json")
+    assert target_checks == [False]
+    assert not (args[3] / "release-evaluation.json").exists()
+
+
 @pytest.mark.parametrize("mutation", ["outer_release", "gate_release", "statistics", "extra_field"])
 def test_receipt_binds_complete_report_and_cannot_grant_release(
     manifest, tmp_path, monkeypatch, mutation

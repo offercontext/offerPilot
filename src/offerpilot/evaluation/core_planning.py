@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor
 import json
 from pathlib import Path
 from typing import Any
@@ -192,18 +193,48 @@ def read_plan(path: Path, *, check_targets: bool = True) -> RunManifestV2:
     if manifest.evaluator_hash != evaluator_hash():
         raise ValueError("frozen evaluator differs; use original evaluator checkout")
     if check_targets:
-        for v in manifest.variants.values():
-            now = snapshot(Path(v["checkout"]))
-            if any(now[k] != v[k] for k in now):
-                raise ValueError("target source snapshot changed; regenerate plan")
-            runtime = target_environment(
-                VariantConfig(
-                    variant_id=v["variant_id"], checkout=v["checkout"], interpreter=v["interpreter"]
-                )
-            )
-            if runtime != v["runtime"]:
-                raise ValueError("target runtime changed")
+        _validate_targets(list(manifest.variants.values()))
     return manifest
+
+
+def _validate_targets(variants: list[dict[str, Any]]) -> None:
+    def source(v: dict[str, Any]) -> None:
+        now = snapshot(Path(v["checkout"]))
+        if any(now[k] != v[k] for k in now):
+            raise ValueError("target source snapshot changed; regenerate plan")
+
+    def runtime(v: dict[str, Any]) -> None:
+        observed = target_environment(VariantConfig(
+            variant_id=v["variant_id"], checkout=v["checkout"], interpreter=v["interpreter"]))
+        if observed != v["runtime"]:
+            raise ValueError("target runtime changed")
+
+    if len(variants) == 1:
+        source(variants[0])
+        runtime(variants[0])
+        return
+    # A source failure blocks every target program. Each phase joins all work
+    # before returning or raising; manifest order, not completion order, wins.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        for check in (source, runtime):
+            futures = [pool.submit(check, variant) for variant in variants]
+            errors: list[BaseException] = []
+            for future in futures:
+                try:
+                    future.result()
+                except BaseException as exc:
+                    errors.append(exc)
+            if errors:
+                if len(errors) == 1:
+                    raise errors[0]
+                secondary = errors[1]
+                if errors[0].__cause__ is not None:
+                    # Python 3.10 has no ExceptionGroup. Keep the original
+                    # primary cause and secondary object without replacing it.
+                    details = Exception("additional target validation failure", secondary)
+                    details.__cause__ = errors[0].__cause__
+                    secondary = details
+                raise errors[0] from secondary
 
 
 def validate_grant(manifest: RunManifestV2, path: Path | None) -> RunGrant | None:
