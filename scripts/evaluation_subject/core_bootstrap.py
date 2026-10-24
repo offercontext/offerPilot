@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.metadata
+from contextlib import ExitStack
 import inspect
 import hashlib
 import json
@@ -21,7 +22,9 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from scripts.evaluation_subject.bootstrap import Channel, UnsupportedCapability  # noqa: E402
+from scripts.evaluation_subject.bootstrap import (  # noqa: E402
+    Channel, SubjectStopping, UnsupportedCapability, finish_subject, run_ready,
+)
 from scripts.evaluation_subject import core_observer as observer  # noqa: E402
 from scripts.evaluation_subject.core_fixtures import prepare  # noqa: E402
 from scripts.evaluation_subject.core_transport import observe  # noqa: E402
@@ -37,41 +40,10 @@ class CoreChannel(Channel):
         )
 
     def emit_sequence(self, kind: str, payload: dict[str, Any], *, ack: bool = False) -> int:
-        from scripts.evaluation_subject.bootstrap import CONTROL, MAX_MESSAGE
-
-        with self.lock:
-            self.seq += 1
-            seq = self.seq
-            waiter = threading.Event()
-            if ack:
-                self.pending[seq] = waiter
-            event = {
-                "schema_version": 1,
-                "trial_key": self.config["trial_key"],
-                "epoch": self.config["epoch"],
-                "seq": seq,
-                "type": kind,
-                **payload,
-            }
-            line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
-            if len(line.encode()) > MAX_MESSAGE:
-                raise ValueError("oversized control message")
-            CONTROL.write(line + "\n")
-            CONTROL.flush()
-        if ack:
-            controlled = kind == "fault_reached" and self.config["fault_profile"] in {
-                "executor_block",
-                "model_block",
-            }
-            try:
-                if not waiter.wait(
-                    max(0, min(90 if controlled else 30, self.deadline - time.monotonic()))
-                ):
-                    raise RuntimeError("control ACK missing; call was blocked")
-            finally:
-                with self.lock:
-                    self.pending.pop(seq, None)
-        return seq
+        controlled = kind == "fault_reached" and self.config["fault_profile"] in {
+            "executor_block", "model_block",
+        }
+        return super()._emit_sequence(kind, payload, ack=ack, ack_seconds=90 if controlled else 30)
 
 
 class ScriptModel:
@@ -338,6 +310,8 @@ def budget_finish_wrapper(channel: Channel, original: Any, method_name: str) -> 
 def serve(channel: Channel) -> None:
     config = channel.config
     setup_started = time.monotonic()
+    resources = ExitStack()
+    ready_thread = None
     try:
         policy_proof = sys.modules["fixed_evaluation_source_launcher"].policy_proof
         policy_proof()
@@ -351,12 +325,14 @@ def serve(channel: Channel) -> None:
         if not source.is_relative_to(checkout / "src"):
             raise ValueError("target import escaped checkout")
         listener = socket.socket()
+        resources.callback(listener.close)
         listener.bind(("127.0.0.1", 0))
         listener.listen(128)
         port = listener.getsockname()[1]
         import asyncio
 
         loop = asyncio.new_event_loop()
+        resources.callback(loop.close)
         action_id = config.get("action_id", config["trial_key"]["execution_item_id"])
         model: Any = (
             StreamBurstModel(channel)
@@ -382,6 +358,8 @@ def serve(channel: Channel) -> None:
             from scripts.evaluation_subject.core_loopback import start_provider
 
             provider_server, endpoint = start_provider(channel, model)
+            resources.callback(provider_server.server_close)
+            resources.callback(provider_server.shutdown)
         fence(channel, ports, endpoint)
         from offerpilot.config import Config, AIProviderProfile, save_config
 
@@ -559,13 +537,16 @@ def serve(channel: Channel) -> None:
             import httpx
             from openai import OpenAI
 
+            http_client = httpx.Client(trust_env=False, follow_redirects=False)
+            resources.callback(http_client.close)
             sdk_client = OpenAI(
                 api_key=key,
                 base_url=endpoint,
                 timeout=limits["timeout_seconds"],
                 max_retries=0,
-                http_client=httpx.Client(trust_env=False, follow_redirects=False),
+                http_client=http_client,
             )
+            resources.callback(sdk_client.close)
 
             original_completion = getattr(client_module, "completion")
 
@@ -782,7 +763,8 @@ def serve(channel: Channel) -> None:
         server = uvicorn.Server(
             uvicorn.Config(Ingress(product), log_level="warning", access_log=False)
         )
-        channel.server = server
+        if not channel.bind_server(server):
+            return
 
         def ready() -> None:
             while not server.started and not server.should_exit:
@@ -818,19 +800,14 @@ def serve(channel: Channel) -> None:
                     ack=True,
                 )
 
-        threading.Thread(target=ready, daemon=True).start()
+        ready_thread = threading.Thread(target=run_ready, args=(ready,), daemon=True)
+        ready_thread.start()
         from scripts.evaluation_subject.core_process import observe as observe_process
 
         with observe_process(channel):
             loop.run_until_complete(server.serve(sockets=[listener]))
-        if provider_server:
-            provider_server.shutdown()
-            provider_server.server_close()
-        if endpoint:
-            sdk_client.close()
-        loop.close()
-        listener.close()
-        channel.emit("shutdown_complete", {})
+    except SubjectStopping:
+        pass
     except BaseException as exc:
         # Never serialize exception text from credential-bearing clients.
         import traceback
@@ -850,6 +827,11 @@ def serve(channel: Channel) -> None:
                 ],
             },
         )
+    finally:
+        try:
+            finish_subject(channel, resources, ready_thread)
+        except BaseException as exc:
+            channel.emit("error", {"error_type": type(exc).__name__, "message": type(exc).__name__})
 
 
 def main() -> None:
@@ -870,21 +852,16 @@ def main() -> None:
     for line in sys.stdin:
         command = json.loads(line)
         if command.get("command") == "ack":
-            with channel.lock:
-                pending = channel.pending.get(command["seq"])
-                if pending:
-                    pending.set()
+            channel.acknowledge(command["seq"])
         elif command.get("command") == "request_shutdown":
-            if channel.server:
-                channel.server.should_exit = True
+            channel.request_shutdown()
             worker.join(timeout=config["limits"]["shutdown_seconds"])
             if worker.is_alive():
                 os._exit(3)
             return
         else:
             raise ValueError("unregistered controller action")
-    if channel.server:
-        channel.server.should_exit = True
+    channel.request_shutdown()
     worker.join(timeout=2)
 
 

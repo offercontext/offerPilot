@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -25,6 +26,16 @@ class UnsupportedCapability(RuntimeError):
     pass
 
 
+class SubjectStopping(RuntimeError):
+    """Control cancellation is never an acknowledgement or business success."""
+
+
+class PendingAck:
+    def __init__(self) -> None:
+        self.wakeup = threading.Event()
+        self.acknowledged = False
+
+
 def load_observer() -> Any:
     path = BRIDGE_ROOT / "src/offerpilot/evaluation/evidence/observer.py"
     spec = importlib.util.spec_from_file_location("fixed_evaluation_observer", path)
@@ -39,30 +50,84 @@ class Channel:
         self.config = config
         self.seq = 0
         self.lock = threading.RLock()
-        self.pending: dict[int, threading.Event] = {}
+        self.pending: dict[int, PendingAck] = {}
         self.closed = False
-        self.server: Any = None
+        self._server: Any = None
+        self.shutdown_requested = False
+        self.shutdown_deadline: float | None = None
         self.deadline = time.monotonic() + config["limits"]["wall_seconds"]
 
-    def emit(self, kind: str, payload: dict[str, Any], *, ack: bool = False) -> None:
+    @property
+    def server(self) -> Any:
         with self.lock:
+            return self._server
+
+    @server.setter
+    def server(self, server: Any) -> None:
+        with self.lock:
+            self._server = server
+            if server is not None and self.shutdown_requested:
+                server.should_exit = True
+
+    def bind_server(self, server: Any) -> bool:
+        with self.lock:
+            self.server = server
+            return not self.shutdown_requested
+
+    def request_shutdown(self) -> None:
+        with self.lock:
+            if not self.shutdown_requested:
+                self.shutdown_requested = True
+                self.shutdown_deadline = min(
+                    self.deadline, time.monotonic() + self.config["limits"]["shutdown_seconds"])
+            if self._server is not None:
+                self._server.should_exit = True
+            for pending in self.pending.values():
+                pending.wakeup.set()
+
+    def acknowledge(self, seq: int) -> None:
+        with self.lock:
+            pending = self.pending.get(seq)
+            if pending is not None and not self.shutdown_requested:
+                pending.acknowledged = True
+                pending.wakeup.set()
+
+    def emit(self, kind: str, payload: dict[str, Any], *, ack: bool = False) -> None:
+        self._emit_sequence(kind, payload, ack=ack)
+
+    def _emit_sequence(self, kind: str, payload: dict[str, Any], *, ack: bool = False,
+                       ack_seconds: int = 30) -> int:
+        with self.lock:
+            if self.shutdown_requested and kind not in {"error", "shutdown_complete"}:
+                raise SubjectStopping("subject shutdown requested")
             self.seq += 1
             seq = self.seq
-            waiter = threading.Event()
-            if ack:
-                self.pending[seq] = waiter
+            waiter = PendingAck()
             event = {"schema_version": 1, "trial_key": self.config["trial_key"],
                      "epoch": self.config["epoch"], "seq": seq, "type": kind, **payload}
             line = json.dumps(event, ensure_ascii=False, separators=(",", ":"))
             if len(line.encode()) > MAX_MESSAGE:
                 raise ValueError("oversized control message")
-            CONTROL.write(line + "\n")
-            CONTROL.flush()
-        if ack:
-            if not waiter.wait(max(0, min(30, self.deadline - time.monotonic()))):
-                raise RuntimeError("control ACK missing; call was blocked")
-            with self.lock:
+            if ack:
+                self.pending[seq] = waiter
+            try:
+                CONTROL.write(line + "\n")
+                CONTROL.flush()
+            except BaseException:
                 self.pending.pop(seq, None)
+                raise
+        if ack:
+            try:
+                received = waiter.wakeup.wait(max(0, min(ack_seconds, self.deadline - time.monotonic())))
+                with self.lock:
+                    if self.shutdown_requested:
+                        raise SubjectStopping("subject shutdown requested")
+                    if not received or not waiter.acknowledged:
+                        raise RuntimeError("control ACK missing; call was blocked")
+            finally:
+                with self.lock:
+                    self.pending.pop(seq, None)
+        return seq
 
     def attempt(self, purpose: str, **metadata: Any) -> None:
         self.emit("call_attempt", {"purpose": purpose, **metadata}, ack=True)
@@ -74,6 +139,38 @@ class Channel:
             load_observer().marker(Path(self.config["data_dir"]) / "data.db", "negative_control_reached", payload)
         else:
             self.emit("negative_control_reached", payload, ack=True)
+
+
+def run_ready(function: Any) -> None:
+    try:
+        function()
+    except SubjectStopping:
+        pass
+
+
+def finish_subject(channel: Channel, resources: ExitStack,
+                   ready_thread: threading.Thread | None) -> None:
+    failures: list[BaseException] = []
+    try:
+        channel.request_shutdown()
+        if ready_thread is not None:
+            assert channel.shutdown_deadline is not None
+            ready_thread.join(timeout=max(0, channel.shutdown_deadline - time.monotonic()))
+            if ready_thread.is_alive():
+                raise RuntimeError("ready helper did not stop")
+    except BaseException as exc:
+        failures.append(exc)
+    try:
+        resources.close()
+    except BaseException as exc:
+        failures.append(exc)
+    if failures:
+        if len(failures) > 1:
+            raise failures[0] from failures[1]
+        raise failures[0]
+    with channel.lock:
+        channel.closed = True
+    channel.emit("shutdown_complete", {})
 
 
 def network_guard(channel: Channel, port: int) -> None:
@@ -193,6 +290,8 @@ class FixedModel:
 
 def serve(channel: Channel) -> None:
     config = channel.config
+    resources = ExitStack()
+    ready_thread = None
     try:
         policy_proof = sys.modules["fixed_evaluation_source_launcher"].policy_proof
         policy_proof()
@@ -210,6 +309,7 @@ def serve(channel: Channel) -> None:
             raise ValueError("wrong product import source")
         observer = load_observer()
         listener = socket.socket()
+        resources.callback(listener.close)
         listener.bind(("127.0.0.1", 0))
         listener.listen(128)
         port = listener.getsockname()[1]
@@ -217,6 +317,7 @@ def serve(channel: Channel) -> None:
         # before fencing product networking; the product never receives its port.
         import asyncio
         event_loop = asyncio.new_event_loop()
+        resources.callback(event_loop.close)
         network_guard(channel, port)
         from offerpilot.config import Config, load_config, save_config
         prepared_data = None
@@ -375,7 +476,8 @@ def serve(channel: Channel) -> None:
         import uvicorn
         server = uvicorn.Server(uvicorn.Config(Ingress(product), host="127.0.0.1", port=port,
                                                log_level="warning", access_log=False))
-        channel.server = server
+        if not channel.bind_server(server):
+            return
         if prepared_data:
             channel.emit("prepared", prepared_data, ack=True)
         def ready() -> None:
@@ -397,16 +499,21 @@ def serve(channel: Channel) -> None:
                     "capabilities": capabilities,
                     "config": {"chat_auto_approve_writes": current.chat_auto_approve_writes,
                                "auth_enabled": current.auth_enabled}}, ack=True)
-        threading.Thread(target=ready, daemon=True).start()
+        ready_thread = threading.Thread(target=run_ready, args=(ready,), daemon=True)
+        ready_thread.start()
         event_loop.run_until_complete(server.serve(sockets=[listener]))
         if config["fault"] == "shutdown_timeout":
             channel.witness("shutdown_stalled", durable=True)
             time.sleep(60)
-        event_loop.close()
-        listener.close()
-        channel.emit("shutdown_complete", {})
+    except SubjectStopping:
+        pass
     except BaseException as exc:
         channel.emit("error", {"error_type": type(exc).__name__, "message": str(exc)[:500]})
+    finally:
+        try:
+            finish_subject(channel, resources, ready_thread)
+        except BaseException as exc:
+            channel.emit("error", {"error_type": type(exc).__name__, "message": str(exc)[:500]})
 
 
 def main() -> None:
@@ -423,21 +530,16 @@ def main() -> None:
     for line in sys.stdin:
         command = json.loads(line)
         if command.get("command") == "ack":
-            with channel.lock:
-                event = channel.pending.get(command["seq"])
-                if event:
-                    event.set()
+            channel.acknowledge(command["seq"])
         elif command.get("command") == "request_shutdown":
-            if channel.server:
-                channel.server.should_exit = True
+            channel.request_shutdown()
             worker.join(timeout=config["limits"]["shutdown_seconds"])
             if worker.is_alive():
                 os._exit(3)
             return
         else:
             raise ValueError("unknown control command")
-    if channel.server:
-        channel.server.should_exit = True
+    channel.request_shutdown()
     worker.join(timeout=2)
 
 
