@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import importlib.metadata
 import importlib.util
 import json
@@ -73,14 +74,34 @@ def git(checkout: Path, *args: str) -> bytes:
         raise ValueError("Git snapshot read unavailable") from exc
 
 
+def _snapshot_files(checkout: Path, paths: list[bytes]) -> dict[str, str]:
+    def read(raw: bytes) -> tuple[str, str]:
+        name = os.fsdecode(raw).replace("\\", "/")
+        path = checkout / name
+        return name, file_hash(path) if path.is_file() else "missing"
+
+    files = {}
+    first_error: BaseException | None = None
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(read, raw) for raw in paths]
+        # Observe in sorted path order, but join all work before returning or
+        # raising the original first error (including its explicit cause).
+        for future in futures:
+            try:
+                name, value = future.result()
+                files[name] = value
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+    if first_error is not None:
+        raise first_error
+    return files
+
+
 def snapshot(checkout: Path) -> dict[str, Any]:
     tracked = git(checkout, "ls-files", "-z").split(b"\0")
     untracked = git(checkout, "ls-files", "--others", "--exclude-standard", "-z").split(b"\0")
-    files = {}
-    for raw in sorted(set(tracked + untracked) - {b""}):
-        name = os.fsdecode(raw).replace("\\", "/")
-        path = checkout / name
-        files[name] = file_hash(path) if path.is_file() else "missing"
+    files = _snapshot_files(checkout, sorted(set(tracked + untracked) - {b""}))
     return {"commit": git(checkout, "rev-parse", "HEAD").decode().strip(),
             "diff_hash": digest([git(checkout, "diff", "--binary", "HEAD").hex(), files]),
             "lock_hash": file_hash(checkout / "uv.lock"), "files_hash": digest(files)}
