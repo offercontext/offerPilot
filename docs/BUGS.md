@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Provider SDK 在不调用模型的启动链中提前加载（2026-10-24）
+
+**现象：** 在固定源码加载与网络/进程围栏下，冷解释器导入 ChatPersistenceCoordinator 用时 11.976 秒；原始 importtime 显示 Knowledge provider 首次导入 LiteLLM 的累计墙钟为 9.900 秒。稍后 AI client 的导入仅 0.009 秒，因为 SDK 已加载。该诊断不是完整 API/create_app 初始化测量，不能以这两段差值宣称启动超时已解决，也不能回填历史失败原因。
+
+**根因：** AI client 与 Knowledge provider 都在模块级导入 LiteLLM。Knowledge 包通过 worker 引入 provider，使不调用模型的上下文与 Runtime 初始化也承担 SDK 加载成本；仅调整 AI client 无法消除此处提前加载。
+
+**修复：** 两个原模块级 completion 入口改为首次调用时直接导入并委托 SDK，保留可替换的原调用点、位置/关键字参数、流对象、异常传播及原授权/预算/审计顺序。不新增缓存、线程、重试或评估专用分支，不改超时、HITL、provider_blocks 或来源规则。
+
+**教训与验证边界：** 使用新解释器、原源码加载守卫和禁止 SDK 导入的哨兵，验证两个入口及 API 导入；模拟首次调用检查参数、上下文、流迭代、错误与无新增重试。冷 SDK 成本转移到首次请求，首次调用耗时仍消耗外层原预算，SDK 的 HTTP timeout 不覆盖它之前的模块导入；不承诺总工作消失或真实 Provider 兼容。完整初始化、目标业务恢复路径与发布门禁需分别验证，旧失败和人工结论保留原绑定。
+
 ## Subject 初始化期间的关闭请求丢失并阻塞 ACK 收口（2026-10-24）
 
 **现象：** 冻结候选的两次完整门禁均在 E06 第二周期等待 ready 超时，原始结果保留 incomplete。一次追加的前 222 项加目标联合诊断再次超时：父内 ready 等待 30.003 秒后失败，1.467 秒后才读到 ready；子内关闭请求到达时 server 不存在，1.195 秒后才赋值 server，随后 join 30.008 秒仍有 worker 存活。启动器与 recorder 的 PID 不同，未采集 OS 父子关系，跨进程绝对时间差保留 null；不回填历史根因。

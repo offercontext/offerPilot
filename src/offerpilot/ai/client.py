@@ -9,8 +9,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-from litellm import completion
-
 from offerpilot.ai.types import Assistant, Message, ToolCall
 from offerpilot.ai.tool_runtime.contracts import (
     ProviderToolContract,
@@ -37,6 +35,13 @@ from offerpilot.context_projector.gateway import (
     SingleCandidateAgentTransport,
     normalize_provider_endpoint,
 )
+
+
+def completion(*args: Any, **kwargs: Any) -> Any:
+    """Load the SDK at first use, preserving this module's patchable call boundary."""
+    from litellm import completion as sdk_completion
+
+    return sdk_completion(*args, **kwargs)
 
 
 class ProviderCallError(RuntimeError):
