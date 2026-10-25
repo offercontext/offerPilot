@@ -6,6 +6,7 @@ The runner accepts only a fresh paid-phase admission from the same GitHub run.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -58,8 +59,10 @@ def check_admission(record: Any, metadata: dict[str, str], now: float) -> str:
             not isinstance(helper, str) or len(helper) != 40 or
             any(c not in "0123456789abcdef" for c in helper) or sha == helper
             or sha in {continuation.ORIGINAL_SOURCE_SHA, continuation.ORIGINAL_HELPER_SHA,
+                          continuation.SECOND_SOURCE_SHA, continuation.SECOND_HELPER_SHA,
                           record["predecessor_source_sha"], record["predecessor_helper_sha"]}
             or helper in {continuation.ORIGINAL_SOURCE_SHA, continuation.ORIGINAL_HELPER_SHA,
+                          continuation.SECOND_SOURCE_SHA, continuation.SECOND_HELPER_SHA,
                              record["predecessor_source_sha"], record["predecessor_helper_sha"]}
             or not isinstance(run_id, str) or not run_id or run_id[0] == "0"
             or any(c not in "0123456789" for c in run_id)
@@ -120,6 +123,55 @@ def write_config(data_dir: Path, base_url: str, token: str) -> None:
     os.replace(temporary, data_dir / "config.json")
 
 
+class RequestEvidence:
+    """Exact outgoing bodies from this fixed synthetic harness, never headers.
+
+    The broker has already validated and reserved the request. Durable capture
+    must finish before transport; failure retains that conservative reservation.
+    """
+    def __init__(self, evidence_dir: Path):
+        self._fd = os.open(evidence_dir / "requests.jsonl",
+                           os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        self._count = 0
+        try:
+            directory_fd = os.open(evidence_dir, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            self.close()
+            raise
+
+    def record(self, body: bytes) -> None:
+        if (type(body) is not bytes or not 0 < len(body) <= MAX_BYTES
+                or self._count >= len(OPERATIONS) or self._fd < 0):
+            raise GateError("request_evidence_shape")
+        try:
+            raw_body = body.decode("utf-8", errors="strict")
+        except UnicodeError:
+            raise GateError("request_evidence_shape") from None
+        line = encode({"operation": OPERATIONS[self._count], "ordinal": self._count + 1,
+                       "body_sha256": hashlib.sha256(body).hexdigest(),
+                       "raw_body": raw_body}) + b"\n"
+        try:
+            view = memoryview(line)
+            while view:
+                count = os.write(self._fd, view)
+                if count <= 0:
+                    raise GateError("request_evidence_write")
+                view = view[count:]
+            os.fsync(self._fd)
+        except OSError:
+            raise GateError("request_evidence_write") from None
+        self._count += 1
+
+    def close(self) -> None:
+        if self._fd >= 0:
+            fd, self._fd = self._fd, -1
+            os.close(fd)
+
+
 class ResponseEvidence:
     """Bounded successful synthetic samples survive a later failed matrix turn."""
     def __init__(self, path: Path):
@@ -165,11 +217,22 @@ def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
     # Offline callers are protected by pytest's early loopback-only network guard.
     from scripts.companion_ai_validation.driver import MatrixFailure, run_matrix
 
-    evidence_dir.mkdir(parents=True, exist_ok=False)
-    broker = Broker(evidence_dir / "budget.jsonl", send, source_sha, window=window)
+    evidence_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
+    requests: RequestEvidence | None = None
+
+    def captured_send(body: bytes) -> tuple[int, bytes]:
+        if requests is None:
+            raise GateError("request_evidence_required")
+        requests.record(body)
+        # The new durable I/O cannot extend the broker's original send window.
+        broker._check_window()
+        return send(body)
+
+    broker = Broker(evidence_dir / "budget.jsonl", captured_send, source_sha, window=window)
     outcome: dict[str, Any] = {"passed": False, "error_code": "incomplete"}
     samples: ResponseEvidence | None = None
     try:
+        requests = RequestEvidence(evidence_dir)
         samples = ResponseEvidence(evidence_dir / "responses.jsonl")
         with tempfile.TemporaryDirectory(prefix="offerpilot-companion-owned-") as owned:
             data_dir = Path(owned) / "data"
@@ -201,6 +264,11 @@ def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
     except BaseException:
         outcome = {"passed": False, "error_code": "validation_blocked"}
     finally:
+        if requests is not None:
+            try:
+                requests.close()
+            except OSError:
+                outcome = {"passed": False, "error_code": "request_evidence_write"}
         if samples is not None:
             try:
                 samples.close()

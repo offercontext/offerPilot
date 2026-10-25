@@ -1,7 +1,7 @@
-"""One fixed third batch, linked to two immutable synthetic predecessor archives.
+"""One fixed fourth batch, linked to three immutable synthetic predecessor archives.
 
 Standard library only. No network, credential, caller-selected balance, URL or
-predecessor. Every public verification re-reads both fixed, hash-pinned archives.
+predecessor. Every public verification re-reads all three fixed, hash-pinned archives.
 """
 from __future__ import annotations
 
@@ -19,9 +19,9 @@ import zipfile
 
 ADMISSION_SCHEMA = 2
 CAMPAIGN_ID = "one-shot-20261021"
-CORRECTION_ORDINAL = 2
+CORRECTION_ORDINAL = 3
 # Original schema-1 evidence is immutable; these identities remain explicit for
-# preflight's two-run history check, not caller-selected continuation inputs.
+# preflight's three-run history check, not caller-selected continuation inputs.
 ORIGINAL_RUN_ID = 39736858377
 ORIGINAL_HELPER_RUN_ID = 39699222167
 ORIGINAL_ARTIFACT_ID = 12408325852
@@ -39,34 +39,51 @@ ORIGINAL_MEMBERS = {
 ORIGINAL_EVIDENCE_PATH = Path(__file__).with_name("evidence") / "predecessor-39736858377.zip"
 ORIGINAL_SETTLED = 103_154
 ORIGINAL_REQUESTS = 12
-PREDECESSOR_RUN_ID = 39746585328
-PREDECESSOR_HELPER_RUN_ID = 39744681282
-PREDECESSOR_ARTIFACT_ID = 12412545645
-PREDECESSOR_SOURCE_SHA = "e6cbb73e02863d79332855fadfe75f0e699312ae"
-PREDECESSOR_HELPER_SHA = "64bcd7ab737650415b1d987b1e56681aca6f9fcf"
-PREDECESSOR_TREE_SHA = "e595f61eafc7c3cdd4011c19016892f3a93db15e"
-ARCHIVE_SHA256 = "483e889eb6788f827857fde681ca4e42f627328af537b5113ecbce109ed53dab"
-LEDGER_SHA256 = "f005b4dc89bc2ac46d752a310399bd39c7104da757992ab3a8e0ab1357f8756c"
-ARCHIVE_SIZE = 18554
-MEMBERS = {
-    "budget.jsonl": (45917, LEDGER_SHA256),
+SECOND_RUN_ID = 39746585328
+SECOND_HELPER_RUN_ID = 39744681282
+SECOND_ARTIFACT_ID = 12412545645
+SECOND_SOURCE_SHA = "e6cbb73e02863d79332855fadfe75f0e699312ae"
+SECOND_HELPER_SHA = "64bcd7ab737650415b1d987b1e56681aca6f9fcf"
+SECOND_TREE_SHA = "e595f61eafc7c3cdd4011c19016892f3a93db15e"
+SECOND_ARCHIVE_SHA256 = "483e889eb6788f827857fde681ca4e42f627328af537b5113ecbce109ed53dab"
+SECOND_LEDGER_SHA256 = "f005b4dc89bc2ac46d752a310399bd39c7104da757992ab3a8e0ab1357f8756c"
+SECOND_ARCHIVE_SIZE = 18554
+SECOND_MEMBERS = {
+    "budget.jsonl": (45917, SECOND_LEDGER_SHA256),
     "summary.json": (52171, "ca01395f3fbdfda1a7d7e4b52cc85f34d549c3f9193aba45cddf7271bef300f5"),
     "responses.jsonl": (41194, "0ca8a036d4706514ea3c1f95e04e00dff3831ed41a76024883baabba2cb42c88"),
 }
-EVIDENCE_PATH = Path(__file__).with_name("evidence") / "predecessor-39746585328.zip"
+SECOND_EVIDENCE_PATH = Path(__file__).with_name("evidence") / "predecessor-39746585328.zip"
+PREDECESSOR_RUN_ID = 40060633208
+PREDECESSOR_HELPER_RUN_ID = 40059926016
+PREDECESSOR_ARTIFACT_ID = 12547790764
+PREDECESSOR_SOURCE_SHA = "5b4d7a75ff40a3f8f7cbee9b3e6300bfa6896a10"
+PREDECESSOR_HELPER_SHA = "744fb0f6a716cce3e75e14eb8bf9dfe585aff4c2"
+PREDECESSOR_TREE_SHA = "08a19a7f84868590b8c9a49d288356afac134d11"
+ARCHIVE_SHA256 = "e12dc5ebe12183bf5f673cf941100b0be0eb6902f2fa90abf45d881bb613917d"
+LEDGER_SHA256 = "db3e83e8543468fffd01931ade74bd137a24f0af691e048054a4296c8b98632b"
+ARCHIVE_SIZE = 17747
+MEMBERS = {
+    "budget.jsonl": (45917, LEDGER_SHA256),
+    "summary.json": (51532, "a5d4db3379b91755dbba4ef812e248f3ca47da2d7e74e168bdbb76a9348d18f0"),
+    "responses.jsonl": (40555, "774f62166a735dcd6b7ad61f1f3405db0873f7e9e541d45605afb13a8fa6dc88"),
+}
+EVIDENCE_PATH = Path(__file__).with_name("evidence") / "predecessor-40060633208.zip"
+PRIOR_SETTLED = 315_652
+PRIOR_REQUESTS = 36
 BUDGET = 20_000_000
 RESERVATION = 3_000_000
-PRIOR_SETTLED = 208_516
-PRIOR_REQUESTS = 24
+SECOND_SETTLED = 208_516
+SECOND_REQUESTS = 24
 # Historical evidence keeps its original deadline; a new candidate deadline is
 # not retroactive authorization and cannot rewrite the accepted historical run.
 HISTORICAL_PRICE_VALID_UNTIL = int(datetime(2026, 10, 24, tzinfo=timezone.utc).timestamp())
 PRICE_VALID_UNTIL = int(datetime(2026, 10, 26, tzinfo=timezone.utc).timestamp())
 OPERATIONS = (
-    "independent_play", "shared_wait_after_absence", "actual_color_choice",
-    "unpressured_leisure", "paused_gap", "serious_mixed_work",
-    "work_finish_continuation", "boat_specific_memory", "cloud_specific_memory",
-    "same_type_ambiguity", "deleted_source_memory", "withdrawal_and_boundaries",
+    "shared_wait_after_absence", "actual_color_choice", "serious_mixed_work",
+    "work_finish_continuation", "same_type_ambiguity", "deleted_source_memory",
+    "greeting_without_page", "greeting_with_page", "third_party_experience",
+    "future_invitation", "explicit_work_format", "unseen_ordinary_greeting",
 )
 OPERATIONS_SHA256 = hashlib.sha256(json.dumps(
     OPERATIONS, ensure_ascii=False, separators=(",", ":"), allow_nan=False,
@@ -194,36 +211,63 @@ def _historical_lineage() -> dict[str, Any]:
     }
 
 
-def _correction_state(count: int, settled: int, reserved: int, *,
-                      closed: bool = False) -> dict[str, Any]:
+def _third_historical_lineage() -> dict[str, Any]:
+    """Exactly ordinal 2's immutable lineage; no candidate repricing."""
     return {
-        **_historical_lineage(), "schema": 2, "source_sha": PREDECESSOR_SOURCE_SHA,
+        "campaign_id": CAMPAIGN_ID, "correction_ordinal": 2,
+        "predecessor_run_id": SECOND_RUN_ID, "predecessor_artifact_id": SECOND_ARTIFACT_ID,
+        "predecessor_source_sha": SECOND_SOURCE_SHA, "predecessor_helper_sha": SECOND_HELPER_SHA,
+        "predecessor_archive_sha256": SECOND_ARCHIVE_SHA256,
+        "predecessor_ledger_sha256": SECOND_LEDGER_SHA256,
+        "prior_settled_micro_cny": SECOND_SETTLED, "prior_reserved_micro_cny": 0,
+        "prior_request_count": SECOND_REQUESTS, "budget_micro_cny": BUDGET,
+        "operations_sha256": HISTORICAL_OPERATIONS_SHA256,
+        "price_valid_until": int(datetime(2026, 10, 26, tzinfo=timezone.utc).timestamp()),
+    }
+
+
+def _correction_state(count: int, settled: int, reserved: int, *,
+                      closed: bool = False, third: bool = False) -> dict[str, Any]:
+    prior_requests = SECOND_REQUESTS if third else ORIGINAL_REQUESTS
+    prior_settled = SECOND_SETTLED if third else ORIGINAL_SETTLED
+    return {
+        **(_third_historical_lineage() if third else _historical_lineage()), "schema": 2,
+        "source_sha": PREDECESSOR_SOURCE_SHA if third else SECOND_SOURCE_SHA,
         "request_count": count, "settled_micro_cny": settled,
         "reserved_micro_cny": reserved, "halted": closed,
-        "batch_request_count": count, "lifetime_request_count": ORIGINAL_REQUESTS + count,
-        "batch_settled_micro_cny": settled - ORIGINAL_SETTLED,
+        "batch_request_count": count, "lifetime_request_count": prior_requests + count,
+        "batch_settled_micro_cny": settled - prior_settled,
         "batch_reserved_micro_cny": reserved, "lifetime_settled_micro_cny": settled,
         "lifetime_reserved_micro_cny": reserved, "lifetime_liability_micro_cny": settled + reserved,
         "lifetime_remaining_micro_cny": BUDGET - settled - reserved,
     }
 
 
-def _replay_correction_ledger(raw: bytes) -> dict[str, Any]:
-    """Replay exactly ordinal 1 from its cumulative opening, not from zero.
+def _replay_correction_ledger(raw: bytes, *, third: bool = False) -> dict[str, Any]:
+    """Replay the fixed ordinal 1 or 2 ledger from its exact cumulative opening.
 
-    The 105362 micro-CNY batch delta is not the 208516 lifetime liability;
-    original spending is inherited once, never refunded or added twice.
+    Historical batch deltas never replace lifetime liability. This private
+    selector accepts only the two compiled historical schemas, not caller
+    balances, new ordinals, repricing or arbitrary continuation evidence.
     """
+    prior_settled = SECOND_SETTLED if third else ORIGINAL_SETTLED
+    prior_requests = SECOND_REQUESTS if third else ORIGINAL_REQUESTS
+    expected_settled = PRIOR_SETTLED if third else SECOND_SETTLED
+    expected_requests = PRIOR_REQUESTS if third else SECOND_REQUESTS
+
+    def state(count: int, settled: int, reserved: int, *, closed: bool = False) -> dict[str, Any]:
+        return _correction_state(count, settled, reserved, closed=closed, third=third)
+
     rows = _lines(raw)
-    state_keys = set(_correction_state(0, ORIGINAL_SETTLED, 0))
+    state_keys = set(state(0, prior_settled, 0))
     _demand(len(rows) == 2 + 3 * len(HISTORICAL_OPERATIONS))
     _demand(set(rows[0]) == state_keys | {"event"}
-            and _exact(rows[0], {**_correction_state(0, ORIGINAL_SETTLED, 0), "event": "created"}))
-    settled = ORIGINAL_SETTLED
+            and _exact(rows[0], {**state(0, prior_settled, 0), "event": "created"}))
+    settled = prior_settled
     for index, operation in enumerate(HISTORICAL_OPERATIONS):
         reserve, settlement, complete = rows[1 + index * 3:4 + index * 3]
         _demand(set(reserve) == state_keys | {"event", "operation", "body_sha256"}
-                and _exact(reserve, {**_correction_state(index + 1, settled, RESERVATION),
+                and _exact(reserve, {**state(index + 1, settled, RESERVATION),
                                     "event": "reserved", "operation": operation})
                 and isinstance(reserve["body_sha256"], str)
                 and bool(_HASH.fullmatch(reserve["body_sha256"]))
@@ -239,18 +283,18 @@ def _replay_correction_ledger(raw: bytes) -> dict[str, Any]:
                 and 0 <= cost <= RESERVATION)
         assert isinstance(cost, int)
         settled += cost
-        _demand(_exact(settlement, {**_correction_state(index + 1, settled, 0),
+        _demand(_exact(settlement, {**state(index + 1, settled, 0),
                                     "event": "settled", "operation": operation}))
         _demand(set(complete) == state_keys | {"event", "operation", "calls"}
-                and _exact(complete, {**_correction_state(index + 1, settled, 0),
+                and _exact(complete, {**state(index + 1, settled, 0),
                                       "event": "stage_complete", "operation": operation, "calls": 1}))
-    _demand(settled == PRIOR_SETTLED and ORIGINAL_REQUESTS + len(HISTORICAL_OPERATIONS) == PRIOR_REQUESTS)
+    _demand(settled == expected_settled and prior_requests + len(HISTORICAL_OPERATIONS) == expected_requests)
     # Only the final, normally closed row may set halted=true. Unknown usage,
     # extra attempts, incomplete stages and outstanding reservations all block.
     _demand(set(rows[-1]) == state_keys | {"event"}
-            and _exact(rows[-1], {**_correction_state(len(HISTORICAL_OPERATIONS), settled, 0, closed=True),
+            and _exact(rows[-1], {**state(len(HISTORICAL_OPERATIONS), settled, 0, closed=True),
                                   "event": "closed"}))
-    return _correction_state(len(HISTORICAL_OPERATIONS), settled, 0)
+    return state(len(HISTORICAL_OPERATIONS), settled, 0)
 
 
 def _archive_members(raw: bytes, *, size: int, digest: str,
@@ -310,9 +354,16 @@ def _verify_original_archive(raw: bytes) -> dict[str, Any]:
     return state
 
 
+def _verify_second_archive(raw: bytes) -> dict[str, Any]:
+    members = _archive_members(raw, size=SECOND_ARCHIVE_SIZE, digest=SECOND_ARCHIVE_SHA256, expected=SECOND_MEMBERS)
+    state = _replay_correction_ledger(members["budget.jsonl"])
+    _verify_dialogue(members, state, schema=2)
+    return state
+
+
 def _verify_archive(raw: bytes) -> dict[str, Any]:
     members = _archive_members(raw, size=ARCHIVE_SIZE, digest=ARCHIVE_SHA256, expected=MEMBERS)
-    state = _replay_correction_ledger(members["budget.jsonl"])
+    state = _replay_correction_ledger(members["budget.jsonl"], third=True)
     _verify_dialogue(members, state, schema=2)
     return state
 
@@ -340,17 +391,23 @@ def _read_evidence(path: Path, size: int) -> bytes:
 
 
 def verified_predecessor() -> Predecessor:
-    """No caller path/balance/ordinal; verify both pinned archives on every call."""
+    """No caller path/balance/ordinal; verify all three pinned archives on every call."""
     original = _verify_original_archive(_read_evidence(ORIGINAL_EVIDENCE_PATH, ORIGINAL_ARCHIVE_SIZE))
-    correction = _verify_archive(_read_evidence(EVIDENCE_PATH, ARCHIVE_SIZE))
+    correction = _verify_second_archive(_read_evidence(SECOND_EVIDENCE_PATH, SECOND_ARCHIVE_SIZE))
     _demand(_exact(correction, {
         "prior_settled_micro_cny": original["settled_micro_cny"],
         "prior_reserved_micro_cny": original["reserved_micro_cny"],
         "prior_request_count": original["request_count"],
     }))
-    return Predecessor(settled_micro_cny=correction["lifetime_settled_micro_cny"],
-                       reserved_micro_cny=correction["lifetime_reserved_micro_cny"],
-                       request_count=correction["lifetime_request_count"])
+    third = _verify_archive(_read_evidence(EVIDENCE_PATH, ARCHIVE_SIZE))
+    _demand(_exact(third, {
+        "prior_settled_micro_cny": correction["lifetime_settled_micro_cny"],
+        "prior_reserved_micro_cny": correction["lifetime_reserved_micro_cny"],
+        "prior_request_count": correction["lifetime_request_count"],
+    }))
+    return Predecessor(settled_micro_cny=third["lifetime_settled_micro_cny"],
+                       reserved_micro_cny=third["lifetime_reserved_micro_cny"],
+                       request_count=third["lifetime_request_count"])
 
 
 def lineage_fields() -> dict[str, Any]:

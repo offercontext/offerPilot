@@ -29,7 +29,10 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parents[1]
 BODY_LIMIT = 262144
 _OWNED_DATA_DIRS: set[Path] = set()
-HISTORICAL_FAILURE_CASES = (2, 7, 10, 12)
+HISTORICAL_FAILURE_CASES = (2, 7, 10)
+HISTORICAL_FAILURE_OPERATIONS = (
+    "shared_wait_after_absence", "work_finish_continuation", "same_type_ambiguity",
+)
 HOLDOUTS = (
     ("unseen_greeting", "早呀，今天阳光不错。", None),
     ("unseen_leisure", "今天只想赖着放空，不做任何安排。你最近在玩什么？", None),
@@ -330,7 +333,7 @@ def run_capture(*, fake_only: bool, label: str) -> Path:
         "capture_boundary": "complete product HTTP request body at fake upstream, before SSE reply",
         "execution_mode": "offline-model; no provider broker, paid ledger, admission, or continuation",
         "source": sources, "historical_failure_case_numbers": list(HISTORICAL_FAILURE_CASES),
-        "historical_failure_operations": [driver.OPERATIONS[n - 1] for n in HISTORICAL_FAILURE_CASES],
+        "historical_failure_operations": list(HISTORICAL_FAILURE_OPERATIONS),
         "request_count": len(records), "requests": records,
     }
     (evidence / "requests.json").write_bytes(_encode(report) + b"\n")

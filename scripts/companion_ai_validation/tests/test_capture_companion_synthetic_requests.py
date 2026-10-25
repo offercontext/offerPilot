@@ -197,7 +197,9 @@ def test_full_capture_uses_real_product_without_env_credentials_or_tool_executio
     assert not report["historical_paid_payloads"]
     assert report["provider_calls"] == report["tool_executions"] == 0
     assert report["request_count"] == 12 + len(capture.HOLDOUTS)
-    assert report["historical_failure_case_numbers"] == [2, 7, 10, 12]
+    assert report["historical_failure_case_numbers"] == [2, 7, 10]
+    assert report["historical_failure_operations"] == [
+        "shared_wait_after_absence", "work_finish_continuation", "same_type_ambiguity"]
     assert report["source"]["working_tree_sha256"]["src/offerpilot/companion/context.py"]
     for record in report["requests"]:
         assert json.loads(record["body_utf8"]) == record["payload"]

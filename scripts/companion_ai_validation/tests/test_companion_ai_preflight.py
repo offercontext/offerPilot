@@ -1,4 +1,4 @@
-"""Offline fixture coverage for the pinned third-batch GitHub approval chain."""
+"""Offline fixture coverage for the pinned fourth-batch GitHub approval chain."""
 
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -50,9 +50,9 @@ def jobs_for(value, phase="before"):
         status = "in_progress" if current and name == active else "completed"
         conclusion = None if status == "in_progress" else "success"
         if not current:
-            if name == p.PAID_JOB and value["id"] not in (c.ORIGINAL_RUN_ID, c.PREDECESSOR_RUN_ID):
+            if name == p.PAID_JOB and value["id"] not in (c.ORIGINAL_RUN_ID, c.SECOND_RUN_ID, c.PREDECESSOR_RUN_ID):
                 conclusion = "skipped"
-            if name == p.PREFLIGHT_JOB and value["id"] not in (c.ORIGINAL_RUN_ID, c.PREDECESSOR_RUN_ID):
+            if name == p.PREFLIGHT_JOB and value["id"] not in (c.ORIGINAL_RUN_ID, c.SECOND_RUN_ID, c.PREDECESSOR_RUN_ID):
                 conclusion = "skipped"
         if name == p.PAID_JOB and current and phase == "before":
             status, conclusion = "queued", None
@@ -82,26 +82,37 @@ def historical_cases():
         "OfferPilot-Companion-AI-Request: one-shot-20261021")
     correction_marker = (
         "test: request OfferPilot companion real AI validation\n\n"
-        f"OfferPilot-Companion-AI-Helper: {c.PREDECESSOR_HELPER_SHA}\n"
+        f"OfferPilot-Companion-AI-Helper: {c.SECOND_HELPER_SHA}\n"
         "OfferPilot-Companion-AI-Request: one-shot-20261021-correction-1\n"
         f"OfferPilot-Companion-AI-Predecessor: {c.ORIGINAL_RUN_ID}\n"
         f"OfferPilot-Companion-AI-Ledger: {c.ORIGINAL_LEDGER_SHA256}")
+    third_marker = (
+        "test: request OfferPilot companion real AI validation\n\n"
+        f"OfferPilot-Companion-AI-Helper: {c.PREDECESSOR_HELPER_SHA}\n"
+        "OfferPilot-Companion-AI-Request: one-shot-20261021-correction-2\n"
+        f"OfferPilot-Companion-AI-Predecessor: {c.SECOND_RUN_ID}\n"
+        f"OfferPilot-Companion-AI-Ledger: {c.SECOND_LEDGER_SHA256}")
     return (
         {"run_id": c.ORIGINAL_RUN_ID, "helper_run_id": c.ORIGINAL_HELPER_RUN_ID,
          "source_sha": c.ORIGINAL_SOURCE_SHA, "helper_sha": c.ORIGINAL_HELPER_SHA,
          "tree_sha": c.ORIGINAL_TREE_SHA, "artifact_id": c.ORIGINAL_ARTIFACT_ID,
          "archive_size": c.ORIGINAL_ARCHIVE_SIZE, "archive_sha256": c.ORIGINAL_ARCHIVE_SHA256,
          "marker": original_marker},
+        {"run_id": c.SECOND_RUN_ID, "helper_run_id": c.SECOND_HELPER_RUN_ID,
+         "source_sha": c.SECOND_SOURCE_SHA, "helper_sha": c.SECOND_HELPER_SHA,
+         "tree_sha": c.SECOND_TREE_SHA, "artifact_id": c.SECOND_ARTIFACT_ID,
+         "archive_size": c.SECOND_ARCHIVE_SIZE, "archive_sha256": c.SECOND_ARCHIVE_SHA256,
+         "marker": correction_marker},
         {"run_id": c.PREDECESSOR_RUN_ID, "helper_run_id": c.PREDECESSOR_HELPER_RUN_ID,
          "source_sha": c.PREDECESSOR_SOURCE_SHA, "helper_sha": c.PREDECESSOR_HELPER_SHA,
          "tree_sha": c.PREDECESSOR_TREE_SHA, "artifact_id": c.PREDECESSOR_ARTIFACT_ID,
          "archive_size": c.ARCHIVE_SIZE, "archive_sha256": c.ARCHIVE_SHA256,
-         "marker": correction_marker},
+         "marker": third_marker},
     )
 
 
-def fixture(phase="before", count=6):
-    assert count >= 6
+def fixture(phase="before", count=8):
+    assert count >= 8
     env = {
         p.HELPER_VAR: H, p.REQUEST_VAR: R, "GITHUB_RUN_ATTEMPT": "1",
         "GITHUB_EVENT_NAME": "push", "GITHUB_REPOSITORY": p.REPOSITORY,
@@ -118,10 +129,12 @@ def fixture(phase="before", count=6):
     }
     runs = [run(1, c.ORIGINAL_HELPER_SHA, run_id=c.ORIGINAL_HELPER_RUN_ID),
             run(2, c.ORIGINAL_SOURCE_SHA, run_id=c.ORIGINAL_RUN_ID),
-            run(3, c.PREDECESSOR_HELPER_SHA, run_id=c.PREDECESSOR_HELPER_RUN_ID),
-            run(4, c.PREDECESSOR_SOURCE_SHA, run_id=c.PREDECESSOR_RUN_ID),
-            run(5, H, run_id=1)]
-    runs.extend(run(n, f"{n:040x}") for n in range(6, count))
+            run(3, c.SECOND_HELPER_SHA, run_id=c.SECOND_HELPER_RUN_ID),
+            run(4, c.SECOND_SOURCE_SHA, run_id=c.SECOND_RUN_ID),
+            run(5, c.PREDECESSOR_HELPER_SHA, run_id=c.PREDECESSOR_HELPER_RUN_ID),
+            run(6, c.PREDECESSOR_SOURCE_SHA, run_id=c.PREDECESSOR_RUN_ID),
+            run(7, H, run_id=1)]
+    runs.extend(run(n, f"{n:040x}") for n in range(8, count))
     runs.append(run(count, R, current=True))
     data = {
         f"git/commits/{R}": p.Response({"sha": R, "tree": {"sha": TREE},
@@ -191,7 +204,7 @@ def jobs(values, run_id=1):
 def test_success_is_bound_to_exact_published_helper_and_current_request(phase):
     calls = []
     assert execute(fixture(phase), phase, calls) == {"ok": True, "helper_sha": H, "request_sha": R}
-    assert ("actions/runs/6/approvals" in calls) is (phase == "paid")
+    assert ("actions/runs/8/approvals" in calls) is (phase == "paid")
     assert not any("secrets" in value or "variables" in value for value in calls)
 
 
@@ -307,7 +320,7 @@ def test_cli_keeps_quote_anchor_across_slow_event_and_admission(stage, wall_roll
 
 def test_before_accepts_unmaterialized_paid_but_never_missing_preflight():
     values = fixture()
-    response = values[2][p.page_path("actions/runs/6/jobs?filter=all", 1)]
+    response = values[2][p.page_path("actions/runs/8/jobs?filter=all", 1)]
     response.data["jobs"].pop()
     response.data["total_count"] -= 1
     assert execute(values)["ok"]
@@ -414,7 +427,7 @@ def test_extra_deployment_policy_is_rejected_even_with_allowed_branch():
 ])
 def test_paid_phase_requires_actual_current_run_owner_environment_approval(mutation):
     values = fixture("paid")
-    mutation(values[2]["actions/runs/6/approvals"].data)
+    mutation(values[2]["actions/runs/8/approvals"].data)
     with pytest.raises(p.Blocked, match="OWNER_APPROVAL_UNVERIFIED"):
         execute(values, "paid")
 
@@ -466,9 +479,9 @@ def test_missing_duplicate_unknown_or_wrong_identity_jobs_are_rejected(mutation)
 @pytest.mark.parametrize("phase", ["before", "paid"])
 def test_current_run_cannot_hide_additional_jobs(phase):
     values = fixture(phase)
-    current_jobs = jobs(values, 6)
+    current_jobs = jobs(values, 8)
     current_jobs.append({**current_jobs[-1], "id": 987, "name": "Surprise provider request"})
-    values[2][p.page_path("actions/runs/6/jobs?filter=all", 1)].data["total_count"] += 1
+    values[2][p.page_path("actions/runs/8/jobs?filter=all", 1)].data["total_count"] += 1
     with pytest.raises(p.Blocked, match="JOB_HISTORY_INVALID"):
         execute(values, phase)
 
@@ -521,7 +534,7 @@ def test_missing_or_inconsistent_history_pages_are_rejected(failure):
 
 
 def test_deleted_run_cannot_be_hidden_by_adjusting_total_count():
-    values = fixture(count=7)
+    values = fixture(count=9)
     response = values[2][p.page_path(RUNS_PATH, 1)]
     response.data["workflow_runs"].pop(0)
     response.data["total_count"] -= 1
@@ -613,11 +626,11 @@ def test_cli_only_writes_admission_after_paid_validation(tmp_path, monkeypatch, 
     assert p.main(["--phase", "paid", "--helper-sha", H, "--request-sha", R,
                    "--admission-file", str(admission)]) == 0
     assert json.loads(capsys.readouterr().out) == {"ok": True, "helper_sha": H, "request_sha": R}
-    assert json.loads(admission.read_text())["run_id"] == "6"
+    assert json.loads(admission.read_text())["run_id"] == "8"
     assert p.main(["--phase", "before", "--admission-file", str(tmp_path / "no.json")]) == 1
     assert not (tmp_path / "no.json").exists()
     assert json.loads(capsys.readouterr().out)["error_code"] == "ADMISSION_PHASE_INVALID"
-    data["actions/runs/6/approvals"].data[0]["state"] = "rejected"
+    data["actions/runs/8/approvals"].data[0]["state"] = "rejected"
     assert p.main(["--phase", "paid", "--admission-file", str(tmp_path / "denied.json")]) == 1
     assert not (tmp_path / "denied.json").exists()
     assert "synthetic-github-token" not in capsys.readouterr().out
@@ -660,21 +673,23 @@ def test_registration_inspection_cannot_arm_or_write_admission(monkeypatch):
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
-def test_only_two_exact_paid_runs_are_exempt_and_current_approval_is_separate(phase):
+def test_only_three_exact_paid_runs_are_exempt_and_current_approval_is_separate(phase):
     calls = []
     assert execute(fixture(phase), phase, calls)['ok']
     assert f'actions/runs/{c.ORIGINAL_RUN_ID}/approvals' in calls
     assert f'actions/artifacts/{c.ORIGINAL_ARTIFACT_ID}' in calls
+    assert f'actions/runs/{c.SECOND_RUN_ID}/approvals' in calls
+    assert f'actions/artifacts/{c.SECOND_ARTIFACT_ID}' in calls
     assert f'actions/runs/{c.PREDECESSOR_RUN_ID}/approvals' in calls
-    assert ('actions/runs/6/approvals' in calls) is (phase == 'paid')
+    assert ('actions/runs/8/approvals' in calls) is (phase == 'paid')
     assert f'actions/artifacts/{c.PREDECESSOR_ARTIFACT_ID}' in calls
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
 @pytest.mark.parametrize('mutation', ['missing', 'sha', 'failure', 'rerun', 'paid_skipped',
                                       'paid_unknown', 'helper_sha', 'helper_failure', 'order'])
-@pytest.mark.parametrize('batch_index', [0, 1])
-def test_both_pinned_histories_are_mandatory_not_any_successful_runs(phase, mutation, batch_index):
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
+def test_all_pinned_histories_are_mandatory_not_any_successful_runs(phase, mutation, batch_index):
     values = fixture(phase)
     rows = history(values)
     batch = historical_cases()[batch_index]
@@ -712,7 +727,7 @@ def test_both_pinned_histories_are_mandatory_not_any_successful_runs(phase, muta
     ('digest', None), ('digest', 'sha256:' + '0' * 64), ('expired', True),
     ('url', 'https://untrusted.invalid/artifact'),
 ])
-@pytest.mark.parametrize('batch_index', [0, 1])
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
 def test_artifact_must_remain_available_and_exact_in_both_phases(phase, field, value, batch_index):
     values = fixture(phase)
     artifact_id = historical_cases()[batch_index]['artifact_id']
@@ -725,7 +740,7 @@ def test_artifact_must_remain_available_and_exact_in_both_phases(phase, field, v
     ('id', 1), ('repository_id', 1), ('head_repository_id', 1),
     ('head_branch', 'master'), ('head_sha', H),
 ])
-@pytest.mark.parametrize('batch_index', [0, 1])
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
 def test_artifact_cannot_belong_to_another_run_or_source(field, value, batch_index):
     values = fixture()
     artifact_id = historical_cases()[batch_index]['artifact_id']
@@ -738,7 +753,7 @@ def test_artifact_cannot_belong_to_another_run_or_source(field, value, batch_ind
     ('sha', H), ('tree', {'sha': TREE}), ('parents', []),
     ('parents', [{'sha': H}]), ('message', 'same source but unreviewed'),
 ])
-@pytest.mark.parametrize('batch_index', [0, 1])
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
 def test_each_request_source_is_bound_to_its_exact_helper_tree(field, value, batch_index):
     values = fixture()
     source_sha = historical_cases()[batch_index]['source_sha']
@@ -748,7 +763,7 @@ def test_each_request_source_is_bound_to_its_exact_helper_tree(field, value, bat
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
-@pytest.mark.parametrize('batch_index', [0, 1])
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
 def test_either_missing_historical_approval_is_not_forgiven_by_current_approval(phase, batch_index):
     values = fixture(phase)
     run_id = historical_cases()[batch_index]['run_id']
@@ -757,7 +772,7 @@ def test_either_missing_historical_approval_is_not_forgiven_by_current_approval(
         execute(values, phase)
 
 
-@pytest.mark.parametrize('path_name', ['ORIGINAL_EVIDENCE_PATH', 'EVIDENCE_PATH'])
+@pytest.mark.parametrize('path_name', ['ORIGINAL_EVIDENCE_PATH', 'SECOND_EVIDENCE_PATH', 'EVIDENCE_PATH'])
 def test_missing_local_evidence_blocks_before_github_and_admission(tmp_path, monkeypatch, path_name):
     monkeypatch.setattr(c, path_name, tmp_path / 'absent.zip')
     calls = []
@@ -769,7 +784,7 @@ def test_missing_local_evidence_blocks_before_github_and_admission(tmp_path, mon
     assert not (tmp_path / 'admission.json').exists()
 
 
-@pytest.mark.parametrize('batch_index', [0, 1])
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
 def test_correction_marker_cannot_reuse_either_historical_request_marker(batch_index):
     values = fixture()
     source_sha = historical_cases()[batch_index]['source_sha']
@@ -778,7 +793,7 @@ def test_correction_marker_cannot_reuse_either_historical_request_marker(batch_i
     values[2][f'git/commits/{R}'].data['message'] = marker
     with pytest.raises(p.Blocked):
         execute(values)
-    assert 'correction-2' in p.marker(H)
+    assert 'correction-3' in p.marker(H)
     assert str(c.PREDECESSOR_RUN_ID) in p.marker(H) and c.LEDGER_SHA256 in p.marker(H)
 
 
@@ -786,6 +801,9 @@ def test_correction_marker_cannot_reuse_either_historical_request_marker(batch_i
     f'actions/artifacts/{c.ORIGINAL_ARTIFACT_ID + 1}',
     f'actions/artifacts/{c.ORIGINAL_ARTIFACT_ID}/zip',
     f'actions/artifacts/{c.ORIGINAL_ARTIFACT_ID}?alternate=true',
+    f'actions/artifacts/{c.SECOND_ARTIFACT_ID + 1}',
+    f'actions/artifacts/{c.SECOND_ARTIFACT_ID}/zip',
+    f'actions/artifacts/{c.SECOND_ARTIFACT_ID}?alternate=true',
     f'actions/artifacts/{c.PREDECESSOR_ARTIFACT_ID + 1}',
     f'actions/artifacts/{c.PREDECESSOR_ARTIFACT_ID}/zip',
     f'actions/artifacts/{c.PREDECESSOR_ARTIFACT_ID}?alternate=true',
@@ -799,6 +817,7 @@ def test_artifact_extension_is_exact_metadata_only_no_download_fallback(path, mo
 
 @pytest.mark.parametrize('key', [p.HELPER_VAR, p.REQUEST_VAR])
 @pytest.mark.parametrize('sha', [c.ORIGINAL_HELPER_SHA, c.ORIGINAL_SOURCE_SHA,
+                                  c.SECOND_HELPER_SHA, c.SECOND_SOURCE_SHA,
                                   c.PREDECESSOR_HELPER_SHA, c.PREDECESSOR_SOURCE_SHA])
 def test_previous_helper_or_request_cannot_be_rearmed(key, sha):
     values, calls = fixture(), []
@@ -825,11 +844,11 @@ def test_numeric_metadata_must_be_integer_not_float_or_boolean(target):
     elif target == 'workflow':
         values[2]['actions/workflows/companion-real-ai.yml'].data['id'] = float(WORKFLOW_ID)
     elif target == 'reviewer':
-        values[2]['actions/runs/6/approvals'].data[0]['user']['id'] = float(p.REVIEWER_ID)
+        values[2]['actions/runs/8/approvals'].data[0]['user']['id'] = float(p.REVIEWER_ID)
     elif target == 'review_environment':
-        values[2]['actions/runs/6/approvals'].data[0]['environments'][0]['id'] = float(ENV_ID)
+        values[2]['actions/runs/8/approvals'].data[0]['environments'][0]['id'] = float(ENV_ID)
     else:
-        jobs(values, 6)[0]['run_attempt'] = True
+        jobs(values, 8)[0]['run_attempt'] = True
     with pytest.raises(p.Blocked):
         execute(values, 'paid')
 
@@ -937,7 +956,7 @@ def test_step_delay_between_real_producer_and_runner_does_not_refresh_admission(
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
-@pytest.mark.parametrize('left', [0, 1, 2, 3])
+@pytest.mark.parametrize('left', [0, 1, 2, 3, 4, 5])
 def test_every_historical_chain_boundary_is_strictly_ordered(phase, left):
     values = fixture(phase)
     rows = history(values)
@@ -948,7 +967,7 @@ def test_every_historical_chain_boundary_is_strictly_ordered(phase, left):
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
-@pytest.mark.parametrize('index', [0, 1, 2, 3])
+@pytest.mark.parametrize('index', [0, 1, 2, 3, 4, 5])
 def test_neither_missing_pair_can_be_hidden_as_an_ordinary_skipped_run(phase, index):
     values = fixture(phase)
     row = history(values)[index]
@@ -964,13 +983,13 @@ def test_neither_missing_pair_can_be_hidden_as_an_ordinary_skipped_run(phase, in
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
-@pytest.mark.parametrize('source', ['original', 'predecessor', 'new'])
+@pytest.mark.parametrize('source', ['original', 'second', 'predecessor', 'new'])
 @pytest.mark.parametrize('conclusion', ['success', 'failure', 'cancelled', 'timed_out',
                                       'neutral', 'action_required', 'unknown', None])
-def test_third_paid_run_is_never_exempt_even_with_a_pinned_source(phase, source, conclusion):
-    values = fixture(phase, count=7)
+def test_fourth_paid_run_is_never_exempt_even_with_a_pinned_source(phase, source, conclusion):
+    values = fixture(phase, count=9)
     row = history(values)[-2]
-    sha = {'original': c.ORIGINAL_SOURCE_SHA, 'predecessor': c.PREDECESSOR_SOURCE_SHA,
+    sha = {'original': c.ORIGINAL_SOURCE_SHA, 'second': c.SECOND_SOURCE_SHA, 'predecessor': c.PREDECESSOR_SOURCE_SHA,
            'new': 'f' * 40}[source]
     row['head_sha'] = sha
     for job in jobs(values, row['id']):
@@ -981,7 +1000,7 @@ def test_third_paid_run_is_never_exempt_even_with_a_pinned_source(phase, source,
 
 
 @pytest.mark.parametrize('phase', ['before', 'paid'])
-@pytest.mark.parametrize('batch_index', [0, 1])
+@pytest.mark.parametrize('batch_index', [0, 1, 2])
 @pytest.mark.parametrize('field,value', [('sha', H), ('tree', {'sha': TREE})])
 def test_each_historical_helper_must_match_its_pinned_tree(phase, batch_index, field, value):
     values = fixture(phase)
@@ -995,7 +1014,7 @@ def test_each_historical_helper_must_match_its_pinned_tree(phase, batch_index, f
 @pytest.mark.parametrize('mutation', ['campaign', 'predecessor', 'ledger', 'extra_line'])
 def test_first_correction_marker_must_refer_to_original_run_and_ledger(phase, mutation):
     values = fixture(phase)
-    request = values[2][f'git/commits/{c.PREDECESSOR_SOURCE_SHA}'].data
+    request = values[2][f'git/commits/{c.SECOND_SOURCE_SHA}'].data
     message = request['message']
     if mutation == 'campaign':
         message = message.replace('correction-1', 'correction-2')
@@ -1010,12 +1029,12 @@ def test_first_correction_marker_must_refer_to_original_run_and_ledger(phase, mu
         execute(values, phase)
 
 
-def test_second_correction_marker_and_quote_deadline_are_explicit_fixed_pins():
+def test_third_correction_marker_and_quote_deadline_are_explicit_fixed_pins():
     assert p.marker(H) == (
         'test: request OfferPilot companion real AI validation\n\n'
         f'OfferPilot-Companion-AI-Helper: {H}\n'
-        'OfferPilot-Companion-AI-Request: one-shot-20261021-correction-2\n'
-        'OfferPilot-Companion-AI-Predecessor: 39746585328\n'
+        'OfferPilot-Companion-AI-Request: one-shot-20261021-correction-3\n'
+        'OfferPilot-Companion-AI-Predecessor: 40060633208\n'
         f'OfferPilot-Companion-AI-Ledger: {c.LEDGER_SHA256}')
     assert p.PRICE_VALID_UNTIL == broker.PRICE_VALID_UNTIL == c.PRICE_VALID_UNTIL == int(
         datetime(2026, 10, 26, tzinfo=timezone.utc).timestamp())
@@ -1035,7 +1054,28 @@ def test_reader_permits_both_pinned_artifact_metadata_ids_and_no_download(monkey
     reader = p.GitHubReader('synthetic-token')
     monkeypatch.setattr(reader.opener, 'open', open_request)
     reader(f'actions/artifacts/{c.ORIGINAL_ARTIFACT_ID}')
+    reader(f'actions/artifacts/{c.SECOND_ARTIFACT_ID}')
     reader(f'actions/artifacts/{c.PREDECESSOR_ARTIFACT_ID}')
     assert [request.full_url for request in requests] == [
-        p.API + 'actions/artifacts/12408325852', p.API + 'actions/artifacts/12412545645']
+        p.API + 'actions/artifacts/12408325852', p.API + 'actions/artifacts/12412545645',
+        p.API + 'actions/artifacts/12547790764']
     assert all(request.method == 'GET' for request in requests)
+
+
+@pytest.mark.parametrize('phase', ['before', 'paid'])
+@pytest.mark.parametrize('mutation', ['campaign', 'predecessor', 'ledger', 'extra_line'])
+def test_second_correction_marker_must_refer_to_second_run_and_ledger(phase, mutation):
+    values = fixture(phase)
+    request = values[2][f'git/commits/{c.PREDECESSOR_SOURCE_SHA}'].data
+    message = request['message']
+    if mutation == 'campaign':
+        message = message.replace('correction-2', 'correction-3')
+    elif mutation == 'predecessor':
+        message = message.replace(str(c.SECOND_RUN_ID), str(c.ORIGINAL_RUN_ID))
+    elif mutation == 'ledger':
+        message = message.replace(c.SECOND_LEDGER_SHA256, c.ORIGINAL_LEDGER_SHA256)
+    else:
+        message += '\n\n'
+    request['message'] = message
+    with pytest.raises(p.Blocked, match='PREDECESSOR_SOURCE_MISMATCH'):
+        execute(values, phase)

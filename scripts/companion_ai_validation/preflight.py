@@ -1,4 +1,4 @@
-"""Read-only, fail-closed gate for the pinned second cumulative correction.
+"""Read-only, fail-closed gate for the pinned third cumulative correction.
 
 Only GitHub runner metadata, the push event and explicitly injected Actions vars
 are inputs. No product settings, local credentials, historical desktop helpers,
@@ -68,7 +68,7 @@ def marker(helper_sha: str) -> str:
     return (
         "test: request OfferPilot companion real AI validation\n\n"
         f"OfferPilot-Companion-AI-Helper: {helper_sha}\n"
-        "OfferPilot-Companion-AI-Request: one-shot-20261021-correction-2\n"
+        "OfferPilot-Companion-AI-Request: one-shot-20261021-correction-3\n"
         f"OfferPilot-Companion-AI-Predecessor: {lineage.PREDECESSOR_RUN_ID}\n"
         f"OfferPilot-Companion-AI-Ledger: {lineage.LEDGER_SHA256}"
     )
@@ -91,6 +91,7 @@ def validate_context(env: Mapping[str, str]) -> Context:
     demand(env.get("GITHUB_RUN_ATTEMPT") == "1", "RERUN_FORBIDDEN")
     helper, request = env.get(HELPER_VAR, ""), env.get(REQUEST_VAR, "")
     old_shas = (lineage.ORIGINAL_HELPER_SHA, lineage.ORIGINAL_SOURCE_SHA,
+                lineage.SECOND_HELPER_SHA, lineage.SECOND_SOURCE_SHA,
                 lineage.PREDECESSOR_HELPER_SHA, lineage.PREDECESSOR_SOURCE_SHA)
     demand(bool(SHA.fullmatch(helper) and SHA.fullmatch(request)) and helper != request
            and helper not in old_shas and request not in old_shas,
@@ -407,6 +408,7 @@ class GitHubReader:
             + r"\?per_page=100&page=[1-9][0-9]*",
             r"actions/runs/[1-9][0-9]*(?:/approvals)?",
             re.escape(f"actions/artifacts/{lineage.ORIGINAL_ARTIFACT_ID}"),
+            re.escape(f"actions/artifacts/{lineage.SECOND_ARTIFACT_ID}"),
             re.escape(f"actions/artifacts/{lineage.PREDECESSOR_ARTIFACT_ID}"),
             r"actions/runs/[1-9][0-9]*/jobs\?filter=all&per_page=100&page=[1-9][0-9]*",
         )
@@ -450,19 +452,26 @@ class HistoricalBatch:
     request_marker: str
 
 
-def historical_batches() -> tuple[HistoricalBatch, HistoricalBatch]:
-    """Only these two paid successes are admissible, never arbitrary history."""
+def historical_batches() -> tuple[HistoricalBatch, HistoricalBatch, HistoricalBatch]:
+    """Only these three paid successes are admissible, never arbitrary history."""
     original_marker = (
         "test: request OfferPilot companion real AI validation\n\n"
         f"OfferPilot-Companion-AI-Helper: {lineage.ORIGINAL_HELPER_SHA}\n"
         "OfferPilot-Companion-AI-Request: one-shot-20261021"
     )
-    predecessor_marker = (
+    second_marker = (
         "test: request OfferPilot companion real AI validation\n\n"
-        f"OfferPilot-Companion-AI-Helper: {lineage.PREDECESSOR_HELPER_SHA}\n"
+        f"OfferPilot-Companion-AI-Helper: {lineage.SECOND_HELPER_SHA}\n"
         "OfferPilot-Companion-AI-Request: one-shot-20261021-correction-1\n"
         f"OfferPilot-Companion-AI-Predecessor: {lineage.ORIGINAL_RUN_ID}\n"
         f"OfferPilot-Companion-AI-Ledger: {lineage.ORIGINAL_LEDGER_SHA256}"
+    )
+    predecessor_marker = (
+        "test: request OfferPilot companion real AI validation\n\n"
+        f"OfferPilot-Companion-AI-Helper: {lineage.PREDECESSOR_HELPER_SHA}\n"
+        "OfferPilot-Companion-AI-Request: one-shot-20261021-correction-2\n"
+        f"OfferPilot-Companion-AI-Predecessor: {lineage.SECOND_RUN_ID}\n"
+        f"OfferPilot-Companion-AI-Ledger: {lineage.SECOND_LEDGER_SHA256}"
     )
     return (
         HistoricalBatch(lineage.ORIGINAL_RUN_ID, lineage.ORIGINAL_HELPER_RUN_ID,
@@ -470,6 +479,10 @@ def historical_batches() -> tuple[HistoricalBatch, HistoricalBatch]:
                         lineage.ORIGINAL_TREE_SHA, lineage.ORIGINAL_ARTIFACT_ID,
                         lineage.ORIGINAL_ARCHIVE_SIZE, lineage.ORIGINAL_ARCHIVE_SHA256,
                         original_marker),
+        HistoricalBatch(lineage.SECOND_RUN_ID, lineage.SECOND_HELPER_RUN_ID,
+                        lineage.SECOND_SOURCE_SHA, lineage.SECOND_HELPER_SHA,
+                        lineage.SECOND_TREE_SHA, lineage.SECOND_ARTIFACT_ID,
+                        lineage.SECOND_ARCHIVE_SIZE, lineage.SECOND_ARCHIVE_SHA256, second_marker),
         HistoricalBatch(lineage.PREDECESSOR_RUN_ID, lineage.PREDECESSOR_HELPER_RUN_ID,
                         lineage.PREDECESSOR_SOURCE_SHA, lineage.PREDECESSOR_HELPER_SHA,
                         lineage.PREDECESSOR_TREE_SHA, lineage.PREDECESSOR_ARTIFACT_ID,
@@ -478,7 +491,7 @@ def historical_batches() -> tuple[HistoricalBatch, HistoricalBatch]:
 
 
 def validate_predecessor_metadata(ctx: Context, read: Reader, environment_id: int) -> None:
-    """Both historical approvals are provenance, never current-run approval."""
+    """All three historical approvals are provenance, never current-run approval."""
     for batch in historical_batches():
         request = obj(single(read, f"git/commits/{batch.source_sha}"))
         helper = obj(single(read, f"git/commits/{batch.helper_sha}"))

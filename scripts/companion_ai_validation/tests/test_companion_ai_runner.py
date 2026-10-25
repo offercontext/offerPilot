@@ -74,10 +74,10 @@ def test_every_lineage_field_is_mandatory_and_exact(admission, key, damage):
     ("checked_at_monotonic_ns", 1.0), ("quote_deadline_monotonic_ns", True),
     ("quote_deadline_monotonic_ns", -1), ("quote_deadline_monotonic_ns", 1.0),
     ("prior_settled_micro_cny", 0), ("prior_settled_micro_cny", False),
-    ("prior_settled_micro_cny", -1), ("prior_settled_micro_cny", 208516.0),
+    ("prior_settled_micro_cny", -1), ("prior_settled_micro_cny", 315652.0),
     ("prior_settled_micro_cny", 103154), ("prior_settled_micro_cny", 105362),
     ("prior_settled_micro_cny", 311670), ("prior_request_count", 12),
-    ("correction_ordinal", 1), ("correction_ordinal", 3),
+    ("correction_ordinal", 1), ("correction_ordinal", 2),
     ("prior_reserved_micro_cny", 1), ("prior_request_count", 0),
     ("source_sha", continuation.PREDECESSOR_SOURCE_SHA),
     ("helper_sha", continuation.PREDECESSOR_HELPER_SHA),
@@ -95,6 +95,8 @@ def test_old_or_coerced_admission_values_cannot_reset_continuation(admission, ke
     "6329657d841b1bc4d8e3a3cdb7618df92c5a140a",
     "64bcd7ab737650415b1d987b1e56681aca6f9fcf",
     "e6cbb73e02863d79332855fadfe75f0e699312ae",
+    "744fb0f6a716cce3e75e14eb8bf9dfe585aff4c2",
+    "5b4d7a75ff40a3f8f7cbee9b3e6300bfa6896a10",
 ])
 def test_neither_historical_helper_nor_request_can_be_reused(admission, field, historic_sha):
     record, metadata, now = admission
@@ -190,16 +192,31 @@ def test_run_matrix_has_exact_one_completion_per_stage(tmp_path, monkeypatch):
     assert report["budget"]["request_count"] == 12
     assert report["budget"]["settled_micro_cny"] == continuation.PRIOR_SETTLED + 12 * 360
     assert report["schema"] == 2
-    assert report["budget"]["prior_settled_micro_cny"] == 208516
+    assert report["budget"]["prior_settled_micro_cny"] == 315652
     assert report["budget"]["batch_settled_micro_cny"] == 12 * 360
-    assert report["budget"]["lifetime_settled_micro_cny"] == 208516 + 12 * 360
-    assert report["budget"]["prior_request_count"] == 24
+    assert report["budget"]["lifetime_settled_micro_cny"] == 315652 + 12 * 360
+    assert report["budget"]["prior_request_count"] == 36
     assert report["budget"]["batch_request_count"] == 12
-    assert report["budget"]["lifetime_request_count"] == 36
+    assert report["budget"]["lifetime_request_count"] == 48
     assert report["budget"]["accounting_basis"] == "conservative_usage_not_provider_invoice"
     assert report["budget"]["reserved_micro_cny"] == 0
     assert report["budget"]["stages_complete"] == 12
-    assert {p.name for p in (tmp_path / "evidence").iterdir()} == {"summary.json", "budget.jsonl", "responses.jsonl"}
+    assert {p.name for p in (tmp_path / "evidence").iterdir()} == {"summary.json", "budget.jsonl", "responses.jsonl", "requests.jsonl"}
+    import hashlib
+    requests_path = tmp_path / "evidence" / "requests.jsonl"
+    assert requests_path.stat().st_mode & 0o777 == 0o600
+    captured = [json.loads(line) for line in requests_path.read_text().splitlines()]
+    journal = [json.loads(line) for line in (tmp_path / "evidence/budget.jsonl").read_text().splitlines()]
+    reserves = [entry for entry in journal if entry["event"] == "reserved"]
+    assert len(captured) == 12
+    for ordinal, (entry, sent, reserve) in enumerate(zip(captured, calls, reserves, strict=True), 1):
+        assert set(entry) == {"operation", "ordinal", "body_sha256", "raw_body"}
+        assert entry["ordinal"] == ordinal and entry["operation"] == gate.OPERATIONS[ordinal - 1]
+        assert json.loads(entry["raw_body"]) == sent
+        assert entry["body_sha256"] == hashlib.sha256(entry["raw_body"].encode()).hexdigest()
+        assert entry["body_sha256"] == reserve["body_sha256"]
+    assert "Authorization" not in requests_path.read_text()
+    assert "Bearer " not in requests_path.read_text() and "api_key" not in requests_path.read_text()
     text = (tmp_path / "evidence" / "budget.jsonl").read_text()
     assert "messages" not in text and "api_key" not in text
     assert "Synthetic response" in (tmp_path / "evidence" / "summary.json").read_text()
@@ -505,12 +522,12 @@ def test_every_failure_slot_preserves_known_cost_unknown_reservation_and_samples
     assert report["matrix"]["passed"] is False and len(calls) == failure_slot + 1
     budget = report["budget"]
     assert budget["halted"] is True
-    assert budget["prior_settled_micro_cny"] == 208516
+    assert budget["prior_settled_micro_cny"] == 315652
     assert budget["batch_settled_micro_cny"] == failure_slot * 360
     assert budget["batch_reserved_micro_cny"] == 3_000_000
-    assert budget["lifetime_liability_micro_cny"] == 3_208_516 + failure_slot * 360
+    assert budget["lifetime_liability_micro_cny"] == 3_315_652 + failure_slot * 360
     assert budget["batch_request_count"] == failure_slot + 1
-    assert budget["lifetime_request_count"] == 25 + failure_slot
+    assert budget["lifetime_request_count"] == 37 + failure_slot
     assert budget["stages_complete"] == failure_slot
     samples = (tmp_path / "evidence/responses.jsonl").read_text().splitlines()
     assert [json.loads(sample) for sample in samples] == [
@@ -594,3 +611,105 @@ def test_actual_product_chat_matrix_through_strict_budget_and_sse_boundary(tmp_p
     assert [entry['operation'] for entry in entries] == list(gate.OPERATIONS)
     assert all(entry['source_verified'] for entry in entries)
     assert all(call['tools'] and call['tool_choice'] == 'auto' for call in calls)
+
+
+def test_request_evidence_has_fixed_path_exclusive_creation_and_twelve_slot_bound(tmp_path):
+    import hashlib
+    evidence = run.RequestEvidence(tmp_path)
+    body = b'{"messages":[{"role":"user","content":"synthetic"}]}'
+    for _ in gate.OPERATIONS:
+        evidence.record(body)
+    with pytest.raises(gate.GateError, match='request_evidence_shape'):
+        evidence.record(body)
+    evidence.close()
+    with pytest.raises(FileExistsError):
+        run.RequestEvidence(tmp_path)
+    rows = [json.loads(line) for line in (tmp_path / 'requests.jsonl').read_text().splitlines()]
+    assert [row['operation'] for row in rows] == list(gate.OPERATIONS)
+    assert [row['ordinal'] for row in rows] == list(range(1, 13))
+    assert all(row['body_sha256'] == hashlib.sha256(body).hexdigest() for row in rows)
+
+
+@pytest.mark.parametrize('body', [b'', b'x' * (gate.MAX_BYTES + 1), b'\xff', 'not bytes'])
+def test_request_evidence_rejects_bad_bodies_without_advancing(tmp_path, body):
+    evidence = run.RequestEvidence(tmp_path)
+    with pytest.raises(gate.GateError, match='request_evidence_shape'):
+        evidence.record(body)
+    evidence.close()
+    assert (tmp_path / 'requests.jsonl').read_bytes() == b''
+
+
+@pytest.mark.parametrize('failure', ['fsync', 'short_write', 'write_error', 'deadline'])
+def test_request_capture_failure_stops_before_send_retaining_reservation(tmp_path, monkeypatch, failure):
+    import os
+    import urllib.request
+    import scripts.companion_ai_validation.driver as driver
+    from scripts.companion_ai_validation.tests.test_companion_ai_broker import payload, response
+
+    wall, monotonic = [gate.PRICE_VALID_UNTIL - 3600], [1000.0]
+    monkeypatch.setattr(gate.time, 'time', lambda: wall[0])
+    monkeypatch.setattr(gate.time, 'monotonic', lambda: monotonic[0])
+    real_record, real_fsync, real_write = run.RequestEvidence.record, os.fsync, os.write
+
+    recorded_instances = []
+    def bad_record(self, body):
+        recorded_instances.append(self)
+        def bad_fsync(fd):
+            if fd == self._fd:
+                if failure == 'fsync':
+                    raise OSError('synthetic write failure - must not leak')
+                if failure == 'deadline':
+                    monotonic[0] += gate.SESSION_SECONDS + 1
+            return real_fsync(fd)
+        def bad_write(fd, value):
+            if fd == self._fd and failure == 'write_error':
+                raise OSError('synthetic write error - must not leak')
+            return 0 if fd == self._fd and failure == 'short_write' else real_write(fd, value)
+        with monkeypatch.context() as patch:
+            patch.setattr(os, 'fsync', bad_fsync)
+            patch.setattr(os, 'write', bad_write)
+            real_record(self, body)
+
+    monkeypatch.setattr(run.RequestEvidence, 'record', bad_record)
+    def matrix(data_dir, stage, *, record_response):
+        with stage(gate.OPERATIONS[0]):
+            config = json.loads((data_dir / 'config.json').read_bytes())['providers'][0]
+            request = urllib.request.Request(
+                config['base_url'] + '/chat/completions', gate.encode(payload(gate.OPERATIONS[0])),
+                {'Authorization': 'Bearer ' + config['api_key'], 'Content-Type': 'application/json'})
+            urllib.request.urlopen(request, timeout=5)
+        pytest.fail('Capture failure must block the request')
+    monkeypatch.setattr(driver, 'run_matrix', matrix)
+    calls = []
+    def fake(body):
+        calls.append(body)
+        return 200, gate.encode(response())
+    report = run.execute(fake, 'b' * 40, tmp_path / 'evidence')
+    assert report['matrix']['passed'] is False and calls == []
+    assert report['budget']['halted'] is True
+    assert report['budget']['batch_reserved_micro_cny'] == 3_000_000
+    assert report['budget']['batch_settled_micro_cny'] == 0
+    assert report['budget']['lifetime_liability_micro_cny'] == continuation.PRIOR_SETTLED + 3_000_000
+    assert 'synthetic write failure' not in json.dumps(report)
+    assert 'synthetic write error' not in json.dumps(report)
+    assert recorded_instances and recorded_instances[0]._fd == -1
+
+
+def test_request_evidence_partial_writes_are_completed_before_success(tmp_path, monkeypatch):
+    import os
+    evidence = run.RequestEvidence(tmp_path)
+    real_write, real_fsync = os.write, os.fsync
+    calls = []
+    def partial(fd, body):
+        calls.append('write')
+        return real_write(fd, body[:7])
+    def synced(fd):
+        calls.append('fsync')
+        return real_fsync(fd)
+    monkeypatch.setattr(os, 'write', partial)
+    monkeypatch.setattr(os, 'fsync', synced)
+    body = b'{"messages":[]}'
+    evidence.record(body)
+    evidence.close()
+    assert calls[-1] == 'fsync' and calls.count('write') > 1
+    assert json.loads((tmp_path / 'requests.jsonl').read_text())['raw_body'].encode() == body

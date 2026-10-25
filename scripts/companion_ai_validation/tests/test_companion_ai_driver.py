@@ -210,15 +210,39 @@ def test_full_matrix_uses_real_http_exactly_twelve_times_and_sources(fake_stage,
                 for item in result["responses"]}
     assert contexts["shared_wait_after_absence"]["actual_user_participation"]["status"] == "promised"
     assert contexts["actual_color_choice"]["recent_shared_choice"]["value"] == "蓝色"
-    assert contexts["paused_gap"]["virtual_activity"]["status"] == "paused"
+    assert result["assertions"]["paused_context_remains_paused"]
     assert contexts["serious_mixed_work"] is None
-    assert contexts["boat_specific_memory"]["recent_shared_choice"]["value"] == "棉花糖号"
-    assert contexts["cloud_specific_memory"]["actual_user_participation"]["user_reply"] == "软糖云"
+    assert result["assertions"]["boat_not_newer_cloud"]
+    assert result["assertions"]["cloud_exact_source"]
     assert contexts["same_type_ambiguity"]["recall_status"] == "ambiguous_activity"
     assert contexts["deleted_source_memory"]["recall_status"] == "source_unavailable"
-    assert "棉花糖号" not in json.dumps(fake_stage.requests[10]["payload"], ensure_ascii=False)
-    assert "小月亮号" not in json.dumps(fake_stage.requests[10]["payload"], ensure_ascii=False)
-    assert contexts["withdrawal_and_boundaries"]["actual_user_participation"]["status"] == "abandoned"
+    assert "棉花糖号" not in json.dumps(fake_stage.requests[5]["payload"], ensure_ascii=False)
+    assert "小月亮号" not in json.dumps(fake_stage.requests[5]["payload"], ensure_ascii=False)
+    assert result["assertions"]["withdrawal_context_not_completion"]
+    requests = {r["operation"]: r["payload"] for r in fake_stage.requests}
+    absent, present = (requests[key] for key in ("greeting_without_page", "greeting_with_page"))
+    assert {k: v for k, v in absent.items() if k != "messages"} == {
+        k: v for k, v in present.items() if k != "messages"}
+    assert absent["messages"][0] == present["messages"][0]
+    assert absent["messages"][-1] == present["messages"][-1] == {
+        "role": "user", "content": driver.PAGE_PAIR_GREETING}
+    assert result["assertions"]["page_pair_fresh_distinct_conversations"]
+    assert result["assertions"]["page_pair_same_companion_state"]
+    assert result["assertions"]["page_pair_same_reference"]
+    # Actual HTTP upstream bodies, not just intended source snapshots. Both
+    # fresh conversations have no history or projected ID/time differences.
+    from offerpilot.api import _chat_page_context_messages
+    expected_page = [{"role": message.role, "content": message.content}
+                     for message in _chat_page_context_messages(driver.PAGE_PAIR_CONTEXT)]
+    assert len(absent["messages"]) == 2
+    assert present["messages"] == [absent["messages"][0], *expected_page,
+                                   absent["messages"][1]]
+    assert all("## 结论" not in p["messages"][0]["content"] for p in requests.values())
+    assert '"view":"settings"' in json.dumps(present, ensure_ascii=False).replace('\\"', '"')
+    assert contexts["explicit_work_format"] is None
+    assert "‘结论’和‘下一步’" in requests["explicit_work_format"]["messages"][-1]["content"]
+    assert "小周" in requests["third_party_experience"]["messages"][-1]["content"]
+    assert "未来的提议" in requests["future_invitation"]["messages"][-1]["content"]
 
 
 @pytest.mark.parametrize("failure", ["provider_error", "tool_call"])

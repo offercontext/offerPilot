@@ -18,7 +18,7 @@ def reviewed_test_clock(monkeypatch):
     monkeypatch.setattr(gate.time, "time", lambda: gate.PRICE_VALID_UNTIL - 3600)
 
 
-def payload(operation="independent_play"):
+def payload(operation=gate.OPERATIONS[0]):
     return {"model": gate.MODEL, "max_tokens": gate.OUTPUT_TOKENS, "messages": [
         {"role": "system", "content": "Synthetic persona and sourced life context"},
         {"role": "user", "content": "Synthetic user turn " + operation},
@@ -67,23 +67,23 @@ def test_reservation_is_fsynced_before_actual_http_and_only_numbers_are_journale
         records = [json.loads(line) for line in path.read_text().splitlines()]
         created, record = records
         assert created["event"] == "created"
-        assert created["settled_micro_cny"] == 208516
-        assert created["lifetime_liability_micro_cny"] == 208516
+        assert created["settled_micro_cny"] == 315652
+        assert created["lifetime_liability_micro_cny"] == 315652
         assert created["batch_settled_micro_cny"] == 0
-        assert created["prior_request_count"] == 24
+        assert created["prior_request_count"] == 36
         assert created["batch_request_count"] == 0
-        assert created["lifetime_request_count"] == 24
+        assert created["lifetime_request_count"] == 36
         assert record["event"] == "reserved"
         assert record["reserved_micro_cny"] == gate.RESERVATION
         assert record["request_count"] == 1
-        assert record["lifetime_liability_micro_cny"] == 3208516
+        assert record["lifetime_liability_micro_cny"] == 3315652
         assert record["batch_request_count"] == 1
-        assert record["lifetime_request_count"] == 25
+        assert record["lifetime_request_count"] == 37
         assert all(record[key] == value for key, value in continuation.lineage_fields().items())
         return 200, gate.encode(response())
 
     broker = gate.Broker(path, send, SHA)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     broker.request(token, gate.encode(payload()))
     assert broker.summary()["settled_micro_cny"] == continuation.PRIOR_SETTLED + 360
     assert broker.summary()["reserved_micro_cny"] == 0
@@ -110,7 +110,7 @@ def test_reservation_is_fsynced_before_actual_http_and_only_numbers_are_journale
 ])
 def test_invalid_request_cannot_reach_upstream(tmp_path, change):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     request = payload()
     change(request)
     with pytest.raises(gate.GateError):
@@ -123,7 +123,7 @@ def test_invalid_request_cannot_reach_upstream(tmp_path, change):
 @pytest.mark.parametrize("raw", [b'{"x":1,"x":2}', b'{"x":NaN}', b'[]', b'{}' * 100000])
 def test_bad_json_never_sends(tmp_path, raw):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     with pytest.raises(gate.GateError):
         broker.request(token, raw)
     assert not fake.calls
@@ -149,13 +149,13 @@ def test_unknown_or_conflicting_usage_preserves_liability_and_stops(tmp_path, ch
     result = response()
     change(result)
     broker, fake = make(tmp_path, Fake(result))
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     with pytest.raises(gate.GateError):
         broker.request(token, gate.encode(payload()))
     assert len(fake.calls) == 1
     assert broker.summary()["reserved_micro_cny"] == gate.RESERVATION
     assert broker.summary()["settled_micro_cny"] == continuation.PRIOR_SETTLED
-    assert broker.summary()["lifetime_liability_micro_cny"] == 3208516
+    assert broker.summary()["lifetime_liability_micro_cny"] == 3315652
     assert broker.summary()["batch_settled_micro_cny"] == 0
     with pytest.raises(gate.GateError):
         broker.request(token, gate.encode(payload()))
@@ -168,7 +168,7 @@ def test_no_redirect_or_status_retry(tmp_path, status):
     fake = Fake()
     fake.status = status
     broker, fake = make(tmp_path, fake)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     for _ in range(3):
         with pytest.raises(gate.GateError):
             broker.request(token, gate.encode(payload()))
@@ -185,7 +185,7 @@ def test_timeout_unknown_retains_three_yuan(tmp_path):
         raise TimeoutError("upstream private response must not leak")
 
     broker, _ = make(tmp_path, timeout)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     with pytest.raises(gate.GateError, match="upstream_unknown") as error:
         broker.request(token, gate.encode(payload()))
     assert "private" not in str(error.value)
@@ -213,10 +213,10 @@ def test_budget_stops_before_total_could_exceed_twenty_yuan(tmp_path):
 
 def test_single_ticket_sdk_retry_and_old_stage_token_fail_closed(tmp_path):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     broker.request(token, gate.encode(payload()))
     broker.close_stage()
-    new_token = broker.begin_stage("shared_wait_after_absence")
+    new_token = broker.begin_stage(gate.OPERATIONS[1])
     assert new_token != token
     with pytest.raises(gate.GateError, match="gate_closed"):
         broker.request(token, gate.encode(payload()))
@@ -248,9 +248,9 @@ def test_twelve_stages_exactly_twelve_http_requests(tmp_path):
         broker.close_stage()
     assert len(fake.calls) == 12
     assert broker.summary()["stages_complete"] == 12
-    assert broker.summary()["prior_request_count"] == 24
+    assert broker.summary()["prior_request_count"] == 36
     assert broker.summary()["batch_request_count"] == 12
-    assert broker.summary()["lifetime_request_count"] == 36
+    assert broker.summary()["lifetime_request_count"] == 48
     assert all(body["thinking"] == {"type": "disabled"} for body in fake.calls)
     with pytest.raises(gate.GateError):
         broker.begin_stage(gate.OPERATIONS[0])
@@ -269,13 +269,13 @@ def test_no_public_opening_balance_override(tmp_path, monkeypatch, seed):
                     initial_settled_micro_cny=seed)
     assert not (tmp_path / "never-created.jsonl").exists()
     broker, fake = make(tmp_path)
-    assert broker.summary()["settled_micro_cny"] == 208516
+    assert broker.summary()["settled_micro_cny"] == 315652
     assert not fake.calls
     broker.close()
 
 
 @pytest.mark.parametrize("damage", ["missing", "changed"])
-@pytest.mark.parametrize("evidence_attr", ["EVIDENCE_PATH", "ORIGINAL_EVIDENCE_PATH"])
+@pytest.mark.parametrize("evidence_attr", ["EVIDENCE_PATH", "SECOND_EVIDENCE_PATH", "ORIGINAL_EVIDENCE_PATH"])
 def test_unverified_predecessor_cannot_create_journal_or_send(
         tmp_path, monkeypatch, damage, evidence_attr):
     evidence = tmp_path / "original.zip"
@@ -294,7 +294,7 @@ def test_real_settlements_use_lifetime_budget_not_a_new_twenty_yuan(tmp_path, ex
     # All prior costs are genuinely settled through fake HTTP, never injected.
     # Fixed integer pricing permits costs in multiples of two micro-CNY.
     target = gate.BUDGET - gate.RESERVATION + excess
-    costs = [2_000_000] * 8 + [target - 208516 - 16_000_000]
+    costs = [2_000_000] * 8 + [target - 315652 - 16_000_000]
     calls = []
 
     def send(raw):
@@ -353,8 +353,8 @@ def test_every_journal_event_preserves_consistent_prior_batch_and_lifetime(tmp_p
         assert record["schema"] == 2
         assert all(record[key] == value for key, value in continuation.lineage_fields().items())
         assert record["batch_request_count"] == record["request_count"]
-        assert record["lifetime_request_count"] == 24 + record["batch_request_count"]
-        assert record["lifetime_settled_micro_cny"] == 208516 + record["batch_settled_micro_cny"]
+        assert record["lifetime_request_count"] == 36 + record["batch_request_count"]
+        assert record["lifetime_settled_micro_cny"] == 315652 + record["batch_settled_micro_cny"]
         assert record["settled_micro_cny"] == record["lifetime_settled_micro_cny"]
         assert record["reserved_micro_cny"] == record["batch_reserved_micro_cny"]
         assert record["lifetime_reserved_micro_cny"] == record["reserved_micro_cny"]
@@ -377,7 +377,7 @@ def test_concurrent_request_never_sends_second(tmp_path):
         return 200, gate.encode(response())
 
     broker, _ = make(tmp_path, slow)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
 
     def run():
         try:
@@ -409,7 +409,7 @@ def test_ledger_write_failure_never_releases_unknown_reservation(tmp_path, monke
         return original(name, **values)
 
     monkeypatch.setattr(broker, "_record", fail)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     with pytest.raises(gate.GateError, match="journal_failure"):
         broker.request(token, gate.encode(payload()))
     assert len(fake.calls) == (event == "settled")
@@ -420,7 +420,7 @@ def test_ledger_write_failure_never_releases_unknown_reservation(tmp_path, monke
 
 def test_http_loopback_auth_path_and_success(tmp_path):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     with gate.serve(broker) as base:
         request = urllib.request.Request(base + "/chat/completions", gate.encode(payload()),
                                          {"Authorization": "Bearer " + token,
@@ -482,7 +482,7 @@ def test_maximum_documented_input_and_output_have_strict_reservation_margin():
 @pytest.mark.parametrize("damage", ["truncate", "replace", "corrupt"])
 def test_midrun_journal_damage_stops_before_next_http(tmp_path, damage):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     broker.request(token, gate.encode(payload()))
     broker.close_stage()
     path = tmp_path / "journal.jsonl"
@@ -495,7 +495,7 @@ def test_midrun_journal_damage_stops_before_next_http(tmp_path, damage):
         raw = bytearray(path.read_bytes())
         raw[0] = ord("[")
         path.write_bytes(raw)
-    token = broker.begin_stage("shared_wait_after_absence")
+    token = broker.begin_stage(gate.OPERATIONS[1])
     with pytest.raises(gate.GateError, match="journal_failure"):
         broker.request(token, gate.encode(payload()))
     assert len(fake.calls) == 1
@@ -506,10 +506,10 @@ def test_midrun_journal_damage_stops_before_next_http(tmp_path, damage):
 @pytest.mark.parametrize("boundary", ["price", "session"])
 def test_every_request_requires_full_timeout_within_review_and_session(tmp_path, monkeypatch, boundary):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     broker.request(token, gate.encode(payload()))
     broker.close_stage()
-    token = broker.begin_stage("shared_wait_after_absence")
+    token = broker.begin_stage(gate.OPERATIONS[1])
     if boundary == "price":
         monkeypatch.setattr(gate.time, "time", lambda: gate.PRICE_VALID_UNTIL - 89)
     else:
@@ -530,7 +530,7 @@ def test_upstream_rejects_tls_logging_and_trust_injection(monkeypatch, name):
 @pytest.mark.parametrize("boundary", ["price", "session"])
 def test_slow_reservation_fsync_must_recheck_before_sending(tmp_path, monkeypatch, boundary):
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     original = broker._record
 
     def slow(name, **values):
@@ -577,7 +577,7 @@ def test_slow_tls_connect_cannot_send_http_after_deadline(tmp_path, monkeypatch,
     monkeypatch.setattr(gate.http.client, "HTTPSConnection", Connection)
     transport = gate.HTTPSUpstream("synthetic-test-only")
     broker, _ = make(tmp_path, transport)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     with pytest.raises(gate.GateError, match="price_review_expired|session_deadline|upstream_timeout"):
         broker.request(token, gate.encode(payload()))
     assert events == ["tls_only", "closed"]
@@ -592,7 +592,7 @@ def test_wall_clock_rollback_cannot_extend_price_deadline(tmp_path, monkeypatch)
     monkeypatch.setattr(gate.time, "monotonic", lambda: monotonic[0])
     monkeypatch.setattr(gate.time, "time", lambda: wall[0])
     broker, fake = make(tmp_path)
-    token = broker.begin_stage("independent_play")
+    token = broker.begin_stage(gate.OPERATIONS[0])
     original = broker._record
 
     def slow(name, **values):

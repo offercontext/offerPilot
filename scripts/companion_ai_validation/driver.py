@@ -39,11 +39,16 @@ from offerpilot.models import (
 from offerpilot.proactive.models import ProactiveJob
 
 OPERATIONS = (
-    "independent_play", "shared_wait_after_absence", "actual_color_choice",
-    "unpressured_leisure", "paused_gap", "serious_mixed_work",
-    "work_finish_continuation", "boat_specific_memory", "cloud_specific_memory",
-    "same_type_ambiguity", "deleted_source_memory", "withdrawal_and_boundaries",
+    "shared_wait_after_absence", "actual_color_choice", "serious_mixed_work",
+    "work_finish_continuation", "same_type_ambiguity", "deleted_source_memory",
+    "greeting_without_page", "greeting_with_page", "third_party_experience",
+    "future_invitation", "explicit_work_format", "unseen_ordinary_greeting",
 )
+# One fixed counterfactual pair: fresh conversations, same synthetic state and
+# user text. Only the second request has page context; no warm-up model calls.
+PAGE_PAIR_GREETING = "午后的风好舒服，我想慢慢坐一会儿。"
+PAGE_PAIR_CONTEXT = {"view": "settings", "label": "设置"}
+
 Stage = Callable[[str], AbstractContextManager[Any]]
 ROOT = Path(__file__).resolve().parents[2]
 PROCESS_TIMEOUT = 180
@@ -234,10 +239,14 @@ class _Matrix:
                                           context_type="workspace", conversation_id=conversation_id)
 
     def chat(self, operation: str, message: str, conversation_id: int = 0,
-             *, control_action: str | None = None) -> dict[str, Any]:
+             *, control_action: str | None = None,
+             page_context: dict[str, str] | None = None) -> dict[str, Any]:
         before = self.view()
-        payload = {"request_id": str(uuid4()), "conversation_id": conversation_id,
+        payload: dict[str, Any] = {"request_id": str(uuid4()), "conversation_id": conversation_id,
                    "message": message, "context_type": "workspace", "mode": "general"}
+        if page_context is not None:
+            _require(control_action is None, operation, "page_only_for_ordinary_turn")
+            payload["page_context"] = dict(page_context)
         if control_action is None:
             _require(len(self.responses) < len(OPERATIONS), operation, "ordinary_turn_cap")
             _require(operation == OPERATIONS[len(self.responses)], operation, "operation_order")
@@ -357,14 +366,13 @@ class _Matrix:
                      and first["shared_participation"] == [])
         self.presence()
         self.checked("read_and_presence_do_not_advance", self.view()["revision"] == first["revision"])
-        self.chat(OPERATIONS[0], "你在干嘛？")
         waited = self.chat("wait_color", "等我回来一起选颜色", control_action="wait")
         waiting = self.view()
         self.advance(3 * 86400)
         after_gap = self.event("app_open")
         self.checked("waiting_gap_does_not_advance", after_gap["state"] == waiting["state"]
                      and after_gap["revision"] == waiting["revision"])
-        self.chat(OPERATIONS[1], "这几天没来，你的小日常怎么样了？我们约好的一步呢？",
+        self.chat("shared_wait_after_absence", "这几天没来，你的小日常怎么样了？我们约好的一步呢？",
                   waited["conversation_id"])
         self.chat("rejoin_color", "我回来了，我们一起选颜色吧", waited["conversation_id"],
                   control_action="join")
@@ -375,7 +383,7 @@ class _Matrix:
                      and colored["state"]["activity"]["status"] == "active"
                      and len(colored["shared_participation"]) == 1
                      and colored["shared_participation"][0]["status"] == "completed")
-        self.chat(OPERATIONS[2], "我们的小船用了什么颜色？")
+        self.chat("actual_color_choice", "我们的小船用了什么颜色？")
         actual = self.responses[-1]["source_facts_before_projection"]["recent_shared_choice"]
         self.checked("color_exact_source", actual["value"] == "蓝色"
                      and actual["source_message_id"] == color["user_message_id"]
@@ -391,7 +399,6 @@ class _Matrix:
         self.settings(proactivity="off")
         self.checked("off_preserves_state_and_blocks_publish", self.view()["state"] == preserved
                      and not self.guard() and self.context("你在干嘛？", 0) is not None)
-        self.chat(OPERATIONS[3], "今天什么正事也不想做，就想闲聊发会儿呆。你想玩什么？")
         self.event("resume_session")
         self.settings(proactivity="default")
         self.chat("pause_boat", "暂停你的折纸活动", control_action="pause")
@@ -399,13 +406,15 @@ class _Matrix:
         self.advance(86400)
         self.event("app_open")
         self.checked("paused_gap_does_not_advance", self.view()["state"] == paused["state"])
-        self.chat(OPERATIONS[4], "又隔了一天，你的小船暂停后怎么样了？")
+        paused_context = self.context("又隔了一天，你的小船暂停后怎么样了？", 0)
+        self.checked("paused_context_remains_paused", paused_context is not None
+                     and paused_context["virtual_activity"]["status"] == "paused")
         self.chat("resume_boat", "继续折纸吧", control_action="resume")
         self.presence(work_running=True, typing=True)
         blockers = self.view()["presence"]["blockers"]
         self.checked("work_presence_blocks_publish", not self.guard()
                      and "work_running" in blockers and "typing" in blockers)
-        work = self.chat(OPERATIONS[5], "先帮我看看这段简历哪里还不清楚，纸小船晚点再聊。\n"
+        work = self.chat("serious_mixed_work", "先帮我看看这段简历哪里还不清楚，纸小船晚点再聊。\n"
                          "以下全是虚构练习资料：小林，某示例大学计算机专业，本科，毕业时间未填。"
                          "校园预约系统：参与开发，起止时间、本人负责的部分和效果都还没写。"
                          "只根据这些文字指出缺失信息，不要替我补经历，也不要保存或调用工具。")
@@ -416,30 +425,34 @@ class _Matrix:
         after_work_end = self.event("work_completed")["state"]["activity"]
         self.checked("work_finish_one_step_same_activity", after_work_end["id"] == boat_id
                      and after_work_end["step_index"] == before_work_end["step_index"] + 1)
-        self.chat(OPERATIONS[6], "刚才那段已经看完了，不用再谈它。你的小船现在做到哪一步了？",
+        self.chat("work_finish_continuation", "刚才那段已经看完了，不用再谈它。你的小船现在做到哪一步了？",
                   work["conversation_id"])
         boat_name = self.name("棉花糖号")
         self.until_template("cloud_catalog")
         cloud_name = self.name("软糖云")
-        self.chat(OPERATIONS[7], "还记得我们的小船叫什么吗？")
-        choice = self.responses[-1]["source_facts_before_projection"]["recent_shared_choice"]
+        boat_context = self.context("还记得我们的小船叫什么吗？", 0)
+        self.checked("boat_recall_available", boat_context is not None)
+        assert boat_context is not None
+        choice = boat_context["recent_shared_choice"]
         self.checked("boat_not_newer_cloud", choice["value"] == "棉花糖号"
                      and choice["activity_id"] == boat_id
                      and choice["source_message_id"] == boat_name["user_message_id"])
-        self.chat(OPERATIONS[8], "我们的云朵叫什么名字？")
-        choice = self.responses[-1]["source_facts_before_projection"]["recent_shared_choice"]
+        cloud_context = self.context("我们的云朵叫什么名字？", 0)
+        self.checked("cloud_recall_available", cloud_context is not None)
+        assert cloud_context is not None
+        choice = cloud_context["recent_shared_choice"]
         self.checked("cloud_exact_source", choice["value"] == "软糖云"
                      and choice["source_message_id"] == cloud_name["user_message_id"])
         self.until_template("paper_boat")
         second_boat_name = self.name("小月亮号")
-        self.chat(OPERATIONS[9], "我们的小船叫什么？")
+        self.chat("same_type_ambiguity", "我们的小船叫什么？")
         ambiguous = self.responses[-1]["source_facts_before_projection"]
         self.checked("same_type_needs_clarification", ambiguous["recall_status"] == "ambiguous_activity"
                      and "recent_shared_choice" not in ambiguous)
         for conversation in (waited, boat_name, second_boat_name):
             _request(self.client, "delete_source", "DELETE",
                      f"/api/chat/conversations/{conversation['conversation_id']}")
-        self.chat(OPERATIONS[10], "还记得我们的小船叫什么吗？")
+        self.chat("deleted_source_memory", "还记得我们的小船叫什么吗？")
         deleted = self.responses[-1]["source_facts_before_projection"]
         self.checked("deleted_source_not_reconstructed", deleted["recall_status"] == "source_unavailable"
                      and "recent_shared_choice" not in deleted)
@@ -465,14 +478,32 @@ class _Matrix:
         self.advance(86400)
         self.event("app_open")
         self.checked("withdrawal_remains_paused", self.view()["state"] == withdrawn["state"])
-        self.chat(OPERATIONS[11], "这一步我不参加了。你的小日常现在怎么样？"
-                  "我不在时你会自己看视频、每天练习吗？我今天不想变成熟，也不想被催着变厉害。",
-                  withdrawal["conversation_id"])
+        withdrawn_context = self.context("这一步我不参加了。你的小日常现在怎么样？",
+                                         withdrawal["conversation_id"])
+        self.checked("withdrawal_context_not_completion", withdrawn_context is not None
+                     and withdrawn_context["actual_user_participation"]["status"] == "abandoned")
         self.chat("resume_after_withdrawal", "继续折纸吧", withdrawal["conversation_id"],
                   control_action="resume")
         self.checked("withdrawal_normal_delay", not self.event("app_open")["changed"])
         self.advance(301)
         self.checked("withdrawal_independent_continuation", self.event("app_open")["changed"])
+        before_pair = self.snapshot(self.view())
+        absent = self.chat("greeting_without_page", PAGE_PAIR_GREETING)
+        present = self.chat("greeting_with_page", PAGE_PAIR_GREETING,
+                            page_context=PAGE_PAIR_CONTEXT)
+        self.checked("page_pair_fresh_distinct_conversations",
+                     absent["conversation_id"] != present["conversation_id"])
+        self.checked("page_pair_same_companion_state", all(
+            response["snapshot"] == before_pair for response in self.responses[-2:]))
+        self.checked("page_pair_same_reference", self.responses[-2]["expected_context"]
+                     == self.responses[-1]["expected_context"])
+        self.chat("third_party_experience", "以下是合成例子：小周说，她和小陈一起给纸船取名‘橘子号’。"
+                  "我只是在转述他们的故事。你的小船有什么进展？")
+        self.chat("future_invitation", "等有空了，我们可以一起给纸星星挑个颜色。"
+                  "现在你在玩什么？这只是未来的提议。")
+        self.chat("explicit_work_format", "请按‘结论’和‘下一步’两个标题整理这条虚构简历的事实缺口："
+                  "参与校园图书管理系统。只根据这句话，不补造经历，不保存或调用工具。")
+        self.chat("unseen_ordinary_greeting", "嘿，窗外的树叶晃得像在打招呼。")
         final = self.view()
         self.settings(enabled=False)
         self.checked("disabled_omits_context", self.context("你在干嘛？", 0) is None and not self.guard())
