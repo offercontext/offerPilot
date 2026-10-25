@@ -35,6 +35,43 @@ afterEach(() => {
 });
 
 describe('Composer quick questions', () => {
+  it('routes immediate slash commands separately from explicit image submission', async () => {
+    const onSend = vi.fn().mockResolvedValue('sent');
+    const onCapabilitySend = vi.fn().mockResolvedValue('sent');
+    const draft = { key: 'image', scopeKey: 'new', scope: {}, name: '截图', previewUrl: 'blob:preview', status: 'ready' as const };
+    const cap = { id: 'list', group: 'test', label: 'List', hint: 'List items', prompt: 'List my items', icon: () => null };
+    const view = render(<Composer capabilities={[cap]} imageDrafts={[draft]} onSend={onSend} onCapabilitySend={onCapabilitySend} />);
+    act(() => changeValue(view.querySelector('textarea')!, '/'));
+    await act(async () => view.querySelector('textarea')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    expect(onCapabilitySend).toHaveBeenCalledWith('List my items');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(view.querySelector('[aria-label="待发送图片"]')).not.toBeNull();
+    await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="发送"]')!.click());
+    expect(onSend).toHaveBeenCalledWith('');
+  });
+  it('sends a ready image without text, and blocks an uploading or failed image', async () => {
+    const onSend = vi.fn().mockResolvedValue('sent');
+    const draft = { key: 'image', scopeKey: 'new', scope: {}, name: '截图', previewUrl: 'blob:preview', status: 'ready' as const };
+    const view = render(<Composer capabilities={[]} imageDrafts={[draft]} onSend={onSend} />);
+    await act(async () => view.querySelector<HTMLButtonElement>('[aria-label="发送"]')?.click());
+    expect(onSend).toHaveBeenCalledWith('');
+    for (const status of ['uploading', 'error'] as const) {
+      act(() => root?.render(<Composer capabilities={[]} imageDrafts={[{ ...draft, status }]} onSend={onSend} />));
+      expect(view.querySelector<HTMLButtonElement>('[aria-label="发送"]')?.disabled).toBe(true);
+    }
+  });
+
+  it('uploads pasted images without cancelling mixed plain text paste', () => {
+    const onAddImages = vi.fn();
+    const view = render(<Composer capabilities={[]} onAddImages={onAddImages} onSend={vi.fn()} />);
+    const image = new File(['pixels'], 'clip.png', { type: 'image/png' });
+    const paste = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, 'clipboardData', { value: { files: [image], getData: () => '保留文字' } });
+    act(() => view.querySelector('textarea')?.dispatchEvent(paste));
+    expect(onAddImages).toHaveBeenCalledWith([image]);
+    expect(paste.defaultPrevented).toBe(false);
+  });
+
   it('uses the shared controlled draft without sending it', () => {
     const onSend = vi.fn();
     const onDraftChange = vi.fn();

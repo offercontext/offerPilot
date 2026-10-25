@@ -962,6 +962,8 @@ class DeterministicPilotAdapter:
                 )
 
     def matches(self, request: StartTurnRequest, conversation: object) -> bool:
+        if request.image_attachment_ids:
+            return False
         if request.pilot_action is not None:
             self._action_from_request(request)
             return True
@@ -998,6 +1000,8 @@ class DeterministicPilotAdapter:
 
     def validate_new_request(self, request: StartTurnRequest) -> None:
         """Validate deterministic intent before a new Conversation is created."""
+        if request.image_attachment_ids:
+            return
 
         action = self._action_from_request(request)
         if action is None:

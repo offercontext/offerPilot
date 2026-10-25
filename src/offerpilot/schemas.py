@@ -97,6 +97,7 @@ class ChatMessageOut(BaseModel):
     conversation_id: int
     role: str
     content: str
+    image_attachments: list[dict[str, Any]] = Field(default_factory=list)
     tool_calls: str = ""
     tool_call_id: str = ""
     operation_id: str | None = None

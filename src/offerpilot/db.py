@@ -55,6 +55,41 @@ def _remove_recovery_path(path: Path) -> None:
         pass
 
 
+def _chat_image_schema_state(connection) -> tuple[bool, bool]:  # type: ignore[no-untyped-def]
+    # Consume every row before releasing the connection or running later DDL.
+    columns = connection.exec_driver_sql("PRAGMA table_info(chat_messages)").fetchall()
+    has_column = any(row[1] == "image_refs_json" for row in columns)
+    has_trigger = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+        "AND name='chat_attachment_immutable' AND tbl_name='chat_attachments'"
+    ).scalar() is not None
+    return has_column, has_trigger
+
+
+def _ensure_chat_image_schema(engine: Engine) -> None:
+    # Normal startup must not contend with an existing application writer just
+    # to inspect an already complete schema. Release this read before locking.
+    with engine.connect() as connection:
+        if all(_chat_image_schema_state(connection)):
+            return
+    with engine.begin() as connection:
+        # Another initializer may repair the schema between the read and lock.
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        has_column, has_trigger = _chat_image_schema_state(connection)
+        if not has_column:
+            connection.exec_driver_sql(
+                "ALTER TABLE chat_messages ADD COLUMN "
+                "image_refs_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if not has_trigger:
+            connection.execute(text("""
+                CREATE TRIGGER IF NOT EXISTS chat_attachment_immutable
+                BEFORE UPDATE OF id, sha256, mime_type, size_bytes, width, height,
+                                 normalization_version, context_type, context_ref ON chat_attachments
+                BEGIN SELECT RAISE(ABORT, 'immutable image resource'); END
+            """))
+
+
 def init_database(db_path: Path) -> SessionFactory:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
@@ -75,6 +110,8 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    _ensure_chat_image_schema(engine)
+    _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
     _record_migration(engine, "0033_job_mail_review", "Add isolated mail evidence, proposals, previews and atomic receipts")
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
@@ -2968,6 +3005,7 @@ def _rebuild_chat_messages_for_write_operation_integrity(engine) -> None:  # typ
                 tool_calls VARCHAR NOT NULL DEFAULT '',
                 tool_call_id VARCHAR NOT NULL DEFAULT '',
                 provider_blocks VARCHAR NOT NULL DEFAULT '',
+                image_refs_json TEXT NOT NULL DEFAULT '[]',
                 operation_id VARCHAR(36),
                 delivery_kind VARCHAR,
                 delivery_ordinal INTEGER,
@@ -2994,11 +3032,13 @@ def _rebuild_chat_messages_for_write_operation_integrity(engine) -> None:  # typ
             """
             INSERT INTO chat_messages_0026 (
                 id, conversation_id, role, content, tool_calls, tool_call_id,
-                provider_blocks, operation_id, delivery_kind, delivery_ordinal, created_at
+                provider_blocks, image_refs_json, operation_id, delivery_kind,
+                delivery_ordinal, created_at
             )
             SELECT id, conversation_id, role, coalesce(content, ''),
                    coalesce(tool_calls, ''), coalesce(tool_call_id, ''),
-                   coalesce(provider_blocks, ''), operation_id, delivery_kind,
+                   coalesce(provider_blocks, ''), coalesce(image_refs_json, '[]'),
+                   operation_id, delivery_kind,
                    delivery_ordinal, coalesce(created_at, CURRENT_TIMESTAMP)
             FROM chat_messages
             """

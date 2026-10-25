@@ -898,7 +898,9 @@ class _LoopServices:
         new_session = getattr(model, "new_agent_provider_session", None)
         if not callable(new_session):
             raise ProjectionError("provider_gateway_session_factory_required")
-        gateway = new_session()
+        image_session = getattr(model, "new_image_provider_session", None)
+        has_image_history = any(message.images for message in messages)
+        gateway = image_session(primary_only=True) if has_image_history and callable(image_session) else new_session()
         if type(gateway) is not AgentProviderGatewaySession:
             raise ProjectionError("provider_gateway_session_required")
         model = _PerCallSurfaceModel(cast(ChatModel, model), gateway)
@@ -920,6 +922,30 @@ class _LoopServices:
             build_identity=build_identity,
             model=model,
         )
+        if has_image_history and callable(image_session):
+            needs_vision = any(message.images for message in surface.messages)
+            gateway = image_session() if needs_vision else new_session()
+            model = _PerCallSurfaceModel(cast(ChatModel, self.model), gateway)
+            surface = self.project_model_surface(
+                messages, model_call_id=model_call_id, build_identity=build_identity, model=model,
+            )
+            if needs_vision and not any(message.images for message in surface.messages):
+                # A smaller vision fallback can evict optional historical
+                # images. The resulting text surface may use the full chain.
+                needs_vision = False
+                gateway = new_session()
+                model = _PerCallSurfaceModel(cast(ChatModel, self.model), gateway)
+                surface = self.project_model_surface(
+                    messages, model_call_id=model_call_id, build_identity=build_identity, model=model,
+                )
+            if not needs_vision and any(message.images for message in surface.messages):
+                gateway = image_session()
+                model = _PerCallSurfaceModel(cast(ChatModel, self.model), gateway)
+                surface = self.project_model_surface(
+                    messages, model_call_id=model_call_id, build_identity=build_identity, model=model,
+                )
+        complete_surface = getattr(model, "complete_agent_surface", None)
+        stream_surface = getattr(model, "stream_agent_surface", None)
         messages = surface.thaw_messages()
         tools = list(surface.tools)
         snapshot_id = self.capture_model_input(
@@ -2316,6 +2342,7 @@ def _journal_model_input(
                 "role": message.role,
                 "content": message.content,
                 "tool_call_id": message.tool_call_id,
+                **({"images": [image.as_dict() for image in message.images]} if message.images else {}),
                 "tool_calls": [
                     {"id": call.id, "name": call.name, "args": call.args}
                     for call in message.tool_calls

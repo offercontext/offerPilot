@@ -65,6 +65,7 @@ from offerpilot.ai.tool_runtime.metadata import (
     WriteOperationMetadataV1,
 )
 from offerpilot.ai.types import Message, ToolCall
+from offerpilot.image_contracts import ImageReference, image_references
 from offerpilot.ai.pending_replay import PendingReplayArgsDecoderV1, PendingReplayIntegrityError
 from offerpilot.ai.write_operations import (
     ClarificationPendingRouteHandle,
@@ -470,6 +471,7 @@ class _PreparedMessage:
     tool_calls: tuple[_PreparedToolCall, ...] = ()
     tool_call_id: str = ""
     provider_blocks: ImmutablePayload = field(default_factory=lambda: freeze_json_mapping({}))
+    images: tuple[ImageReference, ...] = ()
     surface_contributor: str = ""
     surface_signal: str = ""
     surface_revision: str = ""
@@ -1124,6 +1126,7 @@ def _message(value: object) -> Message:
             provider_blocks=dict(value.get("provider_blocks") or {})
             if isinstance(value.get("provider_blocks"), Mapping)
             else {},
+            images=image_references(value.get("images", ())),
             surface_contributor=str(value.get("surface_contributor") or ""),
             surface_signal=str(value.get("surface_signal") or ""),
             surface_revision=str(value.get("surface_revision") or ""),
@@ -1148,6 +1151,7 @@ def _message(value: object) -> Message:
         tool_calls=tool_calls,
         tool_call_id=str(_attribute(value, "tool_call_id", "") or ""),
         provider_blocks=provider_blocks,
+        images=image_references(_attribute(value, "images", ())),
         surface_contributor=str(_attribute(value, "surface_contributor", "") or ""),
         surface_signal=str(_attribute(value, "surface_signal", "") or ""),
         surface_revision=str(_attribute(value, "surface_revision", "") or ""),
@@ -1197,6 +1201,7 @@ def _freeze_stream_value(value: object) -> object:
             tool_calls=tuple(prepared_tool_calls),
             tool_call_id=value.tool_call_id,
             provider_blocks=frozen_blocks,
+            images=value.images,
             surface_contributor=value.surface_contributor,
             surface_signal=value.surface_signal,
             surface_revision=value.surface_revision,
@@ -1222,6 +1227,7 @@ def _materialize_stream_value(value: object) -> object:
             tool_calls=[ToolCall(call.id, call.name, call.args) for call in value.tool_calls],
             tool_call_id=value.tool_call_id,
             provider_blocks=dict(value.provider_blocks),
+            images=value.images,
             surface_contributor=value.surface_contributor,
             surface_signal=value.surface_signal,
             surface_revision=value.surface_revision,
@@ -9264,6 +9270,7 @@ class PilotRuntime:
                 surface_revision=message.surface_revision,
                 surface_page_kind=message.surface_page_kind,
                 surface_attachment_kinds=message.surface_attachment_kinds,
+                images=message.images,
             )
             for message in effective_messages
         ]

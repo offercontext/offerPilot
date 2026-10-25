@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypeAlias, cast
 
 from offerpilot.ai.agent_contracts import PendingAction
 from offerpilot.ai.types import Message, ToolCall
+from offerpilot.image_contracts import ImageReference, image_references
 from offerpilot.ai.write_operations import (
     ClarificationPendingRouteHandle,
     DeliveryOwnership,
@@ -149,6 +150,7 @@ class PersistedMessageView:
     delivery_kind: str | None
     delivery_ordinal: int | None
     created_at: datetime
+    images: tuple[ImageReference, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -475,6 +477,7 @@ def _snapshot_message(message: _ChatMessageRecord) -> PersistedMessageView:
         delivery_kind=message.delivery_kind,
         delivery_ordinal=message.delivery_ordinal,
         created_at=message.created_at,
+        images=image_references(json.loads(getattr(message, "image_refs_json", "[]") or "[]")),
     )
 
 

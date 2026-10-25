@@ -79,6 +79,7 @@ export interface ChatStartRequest {
 export type WriteStatus = 'success' | 'failed' | 'cancelled' | 'none';
 
 export interface ChatMessage {
+  image_attachments?: import('@/services/chatImages').ChatImageReference[];
   id: number;
   operation_id?: string | null;
   conversation_id: number;

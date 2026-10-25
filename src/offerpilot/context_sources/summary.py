@@ -95,7 +95,7 @@ class ConversationSummaryRepository:
                 row = session.get(ChatMessage, message_id)
                 if row is None:
                     break
-                if row.role not in {"user", "assistant"} or row.tool_calls not in {"", "[]"} or row.tool_call_id or row.provider_blocks not in {"", "{}"}:
+                if row.role not in {"user", "assistant"} or row.tool_calls not in {"", "[]"} or row.tool_call_id or row.provider_blocks not in {"", "{}"} or row.image_refs_json not in {"", "[]"}:
                     break
                 value = _source_value(row)
                 size = len(canonical_json(value))
@@ -181,6 +181,8 @@ def load_summary(connection: sqlite3.Connection, conversation_id: int) -> tuple[
     except (TypeError, ValueError):
         return [], ()
     if not isinstance(ids, list) or not ids or len(ids) > 32 or any(type(value) is not int for value in ids):
+        return [], ()
+    if connection.execute("SELECT 1 FROM chat_messages WHERE conversation_id=? AND id<=? AND image_refs_json NOT IN ('', '[]') LIMIT 1", (conversation_id, ids[-1])).fetchone():
         return [], ()
     sizes = connection.execute("""SELECT count(*), sum(length(CAST(content AS BLOB)) + length(CAST(role AS BLOB)) +
         length(CAST(tool_calls AS BLOB)) + length(CAST(tool_call_id AS BLOB)) + length(CAST(provider_blocks AS BLOB)))

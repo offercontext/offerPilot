@@ -1,3 +1,5 @@
+import { useChatImageDrafts } from './useChatImageDrafts';
+import type { ImageCapability } from '@/services/chatImages';
 import { t, useLocale } from '@/i18n';
 import {
   useCallback,
@@ -65,7 +67,7 @@ export interface ActiveConversationRequest extends ActiveConversationRequestOwne
 
 export interface PilotConversationActions {
   undoOperation?: (operationId: string) => Promise<void>;
-  sendMessage: (text: string) => Promise<SendMessageOutcome>;
+  sendMessage: (text: string, options?: { includeImageDrafts?: boolean }) => Promise<SendMessageOutcome>;
   selectConversation: (conversationId: number, options?: { refresh?: boolean }) => Promise<void>;
   startNewChat: () => boolean;
   retryLastMessage: () => void;
@@ -183,6 +185,9 @@ const unavailableActions: PilotConversationActions = {
 };
 
 export function usePilotConversationControllerState(observationEnabled = true) {
+  const imageDrafts = useChatImageDrafts();
+  const imageDraftsRef = useRef(imageDrafts);
+  imageDraftsRef.current = imageDrafts;
   const locale = useLocale();
   const [turns, setTurns] = useState<UITurn[]>([]);
   const [recoveredProgress, setRecoveredProgress] = useState<{
@@ -195,6 +200,10 @@ export function usePilotConversationControllerState(observationEnabled = true) {
   const [requestLoading, setLoading] = useState(false);
   const [autoApprove, setAutoApprove] = useState(false);
   const [hasKey, setHasKey] = useState(true);
+  const [imageCapability, setImageCapabilityState] = useState<ImageCapability>();
+  const setImageCapability = useCallback((next: ImageCapability | undefined) => {
+    setImageCapabilityState((previous) => JSON.stringify(previous) === JSON.stringify(next) ? previous : next);
+  }, []);
   const [degraded, setDegraded] = useState(false);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [showArchived, setShowArchived] = useState(false);
@@ -278,6 +287,12 @@ export function usePilotConversationControllerState(observationEnabled = true) {
         // Another task's completion must not hide a newer error or offer a
         // misleading resend after this request has already succeeded.
         const recoveredSubmission = lastSubmissionRef.current;
+        if (recoveredRequestId && recoveredSubmission?.requestId === recoveredRequestId) {
+          const images = imageDraftsRef.current;
+          images.remove(images.drafts.filter((item) => item.reference && recoveredSubmission.context.image_attachment_ids?.includes(item.reference.id)).map((item) => item.key));
+          setComposerDraft((draft) => draft === recoveredSubmission.message ? '' : draft);
+          lastSubmissionRef.current = null;
+        }
         if (['completed', 'waiting_confirmation'].includes(target.state)
           && recoveredRequestId && recoveredSubmission?.requestId === recoveredRequestId) {
           setLastError(null);
@@ -748,8 +763,8 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     return () => { cancelled = true; clearTimeout(timer); lookup.abort(); };
   }, [observationEnabled, requestLoading, executionControl.acceptExecution, stoppedExecution]);
 
-  const sendMessage = useCallback((text: string) => executionControl.execution?.state === 'running'
-    ? Promise.resolve('ignored' as const) : actionsRef.current.sendMessage(text), [executionControl.execution]);
+  const sendMessage = useCallback((text: string, options?: { includeImageDrafts?: boolean }) => executionControl.execution?.state === 'running'
+    ? Promise.resolve('ignored' as const) : actionsRef.current.sendMessage(text, options), [executionControl.execution]);
   const selectConversation = useCallback(
     (id: number, options?: { refresh?: boolean }) => actionsRef.current.selectConversation(id, options),
     [],
@@ -822,6 +837,8 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     setAutoApprove,
     hasKey,
     setHasKey,
+    imageCapability,
+    setImageCapability,
     degraded,
     setDegraded,
     conversations,
@@ -850,6 +867,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     setComposerResetKey,
     composerDraft,
     setComposerDraft,
+    imageDrafts,
     followingContext,
     setFollowingContext,
     pinnedContext,
@@ -938,6 +956,7 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     composerResetKey,
     composerDraft,
     confirmError,
+    imageDrafts,
     confirmPhase,
     contextChangeNotice,
     conversationId,
@@ -948,6 +967,8 @@ export function usePilotConversationControllerState(observationEnabled = true) {
     finishActiveRequest,
     finishConversationSelection,
     hasKey,
+    imageCapability,
+    setImageCapability,
     hasStreamingAssistantContent,
     lastError,
     lastFailedText,

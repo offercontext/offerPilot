@@ -132,6 +132,7 @@ def test_get_settings_exposes_provider_profiles_without_keys(tmp_path):
         "model": "deepseek-chat",
         "enabled": True,
         "supports_json_schema": False,
+        "supports_vision": False,
         "context_window": 131_072,
         "max_output_tokens": 8_192,
         "has_api_key": True,

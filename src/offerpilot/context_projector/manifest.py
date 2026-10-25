@@ -49,6 +49,7 @@ MANIFEST_SIGNAL_VALUES = (
     "history_recent",
     "history_relevant",
     "history_orphan_compat",
+    "history_images_omitted",
     "catalog_dependency_closure",
     "catalog_domain_union",
 )
@@ -331,7 +332,7 @@ def validate_surface_manifest_v2(
         raise ManifestV2ValidationError("invalid manifest shape or canonical form")
     if manifest["manifest_schema_version"] not in {2, 3}:
         raise ManifestV2ValidationError("invalid manifest version")
-    if manifest["budget_policy_version"] not in {"model-surface-budget-v1", "model-surface-budget-v2"}:
+    if manifest["budget_policy_version"] not in {"model-surface-budget-v1", "model-surface-budget-v2", "model-surface-budget-v3-images"}:
         raise ManifestV2ValidationError("invalid budget policy")
     _hash_array(manifest["providers"], 8, budget_check=budget_check)
     _hash_array(manifest["history_groups"], 32, budget_check=budget_check)

@@ -11,6 +11,11 @@ import HaruChatWindow from './HaruChatWindow';
 import { getPilotExecution } from '@/services/chat';
 import { setLocale } from '@/i18n';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
+import { readChatImage } from '@/services/chatImages';
+vi.mock('@/services/chatImages', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/chatImages')>(),
+  readChatImage: vi.fn().mockResolvedValue(new Blob(['image'], { type: 'image/png' })),
+}));
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 vi.mock('@/services/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/chat')>(),
@@ -111,6 +116,17 @@ function SharedDraftHarness() {
   return <HaruChatWindow returnFocusRef={{ current: null }} />;
 }
 
+function ImageHistoryHarness() {
+  const controller = usePilotConversationController();
+  const surface = useAssistantSurface();
+  useEffect(() => {
+    controller.setTurns([{ role: 'user', content: '', image_attachments: [{ id: 'img_history', sha256: 'hash',
+      mime_type: 'image/png', width: 2, height: 2, size_bytes: 5, normalization_version: 'image-normalize-v1' }] }]);
+    surface.openHaru();
+  }, []);
+  return <HaruChatWindow returnFocusRef={{ current: null }} />;
+}
+
 function LoadingHarness() {
   const controller = usePilotConversationController();
   const surface = useAssistantSurface();
@@ -123,6 +139,21 @@ function LoadingHarness() {
 }
 
 describe('HaruChatWindow', () => {
+  it('closes the image preview before closing Haru when Escape is pressed', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:history');
+      static revokeObjectURL = vi.fn();
+    });
+    await act(async () => root?.render(<AssistantSurfaceProvider><ImageHistoryHarness /></AssistantSurfaceProvider>));
+    expect(readChatImage).toHaveBeenCalledWith('img_history');
+    act(() => host!.querySelector<HTMLImageElement>('img[alt="图片 1，点击放大"]')!.click());
+    const dialog = host!.querySelector<HTMLElement>('#haru-chat-window')!;
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host!.querySelector('#haru-chat-window')).not.toBeNull();
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host!.querySelector('#haru-chat-window')).toBeNull();
+  });
+
   it('blocks keyboard submission when only a remote execution is running', async () => {
     vi.mocked(getPilotExecution).mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' });
     await act(async () => root?.render(
@@ -144,6 +175,7 @@ describe('HaruChatWindow', () => {
   afterEach(() => {
     act(() => root?.unmount());
     host?.remove();
+    vi.unstubAllGlobals();
     setLocale('zh-CN');
   });
 

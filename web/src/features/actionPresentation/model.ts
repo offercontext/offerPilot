@@ -34,7 +34,8 @@ export function mergePresentationTurns(turns: UITurn[], snapshot: PilotPresentat
         || item.item_id !== `message:${item.message_id}`) continue;
       const presentation = item.kind === 'assistant_message' ? parseTurnPresentation(item.content) : undefined;
       result.push({ id: displayId, role: item.kind === 'user_message' ? 'user' : 'assistant',
-        content: presentation?.detailMarkdown ?? item.content, presentation });
+        content: presentation?.detailMarkdown ?? item.content, presentation,
+        image_attachments: item.kind === 'user_message' ? item.image_attachments : undefined });
     } else if (item.kind === 'error_info' || item.kind === 'run_boundary') {
       result.push({ id: displayId, role: 'assistant', content: item.content });
     }

@@ -5,14 +5,12 @@ import {
   useRef,
   useState,
   type MutableRefObject,
-  type KeyboardEvent,
 } from 'react';
 import {
   ArrowUpOutlined,
   BellOutlined,
   CloseOutlined,
   ExpandAltOutlined,
-  SendOutlined,
   StopOutlined,
 } from '@ant-design/icons';
 import { Modal } from 'antd';
@@ -28,6 +26,8 @@ import { PendingStartRecovery } from '@/features/actionPresentation/PendingStart
 import { agentActionCommands, pendingPresentationActions } from '@/features/actionPresentation/commands';
 import { positionHaruWindow, type HaruRect } from './haruWindowPosition';
 import styles from './AssistantSurface.module.css';
+import HaruComposer from './HaruComposer';
+import { chatImageScope, type ChatImageReference } from '@/services/chatImages';
 
 const TASK_COPY = {
   idle: '随时可以开始',
@@ -78,9 +78,36 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
   const dialogRef = useRef<HTMLElement>(null);
   const closingRef = useRef(false);
   const [inboxOpen, setInboxOpen] = useState(false);
+  const [imagePreviewKey, setImagePreviewKey] = useState<string>();
+  const [imageError, setImageError] = useState<string>();
+  const imageContext = controller.buildRequestContext({
+    conversationId: controller.conversationId, draftContext: controller.draftContext,
+    pageContext: controller.conversationId === undefined ? controller.followingContext : controller.pinnedContext,
+    attachments: [],
+  });
+  const { scope: imageScope, scopeKey: imageScopeKey } = chatImageScope(controller.conversationId, imageContext);
+  const imageDrafts = controller.imageDrafts.drafts.filter((item) => item.scopeKey === imageScopeKey);
+  const imageDisabledReason = controller.imageCapability?.enabled ? undefined
+    : controller.imageCapability?.reason ?? t("正在检查图片输入能力");
+  const composerDisabled = !controller.hasKey || controller.loading || Boolean(controller.pending)
+    || controller.executionControl.execution?.state === 'running';
+  const addImages = (files: File[]) => {
+    if (composerDisabled || imageDisabledReason) return;
+    setImageError(controller.imageDrafts.add(files, imageScope, imageScopeKey));
+  };
+  const referenceImage = (image: ChatImageReference) => {
+    if (composerDisabled || imageDisabledReason) return;
+    setImageError(controller.imageDrafts.reference(image, imageScope, imageScopeKey));
+  };
+  useEffect(() => { setImageError(undefined); setImagePreviewKey(undefined); }, [imageScopeKey]);
+  useEffect(() => {
+    if (imagePreviewKey?.startsWith('draft:') && !imageDrafts.some((item) => `draft:${item.key}` === imagePreviewKey)) {
+      setImagePreviewKey(undefined);
+    }
+  }, [imageDrafts, imagePreviewKey]);
 
   useEffect(() => {
-    if (surface.surface !== 'haru_chat') { setInboxOpen(false); return; }
+    if (surface.surface !== 'haru_chat') { setInboxOpen(false); setImagePreviewKey(undefined); return; }
     closingRef.current = false;
     if (controller.hasKey && !controller.pending) inputRef.current?.focus();
     else dialogRef.current?.focus();
@@ -114,21 +141,10 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
     window.setTimeout(() => returnFocusRef.current?.focus(), 0);
   };
   const submit = async () => {
-    if (!draft.trim() || controller.loading || controller.pending || controller.executionControl.execution?.state === 'running') return;
-    const outcome = await controller.sendMessage(draft);
-    if (outcome === 'sent') setDraft('');
-  };
-  const onInputKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      close();
-      return;
-    }
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      void submit();
-    }
+    if (composerDisabled || (!draft.trim() && !imageDrafts.length)
+      || imageDrafts.some((item) => item.status !== 'ready') || (imageDrafts.length > 0 && imageDisabledReason)) return;
+    // Admission owns clearing the submitted draft, across both surfaces.
+    await controller.sendMessage(draft, { includeImageDrafts: true });
   };
   const activeConversation = controller.conversations.find(
     (conversation) => conversation.id === controller.conversationId,
@@ -192,7 +208,9 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
       onKeyDown={(event) => {
         if (event.key === 'Escape') {
           event.preventDefault();
-          close();
+          event.stopPropagation();
+          if (imagePreviewKey) setImagePreviewKey(undefined);
+          else close();
         }
       }}
     >
@@ -270,7 +288,9 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
           recentConversationTurns(controller.displayTurns ?? controller.turns).map((turn, index) => turn.action ? (
             <ActionCard key={turn.id} action={turn.action} busy={controller.loading || controller.presentationRefreshing} commands={agentActionCommands(turn.action, controller)} />
           ) : (
-            <CompactMessageRenderer key={turn.id ?? `transient:${controller.conversationId}:${index}`} turn={turn} />
+            <CompactMessageRenderer key={turn.id ?? `transient:${controller.conversationId}:${index}`} turn={turn}
+              onReferenceImage={!composerDisabled && !imageDisabledReason ? referenceImage : undefined}
+              previewKeyPrefix={`message:${turn.id ?? index}`} activePreviewKey={imagePreviewKey} onPreviewChange={setImagePreviewKey} />
           ))
         )}
         <PresentationRecovery failed={controller.presentationFailed} busy={controller.loading || controller.presentationRefreshing} onRefresh={controller.refreshPresentation} />
@@ -308,25 +328,19 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
       {controller.lastError ? (
         <div className={styles.error} role="alert">
           <span>{displayPilotUiMessage(controller.lastError)}</span>
-          <button type="button" onClick={controller.retryLastMessage} disabled={controller.loading}>
+          {controller.lastSubmissionRef.current ? <button type="button" onClick={controller.retryLastMessage} disabled={composerDisabled}>
             {t("重试")}
-          </button>
+          </button> : null}
         </div>
       ) : null}
 
-      <footer className={styles.composer}>
-        <label htmlFor="haru-composer" className={styles.srOnly}>{t("给 Haru 发消息")}</label>
-        <textarea
-          id="haru-composer"
-          ref={inputRef}
-          rows={2}
-          value={draft}
-          disabled={!controller.hasKey || Boolean(controller.pending) || controller.executionControl.execution?.state === 'running'}
-          placeholder={t(controller.pending ? '请先在 Pilot 中确认' : '问 Haru…')}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={onInputKeyDown}
-        />
-        {controller.loading || controller.executionControl.canStop ? (
+      <HaruComposer value={draft} onChange={setDraft} onSend={() => void submit()} disabled={composerDisabled}
+        inputRef={inputRef} drafts={imageDrafts} imageDisabledReason={imageDisabledReason}
+        placeholder={controller.pending ? t('请先在 Pilot 中确认') : undefined}
+        onAdd={addImages} onRemove={(key) => { controller.imageDrafts.remove([key]); setImageError(undefined); }}
+        onRetry={(image) => { void controller.imageDrafts.retry(image); }}
+        activePreviewKey={imagePreviewKey} onPreviewChange={setImagePreviewKey}
+        stopAction={controller.loading || controller.executionControl.canStop ? (
           <button
             type="button"
             className={styles.stopButton}
@@ -339,22 +353,13 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
             <StopOutlined />
             {controller.executionControl.stopping ? t('正在停止…') : controller.executionControl.retryingStop ? t('重试停止') : null}
           </button>
-        ) : (
-          <button
-            type="button"
-            className={styles.sendButton}
-            aria-label={t("发送消息")}
-            disabled={!draft.trim() || !controller.hasKey || Boolean(controller.pending)}
-            onClick={() => void submit()}
-          >
-            <SendOutlined />
-          </button>
-        )}
+        ) : undefined}>
+        {imageError ? <p role="alert" className={styles.imageValidationError}>{imageError}</p> : null}
         {controller.executionControl.stopMessage && <p role="status">{controller.executionControl.stopMessage}</p>}
         {controller.executionControl.execution?.protocol === 'pilot-runtime-v1'
           && controller.executionControl.execution.state === 'running'
           && <p role="status">{t("关闭窗口后任务会继续；需要终止时，请点击停止。")}</p>}
-      </footer>
+      </HaruComposer>
     </section>
     <Modal open={inboxOpen} title={t("主动提醒与草稿")} onCancel={() => setInboxOpen(false)} footer={null} width={720} destroyOnClose>
       <ProactiveInbox />

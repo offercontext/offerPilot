@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { createImageFixture, image, png } from './fixture-api.mjs';
+assert.equal(png.readUInt32BE(16), image.width);
+assert.equal(png.readUInt32BE(20), image.height);
+assert.equal(image.sha256, createHash('sha256').update(png).digest('hex'));
+const api = createImageFixture();
+assert.equal((await api.handle('GET', '/api/settings')).data.image_capability.enabled, true);
+assert.equal((await api.handle('POST', '/api/chat/attachments')).data.id, image.id);
+const payload = { message: '', request_id: 'synthetic-id', image_attachment_ids: [image.id] };
+assert.equal((await api.handle('POST', '/api/pilot/runtime/v1/turns', payload)).status, 422);
+assert.equal((await api.handle('POST', '/api/pilot/runtime/v1/turns', payload)).data.state, 'completed');
+assert.deepEqual((await api.handle('GET', '/api/chat/conversations/401')).data[0].image_attachments, [image]);
+assert.equal((await api.handle('GET', '/api/chat/conversations/401/timeline')).data.items[0].payload.image_attachments[0].id, image.id);
+assert.equal((await api.handle('POST', '/api/settings/providers/test-image', {})).status, 501);
+assert.equal((await api.handle('DELETE', '/api/chat/conversations/401')).status, 501);
+assert.equal((await createImageFixture({ vision: false }).handle('GET', '/api/settings')).data.image_capability.enabled, false);
+console.log('Image fixture contract passed; unknown writes and paid image tests rejected.');

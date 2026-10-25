@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import errno
+from io import BytesIO
+from PIL import Image
 import json
 import select
 import socket
@@ -140,9 +142,10 @@ def test_streaming_provider_records_only_disconnect_errors(monkeypatch, error, r
         assert not release.is_set(), "cleanup must not supply the disconnect evidence"
 
 
+@pytest.mark.parametrize("with_image", [False, True], ids=["text", "image"])
 @pytest.mark.parametrize("mode", ["continuous", "silent", "delayed_headers"])
 @pytest.mark.parametrize("endpoint", ["/api/chat/turns", "/api/pilot/runtime/v1/turns"])
-def test_interrupt_closes_actual_provider_even_without_next_chunk(tmp_path, mode, endpoint, monkeypatch):
+def test_interrupt_closes_actual_provider_even_without_next_chunk(tmp_path, mode, endpoint, monkeypatch, with_image):
     # Ignore unrelated SOCKS mounts unsupported by this test environment.
     # All provider traffic below is strictly the fixture's loopback address.
     monkeypatch.delenv("ALL_PROXY", raising=False)
@@ -153,12 +156,22 @@ def test_interrupt_closes_actual_provider_even_without_next_chunk(tmp_path, mode
         config = Config(active_provider_id="synthetic", providers=[AIProviderProfile(
             id="synthetic", provider="openai_compatible", api_key="synthetic-local-key",
             base_url=f"http://127.0.0.1:{port}/v1", model="deepseek-flash",
-            context_window=262144, max_output_tokens=4096,
+            context_window=262144, max_output_tokens=4096, supports_vision=with_image,
         )])
         save_config(tmp_path, config)
         with TestClient(create_app(data_dir=tmp_path)) as client:
             try:
+                image_ids = []
+                if with_image:
+                    image = BytesIO()
+                    Image.new("RGB", (12, 12), "blue").save(image, format="PNG")
+                    uploaded = client.post("/api/chat/attachments", files={
+                        "file": ("test.png", image.getvalue(), "image/png"),
+                    })
+                    assert uploaded.status_code == 201, uploaded.text
+                    image_ids = [uploaded.json()["id"]]
                 submission = client.post("/api/pilot/runtime/v1/turns", json={
+                    "image_attachment_ids": image_ids,
                     "request_id": str(uuid4()), "message": "Synthetic cancellation test. Do not use tools.",
                 })
                 assert submission.status_code == 202, submission.text

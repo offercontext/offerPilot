@@ -2188,6 +2188,43 @@ class PilotRequestReceipt(Base):
     )
 
 
+class ChatAttachment(Base):
+    __tablename__ = "chat_attachments"
+    __table_args__ = (
+        CheckConstraint("state IN ('ready')", name="ck_chat_attachment_state"),
+        CheckConstraint("size_bytes > 0 AND width > 0 AND height > 0", name="ck_chat_attachment_size"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    sha256: Mapped[str] = mapped_column(String, nullable=False)
+    mime_type: Mapped[str] = mapped_column(String, nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    width: Mapped[int] = mapped_column(Integer, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, nullable=False)
+    normalization_version: Mapped[str] = mapped_column(String, nullable=False)
+    context_type: Mapped[str] = mapped_column(String, nullable=False)
+    context_ref: Mapped[str] = mapped_column(String, nullable=False, default="")
+    conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True,
+    )
+    bound: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    state: Mapped[str] = mapped_column(String, nullable=False, default="ready")
+    created_at: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ChatMessageAttachment(Base):
+    __tablename__ = "chat_message_attachments"
+    __table_args__ = (UniqueConstraint("message_id", "ordinal"),)
+
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("chat_messages.id", ondelete="CASCADE"), primary_key=True,
+    )
+    attachment_id: Mapped[str] = mapped_column(
+        ForeignKey("chat_attachments.id", ondelete="RESTRICT"), primary_key=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
     __table_args__ = (
@@ -2222,6 +2259,12 @@ class ChatMessage(Base):
     )
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(String, default="", server_default="")
+    image_refs_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+
+    @property
+    def image_attachments(self) -> list[dict[str, Any]]:
+        return list(json.loads(self.image_refs_json or "[]"))
+
     tool_calls: Mapped[str] = mapped_column(String, default="", server_default="")
     tool_call_id: Mapped[str] = mapped_column(String, default="", server_default="")
     provider_blocks: Mapped[str] = mapped_column(String, default="", server_default="")

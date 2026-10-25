@@ -18,6 +18,7 @@ from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.models import (
+    ChatAttachment,
     ChatMessage, Conversation, PilotRequestReceipt, PilotTurnRecord, PilotTurnMessage,
     PilotTurnOperation, PilotExecution,
     PilotTimelineState, PilotTimelineItem, PilotTimelineChange,
@@ -109,16 +110,28 @@ class PilotTimelineRepository:
         if type(conversation_id) is not int or conversation_id < 0:
             raise ValueError("conversation_id must be a non-negative integer")
         message = request.get("message")
-        if not isinstance(message, str) or not message:
+        if not isinstance(message, str) or (not message and not request.get("image_attachment_ids")):
             raise ValueError("message is required")
         canonical = dict(request)
         canonical.pop("request_id", None)
         canonical.pop("conversation_id", None)
         request_key = _digest(["pilot-start-v1", request_id])
-        request_digest = _digest(canonical)
         with self.session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             receipt = session.get(PilotRequestReceipt, request_key)
+            if receipt is not None and receipt.turn_id is None:
+                raise AdmissionGone("Original conversation was deleted")
+            if request.get("image_attachment_ids"):
+                from offerpilot.chat_images import reference
+                from offerpilot.image_contracts import ImageInputError, image_ids
+                images = []
+                for attachment_id in image_ids(request["image_attachment_ids"]):
+                    image = session.get(ChatAttachment, attachment_id)
+                    if image is None:
+                        raise ImageInputError("image_unavailable")
+                    images.append(reference(image).as_dict())
+                canonical["image_references"] = images
+            request_digest = _digest(canonical)
             if receipt is not None:
                 if receipt.turn_id is None:
                     raise AdmissionGone("Original conversation was deleted")

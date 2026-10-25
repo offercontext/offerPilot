@@ -7,6 +7,8 @@ import type { Settings } from '@/services/chat';
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const api = vi.hoisted(() => ({ getSettings: vi.fn(), updateSettings: vi.fn(), testProviderConnection: vi.fn() }));
+const imageApi = vi.hoisted(() => ({ testProviderImage: vi.fn() }));
+vi.mock('@/services/chatImages', () => imageApi);
 vi.mock('@/services/chat', () => ({ ...api, SETTINGS_QUERY_KEY: ['settings'] }));
 import AISettingsDrawer from './AISettingsDrawer';
 
@@ -40,6 +42,11 @@ beforeEach(async () => {
 afterEach(() => { act(() => root.unmount()); qc.clear(); host.remove(); vi.restoreAllMocks(); });
 
 describe('AI settings draft lifecycle', () => {
+  it('tests an unchanged saved provider when its older profile omits vision capability', async () => {
+    act(() => button('测试连接').click()); await flush();
+    expect(api.testProviderConnection).toHaveBeenCalledWith({ provider_id: 'one' });
+  });
+
   it('keeps all provider drafts and permission choice across switches and saves once', async () => {
     change('model', 'edited-one'); change('api_key', 'test-draft-key');
     act(() => host.querySelector<HTMLButtonElement>('#chat_auto_approve_writes')!.click());
@@ -125,4 +132,23 @@ describe('AI settings draft lifecycle', () => {
     act(() => button('保存').click()); await flush();
     expect(api.updateSettings).not.toHaveBeenCalled();
   });
+  it('invalidates vision capability in the retained draft when the model changes', async () => {
+    act(() => host.querySelector<HTMLButtonElement>('#supports_vision')!.click());
+    await edit(1); await edit(0);
+    expect(host.querySelector('#supports_vision')!.getAttribute('aria-checked')).toBe('true');
+    change('model', 'different-vision-model');
+    await edit(1); await edit(0);
+    expect(host.querySelector('#supports_vision')!.getAttribute('aria-checked')).toBe('false');
+    act(() => button('保存').click()); await flush();
+    expect(api.updateSettings.mock.calls[0][0].providers[0].supports_vision).toBe(false);
+  });
+  it('ignores a late failed image test after switching providers', async () => {
+    let fail!: (error: Error) => void;
+    imageApi.testProviderImage.mockReturnValue(new Promise((_resolve, reject) => { fail = reject; }));
+    act(() => button('测试图片识别（会产生费用）').click()); await flush();
+    await edit(1);
+    await act(async () => fail(new Error('late image failure'))); await flush();
+    expect(host.textContent).not.toContain('图片测试失败');
+  });
+
 });
