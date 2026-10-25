@@ -118,7 +118,7 @@ from offerpilot.config import (
     resolve_data_dir,
     save_config,
 )
-from offerpilot.context_projector.loader import ContextSourceLoader, fetch_rows
+from offerpilot.context_projector.loader import ContextSourceLoader, SourceTemporarilyUnavailable, fetch_rows
 from offerpilot.context_projector.contracts import ProjectionError
 from offerpilot.context_projector.budget import PROVIDER_FRAMING_RESERVE
 from offerpilot.context_sources.binding_scope import frozen_readiness_scope
@@ -431,6 +431,10 @@ _KNOWLEDGE_MAIN_UPLOAD_LIMIT = 5 * 1024 * 1024
 _KNOWLEDGE_ASSET_UPLOAD_LIMIT = 10 * 1024 * 1024
 _KNOWLEDGE_BUNDLE_UPLOAD_LIMIT = 50 * 1024 * 1024
 _KNOWLEDGE_ASSET_COUNT_LIMIT = 50
+
+
+class RuntimeSourceUnavailable(RuntimeError):
+    """Source visibility could not be verified within its bounded read budget."""
 
 
 class _KnowledgeUploadLimitExceeded(ValueError):
@@ -1378,6 +1382,19 @@ def create_app(
                 "Content-Type, Authorization, X-OfferPilot-Token"
             )
         return response
+
+    @app.exception_handler(RuntimeSourceUnavailable)
+    async def runtime_source_unavailable_handler(
+        request: Request, exc: RuntimeSourceUnavailable,
+    ) -> JSONResponse:
+        # No cached terminal, source identifiers, or exception text may escape
+        # while the visibility check is inconclusive.
+        return JSONResponse(
+            {"error": "任务来源暂时无法核验，请稍后重试。",
+             "error_code": "runtime_source_unavailable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store", "Retry-After": "1"},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -5320,7 +5337,15 @@ def create_app(
 
         try:
             return bool(context_source_loader.load(read, lambda value: value))
-        except Exception:
+        except SourceTemporarilyUnavailable:
+            logging.getLogger(__name__).warning(
+                "Runtime source visibility unavailable (SourceTemporarilyUnavailable)"
+            )
+            raise RuntimeSourceUnavailable() from None
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Runtime source visibility rejected (%s)", type(exc).__name__,
+            )
             return False
 
     def _runtime_stream_readable(turn_id: str, generation: int) -> bool:
@@ -5961,6 +5986,8 @@ def create_app(
                 response["interrupt"] = result
                 return JSONResponse(response, headers={"Cache-Control": "no-store"})
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except RuntimeSourceUnavailable:
+            raise
         except TurnControlConflict:
             return error_response(409, "停止命令标识已对应其他任务或代次。", code="turn_command_conflict")
         except ValueError:
