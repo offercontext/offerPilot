@@ -126,5 +126,6 @@ jobs:
             artifacts/companion-ai/summary.json
             artifacts/companion-ai/responses.jsonl
             artifacts/companion-ai/budget.jsonl
+            artifacts/companion-ai/requests.jsonl
           if-no-files-found: warn
           retention-days: 14
