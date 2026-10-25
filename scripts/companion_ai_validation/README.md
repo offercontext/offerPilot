@@ -21,7 +21,10 @@ hard failure. Each remaining applicable dimension is scored 0–2; require no
 zero for provenance/work/non-pressure and mean at least 1.5. No template growth
 or new product settings substitute for this review.
 
-Only the actual projected `expected_context` was visible to the model.
+`expected_context` now records the exact natural reference text visible to the
+model (older frozen artifacts retain their original JSON-object representation).
+It is not the whole provider request; historical paid artifacts must not be
+represented as full payload captures.
 `source_facts_before_projection` may contain optional real fixture facts omitted
 by the production 2 KiB context cap; do not grade a model as having seen them.
 Successful bounded samples are fsynced incrementally to `responses.jsonl`, so a
@@ -29,6 +32,33 @@ later failure does not discard earlier paid evidence. Summary and ledger contain
 fixed errors, never provider error bodies or credentials. All retained dialogue
 and state are synthetic. Production request messages and 26 tool schemas remain
 intact; no tools are executed by this harness.
+
+## Free synthetic request inspection
+
+Run `python -m scripts.capture_companion_synthetic_requests --fake-only --label final`
+from the repository's frozen environment. This separate fixture captures complete
+raw request bodies and parsed messages, schemas and parameters at a loopback fake
+upstream for the original twelve cases plus seven held-out cases. It uses freshly
+owned data directories, discards inherited configuration without reading credential
+values, has no real endpoint/data/config/output-path options, and never retains
+headers. The printed temporary evidence directory is synthetic-only. Do not turn
+this into production request logging or use it with real user data or secrets.
+
+The V1.6 product compiler retains source identity, revision and a hash of the full
+raw snapshot as non-model metadata, while sending short natural facts without
+record IDs, clocks or state enums. Work and ordinary dialogue use the same persona,
+execution policy and tools. V1.7 defaults ordinary workspace/general turns to
+neutral expression without fixed report headings, rather than classifying them
+as leisure. Page facts, attachments, work history and companion retrieval misses
+do not themselves select a report format. Complex work and user-requested lists
+remain allowed. Explicit application/task modes and pending/confirmation/
+clarification retain their work protocol and unchanged authority. Untyped read-only
+work can have fewer structured conclusion/action cards; its full text and actual
+tool-result cards remain available through the existing UI fallback.
+No generated-output filter, canned recall reply, new planner or extra model call
+is added. These tests establish exposure and source boundaries, not naturalness
+or a guarantee against invented participation. A new real comparison remains
+separately authorized; the consumed third batch cannot be rerun or reset.
 
 ## Fixed third-batch paid boundary
 

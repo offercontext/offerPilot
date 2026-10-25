@@ -304,7 +304,7 @@ class _Matrix:
                 _require(isinstance(text, str) and bool(text.strip())
                          and len(text.encode("utf-8")) <= 8192, operation, "bounded_ordinary_text")
                 envelope = companion_context_message(expected)
-                projected = json.loads(envelope.content.split("\n", 1)[1]) if envelope else None
+                projected = envelope.content if envelope else None
                 self.responses.append({"operation": operation, "user_input": message,
                     "assistant_text": text, "expected_context": projected,
                     "source_facts_before_projection": expected,
@@ -433,14 +433,14 @@ class _Matrix:
         self.until_template("paper_boat")
         second_boat_name = self.name("小月亮号")
         self.chat(OPERATIONS[9], "我们的小船叫什么？")
-        ambiguous = self.responses[-1]["expected_context"]
+        ambiguous = self.responses[-1]["source_facts_before_projection"]
         self.checked("same_type_needs_clarification", ambiguous["recall_status"] == "ambiguous_activity"
                      and "recent_shared_choice" not in ambiguous)
         for conversation in (waited, boat_name, second_boat_name):
             _request(self.client, "delete_source", "DELETE",
                      f"/api/chat/conversations/{conversation['conversation_id']}")
         self.chat(OPERATIONS[10], "还记得我们的小船叫什么吗？")
-        deleted = self.responses[-1]["expected_context"]
+        deleted = self.responses[-1]["source_facts_before_projection"]
         self.checked("deleted_source_not_reconstructed", deleted["recall_status"] == "source_unavailable"
                      and "recent_shared_choice" not in deleted)
         with self.sessions() as session:

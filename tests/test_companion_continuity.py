@@ -120,15 +120,23 @@ def test_admitted_promise_question_can_read_but_cannot_rearm_short_reply(life):
     assert life[1].read()['state']['activity']['status'] == 'waiting_shared'
 
 
-def test_optional_recall_yields_to_current_state_without_mutating_source(life):
+def test_optional_recall_yields_to_current_state_without_mutating_source(life, monkeypatch):
     choose(life)
     data = read(life)
-    data['recent_shared_choice']['value'] = '很长' * COMPANION_CONTEXT_BYTE_CAP
+    from offerpilot.companion import context
+
     before = deepcopy(data)
+    full = companion_context_message(data)
+    without_history = {key: value for key, value in data.items() if key != 'recent_shared_choice'}
+    current = companion_context_message(without_history)
+    size = len(canonical_json(FrozenMessage.freeze(current).canonical_value())) + 1
+    monkeypatch.setattr(context, 'COMPANION_CONTEXT_BYTE_CAP', size)
     message = companion_context_message(data)
     assert message is not None
-    assert 'recent_shared_choice' not in json.loads(message.content.split('\n', 1)[1])
-    assert 'actual_user_participation' in message.content
+    assert message.content == current.content
+    assert message.surface_revision != current.surface_revision
+    assert message.surface_revision == full.surface_revision
+    assert '这次活动完成了选颜色这一步' in message.content
     assert data == before
     assert len(canonical_json(FrozenMessage.freeze(message).canonical_value())) < COMPANION_CONTEXT_BYTE_CAP
 
@@ -172,7 +180,7 @@ def test_real_source_loader_recalls_without_consuming_a_vague_color_answer(tmp_p
         envelopes = [message for message in model.requests[-1]
             if '以下是带来源的角色日常参考数据' in (message.content or '')]
         assert len(envelopes) == 1
-        assert '等你一起选颜色' in envelopes[0].content
+        assert '已在应用内约好一起选颜色' in envelopes[0].content
         before = repo.read()['revision']
         ambiguous = client.post('/api/chat', json={'request_id': str(uuid4()), 'conversation_id': conversation_id,
             'message': '蓝色'})

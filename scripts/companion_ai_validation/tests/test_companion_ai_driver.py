@@ -135,7 +135,7 @@ def _context(payload):
     for message in payload["messages"]:
         content = message.get("content", "")
         if isinstance(content, str) and content.startswith("以下是带来源的角色日常参考数据"):
-            contexts.append(json.loads(content.split("\n", 1)[1]))
+            contexts.append(content)
     assert len(contexts) <= 1
     return contexts[0] if contexts else None
 
@@ -206,7 +206,8 @@ def test_full_matrix_uses_real_http_exactly_twelve_times_and_sources(fake_stage,
         assert set(payload) <= {"messages", "model", "max_tokens", "tools", "tool_choice", "stream"}
         assert all(message["role"] in {"system", "user", "assistant"} for message in payload["messages"])
         assert all(not message.get("tool_calls") for message in payload["messages"])
-    contexts = {item["operation"]: _context(item["payload"]) for item in fake_stage.requests}
+    contexts = {item["operation"]: item["source_facts_before_projection"]
+                for item in result["responses"]}
     assert contexts["shared_wait_after_absence"]["actual_user_participation"]["status"] == "promised"
     assert contexts["actual_color_choice"]["recent_shared_choice"]["value"] == "蓝色"
     assert contexts["paused_gap"]["virtual_activity"]["status"] == "paused"

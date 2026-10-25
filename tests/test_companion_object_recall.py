@@ -116,7 +116,7 @@ def test_long_object_name_is_still_available_in_bounded_envelope(life):
     data = read(life, '我们的小船叫什么？')
     message = companion_context_message(data)
     assert message is not None
-    assert 'recent_shared_choice' in message.content
+    assert '选择内容是' in message.content
     assert '棉' * 24 in message.content
 
 

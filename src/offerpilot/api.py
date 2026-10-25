@@ -1512,6 +1512,7 @@ def create_app(
         write_coordinator=write_coordinator,
         source_loader=_runtime_source_loader,
         system_message=_chat_response_system_message,
+        general_system_message=lambda: _chat_response_system_message(general=True),
         clarification_message=_chat_clarification_message,
         page_context_messages=lambda page: _chat_page_context_messages(
             dict(page) if page is not None else None
@@ -8985,7 +8986,18 @@ def _generate_conversation_title(
         )
 
 
-def _chat_response_system_message() -> Message:
+def _chat_response_system_message(*, general: bool = False) -> Message:
+    # Same persona and execution boundaries; only presentation is task-scoped.
+    # General expression must not classify real work as leisure. Only explicit
+    # task/control contexts receive a fixed report layout; all facts and history
+    # remain intact, and a user's requested structure can still be followed.
+    presentation = (
+        "围绕用户当前请求自然、直接作答，按问题复杂度展开；需要时可用列表或小标题，"
+        "遵循用户要求的格式，不套固定汇报格式。"
+        if general else
+        "仅对需要结论和后续行动的求职工作任务，请先给出证据与注意事项，再以 `## 结论` 收束为一条简短结论，"
+        "并以 `## 下一步` 结尾，列出一到三条以 `- ` 开头的后续行动；该列表后不要追加文本。"
+    )
     return Message(
         role="system",
         surface_contributor="static_policy",
@@ -8993,9 +9005,8 @@ def _chat_response_system_message() -> Message:
             "你是 OfferPilot，一个求职领航助手。始终使用用户的语言回复。"
             "当前对话界面支持助手文本增量流式输出。"
             "回答保持简洁。"
-            "仅对需要结论和后续行动的求职工作任务，请先给出证据与注意事项，再以 `## 结论` 收束为一条简短结论，"
-            "并以 `## 下一步` 结尾，列出一到三条以 `- ` 开头的后续行动；该列表后不要追加文本。"
-            "问候语、澄清问题与日常陪伴（包括等待、暂停、回忆共同选择）直接自然回应，"
+            + presentation
+            + "问候语、澄清问题与日常陪伴（包括等待、暂停、回忆共同选择）直接自然回应，"
             "不套用工作总结、结论标题或下一步清单。"
             "如果本地工具依据较少，要明确说明。"
             "不要暴露隐藏推理。不要提到 update_application_status、create_application_event "

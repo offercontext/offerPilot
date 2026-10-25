@@ -59,9 +59,9 @@ def test_current_step_is_not_completion_or_an_extra_step(policy):
 
 
 def test_active_is_not_treated_as_waiting_for_user(policy):
-    assert has_clause(policy, "waiting_shared", "才表示", "约定")
-    assert has_clause(policy, "active", "不需要", "用户再次参与")
-    assert has_clause(policy, "paused", "暂停", "普通回复", "不", "已经推进")
+    assert has_clause(policy, "共同等待", "才表示", "约定")
+    assert has_clause(policy, "独立进行", "不需要", "用户再次参与")
+    assert has_clause(policy, "已暂停", "暂停", "普通回复", "不", "已经推进")
 
 
 def test_leisure_can_end_without_a_prompt_invitation_or_coaching(policy):
@@ -99,3 +99,14 @@ def test_capability_questions_are_answered_briefly_without_reading_internal_rule
 def test_leisure_brevity_never_omits_explicit_questions_or_work_requirements(policy):
     assert has_clause(policy, "闲聊", "一到三句", "不遗漏", "问题")
     assert has_clause(policy, "工作", "复杂", "不受", "闲聊篇幅")
+
+
+def test_general_policy_omits_fixed_layout_but_keeps_persona_and_safety():
+    ordinary = _chat_response_system_message(general=True).content
+    work = _chat_response_system_message().content
+    assert "## 结论" not in ordinary and "## 下一步" not in ordinary
+    assert "按问题复杂度展开" in ordinary and "需要时可用列表或小标题" in ordinary
+    assert "这一轮是日常对话" not in ordinary and "不写工作报告或行动清单" not in ordinary
+    assert companion_persona_policy() in ordinary
+    assert ordinary.split("问候语、澄清问题", 1)[1] == work.split("问候语、澄清问题", 1)[1]
+    assert not any(word in ordinary for word in ("waiting_shared", "active", "paused"))

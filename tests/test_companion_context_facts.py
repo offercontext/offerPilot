@@ -3,8 +3,6 @@
 These regressions come from real replies in runs 39736858377 and 39746585328. They
 verify the supplied facts, not a stubbed model's ability to follow them.
 """
-import json
-
 import pytest
 
 from offerpilot.companion.context import companion_context_message
@@ -30,8 +28,11 @@ def test_model_progress_is_one_based_and_does_not_invent_a_fourth_step(companion
     assert activity['status'] == ('completed' if advances == 3 else 'active')
     assert repository.read(2000) == before
     assert before['state']['activity']['step_index'] == min(advances, 2)
-    projected = json.loads(companion_context_message(data).content.split('\n', 1)[1])
-    assert projected['virtual_activity'] == activity
+    projected = companion_context_message(data).content
+    assert f"共3步，到了第{min(advances + 1, 3)}步" in projected
+    assert "第4步" not in projected
+    assert ("活动已完成" in projected) is (advances == 3)
+    assert "step_number" not in projected and "active" not in projected
 
 
 @pytest.mark.parametrize('action,status', [('pause', 'paused'), ('join', 'waiting_shared')])
@@ -101,7 +102,7 @@ def test_same_type_candidates_are_not_shared_making_evidence(life):
     message = companion_context_message(data)
     assert explanation in message.content
     assert '用户称呼' in message.content and '我们' in message.content
-    assert '不是共同制作证据' in message.content
+    assert '不是现实经历或共同制作证据' in message.content
     assert life[1].read() == before
 
 

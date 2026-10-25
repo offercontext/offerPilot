@@ -169,7 +169,7 @@ def test_current_binding_backfill_does_not_overwrite_conflicting_existing_metada
         assert session.scalar(select(CompanionEvent)).template_id == 'cloud_catalog'
 
 
-@pytest.mark.parametrize('previous_persona', ['companion-v1.2', 'companion-v1.3', 'companion-v1.4'])
+@pytest.mark.parametrize('previous_persona', ['companion-v1.2', 'companion-v1.3', 'companion-v1.4', 'companion-v1.5'])
 def test_expression_upgrade_preserves_waiting_life_and_fences_old_window_once(
     tmp_path, previous_persona,
 ):
