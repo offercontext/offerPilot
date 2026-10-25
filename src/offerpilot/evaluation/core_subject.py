@@ -88,6 +88,12 @@ class CoreSubject(Subject):
         )
         self.messages: queue.Queue[dict[str, Any]] = queue.Queue()
         self.errors: list[str] = []
+        self.cleanup_errors: list[dict[str, Any]] = []
+        self._stop_lock = threading.Lock()
+        self._tree_close_attempted = False
+        self._tree_closed = False
+        self._shutdown_graceful = False
+        self._owned_tree_exit_proof: dict[str, Any] | None = None
         self._control_state: dict[str, Any] = dict(
             phase=None, reader_started=False, reader_exited=False, exit_reason=None,
             error_type=None, last_validated_seq=0, last_persisted_seq=0, last_ack_seq=0,
@@ -125,6 +131,8 @@ class CoreSubject(Subject):
             trial_key={key: self.config["trial_key"][key] for key in (
                 "run_id", "variant_id", "execution_item_id", "mode", "repeat_index")},
             errors=list(self.errors), reader_alive=self.reader.is_alive(),
+            cleanup_errors=[dict(value) for value in self.cleanup_errors],
+            owned_tree_exit_proof=dict(self._owned_tree_exit_proof) if self._owned_tree_exit_proof else None,
             subject_closed=self.closed,
             owned_tree_exit_proven=getattr(self, "owned_tree_exit_proven", None))
 

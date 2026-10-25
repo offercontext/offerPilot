@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 import importlib.metadata
 import importlib.util
@@ -158,12 +159,35 @@ def target_environment(variant: VariantConfig) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(raw))
 
 
+def cleanup_error(operation: str, exc: Exception, epoch: int | None) -> dict[str, Any]:
+    number = getattr(exc, "errno", None)
+    return dict(operation=operation, error_type=type(exc).__name__,
+                errno=number if type(number) is int else None, epoch=epoch)
+
+
+def cleanup_call(records: list[dict[str, Any]], operation: str,
+                 action: Callable[[], Any], *, epoch: int | None = None) -> bool:
+    """Keep cleanup failures without leaking exception text or skipping later resources."""
+    try:
+        action()
+        return True
+    except Exception as exc:
+        records.append(cleanup_error(operation, exc, epoch))
+        return False
+
+
 class Subject:
     def __init__(self, variant: VariantConfig, config: dict[str, Any], private: Path,
                  events: list[dict[str, Any]], deadline: float) -> None:
         self.config, self.private, self.events, self.deadline = config, private, events, deadline
         self.messages: queue.Queue[dict[str, Any]] = queue.Queue()
         self.errors: list[str] = []
+        self.cleanup_errors: list[dict[str, Any]] = []
+        self._stop_lock = threading.Lock()
+        self._tree_close_attempted = False
+        self._tree_closed = False
+        self._shutdown_graceful = False
+        self._owned_tree_exit_proof: dict[str, Any] | None = None
         self.closed = False
         self.lock = threading.Lock()
         self.stderr = (private / f"epoch-{config['epoch']}.stderr").open("w", encoding="utf-8")
@@ -241,48 +265,100 @@ class Subject:
         raise TimeoutError(f"subject did not produce {kind}")
 
     def stop(self, *, crash: bool = False) -> None:
+        with self._stop_lock:
+            self._stop(crash=crash)
+
+    def _stop(self, *, crash: bool = False) -> None:
         if self.closed:
             return
-        graceful = False
-        self.owned_tree_exit_proven = False
+        graceful = self._shutdown_graceful
+        self.owned_tree_exit_proven = getattr(self, "owned_tree_exit_proven", False)
         shutdown_deadline = min(self.deadline, time.monotonic() + self.config["limits"]["shutdown_seconds"])
+        operation = "process.poll"
+        epoch = self.config.get("epoch")
+
+        def clean(name: str, action: Callable[[], Any], error: str) -> bool:
+            if cleanup_call(self.cleanup_errors, name, action, epoch=epoch):
+                return True
+            self.errors.append(error)
+            return False
+
         try:
-            if self.process.poll() is None:
+            if self._tree_close_attempted:
+                if not self.owned_tree_exit_proven:
+                    self.errors.append("exit_unverified")
+                    self.cleanup_errors.append(dict(operation="tree.wait", error_type=None, errno=None,
+                        epoch=epoch, reason="ownership_finalized_without_exit_proof"))
+                # After ownership finalization, a wait may observe only the
+                # parent. Never use it to upgrade a missing owned-tree proof.
+            elif self.process.poll() is None:
                 if crash:
+                    operation = "tree.kill"
                     self.tree.kill()
                 else:
+                    operation = "shutdown.send"
                     self.send({"command": "request_shutdown"})
+                    operation = "shutdown.wait"
                     self.wait("shutdown_complete", max(0, shutdown_deadline - time.monotonic()))
                     graceful = True
-            self.tree.wait(timeout=max(0.01, shutdown_deadline - time.monotonic()))
-            self.owned_tree_exit_proven = True
-        except Exception:
-            self.errors.append("shutdown_timeout")
-            try:
-                self.tree.kill()
-            except Exception:
-                self.errors.append("kill_failed")
-            try:
-                self.tree.wait(timeout=10)
+                    self._shutdown_graceful = True
+            if not self._tree_close_attempted:
+                operation = "tree.wait"
+                self.tree.wait(timeout=max(0.01, shutdown_deadline - time.monotonic()))
                 self.owned_tree_exit_proven = True
-            except Exception:
-                self.errors.append("exit_unverified")
+                self._owned_tree_exit_proof = dict(source="owned_tree.wait", epoch=epoch)
+        except Exception as exc:
+            self.cleanup_errors.append(cleanup_error(operation, exc, epoch))
+            self.errors.append("shutdown_timeout" if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
+                               else "shutdown_failed")
+            clean("tree.kill", self.tree.kill, "kill_failed")
+            if clean("tree.wait", lambda: self.tree.wait(timeout=10), "exit_unverified"):
+                self.owned_tree_exit_proven = True
+                self._owned_tree_exit_proof = dict(source="owned_tree.wait_after_kill", epoch=epoch)
         finally:
-            self.reader.join(timeout=5)
-            if self.reader.is_alive():
+            joined = clean("reader.join", lambda: self.reader.join(timeout=5), "control_not_closed")
+            reader_exited = joined and not self.reader.is_alive()
+            if not reader_exited:
                 self.errors.append("control_not_closed")
             if not crash and (not graceful or self.process.returncode != 0):
                 self.errors.append("abnormal_shutdown")
-            try:
-                self.tree.close()
-            except Exception:
-                self.errors.append("tree_close_failed")
-            self.closed = self.process.poll() is not None and not any(
-                e in self.errors for e in ("exit_unverified", "tree_close_failed", "control_not_closed"))
-            self.stderr.close()
-            for stream in (self.process.stdin, self.process.stdout) if self.closed else ():
-                if stream:
-                    stream.close()
+            self._tree_close_attempted = True
+            tree_closed = self._tree_closed or clean("tree.close", self.tree.close, "tree_close_failed")
+            self._tree_closed = tree_closed
+            pipes_safe = (self.process.poll() is not None and self.owned_tree_exit_proven
+                          and reader_exited)
+            streams_closed = clean("stderr.close", self.stderr.close, "stderr_close_failed")
+            for name, stream in (("stdin", self.process.stdin), ("stdout", self.process.stdout)):
+                if not pipes_safe:
+                    self.cleanup_errors.append(dict(operation=name + ".close", error_type=None,
+                        errno=None, epoch=epoch, reason="process_or_reader_exit_unverified"))
+                    streams_closed = False
+                elif stream is not None:
+                    closed = clean(name + ".close", stream.close, name + "_close_failed")
+                    streams_closed = closed and streams_closed
+            # A stream may be internally closed even when flushing raised. Keep
+            # that failed close observable; it cannot establish complete cleanup.
+            self.closed = pipes_safe and tree_closed and streams_closed
+
+
+def cleanup_resources(subjects: Iterable[Subject],
+                      drivers: Iterable[tuple[int | None, HTTPDriver]]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for subject in subjects:
+        if id(subject) in seen:
+            continue
+        seen.add(id(subject))
+        epoch = subject.config.get("epoch")
+        if not subject.closed:
+            cleanup_call(records, "subject.stop", subject.stop, epoch=epoch)
+        records.extend(dict(value) for value in getattr(subject, "cleanup_errors", []))
+    seen.clear()
+    for epoch, driver in drivers:
+        if id(driver) not in seen:
+            seen.add(id(driver))
+            cleanup_call(records, "http_driver.close", driver.close, epoch=epoch)
+    return records
 
 
 def operation_facts(db: Path, operation_id: str | None, conversation_id: int) -> dict[str, Any]:
@@ -489,12 +565,16 @@ def run_trial(plan: PlannedTrial, spec: CaseSpec, variant: VariantConfig, privat
         facts["termination_source"] = "evaluator_watchdog" if isinstance(exc, TimeoutError) else "unknown"
         facts["termination_events"] = [{"source": facts["termination_source"], "reason": type(exc).__name__}]
     finally:
-        if subject:
-            subject.stop()
-            if subject.errors:
-                errors["control"] = ",".join(subject.errors)
-        if driver:
-            driver.close()
+        cleanup_errors = cleanup_resources([subject] if subject else [],
+            [(subject.config.get("epoch") if subject else None, driver)] if driver else [])
+        if subject and subject.errors:
+            errors["control"] = ",".join(subject.errors)
+        if cleanup_errors:
+            facts["cleanup_errors"] = cleanup_errors
+            errors["cleanup"] = ",".join(
+                record["operation"] + ":" + str(record["error_type"]) for record in cleanup_errors)
+            if status == "completed":
+                status = "eval_error"
     final: dict[str, Any] = {}
     deltas, markers = [], []
     if (private / "data.db").exists() and coverage:
@@ -511,7 +591,7 @@ def run_trial(plan: PlannedTrial, spec: CaseSpec, variant: VariantConfig, privat
                 facts.update(operation_facts(private / "sealed.db", op_id, conversation_id))
         except Exception as exc:
             errors["observer"] = type(exc).__name__
-    facts["control_closed"] = bool(subject and subject.closed and not subject.errors)
+    facts["control_closed"] = not cleanup_errors and bool(subject and subject.closed and not subject.errors)
     facts["fault_witnesses"] = [e for e in events + markers
         if (e.get("type") == "negative_control_reached" or e.get("name") == "negative_control_reached")
         and e.get("fault_id") == variant.fault and e.get("trial_key") == trial_key

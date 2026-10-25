@@ -27,7 +27,7 @@ from offerpilot.evaluation.core_storage import load, seal
 from offerpilot.evaluation.core_subject import CoreSubject, RunLedger
 from offerpilot.evaluation.registry import file_hash
 from offerpilot.evaluation.reporting import atomic_json
-from offerpilot.evaluation.runner import snapshot
+from offerpilot.evaluation.runner import cleanup_resources, snapshot
 from scripts.evaluation_subject import core_observer as observer
 
 
@@ -233,11 +233,10 @@ def run_trial(
             "evaluator_watchdog" if isinstance(exc, TimeoutError) else "unknown"
         )
     finally:
-        for value in subjects:
-            if not value.closed:
-                value.stop()
-        if driver:
-            driver.close()
+        cleanup_errors = cleanup_resources(subjects,
+            [(value.config.get("epoch"), resource) for value, resource in drivers])
+        if cleanup_errors:
+            f["cleanup_errors"] = cleanup_errors
         f["control_observations_after_stop"] = _control_observations(subjects)
         http_diagnostics = _http_observations(drivers)
         errors = [dict(error, epoch=value["epoch"], trial_key=value["trial_key"])
@@ -248,7 +247,8 @@ def run_trial(
                           for value in http_diagnostics if value["capture_errors"]]
         if capture_errors:
             f["http_diagnostic_capture_errors"] = capture_errors
-        f["control_closed"] = bool(subjects) and all(s.closed and not s.errors for s in subjects)
+        f["control_closed"] = not cleanup_errors and bool(subjects) and all(
+            s.closed and not s.errors for s in subjects)
         f["owned_subjects_exited"] = bool(subjects) and all(
             getattr(s, "owned_tree_exit_proven", False) for s in subjects
         )

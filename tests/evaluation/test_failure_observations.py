@@ -224,12 +224,17 @@ def test_normal_control_keeps_ack_order_fsync_count_and_detached_snapshots(tmp_p
     assert subject.control_observation()["errors"] == ["abnormal_shutdown"]
 
 
-@pytest.mark.parametrize("failure_epoch", [pytest.param(None, id="success"),
-    pytest.param(1, id="epoch1"), pytest.param(2, id="epoch2")])
-def test_runner_separates_failure_before_stop_from_cleanup_evidence(tmp_path, monkeypatch, failure_epoch):
+@pytest.mark.parametrize("failure_epoch,primary_type", [pytest.param(None, None, id="success"),
+    pytest.param(1, httpx.ReadTimeout, id="epoch1"), pytest.param(2, httpx.ReadTimeout, id="epoch2"),
+    pytest.param(1, TimeoutError, id="interrupted"),
+    pytest.param(1, "product", id="product-failed")])
+@pytest.mark.parametrize("cleanup_mode", [None, "subject", "http", "both"])
+def test_runner_separates_failure_before_stop_from_cleanup_evidence(
+        tmp_path, monkeypatch, failure_epoch, primary_type, cleanup_mode):
     import sys
     from offerpilot.evaluation import core_planning, core_runner, core_storage
     from offerpilot.evaluation.runner import ROOT
+    from offerpilot.evaluation.adapters import ProductFailure
 
     source = dict(commit="a" * 40, diff_hash="b" * 64, lock_hash="c" * 64, files_hash="d" * 64)
     runtime = dict(python="python", sqlite="sqlite", dependencies={})
@@ -240,9 +245,12 @@ def test_runner_separates_failure_before_stop_from_cleanup_evidence(tmp_path, mo
     variants.write_text(json.dumps([dict(variant_id="candidate", checkout=str(ROOT), interpreter=sys.executable)]))
     manifest = core_planning.create_plan(ROOT / "evals/suites/harness-core-v1.json", variants, tmp_path / "plan")
     private = tmp_path / "trial"
-    error = httpx.ReadTimeout("EXCEPTION-SECRET")
+    error = (ProductFailure("business rejected") if primary_type == "product"
+             else (primary_type or httpx.ReadTimeout)("EXCEPTION-SECRET"))
     failed = failure_epoch is not None
     clients = []
+    stopped = []
+    http_closed = []
 
     class Client(StubClient):
         def __init__(self):
@@ -255,6 +263,11 @@ def test_runner_separates_failure_before_stop_from_cleanup_evidence(tmp_path, mo
                 raise error
             return httpx.Response(202 if method == "POST" else 200, json={"turn_id": "turn"}
                 if method == "POST" else {"state": "completed", "terminal": {"response": {"message": "ok"}}})
+
+        def close(self):
+            http_closed.append(self.epoch)
+            if cleanup_mode in {"http", "both"}:
+                raise OSError(22, "HTTP-CLEANUP-SECRET")
 
     monkeypatch.setattr(httpx, "Client", lambda **kwargs: Client())
 
@@ -278,11 +291,14 @@ def test_runner_separates_failure_before_stop_from_cleanup_evidence(tmp_path, mo
             return self.state
 
         def stop(self):
+            stopped.append(self.config["epoch"])
             self.closed, self.owned_tree_exit_proven = True, True
             self.state.update(phase="receive", last_validated_seq=4, last_persisted_seq=4,
                               last_ack_seq=3, reader_alive=False)
             if failed:
                 self.errors.append("abnormal_shutdown")
+            if cleanup_mode in {"subject", "both"}:
+                raise OSError(22, "SUBJECT-CLEANUP-SECRET")
 
     monkeypatch.setattr(core_runner, "CoreSubject", Subject)
     monkeypatch.setattr(core_runner.observer, "marker", lambda *args: None)
@@ -307,14 +323,30 @@ def test_runner_separates_failure_before_stop_from_cleanup_evidence(tmp_path, mo
     result = core_runner.run_trial(manifest, manifest.planned_trials[0], private,
         SimpleNamespace(), diagnostic_probe=failure_epoch != 2)
     evidence = core_storage.load(private, captured["evidence_hash"])
-    assert evidence["errors"] == {} and evidence == captured["evidence"]
+    # Core storage.errors describes fragment integrity, while runtime cleanup
+    # remains in the sealed facts and cannot turn a control gap into a pass.
+    assert evidence["errors"] == {}
+    assert evidence == captured["evidence"]
     assert len(captured["evidence_hash"]) == 64
     facts = evidence["facts"]
-    assert result.execution_status == ("eval_error" if failed else "completed")
-    assert facts["termination_source"] == ("unknown" if failed else "normal")
+    expected = ("product_failed" if primary_type == "product" else "interrupted"
+                if primary_type is TimeoutError else "eval_error" if failed or cleanup_mode else "completed")
+    assert result.execution_status == expected
+    assert facts["termination_source"] == ("evaluator_watchdog" if primary_type is TimeoutError else
+                                           "unknown" if failed or cleanup_mode else "normal")
+    assert stopped == list(range(1, len(clients) + 1))
+    assert http_closed == list(range(1, len(clients) + 1))
+    if cleanup_mode:
+        assert not facts["control_closed"] and facts["consumption"]["in_flight_unknown"]
+        assert facts["consumption"]["provider_attempts"] is None
+        records = facts["cleanup_errors"]
+        assert len(records) == len(clients) * (2 if cleanup_mode == "both" else 1)
+        assert "SECRET" not in json.dumps(records)
+        assert {r["error_type"] for r in records} == {"OSError"}
     after = facts["control_observations_after_stop"][-1]
     assert after["epoch"] == (failure_epoch or 1) and after["last_validated_seq"] == 4
     if failed:
+        assert facts["driver_error"] == type(error).__name__
         assert evidence["http"] == []  # Failed requests remain outside response observations.
         before = facts["driver_failure_observation"]["subjects"][-1]
         assert before["phase"] == "reserve" and before["last_validated_seq"] == 3
@@ -336,4 +368,4 @@ def test_runner_separates_failure_before_stop_from_cleanup_evidence(tmp_path, mo
         assert evidence["http"][1]["response"]["state"] == "completed"
         assert "driver_failure_observation" not in facts
         assert "http_request_errors" not in facts
-        assert facts["control_closed"] is True
+        assert facts["control_closed"] is (cleanup_mode is None)

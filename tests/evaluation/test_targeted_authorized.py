@@ -475,7 +475,8 @@ def test_trusted_anchor_failure_keeps_local_reservation_and_open_allocation(setu
     assert len(ledger.read_bytes().splitlines()) == 1
 
 
-def synthetic_saved(manifest, directory, stage, *, tree=True, reader=True, status="completed", attempts=None):
+def synthetic_saved(manifest, directory, stage, *, tree=True, reader=True, status="completed", attempts=None,
+                    closed=True, cleanup_errors=None, responded=True, trial_status="completed"):
     """Synthetic control facts for controller policy tests, never real capability evidence."""
     from offerpilot.evaluation.core_graders import grade
     child = stage_trial(manifest,stage,True)
@@ -486,17 +487,18 @@ def synthetic_saved(manifest, directory, stage, *, tree=True, reader=True, statu
     variant = manifest.variants["candidate"]
     handshake = dict(checkout_sha=variant["commit"],interpreter=variant["interpreter"],
         **variant["runtime"],product_file=str(ROOT / "src/offerpilot/__init__.py"),database_file=str(private / "data.db"))
-    evidence = dict(trial_key=key,provider_attempts=attempts or [],input_observations=[dict(category="provider_response",status=200)],
-        facts=dict(simulation_only=True,control_closed=True,owned_subjects_exited=tree,control_readers_exited=reader,
+    evidence = dict(trial_key=key,provider_attempts=attempts or [],input_observations=[dict(category="provider_response",status=200)] if responded else [],
+        facts=dict(simulation_only=True,control_closed=closed,owned_subjects_exited=tree,control_readers_exited=reader,
+                   cleanup_errors=cleanup_errors or [],
                    terminal_state="completed",handshakes=[handshake]))
     evidence_hash = seal(private,evidence)
-    result = grade(child,load(private,evidence_hash),"completed",evidence_hash,str(private))
+    result = grade(child,load(private,evidence_hash),trial_status,evidence_hash,str(private))
     result_path = private / "trial-result.json"
     atomic_json(result_path,result.model_dump(mode="json"))
     parent = next(p for p in manifest.planned_trials if p.execution_item_id == child.execution_item_id)
     return dict(status=status,parent_trial_key=list(parent.identity()),child_trial_key=list(child.identity()),
         result=result.model_dump(mode="json"),result_file=str(result_path),result_file_hash=file_hash(result_path),
-        probe_ok=True,control_records_closed=True,owned_subjects_exited=tree)
+        probe_ok=trial_status == "completed",control_records_closed=closed,owned_subjects_exited=tree)
 
 
 def test_closed_unknown_control_eof_keeps_partial_intents_on_readonly_resume(setup,monkeypatch):
@@ -591,6 +593,64 @@ def received(report):
         for obs in load(Path(saved["result"]["private_directory"]),saved["result"]["evidence_hash"])["input_observations"]
         if obs.get("category") == "offline_provider_received")
 
+
+@pytest.mark.parametrize("exit_proven", [True, False])
+def test_actual_close_gap_keeps_unknown_reservation_and_never_resends(setup, monkeypatch, exit_proven):
+    from tests.evaluation.test_cleanup_failures import stopped_subject
+    from offerpilot.evaluation.core_subject import CoreSubject
+    from offerpilot.evaluation.core_targeted_kernel import SessionOutcome
+    from offerpilot.evaluation.core_targeted_evidence import check_request_bindings
+    value, _ = stopped_subject(CoreSubject, {"stdin"}, exit_proven=exit_proven, closed_after_error=True)
+    value.stop(crash=True)
+    assert not value.closed and value.errors
+    path = prepare(setup)
+    amounts = []
+    def stopped_session(manifest, grant, directory, binding, selected, backend, make_ledger):
+        ledger = make_ledger(True)
+        ledger.stage = "probe"
+        child = stage_trial(manifest,"probe",True)
+        key = child.model_dump(mode="json",include={"run_id","variant_id","execution_item_id","mode","repeat_index"})
+        attempt = dict(purpose="provider_send",trial_key=key,epoch=1,seq=1,input_bytes=100,output_cap=10)
+        ledger.reserve(attempt)  # Only pre-ACK reservation; no model response or send is fabricated.
+        amounts.append(ledger.reserved_cny)
+        saved = synthetic_saved(manifest,directory,"probe",tree=value.owned_tree_exit_proven,
+            reader=not value.reader.is_alive(),closed=value.closed and not value.errors,
+            status="interrupted_unknown",attempts=[attempt],responded=False,trial_status="eval_error",
+            cleanup_errors=value.cleanup_errors)
+        saved["request_observation_binding"] = check_request_bindings(
+            "probe",dict(provider_attempts=[attempt]),ledger.rows,complete=False)
+        atomic_json(directory/"session-state.json",dict(schema_version=3,simulation_only=True,
+            plan_hash=binding,ledger=ledger.receipt(),stages={"probe":saved}))
+        return SessionOutcome(dict(schema_version=3,stage_states={"probe":saved},matrix=[],
+            selected_status="incomplete",exit_code=3,reserved_cny=str(ledger.reserved_cny),
+            allowed_requests=ledger.requests,simulation_only=True),ledger)
+    monkeypatch.setattr(auth,"run_session",stopped_session)
+    report = auth.execute(path)
+    assert report["exit_code"] == 3 and report["session_status"] == "incomplete"
+    assert report["transport_observation"]["reserved_without_observed_response"] == 1
+    assert report["transport_observation"]["provider_responses_observed"] == 0
+    assert report["stage_states"]["probe"]["control_records_closed"] is False
+    current = account(setup).inspect()[0]
+    if exit_proven:
+        assert report["allocation_state"] == "closed" and current["allocated_cny"] == "0"
+        assert Decimal(current["retained_cny"]) == Decimal("7.605790") + amounts[0]
+        assert Decimal(current["unallocated_cny"]) == Decimal("2.394210") - amounts[0]
+        assert current["closed_runs"][-1]["accounting"] == "conservative-reservation-not-actual-bill"
+    else:
+        assert report["allocation_state"] == "open" and current["allocated_cny"] == "1.0"
+        assert current["retained_cny"] == "7.605790" and current["unallocated_cny"] == "1.394210"
+    assert current["refund_cny"] == "0"
+    before_budget = (path.parent/"run-budget.jsonl").read_bytes()
+    before_account = setup["account"].read_bytes()
+    def no_resend(*args, **kwargs):
+        pytest.fail("unknown cleanup outcome caused a new model execution")
+    setup["ports"].backend.run = no_resend
+    from offerpilot.evaluation.core_targeted_kernel import run_session
+    monkeypatch.setattr(auth,"run_session",run_session)
+    resumed = auth.execute(path)
+    assert resumed["exit_code"] == 3
+    assert (path.parent/"run-budget.jsonl").read_bytes() == before_budget
+    assert setup["account"].read_bytes() == before_account
 
 def test_full_controller_normal_nine_cli_and_closed_resume(setup):
     path = prepare(setup,cli=True)
