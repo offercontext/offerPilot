@@ -55,6 +55,41 @@ def _remove_recovery_path(path: Path) -> None:
         pass
 
 
+def _chat_image_schema_state(connection) -> tuple[bool, bool]:  # type: ignore[no-untyped-def]
+    # Consume every row before releasing the connection or running later DDL.
+    columns = connection.exec_driver_sql("PRAGMA table_info(chat_messages)").fetchall()
+    has_column = any(row[1] == "image_refs_json" for row in columns)
+    has_trigger = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+        "AND name='chat_attachment_immutable' AND tbl_name='chat_attachments'"
+    ).scalar() is not None
+    return has_column, has_trigger
+
+
+def _ensure_chat_image_schema(engine: Engine) -> None:
+    # Normal startup must not contend with an existing application writer just
+    # to inspect an already complete schema. Release this read before locking.
+    with engine.connect() as connection:
+        if all(_chat_image_schema_state(connection)):
+            return
+    with engine.begin() as connection:
+        # Another initializer may repair the schema between the read and lock.
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        has_column, has_trigger = _chat_image_schema_state(connection)
+        if not has_column:
+            connection.exec_driver_sql(
+                "ALTER TABLE chat_messages ADD COLUMN "
+                "image_refs_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if not has_trigger:
+            connection.execute(text("""
+                CREATE TRIGGER IF NOT EXISTS chat_attachment_immutable
+                BEFORE UPDATE OF id, sha256, mime_type, size_bytes, width, height,
+                                 normalization_version, context_type, context_ref ON chat_attachments
+                BEGIN SELECT RAISE(ABORT, 'immutable image resource'); END
+            """))
+
+
 def init_database(db_path: Path) -> SessionFactory:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
@@ -75,24 +110,7 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
-    with engine.begin() as connection:
-        # Serialize check-and-add across simultaneous application starts.
-        # A deferred transaction allows both connections to observe no column.
-        connection.exec_driver_sql("BEGIN IMMEDIATE")
-        image_columns = connection.exec_driver_sql(
-            "PRAGMA table_info(chat_messages)"
-        ).fetchall()
-        if not any(row[1] == "image_refs_json" for row in image_columns):
-            connection.exec_driver_sql(
-                "ALTER TABLE chat_messages ADD COLUMN "
-                "image_refs_json TEXT NOT NULL DEFAULT '[]'"
-            )
-        connection.execute(text("""
-            CREATE TRIGGER IF NOT EXISTS chat_attachment_immutable
-            BEFORE UPDATE OF id, sha256, mime_type, size_bytes, width, height,
-                             normalization_version, context_type, context_ref ON chat_attachments
-            BEGIN SELECT RAISE(ABORT, 'immutable image resource'); END
-        """))
+    _ensure_chat_image_schema(engine)
     _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
     _record_migration(engine, "0033_job_mail_review", "Add isolated mail evidence, proposals, previews and atomic receipts")
     runtime_columns_changed = [

@@ -15,12 +15,13 @@ class ImageMigrationFinished(Exception):
     """Stop after the real image transaction, before unrelated migrations."""
 
 
-def prepare(path: Path, *, existing: bool) -> str:
+def prepare(path: Path, *, existing: bool, keep_trigger: bool = False) -> str:
     factory = database.init_database(path)
     factory.kw["bind"].dispose()
     expected = '[{"id":"preserved-image-reference"}]' if existing else "[]"
     with sqlite3.connect(path) as connection:
-        connection.execute("DROP TRIGGER chat_attachment_immutable")
+        if not keep_trigger:
+            connection.execute("DROP TRIGGER chat_attachment_immutable")
         connection.execute("DELETE FROM schema_migrations WHERE version='0034_chat_image_messages'")
         connection.execute("INSERT INTO conversations(id,title) VALUES(1,'synthetic')")
         connection.execute(
@@ -32,12 +33,13 @@ def prepare(path: Path, *, existing: bool) -> str:
     return expected
 
 
-@pytest.mark.parametrize("existing", [False, True])
-def test_image_schema_serializes_inspection_and_addition(tmp_path, monkeypatch, existing):
+@pytest.mark.parametrize("existing,keep_trigger", [(False, False), (True, False), (False, True)])
+def test_image_schema_serializes_inspection_and_addition(tmp_path, monkeypatch, existing, keep_trigger):
     path = tmp_path / "image-schema.db"
-    expected = prepare(path, existing=existing)
+    expected = prepare(path, existing=existing, keep_trigger=keep_trigger)
     begin_barrier = Barrier(2)
     observations = []
+    unlocked_observations = []
     engines = []
     mutex = Lock()
     create_engine = database.create_engine
@@ -54,12 +56,10 @@ def test_image_schema_serializes_inspection_and_addition(tmp_path, monkeypatch, 
                 # sleep, changed timeout, or serialized executor masks a race.
                 begin_barrier.wait(timeout=10)
             if statement == "PRAGMA table_info(chat_messages)":
-                assert connection.info.get("image_lock_started"), (
-                    "inspect only after acquiring write lock"
-                )
                 columns = connection.connection.driver_connection.execute(statement).fetchall()
                 with mutex:
-                    observations.append(any(row[1] == "image_refs_json" for row in columns))
+                    target = observations if connection.info.get("image_lock_started") else unlocked_observations
+                    target.append(any(row[1] == "image_refs_json" for row in columns))
 
         @event.listens_for(engine, "after_cursor_execute")
         def after(connection, cursor, statement, parameters, context, executemany):
@@ -92,6 +92,7 @@ def test_image_schema_serializes_inspection_and_addition(tmp_path, monkeypatch, 
             futures = [executor.submit(initialize) for _ in range(2)]
             for future in futures:
                 future.result(timeout=20)
+        assert unlocked_observations == [existing, existing]
         assert observations == ([True, True] if existing else [False, True])
         monkeypatch.setattr(database, "create_engine", create_engine)
         monkeypatch.setattr(database, "_record_migration", record_migration)
@@ -149,3 +150,39 @@ def test_image_schema_rolls_back_column_when_trigger_creation_fails(tmp_path, mo
     finally:
         for engine in engines:
             engine.dispose()
+
+
+def test_complete_image_schema_is_read_only_while_writer_holds_lock(tmp_path):
+    path = tmp_path / "complete.db"
+    expected = prepare(path, existing=True)
+    factory = database.init_database(path)
+    factory.kw["bind"].dispose()
+    # No timer or retry allowance: a competing writer owns the lock throughout
+    # the call, and any accidental SQLite write-lock acquisition fails at once.
+    engine = database.create_engine(f"sqlite:///{path}", connect_args={"timeout": 0})
+    statements = []
+
+    @event.listens_for(engine, "before_cursor_execute")
+    def only_reads(connection, cursor, statement, parameters, context, executemany):
+        statements.append(statement)
+        assert statement.lstrip().upper().startswith(("SELECT", "PRAGMA"))
+
+    writer = sqlite3.connect(path)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        database._ensure_chat_image_schema(engine)
+        assert writer.in_transaction
+        assert len(statements) == 2
+        assert writer.execute(
+            "SELECT content,image_refs_json FROM chat_messages WHERE id=1"
+        ).fetchone() == ("keep", expected)
+    finally:
+        writer.rollback()
+        writer.close()
+        event.remove(engine, "before_cursor_execute", only_reads)
+    try:
+        with engine.begin() as connection:
+            connection.exec_driver_sql("CREATE TABLE image_fast_path_cursor_probe (id INTEGER)")
+            connection.exec_driver_sql("DROP TABLE image_fast_path_cursor_probe")
+    finally:
+        engine.dispose()
