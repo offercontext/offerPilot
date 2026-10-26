@@ -172,14 +172,18 @@ type RuntimeFunctionLike =
   | ts.GetAccessorDeclaration
   | ts.SetAccessorDeclaration;
 
+const runtimeFunctionKinds: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.FunctionDeclaration,
+  ts.SyntaxKind.FunctionExpression,
+  ts.SyntaxKind.ArrowFunction,
+  ts.SyntaxKind.MethodDeclaration,
+  ts.SyntaxKind.Constructor,
+  ts.SyntaxKind.GetAccessor,
+  ts.SyntaxKind.SetAccessor,
+]);
+
 function isRuntimeFunctionLike(node: ts.Node): node is RuntimeFunctionLike {
-  return ts.isFunctionDeclaration(node)
-    || ts.isFunctionExpression(node)
-    || ts.isArrowFunction(node)
-    || ts.isMethodDeclaration(node)
-    || ts.isConstructorDeclaration(node)
-    || ts.isGetAccessorDeclaration(node)
-    || ts.isSetAccessorDeclaration(node);
+  return runtimeFunctionKinds.has(node.kind);
 }
 
 function expressionContainsIdentifier(
