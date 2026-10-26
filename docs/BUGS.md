@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Knowledge 分词器依赖 SDK 的隐式资源初始化（2026-10-27）
+
+**现象：** 26337 候选在新隔离环境的正式确定性评测中，114 次实际执行得到 108 pass、6 eval_error/fail；两个候选 E10 用例的三轮重复均在 ingest 前置计数处报 `tokenizer_unavailable`。原始失败、6 条 fail 规则和 33 条 unknown 规则保留，未执行到的模型/来源链不能补成通过。
+
+**根因：** 基线的 Knowledge provider 在模块级导入 LiteLLM，间接由其 default encoding 模块设置 bundled tokenizer 缓存并加载编码器。SDK 懒加载移除了这个偶然的入库前初始化，而 Knowledge tokenizer 仍直接调用 `tiktoken.get_encoding`，空 TEMP 下因此尝试下载编码资源并被网络围栏拒绝。同一新解释器、独立空 TEMP 和网络拒绝下，旧源码成功、候选失败；候选仅显式选择现有有效 bundle 即恢复，且未导入 SDK。该反事实支持当前资源初始化回归，不证明历史超时同因或冷启动性能收益。
+
+**修复：** Knowledge 自行只读选择固定 cl100k_base 资源，优先使用显式 `TIKTOKEN_CACHE_DIR`、`DATA_GYM_CACHE_DIR`、非空 `CUSTOM_TIKTOKEN_CACHE_DIR`，否则通过分发包 metadata 定位现有 bundle，不导入整个 SDK。对一次读取的 bytes 核验固定 SHA 后直接解析 BPE，按原完整 regex 与五个 special token 定义构造编码器；不经过会下载、删除或写缓存的 factory。显式缺失、损坏和空 native 缓存配置拒绝加载，不静默回退或估算；空 CUSTOM 仍按未配置处理。尊重 native 缓存优先级是对过去 SDK 无条件覆盖它们的隐式副作用作出的语义明确化。进程环境、64,000 token 上限、版本、HITL、SDK 委托和所有原阈值保持不变。
+
+**教训与验证边界：** 原快照反事实及首次真实 ingest 红测留档；初版 148 项通过后，mypy 的 SimplePath 类型错误也保留，路径文本规范化后最终字节另跑 21 项分词器回归及 Ruff/mypy。新进程使用原 SourceGuard 和禁止 SDK/网络的哨兵，覆盖真实 ingest/extraction、64,000 接受/64,001 拒绝、官方 token ID 与特殊 token 行为、配置优先级、缺失/损坏拒绝及读取后资源变化。旧 148 项不自动迁移到最终字节；新快照正式 114、独立候选评审和完整本地 gate 分别记录。旧人工结论和历史缺失归档保持原绑定。
+
 ## 前端审计的运行时函数分类重复调用类型守卫（2026-10-26）
 
 **现象：** fc5d 候选完整本地门禁的生产源码审计测得 30,424.0683 ms，超过原 30,000 ms 断言；失败和后续未执行阶段保留。后续单文件 134 项通过不能替代完整门禁，也不证明历史超时原因已解决。
