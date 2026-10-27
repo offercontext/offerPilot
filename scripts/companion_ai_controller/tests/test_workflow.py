@@ -1,10 +1,11 @@
 """The development workflow has no protected job or secret-bearing path."""
-from pathlib import Path
 import re
 
 import yaml
 
-WORKFLOW = Path('.github/workflows/companion-ai-controller-dry-run.yml')
+from scripts.companion_ai_controller.tests.workflow_assets import historical_workflow
+
+WORKFLOW = historical_workflow('development')
 
 
 def test_workflow_has_only_fixed_fake_push_job_and_read_token():
@@ -36,7 +37,8 @@ def test_workflow_explicit_upload_allowlist_contains_original_requests():
                   if s.get('uses', '').startswith('actions/upload-artifact@'))
     assert upload['if'] == 'always()'
     paths = upload['with']['path'].splitlines()
-    assert len(paths) == 4 and all('*' not in p for p in paths)
+    assert len(paths) == 5 and all('*' not in p for p in paths)
+    assert 'artifacts/companion-controller-public-platform.json' in paths
     assert 'artifacts/companion-controller-rehearsal/rehearsal.zip' in paths
     assert not any(path.endswith('.jsonl') for path in paths)
     assert 'artifacts/companion-controller-offline.json' in paths

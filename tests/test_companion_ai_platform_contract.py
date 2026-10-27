@@ -29,7 +29,8 @@ def test_main_rejects_platform_before_reading_admission_or_key(monkeypatch, caps
 
 def test_linux_gate_cannot_be_silently_replaced_by_default_windows_collection():
     root = Path(__file__).resolve().parents[1]
-    workflow = (root / ".github/workflows/companion-real-ai.yml").read_text()
+    from scripts.companion_ai_controller.tests.workflow_assets import historical_workflow
+    workflow = historical_workflow("legacy").read_text()
     assert "runs-on: ubuntu-latest" in workflow
     assert "python -m scripts.companion_ai_validation.test_gate" in workflow
     assert "tests/test_companion_ai_platform_contract.py" in workflow

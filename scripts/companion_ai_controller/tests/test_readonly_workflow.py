@@ -11,7 +11,9 @@ import yaml
 
 from scripts.companion_ai_controller import read_only as public
 
-WORKFLOW = Path('.github/workflows/companion-ai-controller-dry-run.yml')
+from scripts.companion_ai_controller.tests.workflow_assets import historical_workflow
+
+WORKFLOW = historical_workflow('development')
 PINNED_ZIP = Path('scripts/companion_ai_controller/evidence/h-offline-12707161298.zip')
 REPORT = 'artifacts/companion-controller-public-read.json'
 COMMAND = (
@@ -53,6 +55,7 @@ def test_always_uploads_public_failure_report_and_final_fake_zip_only():
         'artifacts/companion-controller-rehearsal-status.json',
         'artifacts/companion-controller-rehearsal/rehearsal.zip',
         REPORT,
+        "artifacts/companion-controller-public-platform.json",
     ]
     # requests.jsonl remains inside the fully labeled, hash-verified fake ZIP;
     # no raw intermediate ledger directory or uncontrolled path is uploaded.
@@ -110,3 +113,15 @@ def test_public_transport_ignores_proxy_and_token_environment_without_fallback(m
     assert 'PRIVATE_SYNTHETIC_SENTINEL' not in str(request.headers)
     proxies = [h for h in handlers_seen if isinstance(h, ProxyHandler)]
     assert len(proxies) == 1 and proxies[0].proxies == {}
+
+
+def test_platform_probe_is_readonly_fixed_and_preserves_failure():
+    steps = workflow()['jobs']['rehearsal']['steps']
+    probe = next(s for s in steps if s.get('name') ==
+                 'Read existing controller and environment metadata without admission')
+    assert set(probe) == {'name', 'run'}
+    assert shlex.split(probe['run']) == [
+        'uv', 'run', 'python', '-m', 'scripts.companion_ai_controller.admission',
+        '--public-probe', '>', 'artifacts/companion-controller-public-platform.json']
+    source = next(s for s in steps if s.get('name') == 'Read fixed public source and legacy history')
+    assert steps.index(probe) == steps.index(source) + 1

@@ -1,8 +1,11 @@
-"""Credential-free public GitHub evidence collection, never live admission.
+"""Fixed-repository GET evidence readers; no provider or write capability.
 
-Only fixed-repository GET metadata is supported. Artifact download redirects are
-intentionally unsupported: provide independently obtained pinned ZIP bytes or
-receive an explicitly incomplete report. No candidate code is loaded.
+PublicReader and this module's CLI remain credential-free. The separate explicit
+GitHubActionsReadReader accepts a caller-provided temporary metadata token only;
+it is not enabled by environment variables, errors or anonymous fallback.
+Artifact download redirects are unsupported. Independently obtained pinned ZIP
+bytes can complete source verification, never production admission by themselves.
+No candidate code is loaded.
 """
 from __future__ import annotations
 
@@ -61,6 +64,17 @@ def _allowed(path: str) -> bool:
         r"|/actions/workflows/" + str(WORKFLOW) + r"/runs\?per_page=100&page=[1-9][0-9]*)", path))
 
 
+def _registered_safe(path: str) -> bool:
+    """Additional public metadata only; no secret, token, dispatch or write route."""
+    return bool(re.fullmatch(
+        r"(?:/git/ref/heads/ai-validation-control|/git/commits/[0-9a-f]{40}"
+        r"|/git/trees/[0-9a-f]{40}\?recursive=1"
+        r"|/actions/workflows(?:\?per_page=100&page=[1-9][0-9]*)?"
+        r"|/actions/workflows/[1-9][0-9]*(?:/runs\?per_page=100&page=[1-9][0-9]*)?"
+        r"|/actions/runs/[1-9][0-9]*/approvals"
+        r"|/environments/[a-z0-9][a-z0-9-]{0,99}(?:/deployment-branch-policies\?per_page=100&page=[1-9][0-9]*)?)", path))
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req: Any, fp: Any, code: int, msg: str,
                          headers: Any, newurl: str) -> None:
@@ -69,7 +83,10 @@ class NoRedirect(HTTPRedirectHandler):
 
 class PublicReader:
     """No credentials, environment token lookup, proxy or signed-URL handling."""
-    def __init__(self) -> None:
+    def __init__(self, *, registered_paths: frozenset[str] = frozenset()) -> None:
+        p.demand(all(type(path) is str and _registered_safe(path) for path in registered_paths),
+                 "REGISTERED_GET_PATH_INVALID")
+        self.registered_paths = registered_paths
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         # A fixed Linux trust store avoids SSL_CERT_FILE/SSL_CERT_DIR and keylog
@@ -80,13 +97,11 @@ class PublicReader:
         self.requests = 0
 
     def __call__(self, path: str) -> Response:
-        p.demand(type(path) is str and _allowed(path), "GET_PATH_NOT_ALLOWED")
+        p.demand(type(path) is str and (_allowed(path) or path in self.registered_paths), "GET_PATH_NOT_ALLOWED")
         p.demand(self.requests < 256 and 0 <= time.monotonic() - self.started < 120,
                  "PUBLIC_READ_BUDGET_EXHAUSTED")
         self.requests += 1
-        request = Request(ROOT + path, method="GET", headers={
-            "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "OfferPilot-read-only-evidence"})
+        request = Request(ROOT + path, method="GET", headers=self._headers())
         try:
             with self.opener.open(request, timeout=15) as response:
                 p.demand(response.geturl() == ROOT + path, "RESPONSE_URL_CHANGED")
@@ -99,6 +114,27 @@ class PublicReader:
         except (HTTPError, URLError, OSError, TimeoutError):
             # Do not emit exception text, headers, redirect locations or URLs.
             raise Blocked("PUBLIC_GET_FAILED") from None
+
+    def _headers(self) -> dict[str, str]:
+        return {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
+                "User-Agent": "OfferPilot-read-only-evidence"}
+
+
+class GitHubActionsReadReader(PublicReader):
+    """Explicit short-lived Actions token profile; never an anonymous fallback.
+
+    Caller must have separately authorized the workflow's read-only token
+    permissions. No environment is inspected. Token is sent only to ROOT and
+    redirects remain forbidden before a second request can occur.
+    """
+    def __init__(self, *, token: str, registered_paths: frozenset[str] = frozenset()):
+        p.demand(type(token) is str and re.fullmatch(r"[A-Za-z0-9_-]{20,256}", token) is not None,
+                 "EXPLICIT_METADATA_TOKEN_INVALID")
+        super().__init__(registered_paths=registered_paths)
+        self._token = token
+
+    def _headers(self) -> dict[str, str]:
+        return {**super()._headers(), "Authorization": "Bearer " + self._token}
 
 
 def _pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -118,8 +154,8 @@ def _json(raw: bytes) -> Any:
         raise Blocked("JSON_INVALID") from None
 
 
-def _read(reader: Reader, path: str) -> tuple[dict[str, Any], Mapping[str, str]]:
-    p.demand(_allowed(path), "GET_PATH_NOT_ALLOWED")
+def _read(reader: Reader, path: str, *, registered_paths: frozenset[str] = frozenset()) -> tuple[dict[str, Any], Mapping[str, str]]:
+    p.demand(_allowed(path) or (path in registered_paths and _registered_safe(path)), "GET_PATH_NOT_ALLOWED")
     response = reader(path)
     p.demand(isinstance(response, Response) and type(response.status) is int
              and response.status == 200, "GET_STATUS_INVALID")
@@ -157,12 +193,12 @@ def _next(link: str, path: str, page: int) -> bool:
     return "next" in relations
 
 
-def _pages(reader: Reader, path: str, key: str) -> list[dict[str, Any]]:
+def _pages(reader: Reader, path: str, key: str, *, registered_paths: frozenset[str] = frozenset()) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen: set[int] = set()
     total: int | None = None
     for page in range(1, MAX_PAGES + 1):
-        data, headers = _read(reader, f"{path}?per_page=100&page={page}")
+        data, headers = _read(reader, f"{path}?per_page=100&page={page}", registered_paths=registered_paths)
         count, rows = data.get("total_count"), data.get(key)
         p.demand(type(count) is int and 0 <= count <= MAX_PAGES * 100
                  and (total is None or total == count) and type(rows) is list and len(rows) <= 100,

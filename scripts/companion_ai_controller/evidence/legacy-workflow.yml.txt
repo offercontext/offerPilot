@@ -1,0 +1,131 @@
+name: Companion bounded real AI acceptance
+on:
+  push:
+    branches: [feat/20261021-companion-life-v1]
+# No dispatch, pull_request, pull_request_target, deploy, publish or write token.
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: offerpilot-companion-ai-20261021-one-shot
+  cancel-in-progress: false
+jobs:
+  offline:
+    name: Companion offline safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - name: Install frozen dependencies without provider credentials
+        run: uv sync --frozen
+      - name: Test fake upstream, budget failures, genuine CLI and loopback API
+        run: |
+          uv run python -m scripts.companion_ai_validation.test_gate
+          uv run pytest -q tests/test_companion_ai_platform_contract.py
+          uv run ruff check scripts/companion_ai_validation scripts/companion_ai_validation/tests tests/test_companion_ai_platform_contract.py
+          uv run mypy scripts/companion_ai_validation/*.py --follow-imports=silent --explicit-package-bases
+      - name: Read independent workflow and environment protection registration
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python -m scripts.companion_ai_validation.preflight --phase inspect
+      - name: Keep mandatory offline node aggregate
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: companion-ai-offline-${{ github.sha }}
+          path: artifacts/companion-ai-offline.json
+          if-no-files-found: error
+          retention-days: 14
+  preflight:
+    name: Companion request preflight
+    needs: offline
+    if: >-
+      github.repository == 'offercontext/offerPilot' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/feat/20261021-companion-life-v1' &&
+      github.run_attempt == 1 &&
+      vars.OFFERPILOT_COMPANION_AI_HELPER_SHA != '' &&
+      vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA != '' &&
+      github.sha == vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact empty-child request, protected environment and full history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OFFERPILOT_COMPANION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_HELPER_SHA }}
+          OFFERPILOT_COMPANION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA }}
+        run: python -m scripts.companion_ai_validation.preflight --phase before --shadow-review
+  paid:
+    name: Companion approved real AI
+    needs: [offline, preflight]
+    if: >-
+      github.repository == 'offercontext/offerPilot' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/feat/20261021-companion-life-v1' &&
+      github.run_attempt == 1 &&
+      github.sha == vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA &&
+      vars.OFFERPILOT_COMPANION_AI_HELPER_SHA != ''
+    environment: offerpilot-companion-ai-20261021
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - name: Prepare frozen dependencies before exposing the provider secret
+        run: uv sync --frozen
+      - name: Recheck new owner approval, SHA and exact predecessor lineage
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OFFERPILOT_COMPANION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_HELPER_SHA }}
+          OFFERPILOT_COMPANION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA }}
+        run: >-
+          python -m scripts.companion_ai_validation.preflight --phase paid --shadow-review
+          --admission-file "$RUNNER_TEMP/companion-ai-admission.json"
+      - name: Six fixed shadow reviews, no retries, inherited 20 CNY task budget
+        env:
+          OFFERPILOT_COMPANION_DEEPSEEK_20261021: ${{ secrets.OFFERPILOT_COMPANION_DEEPSEEK_20261021 }}
+          OFFERPILOT_COMPANION_AI_MODEL: ${{ vars.OFFERPILOT_COMPANION_AI_MODEL }}
+        run: >-
+          .venv/bin/python -m scripts.companion_ai_validation.run --live --shadow-review
+          --admission-file "$RUNNER_TEMP/companion-ai-admission.json"
+          --evidence-dir "$GITHUB_WORKSPACE/artifacts/companion-ai"
+      - name: Retain synthetic dialogue, structural result and numeric ledger
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: companion-ai-${{ github.sha }}
+          path: |
+            artifacts/companion-ai/summary.json
+            artifacts/companion-ai/responses.jsonl
+            artifacts/companion-ai/budget.jsonl
+            artifacts/companion-ai/requests.jsonl
+          if-no-files-found: warn
+          retention-days: 14

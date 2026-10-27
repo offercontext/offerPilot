@@ -19,8 +19,11 @@ from scripts.companion_ai_validation import broker as gate
 from scripts.companion_ai_validation import run
 from scripts.companion_ai_validation.tests.test_companion_ai_broker import response
 
+from scripts.companion_ai_controller.tests.workflow_assets import historical_workflow
+
 ROOT = Path(__file__).resolve().parents[3]
-WORKFLOW = ROOT / ".github/workflows/companion-real-ai.yml"
+
+WORKFLOW = historical_workflow("legacy")
 EVIDENCE_DIRECTORY = PurePosixPath("artifacts/companion-ai")
 MEMBERS = frozenset({"summary.json", "responses.jsonl", "budget.jsonl", "requests.jsonl"})
 PATHS = frozenset(str(EVIDENCE_DIRECTORY / name) for name in MEMBERS)

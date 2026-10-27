@@ -177,10 +177,9 @@ def test_shadow_cli_cannot_write_admission_without_current_owner(tmp_path, monke
 
 
 def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
-    from pathlib import Path
     import yaml
-    root = Path(__file__).resolve().parents[3]
-    workflow = yaml.safe_load((root / p.WORKFLOW).read_text())
+    from scripts.companion_ai_controller.tests.workflow_assets import historical_workflow
+    workflow = yaml.safe_load(historical_workflow("legacy").read_text())
     commands = [step.get("run", "") for job in workflow["jobs"].values()
                 for step in job["steps"]]
     for fragment in ("preflight --phase before", "preflight --phase paid", ".run --live"):

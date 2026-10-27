@@ -223,7 +223,8 @@ def test_run_matrix_has_exact_one_completion_per_stage(tmp_path, monkeypatch):
 
 
 def test_workflow_has_one_secret_step_and_no_pr_or_write_path():
-    path = Path(__file__).resolve().parents[3] / ".github/workflows/companion-real-ai.yml"
+    from scripts.companion_ai_controller.tests.workflow_assets import historical_workflow
+    path = historical_workflow("legacy")
     workflow = path.read_text()
     assert workflow.count("${{ secrets.OFFERPILOT_COMPANION_DEEPSEEK_20261021 }}") == 1
     assert "  workflow_dispatch:" not in workflow

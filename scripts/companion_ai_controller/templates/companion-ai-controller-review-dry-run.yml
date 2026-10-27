@@ -1,0 +1,51 @@
+# INERT PLATFORM-ONLY REVIEW TEMPLATE. Not installed under .github/workflows.
+# Future deployment target: .github/workflows/companion-ai-controller-dry-run.yml
+# Keep old development-push anchors. Register this completed dispatch as a new
+# exact dry anchor before production; it never consumes a paid attempt.
+name: Companion controller platform-only review
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: offerpilot-companion-ai-20261021-one-shot
+  cancel-in-progress: false
+jobs:
+  platform_review:
+    name: Controller platform-only review
+    if: >-
+      github.repository == 'offercontext/offerPilot' &&
+      github.event_name == 'workflow_dispatch' && github.run_attempt == 1 &&
+      github.ref == 'refs/heads/ai-validation-control' &&
+      vars.OFFERPILOT_COMPANION_AI_CONTROLLER_SHA != '' &&
+      vars.OFFERPILOT_COMPANION_AI_REGISTRATION != '' &&
+      github.sha == vars.OFFERPILOT_COMPANION_AI_CONTROLLER_SHA
+    environment: offerpilot-companion-ai-controller
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      OFFERPILOT_COMPANION_AI_CONTROLLER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_CONTROLLER_SHA }}
+      OFFERPILOT_COMPANION_AI_REGISTRATION: ${{ vars.OFFERPILOT_COMPANION_AI_REGISTRATION }}
+      CONTROLLER_CANDIDATE_SHA: '8848ac33623167cb2c2a58b1e0122abe825810dc'
+      CONTROLLER_CI_RUN_ID: '40441381236'
+      CONTROLLER_MANIFEST_SHA256: '561c83d8295a7aedc925dd474bba58f1188dbf3dfe4a776856d6ae4cef03755e'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ vars.OFFERPILOT_COMPANION_AI_CONTROLLER_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - name: Observe public owner review metadata without a provider or token
+        run: |
+          mkdir -p artifacts
+          python -m scripts.companion_ai_controller.production control-probe > artifacts/companion-controller-platform-review.json
+      - name: Preserve platform-only report including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: companion-controller-platform-review-${{ github.run_id }}
+          path: artifacts/companion-controller-platform-review.json
+          if-no-files-found: error
+          retention-days: 14

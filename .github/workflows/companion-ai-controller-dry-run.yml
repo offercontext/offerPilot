@@ -48,6 +48,10 @@ jobs:
           uv run python -m scripts.companion_ai_controller.read_only
           --offline-artifact scripts/companion_ai_controller/evidence/h-offline-12707161298.zip
           --scan-legacy-history > artifacts/companion-controller-public-read.json
+      - name: Read existing controller and environment metadata without admission
+        run: >-
+          uv run python -m scripts.companion_ai_controller.admission
+          --public-probe > artifacts/companion-controller-public-platform.json
       - name: Preserve aggregate and fake evidence including failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -58,5 +62,6 @@ jobs:
             artifacts/companion-controller-rehearsal-status.json
             artifacts/companion-controller-rehearsal/rehearsal.zip
             artifacts/companion-controller-public-read.json
+            artifacts/companion-controller-public-platform.json
           if-no-files-found: error
           retention-days: 14

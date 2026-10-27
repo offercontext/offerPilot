@@ -1,0 +1,67 @@
+name: Companion controller no-secret rehearsal
+on:
+  push:
+    branches: [feat/20261027-fixed-ai-controller]
+    paths:
+      - '.github/workflows/companion-ai-controller-dry-run.yml'
+      - 'scripts/companion_ai_controller/**'
+      - 'scripts/companion_ai_validation/**'
+      - 'tests/test_companion_ai_platform_contract.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+# Development-only push CI. No deployment, manual dispatch or protected job.
+permissions:
+  contents: read
+concurrency:
+  group: offerpilot-companion-ai-20261021-one-shot
+  cancel-in-progress: false
+jobs:
+  rehearsal:
+    name: Controller no-secret evidence rehearsal
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+      - name: Install frozen development dependencies
+        run: uv sync --frozen
+      - name: Complete old and new offline regression aggregate
+        run: uv run python -m scripts.companion_ai_controller.test_gate
+      - name: Static checks
+        run: |
+          uv run ruff check scripts/companion_ai_controller scripts/companion_ai_validation tests/test_companion_ai_platform_contract.py
+          uv run mypy scripts/companion_ai_controller/*.py scripts/companion_ai_validation/*.py --follow-imports=silent --explicit-package-bases
+      - name: Run isolated fake-only controller path
+        run: uv run python -m scripts.companion_ai_controller.rehearsal --output-dir artifacts/companion-controller-rehearsal
+      - name: Read fixed public source and legacy history
+        run: >-
+          uv run python -m scripts.companion_ai_controller.read_only
+          --offline-artifact scripts/companion_ai_controller/evidence/h-offline-12707161298.zip
+          --scan-legacy-history > artifacts/companion-controller-public-read.json
+      - name: Read existing controller and environment metadata without admission
+        run: >-
+          uv run python -m scripts.companion_ai_controller.admission
+          --public-probe > artifacts/companion-controller-public-platform.json
+      - name: Preserve aggregate and fake evidence including failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: companion-controller-offline-${{ github.sha }}
+          path: |
+            artifacts/companion-controller-offline.json
+            artifacts/companion-controller-rehearsal-status.json
+            artifacts/companion-controller-rehearsal/rehearsal.zip
+            artifacts/companion-controller-public-read.json
+            artifacts/companion-controller-public-platform.json
+          if-no-files-found: error
+          retention-days: 14
