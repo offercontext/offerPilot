@@ -36,7 +36,7 @@ def test_workflow_explicit_upload_allowlist_contains_original_requests():
                   if s.get('uses', '').startswith('actions/upload-artifact@'))
     assert upload['if'] == 'always()'
     paths = upload['with']['path'].splitlines()
-    assert len(paths) == 3 and all('*' not in p for p in paths)
+    assert len(paths) == 4 and all('*' not in p for p in paths)
     assert 'artifacts/companion-controller-rehearsal/rehearsal.zip' in paths
     assert not any(path.endswith('.jsonl') for path in paths)
     assert 'artifacts/companion-controller-offline.json' in paths

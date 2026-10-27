@@ -1,4 +1,4 @@
-name: Companion controller offline rehearsal
+name: Companion controller no-secret rehearsal
 on:
   push:
     branches: [feat/20261027-fixed-ai-controller]
@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   rehearsal:
-    name: Controller fake-only contract rehearsal
+    name: Controller no-secret evidence rehearsal
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
@@ -43,6 +43,11 @@ jobs:
           uv run mypy scripts/companion_ai_controller/*.py scripts/companion_ai_validation/*.py --follow-imports=silent --explicit-package-bases
       - name: Run isolated fake-only controller path
         run: uv run python -m scripts.companion_ai_controller.rehearsal --output-dir artifacts/companion-controller-rehearsal
+      - name: Read fixed public source and legacy history
+        run: >-
+          uv run python -m scripts.companion_ai_controller.read_only
+          --offline-artifact scripts/companion_ai_controller/evidence/h-offline-12707161298.zip
+          --scan-legacy-history > artifacts/companion-controller-public-read.json
       - name: Preserve aggregate and fake evidence including failures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -52,5 +57,6 @@ jobs:
             artifacts/companion-controller-offline.json
             artifacts/companion-controller-rehearsal-status.json
             artifacts/companion-controller-rehearsal/rehearsal.zip
+            artifacts/companion-controller-public-read.json
           if-no-files-found: error
           retention-days: 14
