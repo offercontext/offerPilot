@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Callable, Iterator
 
 from scripts.companion_ai_validation import continuation
@@ -53,6 +54,8 @@ class GateError(RuntimeError):
 @dataclass(frozen=True)
 class RunWindow:
     """One non-extending clock anchor, captured before admission or source I/O."""
+    shadow_review: bool = False
+    price_valid_until: float = field(init=False)
     started_monotonic: float = field(init=False)
     started_wall: float = field(init=False)
     session_deadline: float = field(init=False)
@@ -60,13 +63,18 @@ class RunWindow:
     _last_monotonic: float = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        quote = PRICE_VALID_UNTIL
+        if self.shadow_review:
+            from scripts.companion_ai_validation import shadow_continuation
+            quote = shadow_continuation.PRICE_VALID_UNTIL
+        object.__setattr__(self, "price_valid_until", quote)
         monotonic, wall = time.monotonic(), time.time()
         if not math.isfinite(monotonic) or not math.isfinite(wall):
             raise GateError("clock_anomaly")
         object.__setattr__(self, "started_monotonic", monotonic)
         object.__setattr__(self, "started_wall", wall)
         object.__setattr__(self, "session_deadline", monotonic + SESSION_SECONDS)
-        object.__setattr__(self, "price_deadline", monotonic + (PRICE_VALID_UNTIL - wall))
+        object.__setattr__(self, "price_deadline", monotonic + (quote - wall))
         object.__setattr__(self, "_last_monotonic", monotonic)
 
     def effective_wall(self) -> float:
@@ -130,7 +138,7 @@ def _integer(value: Any, maximum: int) -> int:
     return value
 
 
-def usage_cost(response: dict[str, Any]) -> tuple[int, int, int]:
+def usage_cost(response: dict[str, Any], *, shadow_review: bool = False) -> tuple[int, int, int]:
     usage = response.get("usage")
     if not isinstance(usage, dict):
         raise GateError("missing_usage")
@@ -140,7 +148,7 @@ def usage_cost(response: dict[str, Any]) -> tuple[int, int, int]:
     }:
         raise GateError("untrusted_usage")
     prompt = _integer(usage.get("prompt_tokens"), CONTEXT_TOKENS)
-    completion = _integer(usage.get("completion_tokens"), OUTPUT_TOKENS)
+    completion = _integer(usage.get("completion_tokens"), 768 if shadow_review else OUTPUT_TOKENS)
     total = _integer(usage.get("total_tokens"), CONTEXT_TOKENS)
     hit = _integer(usage.get("prompt_cache_hit_tokens"), CONTEXT_TOKENS)
     miss = _integer(usage.get("prompt_cache_miss_tokens"), CONTEXT_TOKENS)
@@ -212,9 +220,10 @@ class HTTPSUpstream:
         self._key = key
         self._deadline = window.session_deadline
         self._price_deadline = window.price_deadline
+        self._price_valid_until = window.price_valid_until
 
     def _check_window(self, request_deadline: float) -> None:
-        if (time.time() + REQUEST_SECONDS > PRICE_VALID_UNTIL
+        if (time.time() + REQUEST_SECONDS > self._price_valid_until
                 or time.monotonic() + REQUEST_SECONDS > self._price_deadline):
             raise GateError("price_review_expired")
         if time.monotonic() + REQUEST_SECONDS > self._deadline:
@@ -268,23 +277,31 @@ class HTTPSUpstream:
 
 class Broker:
     def __init__(self, journal_path: Path, send: Callable[[bytes], tuple[int, bytes]],
-                 source_sha: str, *, window: RunWindow | None = None):
+                 source_sha: str, *, window: RunWindow | None = None, shadow_review: bool = False):
         require_linux()
-        window = window if window is not None else RunWindow()
+        window = window if window is not None else RunWindow(shadow_review=shadow_review)
         if len(source_sha) != 40 or any(c not in "0123456789abcdef" for c in source_sha):
             raise GateError("source_sha")
+        self._shadow_review = shadow_review
+        lineage_module: ModuleType = continuation
+        if shadow_review:
+            from scripts.companion_ai_validation import shadow_continuation
+            lineage_module = shadow_continuation
+        self._operations = lineage_module.OPERATIONS
+        self._max_requests = 6 if shadow_review else MAX_REQUESTS
         # There is no caller-, CLI- or environment-supplied opening balance. The
         # only continuation inherits the exact fully replayed original ledger.
         try:
-            lineage = continuation.lineage_fields()
+            lineage = lineage_module.lineage_fields()
         except continuation.ContinuationError as exc:
             raise GateError("predecessor_evidence_invalid") from exc
         if (lineage["budget_micro_cny"] != BUDGET
-                or lineage["price_valid_until"] != PRICE_VALID_UNTIL):
+                or lineage["price_valid_until"] != window.price_valid_until):
             raise GateError("continuation_contract_mismatch")
         self._lock = threading.Lock()
         self._deadline = window.session_deadline
         self._price_deadline = window.price_deadline
+        self._price_valid_until = window.price_valid_until
         self._halt = threading.Event()
         self._send = send
         self._token = ""
@@ -353,9 +370,9 @@ class Broker:
 
     def begin_stage(self, operation: str) -> str:
         with self._lock:
-            if self._halt.is_set() or self._operation or self._next >= len(OPERATIONS):
+            if self._halt.is_set() or self._operation or self._next >= len(self._operations):
                 raise GateError("gate_closed")
-            if operation != OPERATIONS[self._next]:
+            if operation != self._operations[self._next]:
                 raise GateError("operation_order")
             self._operation = operation
             self._calls = 0
@@ -376,6 +393,11 @@ class Broker:
         if self._calls:
             # No SDK retry, structural repair, follow-up or second completion.
             raise GateError("ticket_consumed")
+        if self._shadow_review:
+            from scripts.companion_ai_validation.shadow_driver import frozen_request
+            if raw != frozen_request(self._operation):
+                raise GateError("shadow_request_mismatch")
+            return decode(raw)
         payload = decode(raw)
         if set(payload) - {"model", "messages", "max_tokens", "stream", "stream_options", "tools", "tool_choice"}:
             raise GateError("unexpected_request_field")
@@ -429,7 +451,7 @@ class Broker:
         return payload
 
     def _check_window(self) -> None:
-        if (time.time() + REQUEST_SECONDS > PRICE_VALID_UNTIL
+        if (time.time() + REQUEST_SECONDS > self._price_valid_until
                 or time.monotonic() + REQUEST_SECONDS > self._price_deadline):
             raise GateError("price_review_expired")
         if time.monotonic() + REQUEST_SECONDS > self._deadline:
@@ -445,11 +467,14 @@ class Broker:
                 raise GateError("gate_closed")
             payload = self._validate(raw)
             local_stream = payload.get("stream", False)
-            payload["stream"] = False
-            payload.pop("stream_options", None)
-            upstream_raw = encode(payload)
+            if self._shadow_review:
+                upstream_raw = raw
+            else:
+                payload["stream"] = False
+                payload.pop("stream_options", None)
+                upstream_raw = encode(payload)
             self._check_window()
-            if self._state["request_count"] >= MAX_REQUESTS:
+            if self._state["request_count"] >= self._max_requests:
                 raise GateError("request_limit")
             liability = self._state["settled_micro_cny"] + self._state["reserved_micro_cny"]
             if liability + RESERVATION > BUDGET:
@@ -466,7 +491,7 @@ class Broker:
             if status != 200:
                 raise GateError("upstream_status")
             response = decode(response_raw)
-            cost, prompt, completion = usage_cost(response)
+            cost, prompt, completion = usage_cost(response, shadow_review=self._shadow_review)
             response_content(response)
             pending_state = dict(self._state)
             self._state["settled_micro_cny"] += cost

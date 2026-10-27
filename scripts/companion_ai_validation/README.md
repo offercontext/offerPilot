@@ -1,9 +1,54 @@
-# Companion bounded fourth-batch context validation
+# Companion bounded validation and six-target shadow candidate
 
 This is a Linux-only acceptance harness, not an installed product feature or a
 second agent. It uses a fresh owned database, the real loopback `/api/chat`
 endpoint, twelve fixed synthetic ordinary turns and real bounded companion
 commands. No existing user configuration, account or record is loaded.
+
+## Six-target shadow candidate (offline preparation; not authorized to run)
+
+The workflow's new `--shadow-review` selector reviews only the six frozen drafts
+in `shadow_cases/cases.json`, with exact request bytes from `shadow_cases/requests/`.
+It does not generate a fifth dialogue batch, change any draft, call product tools,
+or gate/rewrite user-visible responses. The original twelve-turn code path remains
+for offline regression; all consumed historical H/R pairs and deadlines stay expired.
+
+- New lineage ordinal 4 verifies all four original ZIP archives on every admission
+  and broker opening. It inherits 48 calls, 411934 micro-CNY settled and zero
+  reserved. The fourth archive really lacks `requests.jsonl`; no payload is invented.
+- Six ordered slots (`s01` through `s06`), at most one call each, cumulative maximum
+  54. The unchanged campaign cap is 20 CNY and each attempt reserves 3 CNY before
+  durable capture/send. Unknown cost keeps the reservation and stops the batch.
+- Fixed `deepseek-flash`, thinking disabled, temperature 0, JSON object output,
+  maximum 768 output tokens, no tools/retry/fallback/repair call. UTF-8 byte counts
+  are input-size limits/planning data, not a tokenizer or bill.
+- The proposed quote deadline is **2026-10-28 00:00 UTC**. It is only a candidate,
+  not renewed authorization. Require at least twenty minutes before admission;
+  wall/monotonic checks cannot extend it. Price changes require a new review.
+- New exact marker from `preflight.marker(H, shadow_review=True)`, new H and same-tree
+  empty-child R, independently bound repository variables, successful offline gate,
+  full four-batch history and a fresh owner environment approval are mandatory.
+  Never change protection settings, inject credentials or push/run merely because
+  these candidate files exist. Full new-file disclosure and six provider calls
+  still require the user's combined approval.
+- Only the explicit `summary.json`, `responses.jsonl`, `budget.jsonl`, and
+  `requests.jsonl` artifact paths may be uploaded. Tests execute the real runner
+  against a fake transport, collect those actual workflow paths and inspect the ZIP,
+  including missing-request and unrelated-file contamination failures.
+
+The selected target uses Unicode-code-point offsets; evidence may cite only the
+provided exact source spans. Valid JSON/offsets do **not** establish semantic truth.
+The six cases include authored controls and are not six independent real incidents;
+`s04` has a retained human disagreement (unknown versus contradicted), not a forced
+gold label. Original blind labels, author hypotheses and disagreements are frozen
+alongside the cases, but are never sent to the provider or used to alter reviews.
+Report each target separately: schema/offset validity, human attribution judgment,
+unknown/suggestion false positives, ambiguity, cost and latency; never collapse
+unknown into contradicted or hide disagreement in a single “x/6” success rate.
+Prompt-injection examples are offline tests, never a seventh call.
+No real shadow responses, accuracy, latency, naturalness improvement or product
+benefit have been established. This is a narrow falsification experiment, not a
+new generic guard or a shipped fix.
 
 ## Evidence boundary
 

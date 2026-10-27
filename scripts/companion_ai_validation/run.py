@@ -15,6 +15,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+from types import ModuleType
 from typing import Any, Callable, Iterator
 
 from scripts.companion_ai_validation import continuation
@@ -38,19 +39,29 @@ def clean_environment() -> None:
     })
 
 
-def check_admission(record: Any, metadata: dict[str, str], now: float) -> str:
-    expected = continuation.LINEAGE_KEYS | {
+def check_admission(record: Any, metadata: dict[str, str], now: float, *,
+                    shadow_review: bool = False) -> str:
+    lineage: ModuleType = continuation
+    if shadow_review:
+        from scripts.companion_ai_validation import shadow_continuation
+        lineage = shadow_continuation
+    expected = lineage.LINEAGE_KEYS | {
         "schema", "source_sha", "helper_sha", "run_id", "run_attempt", "checked_at",
         "checked_at_monotonic_ns", "quote_deadline_monotonic_ns",
     }
     if (not isinstance(record, dict) or set(record) != expected
             or type(record["schema"]) is not int
-            or record["schema"] != continuation.ADMISSION_SCHEMA):
+            or record["schema"] != lineage.ADMISSION_SCHEMA):
         raise GateError("admission_required")
     try:
-        continuation.validate_lineage(record)
+        lineage.validate_lineage(record)
     except continuation.ContinuationError as exc:
         raise GateError("admission_lineage") from exc
+    if shadow_review and (not isinstance(record["source_sha"], str)
+                          or not isinstance(record["helper_sha"], str)
+                          or record["source_sha"] in shadow_continuation.ALL_HISTORICAL_IDENTITIES
+                          or record["helper_sha"] in shadow_continuation.ALL_HISTORICAL_IDENTITIES):
+        raise GateError("admission_identity")
     sha = record["source_sha"]
     helper = record["helper_sha"]
     run_id = record["run_id"]
@@ -78,11 +89,16 @@ def check_admission(record: Any, metadata: dict[str, str], now: float) -> str:
                 "offercontext/offerPilot/.github/workflows/companion-real-ai.yml"
                 "@refs/heads/feat/20261021-companion-life-v1")):
         raise GateError("admission_identity")
-    check_admission_time(record, now)
+    check_admission_time(record, now, shadow_review=shadow_review)
     return sha
 
 
-def check_admission_time(record: dict[str, Any], now: float) -> None:
+def check_admission_time(record: dict[str, Any], now: float, *,
+                         shadow_review: bool = False) -> None:
+    deadline = PRICE_VALID_UNTIL
+    if shadow_review:
+        from scripts.companion_ai_validation import shadow_continuation
+        deadline = shadow_continuation.PRICE_VALID_UNTIL
     checked = record["checked_at"]
     if type(checked) is not int or not 0 <= now - checked <= 120:
         raise GateError("admission_expired")
@@ -98,7 +114,7 @@ def check_admission_time(record: dict[str, Any], now: float) -> None:
         raise GateError("admission_expired")
     if quote_ns - now_ns < SESSION_SECONDS * 1_000_000_000:
         raise GateError("price_review_expired")
-    if now + SESSION_SECONDS > PRICE_VALID_UNTIL:
+    if now + SESSION_SECONDS > deadline:
         raise GateError("price_review_expired")
 
 
@@ -129,7 +145,11 @@ class RequestEvidence:
     The broker has already validated and reserved the request. Durable capture
     must finish before transport; failure retains that conservative reservation.
     """
-    def __init__(self, evidence_dir: Path):
+    def __init__(self, evidence_dir: Path, *, shadow_review: bool = False):
+        self._operations: tuple[str, ...] = OPERATIONS
+        if shadow_review:
+            from scripts.companion_ai_validation import shadow_continuation
+            self._operations = shadow_continuation.OPERATIONS
         self._fd = os.open(evidence_dir / "requests.jsonl",
                            os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self._count = 0
@@ -145,13 +165,13 @@ class RequestEvidence:
 
     def record(self, body: bytes) -> None:
         if (type(body) is not bytes or not 0 < len(body) <= MAX_BYTES
-                or self._count >= len(OPERATIONS) or self._fd < 0):
+                or self._count >= len(self._operations) or self._fd < 0):
             raise GateError("request_evidence_shape")
         try:
             raw_body = body.decode("utf-8", errors="strict")
         except UnicodeError:
             raise GateError("request_evidence_shape") from None
-        line = encode({"operation": OPERATIONS[self._count], "ordinal": self._count + 1,
+        line = encode({"operation": self._operations[self._count], "ordinal": self._count + 1,
                        "body_sha256": hashlib.sha256(body).hexdigest(),
                        "raw_body": raw_body}) + b"\n"
         try:
@@ -210,9 +230,13 @@ class ResponseEvidence:
 
 
 def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
-            evidence_dir: Path, *, window: RunWindow | None = None) -> dict[str, Any]:
+            evidence_dir: Path, *, window: RunWindow | None = None,
+            shadow_review: bool = False) -> dict[str, Any]:
     require_linux()
-    window = window if window is not None else RunWindow()
+    window = window if window is not None else RunWindow(shadow_review=shadow_review)
+    if shadow_review:
+        from scripts.companion_ai_validation.shadow_driver import execute as execute_shadow
+        return execute_shadow(send, source_sha, evidence_dir, window=window)
     # Defer production imports until runtime environment is sanitized by main.
     # Offline callers are protected by pytest's early loopback-only network guard.
     from scripts.companion_ai_validation.driver import MatrixFailure, run_matrix
@@ -287,18 +311,20 @@ def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
 def main() -> int:
     try:
         require_linux()
-        window = RunWindow()
         parser = argparse.ArgumentParser()
         parser.add_argument("--live", action="store_true", required=True)
+        parser.add_argument("--shadow-review", action="store_true")
         parser.add_argument("--admission-file", type=Path, required=True)
         parser.add_argument("--evidence-dir", type=Path, required=True)
         args = parser.parse_args()
+        window = RunWindow(shadow_review=args.shadow_review)
         keys = ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_NAME",
                 "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_WORKFLOW_SHA", "GITHUB_WORKFLOW_REF")
         metadata = {name: os.environ.get(name, "") for name in keys}
         with args.admission_file.open("rb") as admission_file:
             admission = decode(admission_file.read(MAX_BYTES + 1))
-        source_sha = check_admission(admission, metadata, window.effective_wall())
+        source_sha = check_admission(admission, metadata, window.effective_wall(),
+                                     shadow_review=args.shadow_review)
         window.restrict_quote_deadline(admission["quote_deadline_monotonic_ns"])
         # Verify checked-out files, not merely a supplied environment string.
         git_environment = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1",
@@ -324,16 +350,22 @@ def main() -> int:
             raise GateError("provider_metadata_mismatch")
         # Checkout/provenance checks may stall. They never extend admission age
         # or the fixed quote, and predecessor bytes must still verify here.
-        check_admission(admission, metadata, window.effective_wall())
+        check_admission(admission, metadata, window.effective_wall(),
+                                     shadow_review=args.shadow_review)
         # The final lineage verification can also stall. No further file or
         # metadata I/O may sit between this anchored check and secret access.
-        check_admission_time(admission, window.effective_wall())
+        check_admission_time(admission, window.effective_wall(),
+                             shadow_review=args.shadow_review)
         # Read the one explicitly authorized environment secret only after all gates.
         key = os.environ.pop(KEY_NAME, "")
         clean_environment()
         transport = HTTPSUpstream(key, window=window)
         key = ""
-        report = execute(transport, source_sha, args.evidence_dir, window=window)
+        if args.shadow_review:
+            report = execute(transport, source_sha, args.evidence_dir, window=window,
+                             shadow_review=True)
+        else:
+            report = execute(transport, source_sha, args.evidence_dir, window=window)
         print(json.dumps({"passed": report["matrix"]["passed"], "budget": report["budget"]},
                          sort_keys=True))
         return 0 if report["matrix"]["passed"] else 1
