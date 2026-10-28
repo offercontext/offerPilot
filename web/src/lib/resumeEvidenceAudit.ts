@@ -82,6 +82,8 @@ const CORE_FIELD_SHAPES: Record<CoreField, 'record' | 'array' | 'flexible'> = {
   career_intent: 'record',
 };
 
+// 业务地图：docs/architecture/code-map/materials.md。只检查已保存结构中的可观察信息；
+// unknown 表示证据不足，不是“缺失”结论，也不能据此判断 PDF 视觉版式或事实真实性。
 export function auditResume(resume: Resume): ResumeAuditResult {
   const rawContent = resume && (typeof resume === 'object' || typeof resume === 'function')
     ? readProperty(resume as unknown as Record<string, unknown>, 'content_json')

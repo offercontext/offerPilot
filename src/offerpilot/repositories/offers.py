@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/opportunity-offers.md（Offer 与投递绑定、比较、谈薪）。
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -238,6 +240,7 @@ class OffersRepository:
         offer_id: int,
         data: OfferCreate,
     ) -> Optional[Offer]:
+        # 受限工具写入同时验证原 Offer 所属投递和请求目标；不能靠替换 application_id 扩大范围。
         binding = self._require_scoped(constraint)
         offer_id = require_scoped_positive_int64(offer_id, "offer id")
         if data.application_id is not None:

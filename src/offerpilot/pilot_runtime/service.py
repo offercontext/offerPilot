@@ -9,6 +9,9 @@ need to know about FastAPI, ORM rows, or Agent Loop internals.
 
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/pilot-runtime.md（请求、上下文、确认与执行恢复）。
+# 新协议的后台任务所有权在 managed_execution.py；此服务负责业务编排，不拥有 HTTP 订阅。
+
 import inspect
 import json
 from hashlib import sha256

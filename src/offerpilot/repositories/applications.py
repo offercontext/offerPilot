@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/applications.md（投递生命周期与工具作用域）。
+# 普通入口由调用方校验输入；scoped 入口将授权范围约束放进最终 SQL。
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -143,6 +146,7 @@ class ApplicationsRepository:
         status: str = "",
         limit: int | None = None,
     ) -> BuiltinList[Application]:
+        # 查询绑定已授权投递范围；调用方传入的过滤条件不能扩大该范围。
         binding = self._require_scoped(constraint)
         if limit is not None and (type(limit) is not int or limit <= 0):
             raise ValueError("application list limit must be a positive integer")
@@ -275,6 +279,8 @@ class ApplicationsRepository:
         return _normalize_model_status(app) if app is not None else None
 
     def update_full(self, app_id: int, data: ApplicationCreate) -> Optional[Application]:
+        # closed 为当前不可重开的终态，首次关闭必须提供原因。
+        # 首次进入各阶段的时间只记录一次，后续编辑不把历史阶段时间刷新为当前时间。
         with repository_session(self._session_factory, self._session) as session:
             app = session.get(Application, app_id)
             if app is None or app.deleted_at is not None:
@@ -394,6 +400,7 @@ class ApplicationsRepository:
         return _normalize_model_status(app)
 
     def delete(self, app_id: int) -> None:
+        # 这里执行软删除；关联业务的可见性依赖父投递 deleted_at，历史记录不在此物理清空。
         with repository_session(self._session_factory, self._session) as session:
             app = session.get(Application, app_id)
             if app is not None and app.deleted_at is None:
@@ -401,6 +408,8 @@ class ApplicationsRepository:
                 finish_repository_write(session, self._session)
 
     def delete_if_matches(self, app_id: int, expected: dict[str, Any]) -> bool:
+        # 创建撤销采用受保护的软删除：除回执快照匹配外，还要求没有新增关联业务。
+        # 已有日程、笔记等依赖时不能按旧创建回执撤销用户后续工作。
         applied_at = expected.get("applied_at")
         if isinstance(applied_at, str):
             applied_at = datetime.fromisoformat(applied_at.replace("Z", "+00:00"))

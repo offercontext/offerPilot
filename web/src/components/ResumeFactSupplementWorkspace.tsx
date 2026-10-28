@@ -130,6 +130,8 @@ export default function ResumeFactSupplementWorkspace({
   if (!open) return null;
 
   const handleSubmit = async () => {
+    // 业务地图：docs/architecture/code-map/materials.md。复制与保存是两个独立请求；
+    // 结果未知时冻结操作并让用户核对，不能把超时当作失败后再创建一个版本。
     try {
       applyResumeFactSupplement(
         source.content_json,

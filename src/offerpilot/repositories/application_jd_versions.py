@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/applications.md（JD 版本）；分析结果的存储见 repositories/jd.py。
+
 import base64
 import hashlib
 import json
@@ -235,6 +237,8 @@ class ApplicationJDService:
         expected_current_version_id: int | None,
         idempotency_key: str,
     ) -> VersionCreateResult:
+        # JD 追加版本而非覆盖旧正文。先恢复相同 key，再对当前版本做乐观并发校验。
+        # 新请求的 expected_current_version_id 过期则拒绝；首次录入须与无当前版本匹配。
         _validate_jd_text(jd_text)
         normalized_url = _normalize_source_url(source_url)
         if source_kind not in {"ui", "pilot"}:

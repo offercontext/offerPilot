@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/workbench-automation.md（主动队列状态与发布条件）。
+
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
@@ -265,6 +267,8 @@ class ProactiveRepository:
             return result
 
     def publish(self, job_id: str, owner: str, turn_id: str, generation: int, content: str, now: float) -> bool:
+        # 模型完成后仍需核对本代所有权、租约、范围、来源、期限和静默时段。
+        # 这里发布队列结果文本，不向外部发送，也不创建正式面试成果。
         with self.sessions() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             row = session.get(ProactiveJob, job_id)

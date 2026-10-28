@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/knowledge-memory.md（用户确认的个人记忆）。
+# Memory 是用户偏好等持续认知，不作为 Knowledge 的事实证据。
+
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -71,6 +74,8 @@ class ConfirmedMemoryRepository:
             return view
 
     def mutate(self, memory_id: str | None, command: MemoryMutation) -> dict[str, object]:
+        # 确认、撤回和删除都受版本及 mutation_id 保护；撤回保留内容，删除清空全部版本正文。
+        # 同 mutation 的重放核对输入指纹，但返回当前可见状态，不恢复被后续删除的内容。
         body = command.model_dump(mode="json")
         body["memory_id"] = memory_id
         fingerprint = sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()

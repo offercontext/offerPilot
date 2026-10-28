@@ -1,6 +1,8 @@
 """User-confirmed revisions and lifecycle for existing Knowledge Notes."""
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/knowledge-memory.md；领域职责以 knowledge-system.md 为准。
+
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -252,6 +254,8 @@ class KnowledgeNoteLifecycle:
         self.sessions = sessions
 
     def mutate(self, note_id: int, command: NoteMutation) -> dict[str, object]:
+        # mutation_id 绑定完整请求；新变更同时检查版本和归档状态。
+        # 修订保留块身份及证据链接，删除则清空历史正文/捕获预览并移除引用，不是普通归档。
         fingerprint = sha256(json.dumps({"note_id": note_id, **command.model_dump(mode="json")},
                                         sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with self.sessions() as session:

@@ -1,6 +1,8 @@
 """One bounded shared manual/scheduled sync pipeline, offline by default."""
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/job-mail.md（同步租约、预算、取消与未知结果）。
+
 import hashlib
 import json
 import threading
@@ -229,6 +231,8 @@ class JobMailSyncService:
         return self.status()
 
     def start_sync(self, *, trigger: str = "manual") -> dict[str, Any]:
+        # 租约过期不等于本机旧线程已停止；旧 worker 尚活跃时不能再开一次同步。
+        # 先保存本次 run/范围版本，再启动线程，后续结果都必须通过 _fenced 校验。
         if self._stopped.is_set():
             raise JobMailError("backend_stopped", "后端已停止，不能启动同步", 409)
         now = _now()

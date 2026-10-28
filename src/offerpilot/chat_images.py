@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/pilot-runtime.md（图片上传、消息绑定、历史重读）。
+# 文件完整性与会话归属分别验证；仅有附件 ID 不能证明当前调用可以读取它。
+
 import hashlib
 import io
 import json

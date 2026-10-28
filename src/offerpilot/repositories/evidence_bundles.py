@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（用户确认已提交材料）。
+# EvidenceBundle 记录用户声明，不是系统已替用户向招聘方发送材料的凭据。
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -77,6 +80,7 @@ class EvidenceBundlesRepository:
         idempotency_key: str,
         expected_bundle_sha256: str,
     ) -> tuple[ApplicationEvidenceBundle, bool]:
+        # 只对序号竞争有限重试；唯一键已存在时恢复原包，不因重试再追加提交事件。
         submitted_at = _normalize_submitted_at(submitted_at)
         for attempt in range(_SEQUENCE_CONFLICT_ATTEMPTS):
             try:
@@ -102,6 +106,8 @@ class EvidenceBundlesRepository:
         idempotency_key: str,
         expected_bundle_sha256: str,
     ) -> tuple[ApplicationEvidenceBundle, bool]:
+        # 同 key 优先返回原确认；新确认重建预览并校验用户审阅的 bundle hash。
+        # 证据包、pending→applied 和 submission_confirmed 事件一起提交，避免只有状态没有证据。
         submitted_at = _normalize_submitted_at(submitted_at)
         with self._session_factory() as session:
             app = _get_visible_application(session, application_id)

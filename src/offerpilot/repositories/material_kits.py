@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（投递材料包）。
+# 材料包与简历是独立对象；生成/更新包不代表已向招聘方提交。
+
 from dataclasses import dataclass
 from typing import Optional
 
@@ -76,6 +79,8 @@ class MaterialKitsRepository:
 
 
 def _require_current_jd(session: Session, application_id: int, jd_version_id: int | None) -> None:
+    # 携带 JD 版本的写入必须仍使用当前版本，防止模型生成期间 JD 更新后保存过期包。
+    # 历史未绑定版本的记录在此返回，不据此宣称它已通过当前来源校验。
     if jd_version_id is None:
         return
     current_id = session.scalar(

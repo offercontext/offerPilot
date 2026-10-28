@@ -75,6 +75,8 @@ export function isThankYouDraftAvailable(
   return outcomes.some((outcome) => outcome.stage === 'interview');
 }
 
+// 业务地图：docs/architecture/code-map/applications.md。这里只从选定事实拼出可编辑文案；
+// 不调用模型、不发送邮件；感谢信仍要核对投递档案、面试结果与可选日程的归属。
 export function buildApplicationCommunicationDraft(
   input: ApplicationCommunicationDraftInput,
 ): ApplicationCommunicationDraft {

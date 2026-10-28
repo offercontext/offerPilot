@@ -209,6 +209,8 @@ export type MaterialKitQueryFact = {
   kits?: Array<{ application_id?: number }>;
 };
 
+// 业务地图：docs/architecture/code-map/workbench-automation.md。读取失败或列表尚未完整时，
+// 材料是否存在仍为未知，不能将其降成“没有材料”并推荐重复创建。
 export function deriveMaterialKitFact(input: MaterialKitQueryFact): FactState<unknown> {
   if (input.status !== 'success' || !input.complete) {
     return { status: 'unknown', reason: 'not_loaded' };

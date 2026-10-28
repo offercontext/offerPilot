@@ -5,6 +5,8 @@ has no provider/network dependency and never consults chat_auto_approve_writes.
 """
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/job-mail.md（建议预览、明确确认、原子回执）。
+
 import hashlib
 import json
 from datetime import datetime, timedelta, timezone
@@ -243,6 +245,7 @@ class JobMailReviewService:
             return _suggestion_json(session, _get_suggestion(session, suggestion_id))
 
     def preview(self, suggestion_id: str, request: ReviewRequest) -> dict[str, Any]:
+        # 预览绑定精确输入、建议/邮箱范围版本和目标快照，有效期内也不能更换字段后直接确认。
         with self.sessions() as session:
             begin_immediate(session)
             suggestion = _get_suggestion(session, suggestion_id)

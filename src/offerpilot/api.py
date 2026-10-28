@@ -1,3 +1,6 @@
+
+# 业务路由导航：docs/architecture/code-map/route-coverage.md；功能链从 code-map/README.md 下钻。
+# 本文件集中 HTTP 装配，业务事务通常由 Repository/Service 持有；入口成功不等于下游写入成功。
 import hashlib
 import json
 import logging
@@ -4832,6 +4835,7 @@ def create_app(
 
     @app.delete("/api/resumes/{resume_id}")
     def delete_resume(resume_id: int) -> JSONResponse:
+        # 公开 HTTP 入口禁止删除非空主简历；Repository 的主简历接任能力不代表此入口允许任意删除。
         resume = resumes.get(resume_id)
         if resume is None or resume.deleted_at is not None:
             return error_response(404, "Resume not found")
@@ -8954,6 +8958,7 @@ def _runtime_http_response(outcome: object) -> JSONResponse:
 
 
 def _auth_guard_response(request: Request, data_dir: Path) -> JSONResponse | None:
+    # API 登录鉴权与业务作用域校验分层：通过此处仍须通过各 Repository/工具的归属和来源检查。
     path = request.url.path
     if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status"}:
         return None

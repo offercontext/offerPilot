@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/questions.md（题库、生成去重与复习）。
+# QuestionReview 是用户练习评分记录，不是 MockInterviewTurn 的回答或模型反馈。
+
 import hashlib
 import unicodedata
 from dataclasses import dataclass
@@ -107,6 +110,8 @@ class QuestionsRepository:
             return True
 
     def add_review(self, question_id: int, rating: int, note: str = "") -> tuple[QuestionReview, Question] | None:
+        # 评分记录与题目练习次数、掌握状态、下次复习时间一起提交。
+        # 当前间隔是按评分选择 1/3/7 天，不是基于完整历史的自适应记忆算法。
         now = datetime.now(timezone.utc)
         with self._session_factory() as session:
             question = session.get(Question, question_id)
@@ -124,6 +129,7 @@ class QuestionsRepository:
             return review, question
 
     def stats(self) -> dict[str, Any]:
+        # today_reviews 按 UTC 当日统计；streak_days 当前只表示今天是否练习（0/1），不计算连续天数。
         now = datetime.now(timezone.utc)
         start_of_day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
         with self._session_factory() as session:
@@ -168,6 +174,7 @@ def _question_from_create(data: QuestionCreate) -> Question:
 
 
 def question_hash(text: str) -> str:
+    # 题目去重使用 NFKC、小写并去除空白/标点/符号后的文本；不是语义相似度判定。
     normalized = "".join(
         char.lower()
         for char in unicodedata.normalize("NFKC", text)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/opportunity-offers.md（自定义比较维度）。
+
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -107,6 +109,7 @@ class OfferComparisonRepository:
             return value
 
     def clear_value(self, offer_id: int, dimension_id: int) -> Optional[OfferComparisonValue]:
+        # 历史归档维度仍允许清除已有值；新增/更新值则必须使用活跃维度。
         with self._session_factory() as session:
             self._get_visible_offer(session, offer_id)
             self._get_dimension_for_read(session, dimension_id)
@@ -130,6 +133,7 @@ class OfferComparisonRepository:
         return dimension
 
     def comparison_payload(self, offer_ids: list[int], dimension_ids: list[int]) -> dict[str, Any]:
+        # 只使用活跃维度构造本次比较；缺失值单列到 missing，不能把未填写当零值或劣势。
         with self._session_factory() as session:
             offers = [self._get_visible_offer(session, offer_id) for offer_id in offer_ids]
             dimensions: list[OfferComparisonDimension] = []

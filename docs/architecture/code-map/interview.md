@@ -88,6 +88,10 @@
 | 笔记改过又改回、生成后无法保存复盘建议 | `NotesRepository.update` / `update_note_scoped`、`_revisioned_note_values`，`InterviewReviewProposalsRepository.create_generated` | [笔记修订与归属](../../../tests/test_notes_api.py)、[scoped 写入](../../../tests/tool_authority/test_scoped_writes.py)、[复盘来源二次检查](../../../tests/test_interview_review_proposals_repository.py) |
 | 撤销重点失败、专项练习重复或完成冲突 | `ReadinessSignalRepository._retract_signal_authorized_in_session`，`AdaptivePracticeRepository.start_v2` / `complete` | [撤销授权与原子性](../../../tests/product_actions/test_compensation.py)、[计划指纹与版本](../../../tests/test_adaptive_interview_practice_repository.py) |
 | 知识预览迟到、重复确认或证据不完整 | `InterviewKnowledgeCaptureRepository.claim_ai_preview` / `complete_ai_preview` / `confirm` | [预览生成权](../../../tests/test_interview_knowledge_capture_repository.py)、[确认与证据](../../../tests/test_interview_knowledge_capture_api.py) |
+| 手动故事版本冲突、来源变后重放失败 | `InterviewStoriesRepository.create_manual_story` / `create_manual_version`：先核对原请求回执；新版本同时检查 current_version 和 story_revision，推进后使旧目标建议失效 | [故事 Repository](../../../tests/test_interview_stories_repository.py)、[跨领域确认](../../../tests/test_interview_story_product_actions.py) |
+| 快速案例同 key 却无法恢复 | `InterviewPracticeCaseRepository.create_or_replay`：请求指纹含当前简历快照；同 key 下简历变化会冲突，案例本身不创建正式投递/日程 | [案例 Repository](../../../tests/test_interview_practice_cases.py)、[案例 API](../../../tests/test_interview_practice_case_api.py) |
+
+知识成果的后续修订/归档/删除继续查[Knowledge 与 Memory 地图](knowledge-memory.md)；日程基础生命周期见[投递日程](applications.md)，跨功能 Pending/Product Action 的恢复见[Pilot 地图](pilot-runtime.md)。
 
 ## 8. 向排查 Agent 提供什么
 
