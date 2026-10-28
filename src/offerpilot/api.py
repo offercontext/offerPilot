@@ -3174,6 +3174,9 @@ def create_app(
             )
         return JSONResponse(_interview_preparation_proposal_json(proposal))
 
+    # 业务地图：docs/architecture/code-map/interview.md（准备建议）。
+    # 此入口先解析选择并核对 JD/来源，再重放或生成 Proposal；不要从 UI
+    # 的“生成”按钮直接推定一定会调用模型，preflight 也可能返回原尝试。
     @app.post("/api/applications/{app_id}/interview-preparation-proposals")
     def create_interview_preparation_proposal(
         app_id: int,
@@ -6787,6 +6790,9 @@ def create_app(
             return recovery_error("interview_practice_case_not_found", "快速练习档案不存在。")
         return JSONResponse(_interview_practice_case_json(case))
 
+    # 模拟问答链路：docs/architecture/code-map/interview-mock.md。
+    # 快速模拟与事件绑定各自校验归属/来源；领取生成权之后才进入共享
+    # mock_execution。调查“没有下一题”时区分重放、202 与实际模型调用。
     @app.post("/api/interview-practice-cases/{case_id}/mock-interview/attempts")
     def start_quick_practice_attempt(
         case_id: int, payload: dict[str, Any] = Body(...)

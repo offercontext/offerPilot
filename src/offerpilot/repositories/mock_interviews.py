@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview-mock.md。
+# 本层拥有冻结来源、幂等重放、生成权和提交条件；AI 模块只负责生成/校验，
+# 不能用模型成功返回替代这里的来源与代次检查。
+
 import json
 import re
 from dataclasses import dataclass
@@ -392,6 +396,8 @@ class MockInterviewRepository:
     def claim_question(
         self, attempt_id: int, turn_no: int, question_idempotency_key: str
     ) -> MockInterviewQuestionClaim | None:
+        # 在同一写事务内领取生成权并冻结对话。返回 None 时调用方应读取状态；
+        # replay_turn 表示已有可回答问题，二者都不授权直接发起新的模型调用。
         _validate_key(question_idempotency_key, "question_idempotency_key")
         if turn_no < 1 or turn_no > MAX_INTERVIEW_TURNS:
             raise ValueError("interview turn limit reached")
@@ -496,6 +502,8 @@ class MockInterviewRepository:
             )
             if attempt is None or turn is None:
                 return None
+            # 模型调用在事务外完成；期间可能已有新 owner 或回答变化。
+            # 旧结果必须同时匹配代次、token 和对话指纹，才能成为当前题目。
             if (
                 attempt.generation_revision != revision
                 or attempt.provider_call_token != provider_call_token
