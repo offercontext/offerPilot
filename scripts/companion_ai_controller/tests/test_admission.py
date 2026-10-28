@@ -427,3 +427,53 @@ def test_control_dry_anchor_is_exact_not_a_free_exemption(field, value):
     reg = replace(reg, dry_run_anchors=(*reg.dry_run_anchors[:-1], anchor))
     with pytest.raises(p.Blocked, match="DRY_ANCHORS_INVALID"):
         a.verify_before(reg, ctx, reader=data.__getitem__, now=NOW)
+
+
+@pytest.mark.parametrize("now", [p.DEADLINE, p.DEADLINE + 86400])
+def test_expired_campaign_platform_probe_cannot_renew_paid_authority(now):
+    reg, ctx, data = platform_fixture()
+    report = a.control_probe(reg, ctx, reader=data.__getitem__, now=now)
+    assert report["checked_at"] == now
+    for key in ("production_admission", "live_allowed", "paid_started", "provider_access",
+                "campaign_attempt_consumed"):
+        assert report[key] is False
+    reg, ctx, data = make_fixture()
+    before = a.verify_before(reg, ctx, reader=data.__getitem__, now=NOW)
+    def no_read(_):
+        pytest.fail("expired paid campaign attempted metadata access")
+    with pytest.raises(p.Blocked, match="DEADLINE_OR_WINDOW_EXPIRED"):
+        a.verify_before(reg, ctx, reader=no_read, now=now)
+    with pytest.raises(p.Blocked, match="DEADLINE_OR_WINDOW_EXPIRED"):
+        a.verify_paid(reg, ctx, before, reader=no_read, now=now)
+
+
+@pytest.mark.parametrize("now", [float("nan"), float("inf"), -1, 0, True])
+def test_platform_probe_rejects_invalid_wallclock(now):
+    reg, ctx, _ = platform_fixture()
+    with pytest.raises(p.Blocked, match="CONTROL_PROBE_CLOCK_INVALID"):
+        a.control_probe(reg, ctx, reader=lambda _: pytest.fail("invalid clock read"), now=now)
+
+
+@pytest.mark.parametrize("elapsed", [120.001, -1, float("nan"), float("inf")])
+def test_platform_probe_monotonic_read_budget(monkeypatch, elapsed):
+    reg, ctx, data = platform_fixture()
+    ticks = iter([1000, 1000 + elapsed])
+    monkeypatch.setattr(a.time, "monotonic", lambda: next(ticks))
+    with pytest.raises(p.Blocked, match="CONTROL_PROBE_READ_DEADLINE"):
+        a.control_probe(reg, ctx, reader=data.__getitem__, now=p.DEADLINE + 86400)
+
+
+def test_platform_probe_rechecks_finite_wallclock_after_read(monkeypatch):
+    reg, ctx, data = platform_fixture()
+    ticks = iter([p.DEADLINE + 86400, float("nan")])
+    monkeypatch.setattr(a.time, "time", lambda: next(ticks))
+    with pytest.raises(p.Blocked, match="CONTROL_PROBE_CLOCK_INVALID"):
+        a.control_probe(reg, ctx, reader=data.__getitem__)
+
+
+def test_platform_probe_rejects_wallclock_rollback(monkeypatch):
+    reg, ctx, data = platform_fixture()
+    ticks = iter([p.DEADLINE + 86400, p.DEADLINE + 86399])
+    monkeypatch.setattr(a.time, "time", lambda: next(ticks))
+    with pytest.raises(p.Blocked, match="CONTROL_PROBE_CLOCK_INVALID"):
+        a.control_probe(reg, ctx, reader=data.__getitem__)

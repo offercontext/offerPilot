@@ -482,10 +482,13 @@ def _safe_verify(*args: Any, **kwargs: Any) -> ProductionAdmission:
 def control_probe(registration: Registration | None, context: RunContext, *,
                   reader: ro.Reader | None = None, now: float | None = None,
                   metadata_token: str | None = None) -> dict[str, Any]:
-    """Owner-reviewed platform-only job; no provider, paid state or admission."""
+    """Independent 120-second platform read; never extends campaign authority."""
     try:
         reg = _registration(registration)
-        _time(now)
+        started = time.monotonic()
+        wall = time.time() if now is None else now
+        p.demand(type(wall) in (int, float) and math.isfinite(wall) and wall > 0,
+                 "CONTROL_PROBE_CLOCK_INVALID")
         p.demand(type(context) is RunContext and context.repository_id == p.REPOSITORY_ID
                  and context.ref == p.CONTROL_REF and context.sha == context.workflow_sha == reg.controller_sha
                  and type(context.run_id) is int and context.run_id > 0 and context.attempt == 1
@@ -515,7 +518,11 @@ def control_probe(registration: Registration | None, context: RunContext, *,
                  "PLATFORM_ONLY_JOB_REQUIRED")
         _environment(snapshot, reg)
         _approval(snapshot, reg, context, bind=True)
-        checked = _time(now)
+        checked = time.time() if now is None else now
+        elapsed = time.monotonic() - started
+        p.demand(type(checked) in (int, float) and math.isfinite(checked) and checked >= wall,
+                 "CONTROL_PROBE_CLOCK_INVALID")
+        p.demand(math.isfinite(elapsed) and 0 <= elapsed <= 120, "CONTROL_PROBE_READ_DEADLINE")
         return {"mode": "platform_only", "production_admission": False, "live_allowed": False,
             "paid_started": False, "provider_access": False, "run_id": context.run_id,
             "controller_sha": reg.controller_sha, "environment_verified": True,
