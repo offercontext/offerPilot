@@ -294,10 +294,14 @@ export default function InterviewPreparationProposalDrawer({
   if (!open) return null;
 
   const generate = async () => {
+    // 业务地图：docs/architecture/code-map/interview.md（准备建议）。
+    // unknown/pending 要带原 key 和冻结草稿恢复，不能把未确认结果当成新生成。
+    // 回归入口：InterviewPreparationProposalDrawer.interaction.test.tsx。
     if (!hasInput || busy) return;
     const frozenUnknownDraft = resultUnknown
       ? activeAttemptDraftRef.current ?? draft ?? null
       : null;
+    // 字段缺省（V1）与显式空选择（V2）是不同契约；恢复时不能被晚到的选项查询升级。
     const selectionPresentForRequest = frozenUnknownDraft
       ? frozenUnknownDraft.readinessFeedbackSelection?.present === true
       : readinessSelectionPresent || readinessContractReadyRef.current;
@@ -311,6 +315,7 @@ export default function InterviewPreparationProposalDrawer({
       : Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'readiness_feedback_version_ids')) as CreateInterviewPreparationProposalInput;
     const requestKey = attemptKey;
     const requestGeneration = activeAttemptGenerationRef.current + 1;
+    // key 标识后端尝试，generation 标识本次组件请求；同 key 的重试也要隔离迟到响应。
     activeAttemptGenerationRef.current = requestGeneration;
     activeAttemptKeyRef.current = requestKey;
     const requestDraft: InterviewPreparationDraft = {
@@ -332,6 +337,7 @@ export default function InterviewPreparationProposalDrawer({
     suppressDraftPersistence.current = false;
     try {
       const result = await createInterviewPreparationProposal(requestInput);
+      // 关闭、卸载或已发起新一代请求后，旧响应不得清掉新草稿或替换当前结果。
       if (
         !mountedRef.current
         || activeAttemptGenerationRef.current !== requestGeneration
@@ -358,6 +364,7 @@ export default function InterviewPreparationProposalDrawer({
         || activeAttemptKeyRef.current !== requestKey
       ) return;
       const typedError = caught instanceof InterviewPreparationProposalError ? caught : null;
+      // 网络/Provider/5xx 无法证明后端没有受理，保留原尝试供重试；确定失败才清理。
       const unknown =
         !typedError
         || typedError.code === null
@@ -390,6 +397,7 @@ export default function InterviewPreparationProposalDrawer({
   };
 
   const handleClose = () => {
+    // 关闭抽屉只放弃本次 UI 响应所有权，不代表后端生成已取消；把在途草稿保存为未知。
     const key = activeAttemptKeyRef.current;
     if (key) {
       activeAttemptGenerationRef.current += 1;

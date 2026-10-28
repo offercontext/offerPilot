@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（语音输入与表达反馈）。
+# 保存浏览器测量值和服务端已提交答案的快照，不保存音频，也不生成面试内容评分。
+# 回归入口：tests/test_voice_coaching_repository.py。
+
 import json
 import math
 import re
@@ -59,6 +63,8 @@ class VoiceCoachingRepository:
         focus_kind: str | None,
         origin_snapshot_id: int | None,
     ) -> tuple[dict[str, Any], bool]:
+        # 先校验投递→面试→Attempt→Turn 归属并要求已作答，再冻结服务端问题/答案。
+        # 指纹同时绑定答案与测量值：同 key 只能重放同一输入，同一 Turn 仅保存一份快照。
         if not isinstance(idempotency_key, str) or _IDEMPOTENCY_KEY.fullmatch(idempotency_key) is None:
             raise VoiceCoachingValidationError("voice coaching idempotency key is invalid")
         validated = _validate_measurements(
@@ -177,6 +183,8 @@ class VoiceCoachingRepository:
         focus_kind: str | None,
         origin_snapshot_id: int | None,
     ) -> tuple[dict[str, Any], bool]:
+        # 快速模拟沿 case→Attempt→Turn 校验归属；指纹包含 quick_practice 上下文，
+        # 避免与事件绑定练习混用。快照仍以服务端已提交答案为准，客户端只提供测量值。
         if not isinstance(idempotency_key, str) or _IDEMPOTENCY_KEY.fullmatch(idempotency_key) is None:
             raise VoiceCoachingValidationError("voice coaching idempotency key is invalid")
         validated = _validate_measurements(
@@ -333,6 +341,8 @@ class VoiceCoachingRepository:
 
 
 def build_voice_coaching_trends(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    # 调用方按新到旧提供快照：最近 5 次对比前 5 次，建议只看最近 3 次。
+    # 缺失指标保留未知；建议优先长停顿，其次口头禅，再看语速波动，不推断面试能力。
     ordered = rows[:30]
     current = ordered[:5]
     previous = ordered[5:10]
@@ -382,6 +392,8 @@ def _validate_measurements(**values: Any) -> dict[str, Any]:
 
 
 def _validate_fillers(items: list[dict[str, Any]], answer: str) -> list[dict[str, Any]]:
+    # offset 按 Unicode 码点定位已确认答案，不按 UTF-16 单元或 UTF-8 字节计数。
+    # 每个计数都必须对应真实文本位置，不能仅信任浏览器上报的口头禅次数。
     answer_points = list(answer)
     result: list[dict[str, Any]] = []
     for item in items:
@@ -570,6 +582,7 @@ def _filler_rate(rows: list[dict[str, Any]]) -> float | None:
 
 
 def _filler_metric(current: list[dict[str, Any]], previous: list[dict[str, Any]]) -> dict[str, Any]:
+    # 沿用通用响应的 median 字段名，但此指标实际为窗口总次数/总时长，不是单次中位数。
     current_rate = _filler_rate(current)
     previous_rate = _filler_rate(previous)
     return {

@@ -55,7 +55,7 @@
 | 连续语音停住、误提交、重复下一题 | [continuousVoiceSessionController](../../../web/src/features/mockInterviewVoice/continuousVoiceSessionController.ts)、[VoiceAnswerComposer](../../../web/src/features/mockInterviewVoice/VoiceAnswerComposer.tsx) → [Studio](../../../web/src/features/interviewStudio/InterviewStudio.tsx) | [连续状态测试](../../../web/src/features/mockInterviewVoice/continuousVoiceSessionController.test.ts)、[Studio 交互测试](../../../web/src/features/interviewStudio/InterviewStudio.test.tsx) |
 | 语音表现反馈保存/展示 | [voiceCoaching service](../../../web/src/services/voiceCoaching.ts)、[voice_coaching Repository](../../../src/offerpilot/repositories/voice_coaching.py) | [语音反馈 API 测试](../../../tests/test_voice_coaching_api.py) |
 
-语音反馈、回答保存与问题生成是不同操作；一处成功不能证明其他两处成功。
+语音反馈、回答保存与问题生成是不同操作；一处成功不能证明其他两处成功。归属、答案快照和重放查 `create_or_replay` / `create_or_replay_quick`，口头禅位置查 `_validate_fillers`，趋势口径查 `build_voice_coaching_trends` / `_filler_metric`；回归见[语音反馈 Repository 测试](../../../tests/test_voice_coaching_repository.py)。
 
 ## 5. 复盘建议与下一轮准备
 
@@ -78,7 +78,18 @@
 | 从复盘沉淀知识 | [InterviewKnowledgeCaptureDrawer](../../../web/src/components/InterviewKnowledgeCaptureDrawer.tsx) → [capture service](../../../web/src/services/interviewKnowledgeCapture.ts) → [api.py](../../../src/offerpilot/api.py) `create_interview_knowledge_preview` / `confirm_interview_knowledge_capture` → [capture Repository](../../../src/offerpilot/repositories/interview_knowledge_capture.py) / [capture AI](../../../src/offerpilot/ai/interview_knowledge_capture.py) | [Knowledge 架构](../knowledge-system.md)、[捕获 API 测试](../../../tests/test_interview_knowledge_capture_api.py) |
 | 经历故事、版本、AI 草稿 | [InterviewStoryDrawer](../../../web/src/components/InterviewStoryDrawer.tsx) → [stories service](../../../web/src/services/interviewStories.ts) → [stories Repository](../../../src/offerpilot/repositories/interview_stories.py) / [stories AI](../../../src/offerpilot/ai/interview_stories.py) | [故事设计](../../superpowers/specs/2026-08-10-interview-story-library-design.md)、[stories API 测试](../../../tests/test_interview_stories_api.py) |
 
-## 7. 向排查 Agent 提供什么
+## 7. 就近规则与回归入口
+
+下表沿用前文代码入口，进一步定位容易混淆的恢复与写入边界。
+
+| 症状 | 关键符号 | 边界测试 |
+|---|---|---|
+| 准备建议重复调用、卡在未知、旧结果覆盖新结果 | `InterviewPreparationProposalsRepository._try_frozen_existing` / `_handle_existing` / `_call_and_store`，以及 Drawer 的 `generate` / `handleClose` | [租约、来源与重放](../../../tests/test_interview_preparation_repository.py)、[前端未知结果恢复](../../../web/src/components/InterviewPreparationProposalDrawer.interaction.test.tsx) |
+| 笔记改过又改回、生成后无法保存复盘建议 | `NotesRepository.update` / `update_note_scoped`、`_revisioned_note_values`，`InterviewReviewProposalsRepository.create_generated` | [笔记修订与归属](../../../tests/test_notes_api.py)、[scoped 写入](../../../tests/tool_authority/test_scoped_writes.py)、[复盘来源二次检查](../../../tests/test_interview_review_proposals_repository.py) |
+| 撤销重点失败、专项练习重复或完成冲突 | `ReadinessSignalRepository._retract_signal_authorized_in_session`，`AdaptivePracticeRepository.start_v2` / `complete` | [撤销授权与原子性](../../../tests/product_actions/test_compensation.py)、[计划指纹与版本](../../../tests/test_adaptive_interview_practice_repository.py) |
+| 知识预览迟到、重复确认或证据不完整 | `InterviewKnowledgeCaptureRepository.claim_ai_preview` / `complete_ai_preview` / `confirm` | [预览生成权](../../../tests/test_interview_knowledge_capture_repository.py)、[确认与证据](../../../tests/test_interview_knowledge_capture_api.py) |
+
+## 8. 向排查 Agent 提供什么
 
 最少给出：当前分支/提交、上表中的功能、用户动作、实际现象与预期。已有证据再补：事件或 case、attempt/turn/proposal ID、HTTP 状态与错误码、复现步骤。
 

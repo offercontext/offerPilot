@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（真实面试复盘、原始记录）。
+# InterviewNote 是用户原始记录，AI 复盘建议与知识沉淀各自保存，不反向覆盖它。
+# 回归入口：tests/test_notes_api.py、tests/tool_pipeline/test_notes.py。
+# scoped SQL 写入边界见 tests/tool_authority/test_scoped_writes.py。
+
 from dataclasses import dataclass
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Optional, cast
@@ -100,6 +105,7 @@ class NotesRepository:
         authority_factory: AuthorityFactoryProtocol,
         authority: ToolExecutionAuthority,
     ) -> "NotesRepository":
+        # 将工具执行授权、scope 与调用方 Session 绑定；scoped 方法不得另开事务绕过它。
         repository = NotesRepository(self._session_factory, session)
         binding = bind_scoped_repository(
             session,
@@ -122,6 +128,7 @@ class NotesRepository:
         return binding
 
     def create(self, data: NoteCreate) -> InterviewNote:
+        # 原始笔记可独立保存；绑定事件时必须属于同一投递且为面试，一场面试仅一份主笔记。
         note = InterviewNote(
             application_id=data.application_id,
             application_event_id=data.application_event_id,
@@ -152,6 +159,8 @@ class NotesRepository:
         constraint: ApplicationScopeConstraint,
         data: NoteCreate,
     ) -> InterviewNote:
+        # scope、投递可见性和事件占用条件进入 INSERT 本身，避免先查后写留下越界窗口。
+        # 只写入调用方事务；restricted 未命中统一报 scope denied，不泄露资源存在性。
         binding = self._require_scoped(constraint)
         _require_note_company(data.company)
         require_scoped_optional_id(data.application_id, "application_id")
@@ -336,6 +345,8 @@ class NotesRepository:
         return note
 
     def update(self, note_id: int, data: NoteUpdate) -> Optional[InterviewNote]:
+        # application 归属不可改；event 的 UNSET 表示保留，显式 None 表示解除事件绑定。
+        # 每次成功更新都递增 content_revision，让下游识别改过又改回的来源变化。
         with repository_session(self._session_factory, self._session) as session:
             note = session.scalar(self._visible_note_statement(note_id))
             if note is None:
@@ -377,6 +388,8 @@ class NotesRepository:
         note_id: int,
         data: NoteUpdate,
     ) -> Optional[InterviewNote]:
+        # 将授权范围与领域限制合并到同一 UPDATE，失败时不能退回无 scope 写入。
+        # unrestricted 可区分不存在/绑定冲突；restricted 对未命中统一拒绝访问。
         binding = self._require_scoped(constraint)
         note_id = require_scoped_positive_int64(note_id, "note id")
         _require_note_company(data.company)
@@ -494,6 +507,7 @@ class NotesRepository:
         constraint: ApplicationScopeConstraint,
         note_id: int,
     ) -> bool:
+        # 删除也受同一 scope 和父投递可见性约束，使用调用方事务以配合工具确认/回滚。
         binding = self._require_scoped(constraint)
         note_id = require_scoped_positive_int64(note_id, "note id")
         visible_parent = exists(
@@ -523,6 +537,8 @@ class NotesRepository:
         return True
 
     def delete_if_matches(self, note_id: int, expected: dict[str, object]) -> bool:
+        # 条件删除仅在所列内容字段、投递归属与预期一致且仍可见时执行，保护后续编辑。
+        # 此处不是 revision CAS：不能据 True 推断所有字段或历史版本都未变化。
         statement = (
             delete(InterviewNote)
             .where(InterviewNote.id == note_id)
@@ -640,6 +656,7 @@ def _note_update_values(data: NoteUpdate) -> dict[str, object]:
 
 
 def _revisioned_note_values(values: Mapping[str, object]) -> dict[str, object]:
+    # 在数据库表达式中递增版本，避免并发更新都从同一个 Python 旧值计算而丢失修订次数。
     return {
         **values,
         "content_revision": InterviewNote.content_revision + 1,

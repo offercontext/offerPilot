@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（复盘建议与下一轮准备）。
+# 建议独立于原始 InterviewNote；生成不会自动覆盖笔记或确认练习重点。
+# 回归入口：tests/test_interview_review_proposals_repository.py。
+
 from datetime import timezone
 from typing import Any
 
@@ -88,6 +92,8 @@ class InterviewReviewProposalsRepository:
         *,
         on_diagnostic: InterviewReviewDiagnosticSink | None = None,
     ) -> tuple[InterviewReviewProposal, bool]:
+        # 冻结来源后在数据库事务外调用模型，返回时再检查来源与同 key 落库结果。
+        # 这里去重的是保存结果，没有准备建议的生成租约；并发请求可能都调用模型。
         with self._session_factory() as session:
             note = _visible_note(session, note_id)
             if note is None:
@@ -137,6 +143,7 @@ class InterviewReviewProposalsRepository:
                 or note.content_revision != source_note_revision
                 or current_fingerprint != source_fingerprint
             ):
+                # revision 防止内容或事件绑定改动后又改回（ABA）绕过指纹比较。
                 raise InterviewReviewConflictError("interview review source changed")
             event_id = int(current_snapshot["event"]["id"])
             stored = InterviewReviewProposal(
@@ -155,6 +162,7 @@ class InterviewReviewProposalsRepository:
                 session.commit()
             except IntegrityError as exc:
                 session.rollback()
+                # 唯一键竞争后读取胜出结果；没有胜出记录才作为持久化冲突返回。
                 existing = _find_by_key(session, note_id, idempotency_key)
                 if existing is None:
                     raise InterviewReviewConflictError("interview review could not be stored") from exc
