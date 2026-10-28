@@ -57,7 +57,7 @@ def test_prepare_refuses_readonly_output_alias_before_creating_or_executing(
                 "original",
                 "g1",
                 c.run,
-                ROOT / "evals/policies/core-initial-baseline-v5.json",
+                ROOT / "evals/policies/core-initial-baseline-v6.json",
                 c.review,
                 tmp_path / "experiment.json",
                 tmp_path / "history.json",

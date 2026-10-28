@@ -128,6 +128,22 @@ EXTENSION_ITEMS: dict[str, dict[str, Any]] = {
 }
 REGISTERED_ITEMS = ITEMS | EXTENSION_ITEMS
 
+# These user scripts now state the UTC+08:00 premise already required by the grader.
+TIMEZONE_CASE_VERSIONS = {
+    "E02.runtime_clarify": 3,
+    "E03.runtime_reject": 3,
+    "E04.runtime_edit": 4,
+    "E05.runtime_replay": 3,
+    "E05.runtime_conflict": 3,
+    "E06.legacy_saved": 4,
+    "E06.runtime_saved": 4,
+    "E06.legacy_missing": 4,
+    "E06.runtime_missing_observe": 4,
+    "E08.runtime_unknown": 4,
+    "E08.runtime_model_budget": 4,
+    "E08.runtime_tool_budget": 4,
+}
+
 
 def suite_items(suite_id: str) -> set[str]:
     return {
@@ -159,7 +175,9 @@ def case_definition(item: str) -> dict[str, Any]:
     return dict(
         schema_version=2,
         case_id=case,
-        case_version=1
+        case_version=TIMEZONE_CASE_VERSIONS[item]
+        if item in TIMEZONE_CASE_VERSIONS
+        else 1
         if item in EXTENSION_ITEMS
         else 3
         if case in {"E01", "E04", "E06", "E07", "E08", "E10"}

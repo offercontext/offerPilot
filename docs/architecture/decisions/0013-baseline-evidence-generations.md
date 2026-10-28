@@ -3,7 +3,7 @@
 - Status：Implementation scope approved；具体冻结代际尚未批准或激活。
 - Date：2026-10-20
 - Decider：维护者在协调会话 `01a12eef-1ce9-7c53-9f29-5e82750fcb34` 批准基线刷新实现、114项离线对照及完整本地门禁；批准原文与范围另存本阶段工件。
-- 依据：v42 的 `baseline-evaluator-refresh-proposal-v3.md`；原产品基线审批链；当前 `core-release-v5`。
+- 依据：v42 的 `baseline-evaluator-refresh-proposal-v3.md`；原产品基线审批链；当时的 `core-release-v5`。
 
 ## Context
 
@@ -18,7 +18,7 @@
 1. 正式计划为同一新评估器驱动两个独立 checkout，旧产品 `baseline`、新产品 `candidate`，19项 deterministic ×3轮 ×2，共114项。完整分母、失败、unknown、未执行均保留；两臂使用同一 suite、规则、fixture 和网络政策，声明实际实验变量。
 2. 旧产品完整 snapshot、runtime 与原批准 product hash 必须相同。新 BRIDGE 始终位于新评估器根，产品 PYTHONPATH 指向相应 checkout/src。新增来源观察记录实际 product package/factory 与 evaluator 文件路径及 hash；不修改用例评分规则或历史 handshake。
 3. 原产品批准链由新 journal 解析器核对 record/reservation/promote/revoke，再用原冻结评估器的只读子进程严格重算旧 raw 与原 plan。原 reader 的 checkout、解释器、runtime、evaluator hash 和 source snapshot 全部绑定；不调用旧 journal 解析器读取新事件，不修改旧 checkout，不跳过其 `read_run` hash。原 authority 的 byte hash 绑定原 request，再绑定原 results 和逐行 index/fragments；不以本次首次计算的 hash 代替历史原始身份。
-4. 新 gate 使用已有 `core-initial-baseline-v5` 的完整19×3绝对要求，明确选择 `baseline` 臂，使用新运行绑定的新独立审查。此 gate 只是刷新资格视图；不是新的产品首次晋升。激活要求旧产品57项实际完成、全部硬规则通过且新 gate enforce/exit0；fail/unknown/未执行可保存测量材料，但不能成为激活的相对基线，也不能沿用旧通过标签。新候选的失败仍阻塞其自身发布，刷新不豁免候选绝对门禁。通用 gate 默认仍选择 candidate，评分规则和阈值不变。
+4. 新 gate 使用当前规范 initial-baseline policy 的完整19×3绝对要求（原为 v5；明确时区的用例版本更新后为 v6），明确选择 `baseline` 臂，使用新运行绑定的新独立审查。此 gate 只是刷新资格视图；不是新的产品首次晋升。激活要求旧产品57项实际完成、全部硬规则通过且新 gate enforce/exit0；fail/unknown/未执行可保存测量材料，但不能成为激活的相对基线，也不能沿用旧通过标签。新候选的失败仍阻塞其自身发布，刷新不豁免候选绝对门禁。通用 gate 默认仍选择 candidate，评分规则和阈值不变。
 5. 准备命令只向新目录输出 request、fresh gate、raw/manifest/来源/比较 fingerprint 及待审批材料，不写原 store。原 baseline record hash、原 product hash、旧/新 evaluator hash、完整114运行、57项旧产品证据、新 gate/review、历史 reader、expected current/generation 全部进入 request hash。
 6. 激活另需 `RefreshApproval`：维护者、有效时间窗、baseline/generation ID、request hash、双 CAS 期望值，以及内容完全匹配的独立人工审批记录引用/hash。不能用一句自由文本、旧标签或实现授权代替新冻结审批。提交时审批和审查需有效；历史加载按实际提交时点核验其有效性，原批准记录不因自然到期被重新解释为当年无效。
 

@@ -193,9 +193,9 @@ def _qualification(
         fresh_run(directory, original, _origin=_origin))
     policy = gov.GatePolicyV2.model_validate(read(policy_path))
     canonical = gov.GatePolicyV2.model_validate(
-        read(ROOT / "evals/policies/core-initial-baseline-v5.json")
+        read(ROOT / "evals/policies/core-initial-baseline-v6.json")
     )
-    require(policy == canonical, "refresh requires the unchanged formal initial-baseline-v5 policy")
+    require(policy == canonical, "refresh requires the unchanged formal initial-baseline-v6 policy")
     bundle = gov.ReviewBundle.model_validate(read(review_path))
     fingerprint = evidence_fingerprint(manifest, rows)
     reviewed = independent_reviews(bundle, manifest, fingerprint, at)

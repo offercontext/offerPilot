@@ -240,7 +240,7 @@ def refresh_case(manifest, tmp_path, monkeypatch):
             "original",
             generation,
             run,
-            ROOT / "evals/policies/core-initial-baseline-v5.json",
+            ROOT / "evals/policies/core-initial-baseline-v6.json",
             review_path,
             experiment,
             history,

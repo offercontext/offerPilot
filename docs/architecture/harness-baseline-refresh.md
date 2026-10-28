@@ -24,7 +24,7 @@
 ## 冻结审批材料
 
 ```powershell
-oc eval baseline refresh-prepare --store <原store> --baseline-id <原ID> --generation-id <新代际ID> --run <run> --policy evals/policies/core-initial-baseline-v5.json --review <新review.json> --experiment <experiment.json> --history <history-descriptor.json> --output <新目录>
+oc eval baseline refresh-prepare --store <原store> --baseline-id <原ID> --generation-id <新代际ID> --run <run> --policy evals/policies/core-initial-baseline-v6.json --review <新review.json> --experiment <experiment.json> --history <history-descriptor.json> --output <新目录>
 ```
 
 准备只向新目录写入历史审计收据、measurement、qualification gate 和 `refresh-request.json`，不写原 store。没有合格新审查或旧产品57项未全部硬规则通过时，材料可记录测量结果，但 `activatable=false`，不能激活。计划 checksum、实测 manifest、原始字节、来源档案、review 和 gate 均进入冻结绑定。

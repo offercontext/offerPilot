@@ -234,10 +234,10 @@ def drive(
     message = (
         "列出云岚数据测试开发在2026年10月的面试，只查询"
         if item.startswith(("E01.", "E07.", "E08.runtime_deadline"))
-        else "将云岚数据测试开发2026年10月技术面试从10点改到15点"
+        else "将云岚数据测试开发2026年10月技术面试从10点改到15点，本次时间均为UTC+08:00。"
     )
     if item.startswith("E02."):
-        message = "把云岚数据测试开发2026年10月的一场面试改到15点。请先澄清是哪一场。"
+        message = "把云岚数据测试开发2026年10月的一场面试改到15点（UTC+08:00）。请先澄清是哪一场。"
     if item.startswith("E09."):
         message = "只读回答：" + core["current_format"] + "给出面试准备建议，不做任何写入。"
     if item.startswith("E10."):
@@ -415,7 +415,7 @@ def drive(
         answer = body | {
             "conversation_id": conversation,
             "request_id": str(uuid4()),
-            "message": "明确选择技术面试，改到15点。",
+            "message": "明确选择2026年10月14日的技术面试，改到15点（UTC+08:00）。",
         }
         submitted = driver.request("POST", "/api/pilot/runtime/v1/turns", answer)
         turn = submitted["turn_id"]

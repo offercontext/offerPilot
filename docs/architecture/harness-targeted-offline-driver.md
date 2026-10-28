@@ -68,6 +68,6 @@ oc eval targeted-offline-run --plan artifacts/harness/new-offline-session/target
 
 ## 发布边界
 
-当前 `core-release-v5.json` 要求19项 deterministic 各3轮、独立审查、严格基线比较；`review_rules=[]`。裁判在设计 §10 中为可选能力，校准0/20不是所有发布的自动必经阻塞。完整本地 gate 与发布政策仍分别需要对应快照的实际证据。
+当前 `core-release-v6.json` 要求19项 deterministic 各3轮、独立审查、严格基线比较；`review_rules=[]`。v6 仅随明确时区后的用户脚本更新 case/suite 绑定，规则不减。裁判在设计 §10 中为可选能力，校准0/20不是所有发布的自动必经阻塞。完整本地 gate 与发布政策仍分别需要对应快照的实际证据。
 
 已批准历史基线位于 `harness-policy-binding-fix/jobAggregation/artifacts/harness/approved-baselines-v24`，ID为 `harness-core-f78346f0-d3-20261015`。其冻结评估器与后续候选不同，严格比较的兼容性需要后续处理；本入口不修改、重新晋升或移植旧基线分数。旧57/57仍只绑定旧快照。本轮不启动真实Provider、裁判、Bash排查或完整gate。

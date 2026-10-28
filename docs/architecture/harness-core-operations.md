@@ -6,7 +6,7 @@
 
 核心 suite 的分母为 19 个 deterministic、13 个 real 执行项。两版本三次分别为 114 和 78 trial；每次重新创建合成数据库、认证身份、配置和来源。排列固定为 repeat → item → variant。缺测计入完整分母，诊断重试创建新 run。
 
-当前核心 spec 为 E01/E04/E06/E07/E08 v3，其余 v2。历史 spec、评估器与失败记录保留在对应冻结 worktree；旧证据必须使用原评估器回读。新版启动期限 90 秒涵盖 prepared 和 ready，普通 wall 360 秒、缺失恢复 600 秒；这些是评估器保护，产品实际预算独立回读，不能互相替代。
+当前核心 spec 的12个写入用户脚本已显式提供 UTC+08:00：E02/E03/E05 v3，E04/E06 及 E08 的 unknown/model_budget/tool_budget v4；其余版本见 suite。E02 第一轮仍不指明面试场次，澄清后才提供技术面、日期与时间。评分仍核对原定瞬间，不修正模型提议。历史 spec、评估器与失败记录保留在对应冻结 worktree；旧证据必须使用原评估器回读。启动期限 90 秒涵盖 prepared 和 ready，普通 wall 360 秒、缺失恢复 600 秒；这些是评估器保护，产品实际预算独立回读，不能互相替代。
 
 [扩展 suite](../../evals/suites/harness-extension-v1.json)独立包含 E11.memory_withdraw_scope v1。来自 fixture-control 授权范围曾过宽的实际缺口：准备两条 active Memory，撤回其中一条；其新来源单位必须消失，另一条保持原版本并继续进入最终序列化请求。扩展暂为观察集，不能混入核心 policy 或声称私有保留集。
 
@@ -46,7 +46,7 @@ E07 在模型屏障释放前从实际 cursor 建立重连，随后释放模型�
 
 ```text
 oc eval compare --baseline <run目录> --candidate <run目录> --policy core-observe-v1 --output <compare.json>
-oc eval gate --candidate <D-run目录> --policy evals/policies/core-initial-baseline-v5.json --purpose initial-baseline --mode enforce --review <审核.json> --output <gate.json>
+oc eval gate --candidate <D-run目录> --policy evals/policies/core-initial-baseline-v6.json --purpose initial-baseline --mode enforce --review <审核.json> --output <gate.json>
 oc eval gate --candidate <run目录> --baseline <批准基线run目录> --policy <release-policy.json> --purpose release --mode enforce --experiment <实验.json> --review <审核.json> --baseline-store <store目录> --baseline-id <id> --output <gate.json>
 ```
 
@@ -54,7 +54,7 @@ oc eval gate --candidate <run目录> --baseline <批准基线run目录> --policy
 
 直接比较同一 A/B run 默认为原 baseline 对 candidate；正式相对门禁始终读取获批 run 的 candidate 分组。EvalReuse 复用该获批 run 本身时也是 candidate 对 candidate，报告记录双方实际分组，实验变量 hash 按获批分组声明。
 
-[initial 模板](../../evals/policies/core-initial-baseline-v5.json)和 [release 模板](../../evals/policies/core-release-v5.json)默认要求 19 项 D 每项三次并有真实独立审查引用。v5 绑定上述三个 v3 case 的新 suite 字节；必需规则、重复和审核要求不减。v4 的换行修复以及更早配置、失败报告均保留，历史报告应使用原冻结评估器，不能用新 grader 追溯改分。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
+[initial 模板](../../evals/policies/core-initial-baseline-v6.json)和 [release 模板](../../evals/policies/core-release-v6.json)默认要求 19 项 D 每项三次并有真实独立审查引用。v6 绑定明确时区后的12个新版 case 与新 suite 字节；必需规则、重复、比较和审核要求不减。v5 及更早配置、失败报告均保留，历史报告应使用原冻结评估器，不能用新 grader 追溯改分。若发布范围要求 R，需另冻结覆盖完整 13 项 R 的 policy、人工 rubric、profile 和费用 grant；不能把 D 模板冒充真实质量验收。
 
 exit 优先级为已知阻断失败 1、配置或不可比 2、不完整或待人工 3、满足 0。所有 eval/compare/gate 报告仍为 release_eligible=false。质量例外只对已完成的人工质量 fail、精确对象和有效期生效；安全失败、缺测、缺证据和待人工不得例外。
 
