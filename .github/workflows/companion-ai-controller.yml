@@ -1,0 +1,32 @@
+# Default-branch registration only; not an execution controller.
+# GitHub dispatch uses the workflow at the selected ref. Select the locked
+# ai-validation-control branch only after owner setup and review are complete.
+name: Companion fixed controller - SELECT ai-validation-control
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_sha:
+        required: true
+        type: string
+        default: '8848ac33623167cb2c2a58b1e0122abe825810dc'
+      ci_run_id:
+        required: true
+        type: string
+        default: '40441381236'
+      manifest_sha256:
+        required: true
+        type: string
+        default: '561c83d8295a7aedc925dd474bba58f1188dbf3dfe4a776856d6ae4cef03755e'
+permissions: {}
+jobs:
+  registration_only:
+    name: Registration only - select the control branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Refuse execution from this registration stub
+        shell: bash
+        run: |
+          printf '%s\n' '::error::Registration only. In Run workflow, select ai-validation-control after owner setup. This stub cannot execute validation or paid calls.'
+          printf '%s\n' 'The previous paid authorization expired at 2026-10-28 00:00 UTC. A new paid authorization is required; selecting a branch does not renew it.'
+          exit 1
