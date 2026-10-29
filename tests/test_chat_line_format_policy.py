@@ -11,6 +11,8 @@ from fastapi.testclient import TestClient
 
 from offerpilot.ai.types import Assistant, Message
 from offerpilot.api import create_app
+from offerpilot.confirmed_memory.repository import ConfirmedMemoryRepository, MemoryMutation
+from offerpilot.db import session_factory_for_data_dir
 
 
 class RecordingModel:
@@ -36,17 +38,26 @@ class RecordingModel:
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat", "/api/chat/stream"])
+@pytest.mark.parametrize("user_request", [
+    "只读回答：用三行短句说明如何准备面试。",
+    "Read-only: describe a weekly study plan in three short sentences, one per line.",
+], ids=["interview-zh", "study-en"])
 def test_line_quota_policy_reaches_model_without_rewriting_answer(
-    tmp_path: Path, endpoint: str
+    tmp_path: Path, endpoint: str, user_request: str
 ) -> None:
-    request = "只读回答：用三行短句说明如何准备面试。"
     # Deliberately malformed output proves that the API does not manufacture a pass.
-    raw_answer = "练习介绍项目。\n\n准备问题。"
+    raw_answer = "练习介绍项目。\n\n准备问题、排查缺陷并确认时间，再补充复盘和个人介绍。"
     model = RecordingModel(raw_answer)
-    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+    app = create_app(data_dir=tmp_path, chat_model=model)
+    old_preference = "偏好每次回答使用五条长段落。"
+    ConfirmedMemoryRepository(session_factory_for_data_dir(tmp_path)).mutate(
+        None, MemoryMutation(mutation_id=uuid4(), action="confirm", expected_version=0,
+                             confirmed=True, content=old_preference)
+    )
+    with TestClient(app) as client:
         response = client.post(
             endpoint,
-            json={"request_id": str(uuid4()), "message": request, "conversation_id": 0},
+            json={"request_id": str(uuid4()), "message": user_request, "conversation_id": 0},
         )
         assert response.status_code == 200
         assert len(model.calls) == 1
@@ -60,7 +71,11 @@ def test_line_quota_policy_reaches_model_without_rewriting_answer(
         assert "用户限定最终回复行数时" in policy
         assert "行间不插空行" in policy
         assert "每行使用简短句子" in policy
-        assert [message.content for message in messages if message.role == "user"] == [request]
+        assert "每个短句只保留一个核心意思" in policy
+        assert "用取舍删减来缩短" in policy
+        user_messages = [message.content for message in messages if message.role == "user"]
+        assert any(old_preference in (text or "") for text in user_messages)
+        assert user_messages[-1] == user_request
 
         conversations = client.get("/api/chat/conversations").json()
         stored = client.get(f"/api/chat/conversations/{conversations[0]['id']}").json()
