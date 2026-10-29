@@ -112,10 +112,10 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
-    _record_migration(engine, "0035_external_agent_requests", "Add scoped external Agent grants and scheduling request receipts")
-    ensure_business_schema(engine)
     _ensure_chat_image_schema(engine)
     _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
+    _record_migration(engine, "0035_external_agent_requests", "Add scoped external Agent grants and scheduling request receipts")
+    ensure_business_schema(engine)
     _record_migration(engine, "0033_job_mail_review", "Add isolated mail evidence, proposals, previews and atomic receipts")
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
