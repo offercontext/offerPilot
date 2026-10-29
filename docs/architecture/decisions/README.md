@@ -5,6 +5,10 @@
 
 ## 当前记录
 
+### 外部 Agent 接入
+
+- [ADR-0016: 以受限 MCP 提案连接外部 Agent](./0016-expose-scoped-external-agent-mcp.md) — Accepted for implementation
+
 ### 产品入口与草稿
 
 - [ADR-0015: 精简入口并保留领域草稿所有权](./0015-simplify-product-entry-and-draft-ownership.md) — Accepted

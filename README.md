@@ -124,6 +124,12 @@ macOS Keychain 或 Linux Secret Service；仅安装 Python 包不等于系统安
 
 需要 AI 辅助时，再到“设置 → AI 与模型 → 配置 AI”填写模型服务信息，测试连接、应用到 Provider 列表，最后点击页面顶部“保存”。完整步骤见[第一次使用指南](docs/product-manual/产品说明书.md#start)。
 
+## 连接 DSH 和其他外部 Agent
+
+源码版安装 `mcp` extra 后，可通过 stdio MCP 查询明确授权的投递与事件，并提出面试创建/改期请求。
+默认只读；面试提案需另行授权，保存仍由用户在独立可信终端核对确认。MCP 不提供模型自调用的确认工具。
+DSH 使用通用 MCP 客户端配置，无需 OfferPilot 原生插件。安装、配置、授权范围及本机信任限制见[接入说明](docs/architecture/external-agent-mcp.md)。
+
 ## 求职过程中，可以怎样使用它
 
 | 功能 | 具体用途 |
