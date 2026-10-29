@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 评测预算拒绝后的 HTTP 502 被误归为产品失败（2026-10-30）
+
+**现象：** `2687fd09` 完整本地 gate 的 27 请求边界负例已允许并观测到 27 次 loopback 请求，第 28 条预 ACK 预留被拒绝。Legacy epoch 的控制 seq48 已落盘，最后 ACK 为 seq47；控制读取停止后 `/api/chat` 返回“control ACK missing”502。原报告因此为 product_failed／fail／exit1，而预算中断应保留 incomplete／exit3。原失败及 230 份原始文件保留，不涉及付费 Provider。
+
+**根因与边界：** RunLedger 持久化拒绝行后只抛通用 TimeoutError，CoreSubject 丢失异常对象和拒绝来源；HTTP 状态错误又全部用 ProductFailure 表示。本次同步 HTTP 等待读到了该 502，暴露了控制拒绝与普通 HTTP 错误混用的归因缺口。此记录不解释全部历史连接失败，也不回填 legacy 缺失的 execution／request_id。
+
+**修复：** 持久化拒绝后生成带白名单事件、拒绝行及 ledger 身份的 TimeoutError 子类，由同一 CoreSubject 保留；等待队列继续原 TimeoutError 类别。HTTP 状态错误携带 parent-only driver、请求索引、trial／epoch 和时间窗口，不复制正文。仅在 simulation-only targeted 场景中，于清理后确认 reader 和自有进程树均已退出，再核对同一 ledger／subject／driver、epoch 唯一首个请求、完整拒绝行及哈希、事件身份、ACK 恰为拒绝序号减一，才将对应 chat／confirm 502 记为“评测中断、功能归因未知”。原 HTTP 响应和错误文字另存，控制收口不足仍为未知。普通真实运行、缺绑定、并发或多个请求、其他 HTTP 状态及语义 ProductFailure 保留失败。预算、重试、HITL、case、grader 和原 4 秒门槛均不变。
+
+**教训与验证边界：** 拒绝发送不能借 API 错误反推产品能力；观察不足也不能覆盖已知语义失败。局部回归分别保护拒绝持久化、Timeout 等待语义、来源错绑拒绝及 HTTP 原证据；同一快照的真实 loopback 边界、完整正式评测、完整 gate 和独立审查分别留档，未完成前不声明发布通过。
+
 ## 子进程退出先于最后控制回执发布，误判关闭失败（2026-10-29）
 
 **现象：** `0a5dc089` 的正式 D57 为 30 pass／27 incomplete：`E08.runtime_unknown` 第二轮的功能目标、授权变更和晚到结果围栏通过，但 `shutdown.wait` 报 DriverError；后续 26 项因关闭未验证而保留 not_run。控制文件已封存 `shutdown_complete`（seq343），读线程最终正常 EOF，无 error 帧，旧结果及该快照 1,962 份源文件原始字节均保留。

@@ -126,7 +126,8 @@ def test_diagnostic_capture_failure_cannot_mask_main_exception(monkeypatch):
     assert driver.request_error_capture_errors == ["ValueError"]
 
 
-def make_subject(tmp_path, monkeypatch, raw, *, mode="normal", previous_events=None):
+def make_subject(tmp_path, monkeypatch, raw, *, mode="normal", previous_events=None,
+                 ledger=None, trial_key=None, epoch=2):
     private = tmp_path / "private"
     private.mkdir()
     process = SimpleNamespace(stdout=io.StringIO(raw), stdin=io.StringIO(), returncode=0,
@@ -159,13 +160,13 @@ def make_subject(tmp_path, monkeypatch, raw, *, mode="normal", previous_events=N
         if mode == "reserve":
             raise TimeoutError("RESERVATION-SECRET")
 
-    key = dict(run_id="run", variant_id="candidate", execution_item_id="E06.legacy_saved",
-               mode="deterministic", repeat_index=1)
-    config = dict(epoch=2, trial_key=key, limits=dict(model_calls=8, tool_attempts=20), command="prepare")
+    key = trial_key or dict(run_id="run", variant_id="candidate", execution_item_id="E06.legacy_saved",
+                           mode="deterministic", repeat_index=1)
+    config = dict(epoch=epoch, trial_key=key, limits=dict(model_calls=8, tool_attempts=20), command="prepare")
     variant = SimpleNamespace(checkout=str(tmp_path), interpreter="unused")
     subject = core_subject.CoreSubject(variant, config, private,
         previous_events if previous_events is not None else [], time.monotonic() + 60,
-        SimpleNamespace(reserve=reserve))
+        ledger if ledger is not None else SimpleNamespace(reserve=reserve))
     subject.reader.join(3)
     assert not subject.reader.is_alive()
     subject.stderr.close()

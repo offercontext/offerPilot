@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from decimal import Decimal
 from datetime import datetime, timezone
 import json
@@ -14,6 +15,34 @@ from typing import Any, TextIO, cast
 from offerpilot.evaluation.core_contracts import RunGrant, RunManifestV2
 from offerpilot.evaluation.runner import ROOT, Subject, process_environment, process_tree, subject_command
 from scripts.evaluation_subject import core_observer as observer
+
+
+class ReservationDenied(TimeoutError):
+    """A parent-side refusal created only after the denied row was recorded."""
+
+    def __init__(self, event: dict[str, Any], row: dict[str, Any], ledger: RunLedger) -> None:
+        super().__init__("authorized run request/fee reservation exhausted")
+        self.ledger = ledger
+        self.captured_at_monotonic = time.monotonic()
+        self.event = {key: copy.deepcopy(event[key]) for key in (
+            "trial_key", "epoch", "seq", "type", "purpose", "model_call_id",
+            "provider_attempt_id", "input_bytes", "output_cap", "execution",
+        ) if key in event}
+        execution = self.event.get("execution")
+        if isinstance(execution, dict):
+            self.event["execution"] = {key: value for key, value in execution.items()
+                if key in {"turn_id", "generation", "conversation_id", "request_id"}
+                and (value is None or type(value) in {str, int})}
+        elif execution is not None:
+            self.event.pop("execution", None)
+        self.row = {key: copy.deepcopy(row[key]) for key in (
+            "trial_key", "epoch", "seq", "allowed", "reserve_cny", "input_bytes", "output_cap",
+            "stage", "binding", "event_id", "row_hash", "previous_hash", "simulation_only",
+        ) if key in row}
+
+    def observation(self) -> dict[str, Any]:
+        return copy.deepcopy(dict(error_type=type(self).__name__,
+            captured_at_monotonic=self.captured_at_monotonic, event=self.event, row=self.row))
 
 
 class RunLedger:
@@ -59,7 +88,7 @@ class RunLedger:
                 self.reserved_cny += amount
             self.record(self.rows[-1], event)
             if blocked:
-                raise TimeoutError("authorized run request/fee reservation exhausted")
+                raise ReservationDenied(event, self.rows[-1], self)
 
     def record(self, row: dict[str, Any], event: dict[str, Any]) -> None:
         """Durable before ACK; a specialized driver may add recovery bindings."""
@@ -88,6 +117,7 @@ class CoreSubject(Subject):
         )
         self.messages: queue.Queue[dict[str, Any]] = queue.Queue()
         self.errors: list[str] = []
+        self.reservation_denial: ReservationDenied | None = None
         self.cleanup_errors: list[dict[str, Any]] = []
         self._stop_lock = threading.Lock()
         self._tree_close_attempted = False
@@ -127,6 +157,7 @@ class CoreSubject(Subject):
     def control_observation(self) -> dict[str, Any]:
         """Identity, fsync and ACK-send cursors; none of them means a send was authorized."""
         state = self._control_state
+        denial = getattr(self, "reservation_denial", None)
         return dict(state, epoch=self.config["epoch"],
             trial_key={key: self.config["trial_key"][key] for key in (
                 "run_id", "variant_id", "execution_item_id", "mode", "repeat_index")},
@@ -134,6 +165,7 @@ class CoreSubject(Subject):
             cleanup_errors=[dict(value) for value in self.cleanup_errors],
             owned_tree_exit_proof=dict(self._owned_tree_exit_proof) if self._owned_tree_exit_proof else None,
             subject_closed=self.closed,
+            reservation_denial=denial.observation() if isinstance(denial, ReservationDenied) else None,
             owned_tree_exit_proven=getattr(self, "owned_tree_exit_proven", None))
 
     def _read(self) -> None:
@@ -216,7 +248,11 @@ class CoreSubject(Subject):
                             > self.config["provider_profile"]["max_attempts_per_trial"]
                         ):
                             raise TimeoutError("provider trial attempt cap exhausted")
-                        self.ledger.reserve(event)
+                        try:
+                            self.ledger.reserve(event)
+                        except ReservationDenied as denial:
+                            self.reservation_denial = denial
+                            raise
                     held_stream_barrier = (
                         event["type"] == "fault_reached"
                         and self.config["trial_key"]["execution_item_id"] == "E07.runtime_reattach"
@@ -244,7 +280,9 @@ class CoreSubject(Subject):
             self.messages.put(
                 {
                     "type": "error",
-                    "error_type": type(exc).__name__,
+                    # Subject.wait consumes the existing timeout category; the
+                    # actual subtype and safe refusal remain on this subject.
+                    "error_type": "TimeoutError" if isinstance(exc, TimeoutError) else type(exc).__name__,
                     "message": str(exc) if isinstance(exc, TimeoutError) else type(exc).__name__,
                 }
             )

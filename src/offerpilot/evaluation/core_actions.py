@@ -26,6 +26,32 @@ from scripts.evaluation_subject import core_observer as observer
 TERMINAL = {"completed", "failed", "cancelled", "interrupted", "stopped", "result_unknown"}
 
 
+class CoreHTTPStatusFailure(ProductFailure):
+    """HTTP status observation with a parent-only driver binding, without a body."""
+
+    def __init__(self, status: int, method: str, path: str, driver: CoreHTTPDriver,
+                 request_index: int, started: float) -> None:
+        try:
+            logical_path: str | None = urlsplit(path).path
+        except ValueError:
+            logical_path = None
+        super().__init__(f"HTTP {status} on {logical_path or '<unknown>'}")
+        self.driver = driver
+        context = driver.request_context
+        trial = context.get("trial_key")
+        self.context = dict(epoch=context.get("epoch"), trial_key={
+            key: trial[key] for key in ("run_id", "variant_id", "execution_item_id", "mode", "repeat_index")
+            if key in trial} if isinstance(trial, dict) else None)
+        self.status, self.method, self.path = status, method, logical_path
+        self.request_index, self.started = request_index, started
+        self.finished = time.monotonic()
+
+    def observation(self) -> dict[str, Any]:
+        return dict(status=self.status, method=self.method, path=self.path,
+            driver_request_index=self.request_index, request_context=self.context,
+            started_at_monotonic=self.started, finished_at_monotonic=self.finished)
+
+
 class CoreHTTPDriver(HTTPDriver):
     def __init__(
         self,
@@ -270,7 +296,8 @@ class CoreHTTPDriver(HTTPDriver):
                 )
             )
             if response.status_code not in allowed:
-                raise ProductFailure(f"HTTP {response.status_code} on {path}") from exc
+                raise CoreHTTPStatusFailure(response.status_code, method, path, self,
+                                            request_index, started) from exc
             raise DriverError("unhandled non-JSON response") from exc
         if time.monotonic() >= request_deadline:
             raise TimeoutError("local HTTP response deadline")
@@ -278,7 +305,8 @@ class CoreHTTPDriver(HTTPDriver):
             dict(method=method, path=path, body=body, status=response.status_code, response=payload)
         )
         if response.status_code not in allowed:
-            raise ProductFailure(f"HTTP {response.status_code} on {path}")
+            raise CoreHTTPStatusFailure(response.status_code, method, path, self,
+                                        request_index, started)
         if not isinstance(payload, dict):
             raise DriverError("unhandled non-object response")
         return payload
