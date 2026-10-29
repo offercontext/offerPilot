@@ -65,7 +65,9 @@ Basic application tracking does not require AI configuration.
 
 ## Connect DSH and other external agents
 
-Install the source edition's `mcp` extra to expose scoped application/event reads and interview proposals over stdio MCP.
+Install the source edition's `mcp` extra for stdio MCP reads of applications, events, resumes, interview notes and current Knowledge,
+plus proposals to maintain applications, interviews, resumes and notes. Each additional resource and write capability requires an explicit grant;
+resume and Knowledge reads are separate global grants. Existing connections gain no new permissions on upgrade.
 Connections default to read-only. Scheduling needs an explicit grant and a separate user review in a trusted terminal;
 the MCP surface has no approval tool. DSH uses its generic MCP client, with no OfferPilot native plugin required.
 See the [setup and local trust boundaries (Chinese)](docs/architecture/external-agent-mcp.md).

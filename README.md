@@ -126,8 +126,9 @@ macOS Keychain 或 Linux Secret Service；仅安装 Python 包不等于系统安
 
 ## 连接 DSH 和其他外部 Agent
 
-源码版安装 `mcp` extra 后，可通过 stdio MCP 查询明确授权的投递与事件，并提出面试创建/改期请求。
-默认只读；面试提案需另行授权，保存仍由用户在独立可信终端核对确认。MCP 不提供模型自调用的确认工具。
+源码版安装 `mcp` extra 后，可通过 stdio MCP 查询明确授权的投递、事件、简历、面试笔记和当前 Knowledge，
+并提出投递维护、面试安排、简历维护和笔记维护请求。默认只读投递及事件；新增资源和写提案需分别授权，
+保存仍由用户在独立可信终端核对确认。简历和 Knowledge 读取权是独立的全局授权。MCP 不提供模型自调用的确认工具。
 DSH 使用通用 MCP 客户端配置，无需 OfferPilot 原生插件。安装、配置、授权范围及本机信任限制见[接入说明](docs/architecture/external-agent-mcp.md)。
 
 ## 求职过程中，可以怎样使用它

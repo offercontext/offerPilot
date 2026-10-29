@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.external_agents.schemas import INPUTS, OUTPUTS, PROPOSAL_TOOLS
 from offerpilot.external_agents.service import ExternalAgentError, ExternalAgentService
+from offerpilot.external_agents.catalog import permitted
 
 DESCRIPTIONS = {
     "list_applications": "List saved applications in the user-granted scope, with ID pagination.",
@@ -25,6 +26,25 @@ DESCRIPTIONS = {
     "get_request": "Read this connection's durable request status and visible committed receipt. Hidden sources omit event text. Does not approve or execute it.",
     "cancel_request": "Cancel this connection's pending request. Terminal requests return their existing state; committed events are never undone.",
 }
+DESCRIPTIONS.update(
+    {
+        "propose_application_create": "Propose a saved application with company, role, URL, stage and notes. Requires explicit workspace create grant. No application is saved before independent user review.",
+        "propose_application_update": "Propose a partial application edit or stage change using its current revision. Closing needs a reason; closed applications cannot reopen. Omitted fields are preserved.",
+        "propose_application_delete": "Propose soft deletion of an application. Approval hides its related business content; does not physically erase history. Requires current revision.",
+        "list_resumes": "List current resumes only with the separate global resume read grant. Never inferred from application scope.",
+        "get_resume": "Read current resume content and revision with a separate global resume grant; local file paths are omitted.",
+        "propose_resume_create": "Propose a new resume. Explicit global resume write grant and separate user review required; the first resume becomes master unless explicitly invalid.",
+        "propose_resume_update": "Propose selected resume fields using current revision. Omitted fields stay unchanged. Master transitions also recheck the library snapshot at approval.",
+        "propose_resume_copy": "Propose an editable non-master copy of the current resume with a new title, preserving its parent lineage.",
+        "propose_resume_delete": "Propose soft deletion of a resume using its revision. Nonempty master resumes cannot be deleted. Never executes before separate user review.",
+        "list_notes": "List original interview notes in granted applications. Unbound notes require an additional explicit workspace grant.",
+        "get_note": "Read an original interview note and revision within the granted application scope.",
+        "propose_note_create": "Propose an original interview note. A bound interview must belong to the granted application and can have only one note. Unbound notes require a separate workspace grant.",
+        "propose_note_update": "Propose selected original note fields using its revision. Application ownership cannot change. Explicit null application_event_id unbinds the event; omission preserves it.",
+        "propose_note_delete": "Propose deletion of an original interview note with its revision; the independent user preview shows the affected record.",
+        "search_knowledge": "Search current confirmed Knowledge Notes and independent Evidence with an explicit global Knowledge read grant. Returns provenance, versions and hashes; omits oversized complete items and reports omitted_count. Does not ingest, generate or write Knowledge.",
+    }
+)
 
 
 def open_sessions(data_dir: Path) -> sessionmaker[Session]:
@@ -57,12 +77,12 @@ def build_server(service: ExternalAgentService) -> Any:
         "offerpilot",
         version="1.0.0",
         instructions=(
-            "OfferPilot provides user-scoped saved applications and interview scheduling proposals. "
-            "A pending request is not an event. Only the user's separate trusted OfferPilot review "
+            "OfferPilot provides explicitly scoped business reads, Knowledge retrieval and maintenance proposals. "
+            "Resume and Knowledge access require separate global grants. A pending request is not saved business data. Only the user's separate trusted OfferPilot review "
             "channel can commit it; no tool can confirm and no boolean counts as user consent. "
-            "After the user independently reviews, read get_request. Report an exact event only "
-            "when status=committed and the receipt includes event; otherwise report the actual "
-            "status/source availability without reconstructing hidden event text. Never invoke "
+            "After the user independently reviews, read get_request. Report saved data only "
+            "when status=committed and the receipt includes the resource; otherwise report the actual "
+            "status/source availability without reconstructing hidden resource text. Never invoke "
             "the operator review command on the user's behalf, including through an Agent shell. "
             "MCP cancellation interrupts observation; use cancel_request to cancel a durable pending "
             "proposal. Recover uncertain proposals by repeating their original idempotency key and input. "
@@ -88,7 +108,7 @@ def build_server(service: ExternalAgentService) -> Any:
                 ),
             )
             for name, schema in INPUTS.items()
-            if grant["allow_scheduling"] or name not in PROPOSAL_TOOLS
+            if permitted(name, grant)
         ]
 
     @server.call_tool(validate_input=False)  # type: ignore[untyped-decorator]

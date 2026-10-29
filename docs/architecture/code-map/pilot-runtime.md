@@ -14,7 +14,7 @@
 | 练习重点/经历故事的确认和撤销 | [reviewReadiness service](../../../web/src/features/reviewReadiness/service.ts)、[product_actions](../../../src/offerpilot/product_actions/) | Product Action 的 proposal/decision/terminal 与普通聊天 Pending 有各自契约；不能互换 token |
 | 停止、超时、重新连接 | [managed_execution](../../../src/offerpilot/pilot_runtime/managed_execution.py)、[turn_control](../../../src/offerpilot/pilot_runtime/turn_control.py)、[runtime_transport](../../../src/offerpilot/runtime_transport.py) | 观察订阅、执行所有权、Provider 物理调用不是同一状态 |
 | 图片上传、历史识图 | [chatImages](../../../web/src/services/chatImages.ts) → [chat_image_routes](../../../src/offerpilot/chat_image_routes.py) → [ChatImageStore](../../../src/offerpilot/chat_images.py) | 上传附件、绑定消息、历史引用和模型能力分别核对 |
-| DSH / 外部 Agent 查询投递、提出面试安排、独立用户审阅 | [external_agents](../../../src/offerpilot/external_agents/) 的 `server.build_server` → `ExternalAgentService.call`；独立 `oc mcp review` → `review_in_terminal` / `decide` | [接入与信任边界](../external-agent-mcp.md)、[ADR-0016](../decisions/0016-expose-scoped-external-agent-mcp.md)；不冒用 Chat Pending / Product Action |
+| DSH / 外部 Agent 查询投递/简历/笔记/Knowledge，提出业务维护，独立用户审阅 | [external_agents](../../../src/offerpilot/external_agents/) 的 `server.build_server` → `ExternalAgentService.call` → `business.prepare/read`；独立 `oc mcp review` → `review_in_terminal` / `decide` | [接入与信任边界](../external-agent-mcp.md)、[ADR-0016](../decisions/0016-expose-scoped-external-agent-mcp.md)；不冒用 Chat Pending / Product Action |
 
 ## 2. 一次请求的调用链
 
@@ -32,7 +32,7 @@
 - 服务重启核对保存事实，不自动重做未知 Provider/工具。确认写入已提交但响应超时时，先查 ledger 和保存回执，不能因没有最终文本就认定未写入。
 - Product Action 的确认和补偿继续跟随 [coordinator](../../../src/offerpilot/product_actions/coordinator.py)、[repository](../../../src/offerpilot/product_actions/repository.py) 与具体领域 Handler；撤销必须确认原操作和当前状态允许，不能用新写操作模拟撤销。
 - 共用恢复词汇以 [recovery-policy.v1.json](../../../contracts/recovery-policy.v1.json) 和[策略消费者](../../../src/offerpilot/reliability/policy.py)为准；单凭 HTTP 500 不能选“安全重试”。
-- 外部 MCP 提案另有连接范围、15 分钟有效期、原 key 幂等与回执；`decide` 在 SQLite 写锁内重查来源，再绑定 `ApplicationEventsRepository` 同事务写入。MCP 不提供确认；独立终端不是 OS 沙箱或真人身份证明。测试：[事务/确认](../../../tests/test_external_agents.py)、[真实 stdio](../../../tests/test_external_agents_stdio.py)。
+- 外部 MCP 提案另有连接范围、显式 capability、15 分钟有效期、原 key 幂等与回执；`decide` 在 SQLite 写锁内重查来源，`business.recheck/execute` 绑定领域 Repository 同事务写入。全局 Resume/Knowledge 不由 workspace 或投递范围隐式授权，旧 grant 不扩权。MCP 不提供确认；独立终端不是 OS 沙箱或真人身份证明。2026-10-29 扩展核对：测试[事务/确认](../../../tests/test_external_agents.py)、[真实 stdio](../../../tests/test_external_agents_stdio.py)、[业务维护](../../../tests/test_external_agent_business.py)、[业务 stdio](../../../tests/test_external_agent_business_stdio.py)、[迁移保留/回滚](../../../tests/test_external_agent_business_migration.py)。
 
 ## 4. 图片与上下文
 

@@ -421,6 +421,7 @@ from offerpilot.schemas import (
     resume_payload,
 )
 from offerpilot.skills import SkillRegistryError, register_skill, skills_payload, update_skill
+from offerpilot.resume_rules import is_empty_resume_draft, content_has_value
 from offerpilot.chat_transport import (
     execute_runtime_sync,
     outcome_http_response,
@@ -11711,16 +11712,11 @@ def _content_json_from_payload(value: Any) -> dict[str, Any] | JSONResponse:
 
 
 def _resume_is_empty_draft(resume: Any) -> bool:
-    content = normalize_resume_content(resume.content_json)
-    return not str(resume.parsed_data or "").strip() and not _resume_content_has_value(content)
+    return is_empty_resume_draft(resume)
 
 
 def _resume_content_has_value(value: Any) -> bool:
-    if isinstance(value, dict):
-        return any(_resume_content_has_value(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_resume_content_has_value(item) for item in value)
-    return bool(str(value or "").strip())
+    return content_has_value(value)
 
 
 def _resume_sample(sample_id: str) -> dict[str, Any] | None:

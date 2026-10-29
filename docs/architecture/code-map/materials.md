@@ -20,6 +20,8 @@ HTTP 装配在 [api.py](../../../src/offerpilot/api.py)：`upload_resume` 负责
 
 `ResumesRepository.create/update/copy/delete` 管理主标记、软删除和派生关系；公开 HTTP `delete_resume` 还禁止删除非空主简历。不能仅凭 Repository 有接任逻辑，就认定 UI/API 允许删除所有主简历。
 
+2026-10-29 外部 MCP：全局简历读取/维护须分别显式授权，入口 [business.prepare/execute](../../../src/offerpilot/external_agents/business.py) → 同事务绑定 `ResumesRepository`。共享[主简历删除规则](../../../src/offerpilot/resume_rules.py)，冻结集合与接任人；标题/结构化更新保留未改正文和解析状态。没有文件上传/下载或自动分类；测试见[外部业务回归](../../../tests/test_external_agent_business.py)，授权见[接入说明](../external-agent-mcp.md)。
+
 `/api/jd/analyze`、`/api/resumes/{resume_id}/match` → [workflows](../../../src/offerpilot/ai/workflows.py) 的 `resolve_jd_input` / `analyze_jd` / `match_resume`。关联投递时使用 JD 版本；[JDAnalysesRepository.create_for_current](../../../src/offerpilot/repositories/jd.py) 在保存前复核当前版本。诊断分别保留原文版本、分析结果和匹配结果，不能互相当作事实源。
 
 ## 3. 不经过独立模型接口的前端业务

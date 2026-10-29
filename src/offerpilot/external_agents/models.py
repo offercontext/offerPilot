@@ -16,6 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from offerpilot.models import Base
+from offerpilot.external_agents.catalog import ACTIONS
 
 
 class ExternalAgentConnection(Base):
@@ -26,6 +27,9 @@ class ExternalAgentConnection(Base):
     application_ids_json: Mapped[str] = mapped_column(Text, nullable=False)
     workspace: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     allow_scheduling: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    capabilities_json: Mapped[str] = mapped_column(
+        Text, nullable=False, default="[]", server_default="[]"
+    )
     active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
@@ -39,7 +43,7 @@ class ExternalAgentRequest(Base):
             name="ck_external_agent_request_status",
         ),
         CheckConstraint(
-            "action IN ('create_interview','reschedule_interview')",
+            "action IN (" + ",".join(f"'{action}'" for action in ACTIONS) + ")",
             name="ck_external_agent_request_action",
         ),
     )
@@ -52,7 +56,7 @@ class ExternalAgentRequest(Base):
     input_digest: Mapped[str] = mapped_column(String, nullable=False)
     proposal_digest: Mapped[str] = mapped_column(String, nullable=False)
     action: Mapped[str] = mapped_column(String, nullable=False)
-    application_id: Mapped[int] = mapped_column(nullable=False)
+    application_id: Mapped[int | None] = mapped_column(nullable=True)
     proposal_json: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String, nullable=False, default="pending", index=True)
     outcome_json: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -22,6 +22,12 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.external_agents.models import ExternalAgentConnection, ExternalAgentRequest
 from offerpilot.external_agents.schemas import INPUTS, PROPOSAL_TOOLS
+from offerpilot.external_agents.catalog import (
+    BUSINESS_PROPOSALS,
+    CAPABILITIES,
+    TOOL_CAPABILITIES,
+    permitted,
+)
 from offerpilot.models import Application, ApplicationEvent
 from offerpilot.repositories.application_events import (
     ApplicationEventCreate,
@@ -85,12 +91,23 @@ def create_connection(
     *,
     workspace: bool = False,
     allow_scheduling: bool = False,
+    capabilities: list[str] | None = None,
 ) -> dict[str, Any]:
     """Trusted local administration; never exposed as an MCP tool."""
     if not name.strip() or len(name) > 80 or workspace == bool(application_ids):
         raise ExternalAgentError("explicit_scope_required")
     if any(type(value) is not int or not 1 <= value <= 2**63 - 1 for value in application_ids):
         raise ExternalAgentError("invalid_scope")
+    granted = set(capabilities or [])
+    if not granted <= CAPABILITIES:
+        raise ExternalAgentError("unknown_capability")
+    if ("applications.create" in granted or "notes.unbound" in granted) and not workspace:
+        raise ExternalAgentError("workspace_create_required")
+    if any(
+        f"{kind}.write" in granted and f"{kind}.read" not in granted
+        for kind in ("resumes", "notes")
+    ) or ("notes.unbound" in granted and "notes.read" not in granted):
+        raise ExternalAgentError("read_grant_required")
     with transaction(sessions) as session:
         for application_id in application_ids:
             application = session.get(Application, application_id)
@@ -102,6 +119,7 @@ def create_connection(
             application_ids_json=canonical(sorted(set(application_ids))),
             workspace=workspace,
             allow_scheduling=allow_scheduling,
+            capabilities_json=canonical(sorted(granted)),
             active=True,
             created_at=naive_utc(utcnow()),
         )
@@ -111,7 +129,7 @@ def create_connection(
 
 
 def connection_json(connection: ExternalAgentConnection) -> dict[str, Any]:
-    return {
+    value = {
         "connection_id": connection.id,
         "name": connection.name,
         "application_ids": json.loads(connection.application_ids_json),
@@ -119,6 +137,19 @@ def connection_json(connection: ExternalAgentConnection) -> dict[str, Any]:
         "allow_scheduling": connection.allow_scheduling,
         "active": connection.active,
     }
+    if connection.capabilities_json and json.loads(connection.capabilities_json):
+        value["capabilities"] = json.loads(connection.capabilities_json)
+    return value
+
+
+def row_revision(resource: Any) -> str:
+    return digest(
+        {
+            attribute.key: timestamp(value) if isinstance(value, datetime) else value
+            for attribute in resource.__mapper__.column_attrs
+            for value in (getattr(resource, attribute.key),)
+        }
+    )
 
 
 def application_json(application: Application) -> dict[str, Any]:
@@ -130,6 +161,8 @@ def application_json(application: Application) -> dict[str, Any]:
         "job_url": application.job_url,
         "notes": application.notes,
         "applied_at": timestamp(application.applied_at),
+        "closed_reason": application.closed_reason,
+        "revision": row_revision(application),
     }
 
 
@@ -241,8 +274,10 @@ class ExternalAgentService:
         self,
         session: Session,
         connection: ExternalAgentConnection,
-        application_id: int,
+        application_id: int | None,
     ) -> bool:
+        if application_id is None:
+            return False
         try:
             self._application(session, connection, application_id)
         except ExternalAgentError:
@@ -261,10 +296,20 @@ class ExternalAgentService:
             self.sessions, write=tool in PROPOSAL_TOOLS or tool in {"get_request", "cancel_request"}
         ) as session:
             connection = self._connection(session)
+            if tool not in {"propose_interview", "propose_reschedule"} and not permitted(
+                tool, connection_json(connection)
+            ):
+                raise ExternalAgentError("capability_not_granted")
+            if tool in BUSINESS_PROPOSALS:
+                return self._propose_business(session, connection, tool, args)
             if tool in PROPOSAL_TOOLS:
                 if not connection.allow_scheduling:
                     raise ExternalAgentError("scheduling_not_granted")
                 return self._propose(session, connection, tool, args)
+            if tool in TOOL_CAPABILITIES:
+                from offerpilot.external_agents.business import read
+
+                return read(self, session, connection, tool, args)
             if tool in {"get_request", "cancel_request"}:
                 request = session.get(ExternalAgentRequest, args["request_id"])
                 if request is None or request.connection_id != self.connection_id:
@@ -331,7 +376,13 @@ class ExternalAgentService:
     def _request_json(
         self, session: Session, connection: ExternalAgentConnection, request: ExternalAgentRequest
     ) -> dict[str, Any]:
-        source_available = self._source_available(session, connection, request.application_id)
+        frozen = json.loads(request.proposal_json)
+        if "resource" in frozen:
+            from offerpilot.external_agents.business import visible_request
+
+            source_available = visible_request(self, session, connection, request, frozen)
+        else:
+            source_available = self._source_available(session, connection, request.application_id)
         value: dict[str, Any] = {
             "request_id": request.id,
             "status": request.status,
@@ -347,7 +398,17 @@ class ExternalAgentService:
             # Request ownership permits cancellation/observation after deletion,
             # but cannot expose frozen business text from an invisible source.
             if not source_available:
-                outcome.pop("event", None)
+                for field in ("event", "application", "resume", "note"):
+                    outcome.pop(field, None)
+            if "replacement_master" in outcome:
+                from offerpilot.external_agents.business import find
+
+                try:
+                    if "resumes.read" not in json.loads(connection.capabilities_json):
+                        raise ExternalAgentError("capability_not_granted")
+                    find(self, session, connection, "resume", outcome["replacement_master"]["id"])
+                except ExternalAgentError:
+                    outcome.pop("replacement_master", None)
             value.update(outcome)
         return value
 
@@ -428,6 +489,82 @@ class ExternalAgentService:
         session.flush()
         return self._request_json(session, connection, request)
 
+    def _propose_business(
+        self, session: Session, connection: ExternalAgentConnection, tool: str, args: dict[str, Any]
+    ) -> dict[str, Any]:
+        from offerpilot.external_agents.business import prepare
+        from offerpilot.repositories.notes import NoteBindingError
+
+        prior = session.scalar(
+            select(ExternalAgentRequest).where(
+                ExternalAgentRequest.connection_id == connection.id,
+                ExternalAgentRequest.idempotency_key == args["idempotency_key"],
+            )
+        )
+        if prior is not None:
+            if prior.input_digest != digest({"tool": tool, "args": args}):
+                raise ExternalAgentError("idempotency_conflict")
+            self._expire(prior)
+            return self._request_json(session, connection, prior)
+        try:
+            application_id, frozen = prepare(
+                self, session, connection, BUSINESS_PROPOSALS[tool], args
+            )
+        except NoteBindingError as exc:
+            raise ExternalAgentError("note_binding_conflict") from exc
+        frozen.update({"input": args, "tool": tool, "connection": connection_json(connection)})
+        now = naive_utc(self.clock())
+        request = ExternalAgentRequest(
+            id=str(uuid4()),
+            connection_id=connection.id,
+            idempotency_key=args["idempotency_key"],
+            input_digest=digest({"tool": tool, "args": args}),
+            proposal_digest=digest(frozen),
+            action=BUSINESS_PROPOSALS[tool],
+            application_id=application_id,
+            proposal_json=canonical(frozen),
+            status="pending",
+            created_at=now,
+            expires_at=now + timedelta(minutes=15),
+        )
+        session.add(request)
+        session.flush()
+        return self._request_json(session, connection, request)
+
+    def _decide_business(
+        self,
+        session: Session,
+        connection: ExternalAgentConnection,
+        request: ExternalAgentRequest,
+        frozen: dict[str, Any],
+    ) -> dict[str, Any]:
+        from offerpilot.external_agents.business import recheck, execute
+        from offerpilot.repositories.notes import NoteBindingError
+
+        if not permitted(frozen["tool"], connection_json(connection)):
+            raise ExternalAgentError("capability_not_granted")
+        try:
+            if connection_json(connection) != frozen["connection"]:
+                raise ExternalAgentError("proposal_source_changed")
+            recheck(self, session, connection, request.action, frozen["input"], frozen)
+            with session.begin_nested():
+                outcome = execute(self, session, request.action, frozen)
+        except (ExternalAgentError, NoteBindingError, ValueError) as exc:
+            request.status = "conflict"
+            request.outcome_json = canonical(
+                {
+                    "error_code": exc.code
+                    if isinstance(exc, ExternalAgentError)
+                    else "business_conflict"
+                }
+            )
+            return self._request_json(session, connection, request)
+        request.status = "committed"
+        request.outcome_json = canonical(outcome)
+        if request.action == "create_application":
+            request.application_id = outcome["application"]["id"]
+        return self._request_json(session, connection, request)
+
     def review(self, request_id: str) -> dict[str, Any]:
         """Operator-only preview. Neither this method nor decide is an MCP tool."""
         with transaction(self.sessions) as session:
@@ -466,11 +603,15 @@ class ExternalAgentService:
             if decision == "reject":
                 request.status = "rejected"
                 return self._request_json(session, connection, request)
+            if "resource" in frozen:
+                return self._decide_business(session, connection, request, frozen)
             if not connection.allow_scheduling:
                 raise ExternalAgentError("scheduling_not_granted")
             # Revalidate the exact preview's mutable ownership and event snapshot
             # under the same lock that protects the request receipt and domain write.
             try:
+                if request.application_id is None:
+                    raise ExternalAgentError("proposal_source_changed")
                 application = self._application(session, connection, request.application_id)
                 if frozen["application"] != {
                     "id": application.id,

@@ -82,6 +82,44 @@ def connect(
     allow_scheduling: bool = typer.Option(
         False, "--allow-scheduling", help="Allow pending scheduling proposals; never auto-approve"
     ),
+    allow_application_create: bool = typer.Option(
+        False,
+        "--allow-application-create",
+        help="Create application proposals; requires --workspace",
+    ),
+    allow_application_writes: bool = typer.Option(
+        False,
+        "--allow-application-writes",
+        help="Propose application edits, stages and soft deletion",
+    ),
+    allow_resumes: bool = typer.Option(
+        False,
+        "--allow-resumes",
+        help="Read the global resume library, independently of application scope",
+    ),
+    allow_resume_writes: bool = typer.Option(
+        False,
+        "--allow-resume-writes",
+        help="Propose resume create/copy/edit/delete; requires --allow-resumes",
+    ),
+    allow_notes: bool = typer.Option(
+        False, "--allow-notes", help="Read interview notes bound to granted applications"
+    ),
+    allow_note_writes: bool = typer.Option(
+        False,
+        "--allow-note-writes",
+        help="Propose interview note create/edit/delete; requires --allow-notes",
+    ),
+    allow_unbound_notes: bool = typer.Option(
+        False,
+        "--allow-unbound-notes",
+        help="Include unbound notes; requires --workspace and --allow-notes",
+    ),
+    allow_knowledge: bool = typer.Option(
+        False,
+        "--allow-knowledge",
+        help="Read global current Knowledge Notes and Evidence; no writes",
+    ),
     data_dir: Path | None = typer.Option(None, "--data-dir"),
 ) -> None:
     """Create a revocable local grant. Scope is required; the default is read-only."""
@@ -95,6 +133,20 @@ def connect(
                     application_ids,
                     workspace=workspace,
                     allow_scheduling=allow_scheduling,
+                    capabilities=[
+                        capability
+                        for enabled, capability in (
+                            (allow_application_create, "applications.create"),
+                            (allow_application_writes, "applications.write"),
+                            (allow_resumes, "resumes.read"),
+                            (allow_resume_writes, "resumes.write"),
+                            (allow_notes, "notes.read"),
+                            (allow_note_writes, "notes.write"),
+                            (allow_unbound_notes, "notes.unbound"),
+                            (allow_knowledge, "knowledge.read"),
+                        )
+                        if enabled
+                    ],
                 ),
                 ensure_ascii=False,
                 indent=2,

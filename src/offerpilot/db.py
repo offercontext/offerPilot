@@ -20,6 +20,7 @@ from offerpilot.context_sources import models as _context_sources_models  # noqa
 from offerpilot.proactive import models as _proactive_models  # noqa: F401
 from offerpilot.knowledge import note_lifecycle as _knowledge_note_lifecycle  # noqa: F401
 from offerpilot.external_agents import models as _external_agent_models  # noqa: F401
+from offerpilot.external_agents.migration import ensure_business_schema
 
 SessionFactory = sessionmaker[Session]
 
@@ -112,6 +113,7 @@ def init_database(db_path: Path) -> SessionFactory:
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
     _record_migration(engine, "0035_external_agent_requests", "Add scoped external Agent grants and scheduling request receipts")
+    ensure_business_schema(engine)
     _ensure_chat_image_schema(engine)
     _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
     _record_migration(engine, "0033_job_mail_review", "Add isolated mail evidence, proposals, previews and atomic receipts")

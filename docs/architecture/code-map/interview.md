@@ -20,6 +20,8 @@
 
 页面从 [AppShell](../../../web/src/layout/AppShell.tsx) 装配。若问题是入口显示、切页或详情资料未加载，先查页面传参，再进入具体生成链。
 
+2026-10-29 外部 MCP 原始笔记：显式 notes 授权 → [business.note_statement/prepare/execute](../../../src/offerpilot/external_agents/business.py) → `NotesRepository.bind(session)`。只看授权投递，未绑定笔记另需 workspace grant；复用同投递面试/唯一笔记绑定校验，revision 包含 content_revision，不改投递归属。修改/删除会使旧捕获 Knowledge 的来源指纹失效，预览说明影响，不自动重新捕获。见[业务回归](../../../tests/test_external_agent_business.py)、[接入说明](../external-agent-mcp.md)。
+
 ## 2. 准备建议
 
 | 层 | 位置与符号 | 本层需要确认的事实 |
