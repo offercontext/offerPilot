@@ -14,7 +14,7 @@ import pytest
 
 from offerpilot.evaluation.adapters import ProductFailure
 from offerpilot.evaluation.core_actions import CoreHTTPStatusFailure
-from offerpilot.evaluation.core_runner import _pre_ack_budget_interruption
+from offerpilot.evaluation.core_runner import _offline_budget_denial
 from offerpilot.evaluation.core_subject import ReservationDenied, RunLedger
 from offerpilot.evaluation.contracts import PlannedTrial
 from offerpilot.evaluation.core_targeted_ledger import TargetedLedger, stage_trial
@@ -83,10 +83,8 @@ def bound_http_failure(tmp_path, monkeypatch):
     return failure, plan, subject, driver
 
 
-def classify(failure, plan, subject, driver, *, scope="target", controls=True):
-    return _pre_ack_budget_interruption(failure, plan, [(subject, driver)],
-        offline_simulation=scope,
-        controls=[(subject, subject.control_observation())] if controls else None)
+def admit(plan, subject, *, scope="target"):
+    return _offline_budget_denial(subject, plan, offline_simulation=scope)
 
 
 def test_denied_row_is_durable_without_counting_or_refunding_another_send(tmp_path, monkeypatch):
@@ -120,30 +118,24 @@ def test_failed_durable_record_does_not_create_a_typed_refusal(tmp_path, monkeyp
                             input_bytes=10, output_cap=10))
 
 
-def test_matching_sole_request_proves_interruption_and_preserves_unknown_execution(tmp_path, monkeypatch):
-    failure, plan, subject, driver = bound_http_failure(tmp_path, monkeypatch)
-    result = classify(failure, plan, subject, driver)
-    assert result["kind"] == "pre_ack_reservation_denied"
-    assert "unknown" in result["scope"]
-    assert result["http"]["status"] == 502 and result["denial"]["row"]["allowed"] is False
-    assert result["denial"]["event"]["execution"] is None
-    assert result["observation_source"] == "after_cleanup"
-    assert result["final_control"]["reader_exited"] is True
-    assert "SECRET" not in json.dumps(result)
+def test_matching_denial_admits_cancellation_without_claiming_http_causality(tmp_path, monkeypatch):
+    _, plan, subject, _ = bound_http_failure(tmp_path, monkeypatch)
+    result = admit(plan, subject)
+    assert result is subject.reservation_denial
+    assert result.observation()["event"]["execution"] is None
+    assert result.observation()["row"]["allowed"] is False
+    assert "SECRET" not in json.dumps(result.observation())
 
 
 @pytest.mark.parametrize("damage", [
-    "driver", "ledger", "subject_epoch", "event_epoch", "event_trial", "row_allowed", "row_bool_seq",
-    "ack", "persist", "event_attempt", "duplicate_event", "json_proof", "second_request",
-    "bool_index", "driver_bool_index", "outside_window", "http500", "http503", "get", "control_route", "observer_error",
+    "ledger", "subject_epoch", "event_epoch", "event_trial", "row_allowed", "row_bool_seq",
+    "ack", "persist", "event_attempt", "duplicate_event", "json_proof", "observer_error",
     "simulation", "stage", "missing_epoch", "missing_input", "missing_cap", "missing_row_hash",
-    "missing_event_id", "stale_ack", "reader_running", "exit_unknown", "row_hash", "ledger_tail",
+    "missing_event_id", "stale_ack", "reader_running", "row_hash", "ledger_tail",
 ])
 def test_missing_or_foreign_provenance_keeps_original_http_failure(tmp_path, monkeypatch, damage):
     failure, plan, subject, driver = bound_http_failure(tmp_path, monkeypatch)
-    if damage == "driver":
-        failure.driver = SimpleNamespace()
-    elif damage == "ledger":
+    if damage == "ledger":
         subject.ledger = SimpleNamespace()
     elif damage == "subject_epoch":
         subject.config["epoch"] = 3
@@ -165,22 +157,6 @@ def test_missing_or_foreign_provenance_keeps_original_http_failure(tmp_path, mon
         subject.events.append(copy.deepcopy(subject.events[-1]))
     elif damage == "json_proof":
         subject.reservation_denial = subject.reservation_denial.observation()
-    elif damage == "second_request":
-        driver._request_index = failure.request_index = 2
-    elif damage == "bool_index":
-        failure.request_index = True
-    elif damage == "driver_bool_index":
-        driver._request_index = True
-    elif damage == "outside_window":
-        failure.started = subject.reservation_denial.captured_at_monotonic + 1
-    elif damage == "http500":
-        failure.status = 500
-    elif damage == "http503":
-        failure.status = 503
-    elif damage == "get":
-        failure.method = "GET"
-    elif damage == "control_route":
-        failure.path = "/api/confirmed-memory/1/withdraw"
     elif damage == "observer_error":
         monkeypatch.setattr(subject, "control_observation", lambda: (_ for _ in ()).throw(ValueError("bad observation")))
     elif damage == "simulation":
@@ -195,24 +171,12 @@ def test_missing_or_foreign_provenance_keeps_original_http_failure(tmp_path, mon
     elif damage == "reader_running":
         subject._control_state["reader_exited"] = False
         monkeypatch.setattr(subject.reader, "is_alive", lambda: True)
-    elif damage == "exit_unknown":
-        subject.owned_tree_exit_proven = None
     elif damage == "row_hash":
         subject.reservation_denial.row["row_hash"] = "d" * 64
     elif damage == "ledger_tail":
         subject.ledger.tail = "d" * 64
-    if damage == "observer_error":
-        assert _pre_ack_budget_interruption(failure, plan, [(subject, driver)],
-            offline_simulation="target", controls=[(subject, None)]) is None
-    else:
-        assert classify(failure, plan, subject, driver) is None
+    assert admit(plan, subject) is None
     assert isinstance(failure, ProductFailure) and failure.status >= 400
-
-
-def test_semantic_violation_is_not_downgraded_even_with_a_real_budget_refusal(tmp_path, monkeypatch):
-    _, plan, subject, driver = bound_http_failure(tmp_path, monkeypatch)
-    failure = ProductFailure("ambiguous request produced a pending write")
-    assert classify(failure, plan, subject, driver) is None
 
 
 @pytest.mark.parametrize("gap", ["ordinary_real_run", "stale_ack", "reader_running"])
@@ -223,7 +187,7 @@ def test_review_boundary_never_adopts_ineligible_or_unfinished_proof(tmp_path, m
     elif gap == "reader_running":
         subject._control_state["reader_exited"] = False
         monkeypatch.setattr(subject.reader, "is_alive", lambda: True)
-    assert classify(failure, plan, subject, driver,
+    assert admit(plan, subject,
                     scope=None if gap == "ordinary_real_run" else "target") is None
 
 
@@ -243,14 +207,19 @@ def test_http_status_context_has_no_body_auth_or_unrelated_context_fields(monkey
     assert driver.request_errors == []  # A real HTTP reply is not a fabricated transport exception.
 
 
+@pytest.mark.parametrize("error_kind", ["http502", "http500", "semantic"])
 @pytest.mark.parametrize("known_failure,final_observation", [(False, True), (True, True), (False, False)])
 def test_run_trial_cleanup_grading_and_aggregate_keep_unknown_and_known_failure(
-        tmp_path, monkeypatch, known_failure, final_observation):
+        tmp_path, monkeypatch, known_failure, final_observation, error_kind):
     """Stub process/HTTP I/O, real ledger, reader, run_trial, seal, grader and aggregate."""
     from offerpilot.evaluation import core_runner
     from offerpilot.evaluation.core_storage import load
 
     failure, plan, subject, driver = bound_http_failure(tmp_path, monkeypatch)
+    if error_kind == "http500":
+        failure.status = 500
+    elif error_kind == "semantic":
+        failure = ProductFailure("independent semantic violation")
     plan = plan.model_copy(update=dict(required_rules=["execution.expected_outcome",
         "evidence.required_complete", "business.authorized_deltas"]))
     source = dict(commit="a" * 40, diff_hash="b" * 64, lock_hash="c" * 64, files_hash="d" * 64)
@@ -303,16 +272,12 @@ def test_run_trial_cleanup_grading_and_aggregate_keep_unknown_and_known_failure(
     assert cleaned == [True] and evidence["errors"] == {}
     assert evidence["http"][0]["response"] == {"error": "original unit HTTP error"}
     assert evidence["facts"]["control_closed"] is False
-    if final_observation:
-        assert result.execution_status == "interrupted"
-        assert evidence["facts"]["evaluator_interruption"]["observation_source"] == "after_cleanup"
-        assert evidence["facts"]["original_http_product_failure"] == str(failure)
-        assert "product_failure" not in evidence["facts"]
-    else:
-        assert result.execution_status == "product_failed"
-        assert evidence["facts"]["product_failure"] == str(failure)
-        assert "evaluator_interruption" not in evidence["facts"]
-    expected = "fail" if known_failure or not final_observation else "incomplete"
+    # A coincident refusal proves no causal link to this received HTTP 502.
+    # Even a complete final denial proof cannot remove a known product failure.
+    assert result.execution_status == "product_failed"
+    assert evidence["facts"]["product_failure"] == str(failure)
+    assert "evaluator_interruption" not in evidence["facts"]
+    expected = "fail"
     assert result.verdict == expected
     report = core_runner.aggregate(manifest, [result])
     assert report["counts"][expected] == 1 and report["counts"]["pass"] == 0

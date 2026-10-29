@@ -32,55 +32,32 @@ from offerpilot.evaluation.runner import cleanup_resources, snapshot
 from scripts.evaluation_subject import core_observer as observer
 
 
-def _pre_ack_budget_interruption(
-    error: Exception, plan: PlannedTrial, drivers: list[tuple[CoreSubject, CoreHTTPDriver]],
-    *, offline_simulation: str | None = None,
-    controls: list[tuple[CoreSubject, dict[str, Any] | None]] | None = None,
-) -> dict[str, Any] | None:
-    """Conservative attribution only; never establish a successful product outcome."""
-    if (offline_simulation != "target" or plan.mode != "deterministic"
-            or not isinstance(error, CoreHTTPStatusFailure) or error.status != 502
-            or error.method != "POST" or error.path not in {"/api/chat", "/api/chat/confirm"}):
+def _offline_budget_denial(
+    subject: CoreSubject, plan: PlannedTrial, *, offline_simulation: str | None,
+) -> ReservationDenied | None:
+    """Admit cancellation only; this never reclassifies an observed HTTP failure."""
+    if offline_simulation != "target" or plan.mode != "deterministic":
         return None
     try:
         from offerpilot.evaluation.core_targeted_ledger import TargetedLedger
 
-        pairs = [(subject, driver) for subject, driver in drivers if error.driver is driver]
-        if len(pairs) != 1:
-            return None
-        subject, driver = pairs[0]
-        # Without a legacy execution/request ID, only the sole first request in
-        # this driver epoch has an unambiguous window. More requests fail closed.
-        if (type(error.request_index) is not int or error.request_index != 1
-                or type(driver._request_index) is not int or driver._request_index != 1):
-            return None
         key = plan.model_dump(mode="json", include={
             "run_id", "variant_id", "execution_item_id", "mode", "repeat_index"})
         epoch = subject.config["epoch"]
-        context = dict(trial_key=key, epoch=epoch)
-        if (type(epoch) is not int or type(error.context.get("epoch")) is not int or error.context != context
-                or driver.request_context.get("trial_key") != key
-                or type(driver.request_context.get("epoch")) is not int
-                or driver.request_context.get("epoch") != epoch
-                or subject.config["trial_key"] != key):
-            return None
         denial = getattr(subject, "reservation_denial", None)
         ledger = subject.ledger
-        if (not isinstance(denial, ReservationDenied) or denial.ledger is not ledger
+        if (type(epoch) is not int or subject.config["trial_key"] != key
+                or not isinstance(denial, ReservationDenied) or denial.ledger is not ledger
                 or not isinstance(ledger, TargetedLedger) or ledger.simulation_only is not True
-                or ledger.stage != plan.execution_item_id):
-            return None
-        timing = (error.started, denial.captured_at_monotonic, error.finished)
-        if (any(type(value) not in {int, float} or not math.isfinite(value) for value in timing)
-                or not timing[0] <= timing[1] <= timing[2]):
+                or ledger.stage != plan.execution_item_id
+                or type(denial.captured_at_monotonic) not in {int, float}
+                or not math.isfinite(denial.captured_at_monotonic)):
             return None
         event, row = denial.event, denial.row
-        states = [state for bound, state in controls or [] if bound is subject]
-        if len(states) != 1 or not isinstance(states[0], dict):
-            return None
-        state = states[0]
+        state = subject.control_observation()
         seq = event.get("seq")
-        if (event.get("trial_key") != key or type(event.get("epoch")) is not int
+        if (not isinstance(state, dict)
+                or event.get("trial_key") != key or type(event.get("epoch")) is not int
                 or event["epoch"] != epoch or type(seq) is not int or seq < 1
                 or event.get("type") != "call_attempt" or event.get("purpose") != "provider_send"
                 or not all(isinstance(event.get(name), str) and event[name]
@@ -99,7 +76,6 @@ def _pre_ack_budget_interruption(
                 or state.get("phase") != "reserve" or state.get("exit_reason") != "error"
                 or state.get("error_type") != "ReservationDenied"
                 or state.get("reader_exited") is not True or state.get("reader_alive") is not False
-                or state.get("owned_tree_exit_proven") is not True
                 or any(type(state.get(name)) is not int for name in (
                     "last_validated_seq", "last_persisted_seq", "last_ack_seq"))
                 or state["last_validated_seq"] != seq or state["last_persisted_seq"] != seq
@@ -109,12 +85,9 @@ def _pre_ack_budget_interruption(
                     and value.get("epoch") == epoch and value.get("seq") == seq]
         if len(observed) != 1 or any(observed[0].get(name) != value for name, value in event.items()):
             return None
-        return dict(kind="pre_ack_reservation_denied", http=error.observation(),
-            denial=denial.observation(), final_control=copy.deepcopy(state),
-            observation_source="after_cleanup",
-            scope="simulation-only targeted admission interrupted; product attribution unknown")
+        return denial
     except Exception:
-        return None  # Missing or broken attribution cannot replace the original failure.
+        return None  # Missing proof cannot cancel a request or remove any failure.
 
 
 def _control_observations(subjects: list[CoreSubject]) -> list[dict[str, Any] | None]:
@@ -210,7 +183,6 @@ def run_trial(
     subject = None
     driver = None
     status = "completed"
-    driver_failure: Exception | None = None
     subjects = []
     drivers: list[tuple[CoreSubject, CoreHTTPDriver]] = []
     script_replies = [0]
@@ -278,6 +250,9 @@ def run_trial(
             cleanup_reserve=spec.evaluator_limits.shutdown_seconds,
             diagnostic_dir=private,
             request_context={"trial_key": key, "epoch": value.config.get("epoch")},
+            cancellation_check=(lambda: _offline_budget_denial(
+                value, plan, offline_simulation=offline_simulation))
+                if offline_simulation == "target" and plan.mode == "deterministic" else None,
         )
         drivers.append((value, value_driver))
         return value_driver
@@ -311,7 +286,6 @@ def run_trial(
             subject, driver = drive(spec.action_id, driver, subject, private, e, restart)
         observer.marker(private / "data.db", "driver_finished", {"terminal_received": True})
     except Exception as exc:
-        driver_failure = exc
         f["driver_failure_observation"] = dict(
             captured_at_monotonic=time.monotonic(), error_type=type(exc).__name__,
             subjects=_control_observations(subjects), drivers=_http_observations(drivers),
@@ -338,14 +312,6 @@ def run_trial(
         if cleanup_errors:
             f["cleanup_errors"] = cleanup_errors
         f["control_observations_after_stop"] = _control_observations(subjects)
-        if driver_failure is not None:
-            controlled_interruption = _pre_ack_budget_interruption(
-                driver_failure, plan, drivers, offline_simulation=offline_simulation,
-                controls=list(zip(subjects, f["control_observations_after_stop"])))
-            if controlled_interruption is not None:
-                f["evaluator_interruption"] = controlled_interruption
-                f["original_http_product_failure"] = f.pop("product_failure")
-                status = "interrupted"
         http_diagnostics = _http_observations(drivers)
         errors = [dict(error, epoch=value["epoch"], trial_key=value["trial_key"])
                   for value in http_diagnostics for error in value["request_errors"] or []]

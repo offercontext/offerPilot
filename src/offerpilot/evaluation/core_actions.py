@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 import os
+import secrets
 from pathlib import Path
 import threading
 import subprocess
@@ -22,6 +24,7 @@ from offerpilot.evaluation.registry import digest, file_hash
 from offerpilot.evaluation.reporting import atomic_json
 from offerpilot.evaluation.runner import operation_facts, process_tree, ROOT
 from scripts.evaluation_subject import core_observer as observer
+from scripts.evaluation_subject.local_http import sign_control, verify_control
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted", "stopped", "result_unknown"}
 
@@ -66,6 +69,7 @@ class CoreHTTPDriver(HTTPDriver):
         cleanup_reserve: float = 0,
         diagnostic_dir: Path | None = None,
         request_context: dict[str, Any] | None = None,
+        cancellation_check: Callable[[], TimeoutError | None] | None = None,
     ) -> None:
         self.blocking_waits = dict(blocking_waits or {})
         if any(path not in {"/api/chat", "/api/chat/confirm"}
@@ -79,6 +83,9 @@ class CoreHTTPDriver(HTTPDriver):
         self._blocking_address = address
         self._blocking_token = token
         self.diagnostic_dir, self.request_context = diagnostic_dir, request_context or {}
+        if cancellation_check is not None and diagnostic_dir is None:
+            raise ValueError("request cancellation requires durable diagnostics")
+        self.cancellation_check = cancellation_check
         self.local_http_observations: list[dict[str, Any]] = []
         self._local_http_unclosed = False
         self.cleanup_reserve = cleanup_reserve
@@ -90,7 +97,8 @@ class CoreHTTPDriver(HTTPDriver):
         self._request_index = 0
 
     def _blocking_request(self, method: str, path: str, body: Any,
-                           timeout: float, request_deadline: float) -> Any:
+                           timeout: float, request_deadline: float,
+                           allowed: tuple[int, ...] = (200, 202)) -> Any:
         import httpx
 
         # The product host wait and this single response share one total budget.
@@ -102,6 +110,9 @@ class CoreHTTPDriver(HTTPDriver):
                                                observation_id=uuid4().hex)
         progress_file = (self.diagnostic_dir / ("local-http-" + identity["observation_id"] + ".jsonl")
                          if self.diagnostic_dir else None)
+        control_key = secrets.token_bytes(32)
+        cancel_file = (progress_file.with_suffix(".cancel.json")
+                       if progress_file and self.cancellation_check is not None else None)
         worker = ROOT / "scripts/evaluation_subject/local_http.py"
         record: dict[str, Any] = dict(identity=identity, method=method, path=path,
             worker_file=str(worker), worker_sha256=file_hash(worker),
@@ -109,45 +120,132 @@ class CoreHTTPDriver(HTTPDriver):
             timeout_seconds=timeout, started_at=datetime.now(timezone.utc).isoformat(),
             response_received=None, response_status=None, body_complete=None,
             owned_tree_exited=False, child_exit=None, progress_file=str(progress_file) if progress_file else None)
+        record["control_key_sha256"] = hashlib.sha256(control_key).hexdigest()
         self.local_http_observations.append(record)
         tree = process_tree([sys.executable, "-I", "-B", "-u", "-X", "utf8",
             str(worker)],
             cwd=str(ROOT), env=environment, stdin=subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        closed, timed_out, raw = False, False, b""
+        closed, timed_out, cancelled, raw = False, False, False, b""
+        terminal_before_exit = False
+        completed_response: Any = None
+        denial: TimeoutError | None = None
         started = time.monotonic()
+
+        def progress(data: bytes, *, complete: bool,
+                     verified_prefix: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+            lines = data.splitlines(keepends=True)
+            partial_tail = bool(lines and not lines[-1].endswith(b"\n"))
+            if partial_tail:
+                lines.pop()
+            metadata: list[dict[str, Any]] = [] if verified_prefix is None else verified_prefix
+            for line in lines:
+                item = json.loads(line)
+                if item.get("identity") != identity:
+                    raise DriverError("local HTTP child identity changed")
+                if item.get("stage") != "result":
+                    value = verify_control(item, control_key, "local-http-progress-v1")
+                    if type(value.get("observation_seq")) is not int or value["observation_seq"] != len(metadata) + 1:
+                        raise DriverError("local HTTP observation sequence changed")
+                    metadata.append(value)
+            if partial_tail and complete:
+                raise DriverError("partial local HTTP control receipt")
+            return metadata
+
         try:
-            payload = json.dumps(dict(address=self._blocking_address, token=self._blocking_token,
+            payload: bytes | None = json.dumps(dict(address=self._blocking_address, token=self._blocking_token,
                 method=method, path=path, body=body, deadline=request_deadline, started=started,
-                progress_file=str(progress_file) if progress_file else None, identity=identity)).encode()
+                progress_file=str(progress_file) if progress_file else None, identity=identity,
+                control_key=control_key.hex(), cancel_file=str(cancel_file) if cancel_file else None)).encode()
             try:
-                raw, _ = tree.process.communicate(payload,
-                    timeout=max(.001, request_deadline - time.monotonic()))
+                while True:
+                    remaining = request_deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise subprocess.TimeoutExpired("local HTTP worker", timeout)
+                    try:
+                        raw, _ = tree.process.communicate(payload,
+                            timeout=min(.05, remaining) if cancel_file else remaining)
+                        break  # A completed original HTTP result always wins.
+                    except subprocess.TimeoutExpired as pending:
+                        payload = None
+                        if not cancel_file:
+                            raise
+                        if pending.output is not None:
+                            raw = pending.output
+                        # A complete private terminal is already an observed
+                        # result even if the helper has not finished exiting.
+                        # Consume it before considering any new cancellation.
+                        if raw.endswith(b"\n"):
+                            completed = [json.loads(line) for line in raw.splitlines()]
+                            terminal = [v for v in completed if v.get("stage") == "result"]
+                            if terminal:
+                                progress(raw, complete=True)
+                                if len(terminal) != 1 or completed[-1] is not terminal[0]:
+                                    raise DriverError("invalid local HTTP terminal order")
+                                terminal_before_exit = True
+                                record["terminal_observed_before_helper_exit"] = True
+                                break
+                        # Windows communicate() may buffer stdout until EOF.
+                        # Live archive rows require this request's private MAC;
+                        # the private pipe is fully drained/rechecked on exit.
+                        live = (progress_file.read_bytes() if progress_file and progress_file.exists() else raw)
+                        metadata = progress(live, complete=False)
+                        if any(v.get("stage") == "cancellation_error" for v in metadata):
+                            raise DriverError("local HTTP cancellation observer failed")
+                        if denial is None and self.cancellation_check is not None:
+                            candidate = self.cancellation_check()
+                            if candidate is not None:
+                                if not isinstance(candidate, TimeoutError):
+                                    raise DriverError("invalid local cancellation reason")
+                                denial = candidate
+                                command = sign_control(dict(identity=identity,
+                                    reason="offline_budget_denial"), control_key, "local-http-cancel-v1")
+                                # Publish without following or replacing a
+                                # target-controlled existing file or symlink.
+                                prepared = cancel_file.with_name(cancel_file.name + "." + uuid4().hex + ".prepared")
+                                with prepared.open("xb") as stream:
+                                    stream.write(json.dumps(command).encode())
+                                    stream.flush()
+                                    os.fsync(stream.fileno())
+                                os.link(prepared, cancel_file, follow_symlinks=False)
+                                record["cancellation_requested"] = True
+                        accepted = [v for v in metadata if v.get("stage") == "cancel_accepted_before_headers"]
+                        if accepted:
+                            if (denial is None or len(accepted) != 1
+                                    or any(v.get("stage") == "headers" and v["observation_seq"] < accepted[0]["observation_seq"]
+                                           for v in metadata)):
+                                raise DriverError("invalid local cancellation arbitration")
+                            cancelled = True
+                            raise denial
             except subprocess.TimeoutExpired as exc:
                 timed_out = True
                 raise TimeoutError("local HTTP response deadline") from exc
-            if tree.process.returncode != 0:
-                raise DriverError("local HTTP child failed")
             values = [json.loads(line) for line in raw.splitlines()]
+            if not values:
+                raise DriverError("local HTTP child failed")
             if any(v.get("identity") != identity for v in values):
                 raise DriverError("local HTTP child identity changed")
             result = values[-1]
             if result.get("stage") != "result":
+                if tree.process.returncode != 0:
+                    raise DriverError("local HTTP child failed")
                 raise DriverError("local HTTP child terminal missing")
             if result.get("ok") is not True:
                 kind = result.get("error_type")
-                allowed = {name: getattr(httpx, name) for name in (
+                error_types = {name: getattr(httpx, name) for name in (
                     "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout", "ReadError",
                     "ConnectError", "WriteError", "RemoteProtocolError")}
-                error = allowed.get(kind, DriverError)("local HTTP child request failed")
+                error = error_types.get(kind, DriverError)("local HTTP child request failed")
                 setattr(error, "local_http_diagnostic", {k: result[k] for k in (
                     "error_type", "exception_chain_types")})
                 raise error
             record["body_complete"] = True
             if set(result["headers"]) - {"content-type"}:
                 raise DriverError("local HTTP response headers outside allowlist")
-            return httpx.Response(result["status"], headers=result["headers"],
+            completed_response = httpx.Response(result["status"], headers=result["headers"],
                 content=base64.b64decode(result["content"], validate=True))
+            record["result_observed_before_deadline"] = time.monotonic() < request_deadline
+            return completed_response
         finally:
             # A process boundary makes cancellation independent of HTTPX or
             # coroutine cooperation. Close only this request's owned tree.
@@ -158,7 +256,8 @@ class CoreHTTPDriver(HTTPDriver):
             try:
                 if tree.process.poll() is None:
                     tree.kill()
-                if timed_out:
+                    record["owned_helper_killed_after_terminal"] = terminal_before_exit
+                if timed_out or cancelled or terminal_before_exit or (self.cancellation_check is not None and original_error is not None):
                     raw, _ = tree.process.communicate(timeout=max(.001, cleanup_deadline - time.monotonic()))
                 # ProcessTree.wait can use a second descendant window; reserve
                 # half the remaining cleanup time for that existing phase.
@@ -168,24 +267,31 @@ class CoreHTTPDriver(HTTPDriver):
                 cleanup_error = exc
             finally:
                 record.update(owned_process_tree_exited=closed, child_exit=None,
-                              elapsed_seconds=time.monotonic() - started, timed_out=timed_out)
+                              elapsed_seconds=time.monotonic() - started, timed_out=timed_out,
+                              cancelled_by_budget=cancelled)
                 try:
                     record["child_exit"] = tree.process.poll()
                 except Exception as capture_error:
                     record["exit_capture_error_type"] = type(capture_error).__name__
                 try:
-                    metadata = ([json.loads(line) for line in progress_file.read_bytes().splitlines()]
-                                if progress_file and progress_file.exists() else
-                                [json.loads(line) for line in raw.splitlines()
-                                 if json.loads(line).get("stage") != "result"])
-                    if any(v.get("identity") != identity for v in metadata):
-                        raise ValueError("local HTTP progress identity changed")
+                    # The private pipe is authoritative; a target-writable file
+                    # cannot supply or truncate authenticated control receipts.
+                    metadata = []
                     record["progress"] = metadata
-                    headers = [v for v in metadata if v.get("stage") == "headers"]
-                    if len(headers) == 1:
-                        record.update(response_received=True, response_status=headers[0]["status"])
+                    progress(raw, complete=True, verified_prefix=metadata)
+                    archived = (progress(progress_file.read_bytes(), complete=True)
+                                if progress_file and progress_file.exists() else [])
+                    if archived != metadata:
+                        raise DriverError("local HTTP control archive differs from private pipe")
+                    record["progress_control_authenticated"] = bool(metadata)
                 except Exception as capture_error:
                     record["capture_error_type"] = type(capture_error).__name__
+                finally:
+                    # A malformed/missing tail must not erase an earlier
+                    # independently authenticated HTTP failure observation.
+                    headers = [v for v in record.get("progress", []) if v.get("stage") == "headers"]
+                    if len(headers) == 1:
+                        record.update(response_received=True, response_status=headers[0]["status"])
                 try:
                     tree.close(timeout=max(.001, cleanup_deadline - time.monotonic()))
                     watcher_closed = True
@@ -201,8 +307,41 @@ class CoreHTTPDriver(HTTPDriver):
                               owned_tree_exited=closed and watcher_closed and cleanup_error is None,
                               cleanup_error_type=type(cleanup_error).__name__ if cleanup_error else None)
                 self._local_http_unclosed |= not record["owned_tree_exited"]
+            unexpected_exit = bool((terminal_before_exit or completed_response is not None)
+                and (record["child_exit"] is None
+                     or not record.get("owned_helper_killed_after_terminal") and record["child_exit"] != 0))
+            if unexpected_exit:
+                record["unexpected_helper_exit"] = record["child_exit"]
+            terminal_fault = (unexpected_exit or cleanup_error is not None
+                              or time.monotonic() >= request_deadline)
+            if (terminal_fault and completed_response is not None
+                    and completed_response.status_code not in allowed):
+                # Preserve the received body as well as the known HTTP failure,
+                # even when later helper ownership/cleanup also fails.
+                try:
+                    observed_payload = completed_response.json()
+                except ValueError:
+                    observed_payload = completed_response.text[:524288]
+                self.observations.append(dict(method=method, path=path, body=body,
+                    status=completed_response.status_code, response=observed_payload))
+                raise CoreHTTPStatusFailure(completed_response.status_code, method, path, self,
+                                            self._request_index, started)
+            if self.cancellation_check is not None and (original_error is not None or terminal_fault):
+                # Drain after owned exit before assigning any cancellation.
+                # Even late observed error headers remain known product failures.
+                error_headers = [v for v in record.get("progress", [])
+                                 if v.get("stage") == "headers" and v.get("status") not in allowed]
+                if error_headers:
+                    raise CoreHTTPStatusFailure(error_headers[0]["status"], method, path, self,
+                                                self._request_index, started)
+            if unexpected_exit:
+                raise DriverError("local HTTP child failed after terminal")
             if original_error is None and cleanup_error is not None:
                 raise cleanup_error
+            if cancelled:
+                if (not record.get("progress_control_authenticated")
+                        or record.get("capture_error_type") or not record["owned_tree_exited"]):
+                    raise DriverError("local HTTP cancellation evidence incomplete")
 
     def close(self) -> None:
         super().close()
@@ -273,7 +412,7 @@ class CoreHTTPDriver(HTTPDriver):
             if observed_wait is None:
                 response = self.client.request(method, path, json=body, timeout=timeout)
             else:
-                response = self._blocking_request(method, path, body, timeout, request_deadline)
+                response = self._blocking_request(method, path, body, timeout, request_deadline, allowed)
             if time.monotonic() >= request_deadline:
                 response.close()
                 raise TimeoutError("local HTTP response deadline")
