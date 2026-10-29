@@ -41,7 +41,9 @@ class RecordingModel:
 @pytest.mark.parametrize("user_request", [
     "只读回答：用三行短句说明如何准备面试。",
     "Read-only: describe a weekly study plan in three short sentences, one per line.",
-], ids=["interview-zh", "study-en"])
+    "只读回答：请详细展开一份活动清单，说明这份清单的取舍依据与使用步骤。",
+    "只读回答：比较报告梳理和学习计划，两项都要保留。",
+], ids=["interview-zh", "study-en", "same-deliverable", "explicit-two-outcomes"])
 def test_line_quota_policy_reaches_model_without_rewriting_answer(
     tmp_path: Path, endpoint: str, user_request: str
 ) -> None:
@@ -73,6 +75,12 @@ def test_line_quota_policy_reaches_model_without_rewriting_answer(
         assert "每行使用简短句子" in policy
         assert "每个短句只保留一个核心意思" in policy
         assert "用取舍删减来缩短" in policy
+        assert "附带说明必须明确指向这个成果本身" in policy
+        assert "仍围绕同一份清单" in policy
+        assert "形成两项可独立使用的成果" in policy
+        assert "不限制用户明确要求展开的详细回答" in policy
+        assert "用户明确要求的任务应先分配到可用行数" in policy
+        assert "不假设用户做过相关项目" in policy
         user_messages = [message.content for message in messages if message.role == "user"]
         assert any(old_preference in (text or "") for text in user_messages)
         assert user_messages[-1] == user_request
