@@ -251,9 +251,19 @@ class Subject:
             try:
                 event = self.messages.get(timeout=min(0.1, max(0.001, limit - time.monotonic())))
             except queue.Empty:
-                if self.process.poll() is not None:
-                    raise DriverError("subject exited before control event")
-                continue
+                if self.process.poll() is None:
+                    continue
+                # Child exit can precede persistence/publication of its final
+                # control frame. Drain the reader within the original deadline.
+                reader = getattr(self, "reader", None)
+                if reader is not None and reader.is_alive():
+                    continue
+                try:
+                    event = self.messages.get_nowait()
+                except queue.Empty:
+                    raise DriverError("subject exited before control event") from None
+            if time.monotonic() >= limit:
+                raise TimeoutError(f"subject control event {kind} exceeded deadline")
             if event["type"] == kind:
                 return event
             if event["type"] == "error":
