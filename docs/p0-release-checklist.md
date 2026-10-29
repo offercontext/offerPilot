@@ -25,6 +25,7 @@ The scope/status, browser walkthrough, and deferred sections below are the histo
 Run one of these before treating the branch as locally releasable:
 
 ```powershell
+$env:PYTHONUTF8 = "1"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
 ```
 
@@ -33,6 +34,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
 ```
 
 The scripts wrap the checks below. This is an explanation of the full gate, not a second checklist to run before or after it. A release builds the frontend once, then calls local smoke with `--skip-build` / `-SkipBuild`; standalone local smoke still builds by default. Skipping requires `web/dist/index.html`, and the caller must establish that the build matches the current code and dependencies.
+
+Windows uses `PYTHONUTF8=1`, matching `.github/workflows/desktop-windows.yml`. Set it before pytest collection, shard execution and the release entrypoint; `PYTHONIOENCODING` alone changes streams, not default file decoding. Keep one source/dependency/configuration/environment snapshot for all evidence. Preserve unsuccessful attempts separately and do not relabel evidence from an older SHA as a complete gate for a new SHA.
 
 Both runtime layers remain: local smoke launches the actual `oc start` CLI process and checks health/SPA fallback before `oc smoke`; `oc verify --profile local` runs broader business scenarios over an isolated HTTP app. The business checks overlap (and share the chat-card helper), but local verify does not replace the independent CLI startup check. This change does not merge or remove either layer. PowerShell gates explicitly stop on nonzero native-command and child-gate exit codes.
 

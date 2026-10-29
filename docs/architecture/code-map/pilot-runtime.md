@@ -33,6 +33,7 @@
 - Product Action 的确认和补偿继续跟随 [coordinator](../../../src/offerpilot/product_actions/coordinator.py)、[repository](../../../src/offerpilot/product_actions/repository.py) 与具体领域 Handler；撤销必须确认原操作和当前状态允许，不能用新写操作模拟撤销。
 - 共用恢复词汇以 [recovery-policy.v1.json](../../../contracts/recovery-policy.v1.json) 和[策略消费者](../../../src/offerpilot/reliability/policy.py)为准；单凭 HTTP 500 不能选“安全重试”。
 - 外部 MCP 提案另有连接范围、显式 capability、15 分钟有效期、原 key 幂等与回执；`decide` 在 SQLite 写锁内重查来源，`business.recheck/execute` 绑定领域 Repository 同事务写入。全局 Resume/Knowledge 不由 workspace 或投递范围隐式授权，旧 grant 不扩权。MCP 不提供确认；独立终端不是 OS 沙箱或真人身份证明。2026-10-29 扩展核对：测试[事务/确认](../../../tests/test_external_agents.py)、[真实 stdio](../../../tests/test_external_agents_stdio.py)、[业务维护](../../../tests/test_external_agent_business.py)、[业务 stdio](../../../tests/test_external_agent_business_stdio.py)、[迁移保留/回滚](../../../tests/test_external_agent_business_migration.py)。
+- 名称重合不意味着共用 authority：[架构门禁](../../../tests/tool_metadata/test_deletion_gates.py) 只为独立 MCP 协议声明和精确路由节点提供 AST 角色例外，其他 Pilot 名称分类/反射仍按全源码扫描；[边界检查](../../../tests/tool_metadata/_external_mcp_boundary.py) 阻止 AI/Pilot authority 与外部 registry 的双向静态/动态引用。CLI 与 db 是合法 owner/存储装配入口，不借此给 Provider 传确认能力。
 
 ## 4. 图片与上下文
 

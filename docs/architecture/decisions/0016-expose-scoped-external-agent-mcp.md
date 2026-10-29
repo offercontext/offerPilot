@@ -24,6 +24,7 @@ DSH 官方源码核对版本为 `f3803c96974ad4a94195fb97e5c637e9c2a3afe3`；其
 8. MCP 取消中断观察，不声称撤销已开始的事务。未收到提案结果时，以原 key/输入恢复；显式 `cancel_request` 只取消 pending。终态不重新执行，已提交取消返回原 committed 回执。无后台自动批准或真实模型调用。
 9. 0035 新增两张外部请求表；0036 增加默认空 capability、扩展 action CHECK 并允许全局资源 application_id 为空。后者在单一写事务重建请求表，逐行核对保留旧请求、幂等 key、摘要和回执，失败回滚；旧 grant 的空 capability 不进入冻结 JSON，旧提案仍有效。不改已有事件/对话语义，不删除业务数据。stdio 服务只打开既有数据库，缺失/锁定/不可用安全失败，不初始化或升级工作区。
 10. 投递创建仅保存基础信息，不包含 initial JD、HTTP 创建回执或重复提示；外部请求和领域创建同事务提供自己的幂等保证。简历文本规则与 HTTP 对齐，结构化局部更新不清空未改正文；非空主简历不可删除。Note 事件绑定复用领域校验，不改变归属或自动捕获 Knowledge。Knowledge 复用 `recall_knowledge` 的当前 Note/Evidence 双通道、指纹/引用校验和 provenance，在同一读快照执行，不产生搜索 trace 或其他写入。输出预算整条省略，接受既有最多 24+24 候选、每 Note 最多 160 引用的有界构建成本，不把 max_bytes 宣称为 SQL/计算成本限制。
+11. MCP registry 独立于 Pilot 的 sealed authority catalog。架构门禁继续扫描全部源码；仅对 MCP 的具名协议/schema/描述映射、精确只读路由、应用回执回填和迁移 SQL CHECK 哨兵增加 AST 角色例外，不按目录或文件豁免。比较必须位于预期 If.test；只读路由和迁移分支体锁定结构指纹，随角色审查更新。双向依赖检查覆盖具体 AI/Pilot authority 与外部 registry 的静态导入、可解析别名、相对导入、importlib/__import__ 和 loader 入口、builtins 动态执行，以及 sys.modules/sys.__dict__/vars(sys) 缓存引用；已识别动态导入的目标无法解析时失败关闭。它是静态架构回归检查，不是任意 Python 求值或 OS 沙箱的证明。禁止内部模型执行入口另列边界，纯共享 AI 数据类型仍可使用。CLI/db 的 owner 与存储装配保留。反射分类、前缀路由、旧符号、第二 provider registry 与 fallback/shadow 门禁不变；反例覆盖把同类违规代码移到 external_agents 后仍失败，见[门禁测试](../../../tests/tool_metadata/test_deletion_gates.py)。
 
 ## Consequences
 
