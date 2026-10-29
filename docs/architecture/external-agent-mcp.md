@@ -99,3 +99,27 @@ uv run --extra mcp mypy src/offerpilot/external_agents src/offerpilot/cli.py src
 测试覆盖事务、权限、幂等、拒绝/取消/过期、来源冲突、重启回执、并发、故障回滚、独立终端输入、真实官方 SDK stdio 往返及取消后的同 key 恢复。测试的操作员输入由测试模拟，不是真人身份认证。
 
 DSH overlay 是实际配置产物；DSH 客户端组件往返、完整 DSH profile 启动、真实模型会话、用户手工确认和发布 gate 是不同验证层。交付时按实际命令分别报告，不用配置解析或组件测试冒充完整 DSH 用户验收。无需付费模型即可验证 stdio 与 DSH bridge。
+
+## 6. 首版手工试用验收
+
+使用一个**不存在的新目录**；准备脚本拒绝复用已有目录，避免初始化用户数据库：
+
+```powershell
+uv run --extra mcp python scripts/external-agent-acceptance.py prepare --data-dir D:\temp\offerpilot-manual-acceptance-1
+```
+
+脚本只创建虚构投递、连接配置和一个 15 分钟有效的 pending 请求，并经真实 stdio 检查日程仍为空。它会输出用户应在独立可信终端执行的完整审阅命令。**由用户本人**打开该终端、核对公司/岗位/北京时间 2026-11-01 15:00（UTC 07:00）/时长 60 分钟，再输入指定的完整批准短语。Agent 不代输入，不把自动化审阅测试标成人工验收。
+
+确认后执行：
+
+```powershell
+uv run --extra mcp python scripts/external-agent-acceptance.py verify --data-dir D:\temp\offerpilot-manual-acceptance-1
+```
+
+必须得到 committed、且回执与实际日程列表完全一致、仅有一场面试。未确认时 verify 会失败；拒绝时可加 `--expected rejected`，仍须没有日程。超过 15 分钟需使用另一个新目录重做，旧尝试保留 expired/未知记录，不能改记成功。
+
+第二款实际客户端可用 Claude Code 的 `claude mcp add --scope user ...` / `claude mcp list` / `claude mcp get offerpilot` 检查连接；PowerShell 中用 `claude.cmd`，以免 `.ps1` 包装吞掉 stdio 子命令的 `--`。新增配置应在独立 `CLAUDE_CONFIG_DIR` 中试验，不覆盖既有设置。客户端接入方式见 [Claude Code 官方 MCP 文档](https://code.claude.com/docs/en/mcp)。
+
+本轮另以实际 Claude Code 2.1.284 可执行程序、禁用原生工具和仅绑定本机脚本 Provider 的方式执行了 MCP 发现与投递读取；这是第二款真实客户端的协议/工具运行验证，不是另一份 Python SDK 脚本，也不是真实模型能力或真人批准验收。DSH 0.2.1-rc.2 的官方 bridge、profile 启动和业务链路验证与此分别记录。
+
+开发验收另在用户明确授权后，由 Agent 通过真实 PTY 操作独立审阅命令，并经 MCP 回读 committed、核对唯一事件。该证据标记为“用户授权下的自动化终端验收”；用户亲自操作终端未执行，不能把前者重标为真人交互验收。
