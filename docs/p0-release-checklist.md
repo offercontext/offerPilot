@@ -82,7 +82,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1 -
 ./scripts/release-gate.sh --install
 ```
 
-This calls `scripts/install-gate.ps1` or `scripts/install-gate.sh` to verify the source checkout CLI and isolated `uv tool install` path. The shell gate also verifies `scripts/install.sh --source` against the local checkout.
+This calls `scripts/install-gate.ps1` or `scripts/install-gate.sh` to verify the source checkout CLI and isolated `uv tool install` path. It checks that the base install does not require MCP, installs the `mcp` extra, and uses that installed environment for real stdio preparation and pending readback with fictitious data. It never approves the request. Release-gate runs retain installation artifacts and print their location; failures always retain them. The shell gate also verifies `scripts/install.sh --source` against the local checkout. Windows and POSIX installation execution are separate evidence.
 
 ## Browser Product Walkthrough
 

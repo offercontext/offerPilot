@@ -50,7 +50,7 @@ if [[ "$RUN_REAL_AI" -eq 1 ]]; then
 fi
 
 if [[ "$RUN_INSTALL" -eq 1 ]]; then
-  scripts/install-gate.sh
+  scripts/install-gate.sh --keep-artifacts
 fi
 
 if [[ "$RUN_DOCKER" -eq 1 ]]; then
