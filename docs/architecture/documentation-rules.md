@@ -30,7 +30,7 @@
 | 授权、Git、工作流、领域红线、验收规则 | [AGENTS.md](../../AGENTS.md)（领域红线 §6） |
 | Python rewrite 契约 | [python-rewrite-contract.md](../python-rewrite-contract.md) |
 | P0 发布清单 | [p0-release-checklist.md](../p0-release-checklist.md) |
-| 产品 PRD / ADR / Check 表 | AGENTS.md §4 的飞书 wiki |
+| 产品要求及参考依据 | 按 AGENTS.md §4 核对用户当前确认的要求及相关本地文档；其中的飞书 PRD / ADR / Check 表内容已有陈旧部分，仅供历史参考 |
 | 业务到模块、调用链、代码和测试的导航 | [业务代码地图](code-map/README.md) |
 | Knowledge 架构 | [knowledge-system.md](knowledge-system.md) |
 | 架构决策 | `decisions/00NN-*.md` |
