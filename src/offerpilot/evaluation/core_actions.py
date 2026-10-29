@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timezone
 import json
+import math
+import os
 from pathlib import Path
 import threading
+import subprocess
+import sys
 import time
 from typing import Any, Callable
 from uuid import uuid4
@@ -15,7 +20,7 @@ from offerpilot.evaluation.adapters import DriverError, HTTPDriver, ProductFailu
 from offerpilot.evaluation.graders.p0 import instant
 from offerpilot.evaluation.registry import digest, file_hash
 from offerpilot.evaluation.reporting import atomic_json
-from offerpilot.evaluation.runner import operation_facts
+from offerpilot.evaluation.runner import operation_facts, process_tree, ROOT
 from scripts.evaluation_subject import core_observer as observer
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted", "stopped", "result_unknown"}
@@ -30,14 +35,153 @@ class CoreHTTPDriver(HTTPDriver):
         observations: list[dict[str, Any]],
         replies: int,
         reply_counter: list[int] | None = None,
+        *,
+        blocking_waits: dict[str, float] | None = None,
+        cleanup_reserve: float = 0,
+        diagnostic_dir: Path | None = None,
+        request_context: dict[str, Any] | None = None,
     ) -> None:
+        self.blocking_waits = dict(blocking_waits or {})
+        if any(path not in {"/api/chat", "/api/chat/confirm"}
+               or type(wait) not in {int, float} or not math.isfinite(wait) or wait <= 0
+               for path, wait in self.blocking_waits.items()):
+            raise ValueError("invalid observed legacy response wait")
+        if (type(cleanup_reserve) not in {int, float}
+                or not math.isfinite(cleanup_reserve) or cleanup_reserve < 0):
+            raise ValueError("invalid cleanup reserve")
         super().__init__(address, token, deadline, observations)
+        self._blocking_address = address
+        self._blocking_token = token
+        self.diagnostic_dir, self.request_context = diagnostic_dir, request_context or {}
+        self.local_http_observations: list[dict[str, Any]] = []
+        self._local_http_unclosed = False
+        self.cleanup_reserve = cleanup_reserve
         self.max_replies = replies
         self.reply_counter = reply_counter if reply_counter is not None else [0]
         self.request_errors: list[dict[str, Any]] = []
         self.request_error_capture_errors: list[str] = []
         self._diagnostic_lock = threading.Lock()
         self._request_index = 0
+
+    def _blocking_request(self, method: str, path: str, body: Any,
+                           timeout: float, request_deadline: float) -> Any:
+        import httpx
+
+        # The product host wait and this single response share one total budget.
+        # One second is solely for serializing/draining the terminal HTTP reply;
+        # it does not extend the trial deadline or borrow the process cleanup reserve.
+        environment = {k: v for k, v in os.environ.items() if k.upper() in {
+            "PATH", "SYSTEMROOT", "WINDIR", "TEMP", "TMP", "COMSPEC", "PATHEXT"}}
+        identity = self.request_context | dict(driver_request_index=self._request_index,
+                                               observation_id=uuid4().hex)
+        progress_file = (self.diagnostic_dir / ("local-http-" + identity["observation_id"] + ".jsonl")
+                         if self.diagnostic_dir else None)
+        worker = ROOT / "scripts/evaluation_subject/local_http.py"
+        record: dict[str, Any] = dict(identity=identity, method=method, path=path,
+            worker_file=str(worker), worker_sha256=file_hash(worker),
+            interpreter=sys.executable, request_deadline=request_deadline,
+            timeout_seconds=timeout, started_at=datetime.now(timezone.utc).isoformat(),
+            response_received=None, response_status=None, body_complete=None,
+            owned_tree_exited=False, child_exit=None, progress_file=str(progress_file) if progress_file else None)
+        self.local_http_observations.append(record)
+        tree = process_tree([sys.executable, "-I", "-B", "-u", "-X", "utf8",
+            str(worker)],
+            cwd=str(ROOT), env=environment, stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        closed, timed_out, raw = False, False, b""
+        started = time.monotonic()
+        try:
+            payload = json.dumps(dict(address=self._blocking_address, token=self._blocking_token,
+                method=method, path=path, body=body, deadline=request_deadline, started=started,
+                progress_file=str(progress_file) if progress_file else None, identity=identity)).encode()
+            try:
+                raw, _ = tree.process.communicate(payload,
+                    timeout=max(.001, request_deadline - time.monotonic()))
+            except subprocess.TimeoutExpired as exc:
+                timed_out = True
+                raise TimeoutError("local HTTP response deadline") from exc
+            if tree.process.returncode != 0:
+                raise DriverError("local HTTP child failed")
+            values = [json.loads(line) for line in raw.splitlines()]
+            if any(v.get("identity") != identity for v in values):
+                raise DriverError("local HTTP child identity changed")
+            result = values[-1]
+            if result.get("stage") != "result":
+                raise DriverError("local HTTP child terminal missing")
+            if result.get("ok") is not True:
+                kind = result.get("error_type")
+                allowed = {name: getattr(httpx, name) for name in (
+                    "ReadTimeout", "ConnectTimeout", "WriteTimeout", "PoolTimeout", "ReadError",
+                    "ConnectError", "WriteError", "RemoteProtocolError")}
+                error = allowed.get(kind, DriverError)("local HTTP child request failed")
+                setattr(error, "local_http_diagnostic", {k: result[k] for k in (
+                    "error_type", "exception_chain_types")})
+                raise error
+            record["body_complete"] = True
+            if set(result["headers"]) - {"content-type"}:
+                raise DriverError("local HTTP response headers outside allowlist")
+            return httpx.Response(result["status"], headers=result["headers"],
+                content=base64.b64decode(result["content"], validate=True))
+        finally:
+            # A process boundary makes cancellation independent of HTTPX or
+            # coroutine cooperation. Close only this request's owned tree.
+            cleanup_deadline = min(self.deadline, time.monotonic() + 5)
+            original_error = sys.exc_info()[1]
+            cleanup_error: Exception | None = None
+            watcher_closed = False
+            try:
+                if tree.process.poll() is None:
+                    tree.kill()
+                if timed_out:
+                    raw, _ = tree.process.communicate(timeout=max(.001, cleanup_deadline - time.monotonic()))
+                # ProcessTree.wait can use a second descendant window; reserve
+                # half the remaining cleanup time for that existing phase.
+                tree.wait(timeout=max(.001, (cleanup_deadline - time.monotonic()) / 2))
+                closed = True
+            except Exception as exc:
+                cleanup_error = exc
+            finally:
+                record.update(owned_process_tree_exited=closed, child_exit=None,
+                              elapsed_seconds=time.monotonic() - started, timed_out=timed_out)
+                try:
+                    record["child_exit"] = tree.process.poll()
+                except Exception as capture_error:
+                    record["exit_capture_error_type"] = type(capture_error).__name__
+                try:
+                    metadata = ([json.loads(line) for line in progress_file.read_bytes().splitlines()]
+                                if progress_file and progress_file.exists() else
+                                [json.loads(line) for line in raw.splitlines()
+                                 if json.loads(line).get("stage") != "result"])
+                    if any(v.get("identity") != identity for v in metadata):
+                        raise ValueError("local HTTP progress identity changed")
+                    record["progress"] = metadata
+                    headers = [v for v in metadata if v.get("stage") == "headers"]
+                    if len(headers) == 1:
+                        record.update(response_received=True, response_status=headers[0]["status"])
+                except Exception as capture_error:
+                    record["capture_error_type"] = type(capture_error).__name__
+                try:
+                    tree.close(timeout=max(.001, cleanup_deadline - time.monotonic()))
+                    watcher_closed = True
+                except Exception as exc:
+                    cleanup_error = cleanup_error or exc
+                for pipe in (tree.process.stdin, tree.process.stdout):
+                    if pipe is not None:
+                        try:
+                            pipe.close()
+                        except Exception as exc:
+                            cleanup_error = cleanup_error or exc
+                record.update(watcher_closed=watcher_closed,
+                              owned_tree_exited=closed and watcher_closed and cleanup_error is None,
+                              cleanup_error_type=type(cleanup_error).__name__ if cleanup_error else None)
+                self._local_http_unclosed |= not record["owned_tree_exited"]
+            if original_error is None and cleanup_error is not None:
+                raise cleanup_error
+
+    def close(self) -> None:
+        super().close()
+        if self._local_http_unclosed:
+            raise DriverError("local HTTP owned tree closure unverified")
 
     def request_error_observations(self) -> list[dict[str, Any]]:
         with self._diagnostic_lock:
@@ -67,6 +211,11 @@ class CoreHTTPDriver(HTTPDriver):
             error_chain_truncated=current is not None,
             error_chain_cycle=current is not None and id(current) in seen,
             response_received=None, response_status=None)
+        if hasattr(exc, "local_http_diagnostic"):
+            record["local_http_diagnostic"] = exc.local_http_diagnostic
+        if self.local_http_observations and self.local_http_observations[-1]["identity"]["driver_request_index"] == request_index:
+            local = self.local_http_observations[-1]
+            record.update(response_received=local["response_received"], response_status=local["response_status"])
         with self._diagnostic_lock:
             self.request_errors.append(record)
 
@@ -79,20 +228,29 @@ class CoreHTTPDriver(HTTPDriver):
     ) -> dict[str, Any]:
         started = time.monotonic()
         remaining = self.deadline - started
-        if remaining <= 0:
-            raise TimeoutError("trial watchdog")
+        observed_wait = self.blocking_waits.get(path) if method == "POST" else None
+        request_deadline = (min(started + observed_wait + 1, self.deadline - self.cleanup_reserve)
+                            if observed_wait is not None else min(started + 30, self.deadline))
+        if remaining <= 0 or request_deadline <= started:
+            raise TimeoutError("trial deadline watchdog")
         if method == "POST":
             self.reply_counter[0] += 1
             self.script_replies = self.reply_counter[0]
             if self.reply_counter[0] > self.max_replies:
                 raise TimeoutError("script reply watchdog")
-        timeout = min(30, remaining)
+        timeout = request_deadline - started
         started_at = datetime.now(timezone.utc).isoformat()
         with self._diagnostic_lock:
             self._request_index += 1
             request_index = self._request_index
         try:
-            response = self.client.request(method, path, json=body, timeout=timeout)
+            if observed_wait is None:
+                response = self.client.request(method, path, json=body, timeout=timeout)
+            else:
+                response = self._blocking_request(method, path, body, timeout, request_deadline)
+            if time.monotonic() >= request_deadline:
+                response.close()
+                raise TimeoutError("local HTTP response deadline")
         except Exception as exc:
             try:
                 self._record_request_error(exc, method, path, started, started_at, timeout, request_index)
@@ -114,6 +272,8 @@ class CoreHTTPDriver(HTTPDriver):
             if response.status_code not in allowed:
                 raise ProductFailure(f"HTTP {response.status_code} on {path}") from exc
             raise DriverError("unhandled non-JSON response") from exc
+        if time.monotonic() >= request_deadline:
+            raise TimeoutError("local HTTP response deadline")
         self.observations.append(
             dict(method=method, path=path, body=body, status=response.status_code, response=payload)
         )

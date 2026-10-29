@@ -795,6 +795,14 @@ def serve(channel: Channel) -> None:
                         "address": f"http://127.0.0.1:{port}",
                         "capabilities": caps,
                         "product_budget_effective": effective,
+                        # Read the value used by the actual legacy route code,
+                        # independently of RuntimeBudget and provider timeouts.
+                        "legacy_sync_waits": {
+                            path: getattr(sys.modules[create_app.__module__],
+                                          "CHAT_AGENT_TIMEOUT_SECONDS", None)
+                            for path in ("/api/chat", "/api/chat/confirm")
+                        } if "legacy-chat" in caps else {},
+                        "legacy_sync_wait_source": "api.CHAT_AGENT_TIMEOUT_SECONDS",
                         "setup_seconds": time.monotonic() - setup_started,
                     },
                     ack=True,

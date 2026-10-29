@@ -10,6 +10,19 @@ from offerpilot.evaluation.runner import process_environment
 from tests.evaluation.test_contracts import ROOT
 
 
+def test_process_tree_close_uses_callers_remaining_watcher_budget(monkeypatch):
+    from types import SimpleNamespace
+    from scripts.evaluation_subject import process_tree
+
+    observed = []
+    tree = object.__new__(ProcessTree)
+    tree.job, tree.watch_fd = None, 123
+    tree.watcher = SimpleNamespace(wait=lambda *, timeout: observed.append(timeout))
+    monkeypatch.setattr(process_tree.os, "close", lambda fd: observed.append(fd))
+    tree.close(timeout=.125)
+    assert observed == [123, .125] and tree.watch_fd is None
+
+
 def test_credential_environment_is_not_inherited(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "private-test-key")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "private-test-key")

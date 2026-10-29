@@ -174,6 +174,12 @@ def run_trial(
         f.setdefault("handshakes", []).append(ready)
         f["budget_effective"] = ready["product_budget_effective"]
         f["budget_requested"] = spec.product_budget.model_dump(exclude_none=True)
+        blocking_waits = ready.get("legacy_sync_waits")
+        if "legacy-chat" in ready.get("capabilities", []) and (
+            not isinstance(blocking_waits, dict)
+            or set(blocking_waits) != {"/api/chat", "/api/chat/confirm"}
+        ):
+            raise ValueError("actual legacy response wait unavailable")
         value_driver = CoreHTTPDriver(
             ready["address"],
             token,
@@ -181,6 +187,10 @@ def run_trial(
             e["http"],
             spec.evaluator_limits.script_replies,
             script_replies,
+            blocking_waits=blocking_waits,
+            cleanup_reserve=spec.evaluator_limits.shutdown_seconds,
+            diagnostic_dir=private,
+            request_context={"trial_key": key, "epoch": value.config.get("epoch")},
         )
         drivers.append((value, value_driver))
         return value_driver
@@ -274,9 +284,16 @@ def run_trial(
             v
             for v in events
             if v.get("category")
-            in {"sources", "final_input", "usage", "provider_response", "provider_error", "process", "process_worker", "offline_provider_received"}
+            in {"sources", "final_input", "usage", "provider_response", "provider_error", "provider_stream_terminal", "process", "process_worker", "offline_provider_received"}
         ]
         e["provider_attempts"] = [v for v in events if v.get("purpose") == "provider_send"]
+        f["local_http_transport_observations"] = [copy.deepcopy(record)
+            for _, resource in drivers for record in resource.local_http_observations]
+        f["provider_stream_coverage"] = _stream_coverage(e["input_observations"])
+        if not f["provider_stream_coverage"]["complete"]:
+            # Observation failure is an evaluator failure, not zero activity or
+            # a product failure. No grading rule or missing signal is rewritten.
+            status = "eval_error"
         e["budget_events"] = [
             v for v in events if v.get("category") in {"budget", "budget_termination"}
         ]
@@ -500,19 +517,26 @@ def run_plan(path: Path, grant_path: Path | None = None) -> dict[str, Any]:
     atomic_json(output / "run-manifest.json", manifest.model_dump(mode="json"))
     ledger = RunLedger(manifest, grant, output)
     results = []
+    failures = []
+    stop_after_started_failure = False
     start = time.monotonic()
     for plan in manifest.planned_trials:
+        if stop_after_started_failure:
+            results.append(missing(plan, "previous_trial_closure_unknown"))
+            continue
         if time.monotonic() - start >= manifest.run_max_wall_seconds or (
             grant
             and (ledger.requests >= grant.max_requests or ledger.reserved_cny >= grant.max_cny)
         ):
             results.append(missing(plan, "run_authorization_or_protection_exhausted"))
             continue
+        phase, variant_id = "source_snapshot", None
         try:
-            for v in manifest.variants.values():
+            for variant_id, v in manifest.variants.items():
                 current = snapshot(Path(v["checkout"]))
                 if any(current[k] != v[k] for k in current):
                     raise ValueError("target snapshot changed")
+            phase, variant_id = "trial_execution", plan.variant_id
             private = (
                 output
                 / "private"
@@ -520,9 +544,27 @@ def run_plan(path: Path, grant_path: Path | None = None) -> dict[str, Any]:
             )
             result = run_trial(manifest, plan, private, ledger)
             results.append(result)
+            if result.consumption.get("in_flight_unknown"):
+                stop_after_started_failure = True
         except Exception as exc:
-            results.append(missing(plan, type(exc).__name__))
+            try:
+                failure = _execution_failure(plan, phase, variant_id, exc)
+            except Exception as capture_error:
+                failure = dict(trial_key=plan.model_dump(mode="json", include={"run_id",
+                    "variant_id", "execution_item_id", "mode", "repeat_index"}),
+                    phase=phase, error_type=type(exc).__name__,
+                    capture_error_type=type(capture_error).__name__,
+                    execution_status="not_run" if phase == "source_snapshot" else "eval_error",
+                    retried=False)
+            failures.append(failure)
+            if phase == "source_snapshot":
+                results.append(missing(plan, type(exc).__name__))
+            else:
+                results.append(_started_failure(plan, private, failure))
+                stop_after_started_failure = True
+            atomic_json(output / "execution-failures.json", failures)
         atomic_json(output / "trial-results.json", [r.model_dump(mode="json") for r in results])
+    atomic_json(output / "trial-results.json", [r.model_dump(mode="json") for r in results])
     summary = aggregate(manifest, results)
     atomic_json(output / "summary.json", summary)
     (output / "report.md").write_text(
@@ -530,6 +572,76 @@ def run_plan(path: Path, grant_path: Path | None = None) -> dict[str, Any]:
         encoding="utf-8",
     )
     return summary
+
+
+def _execution_failure(plan: PlannedTrial, phase: str, variant_id: str | None,
+                       exc: BaseException) -> dict[str, Any]:
+    """A diagnostic sidecar does not turn pre-trial failures into executed trials."""
+    from offerpilot.evaluation.runner import ROOT
+
+    chain: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen and len(chain) < 8:
+        seen.add(id(current))
+        frames = []
+        tb = current.__traceback__
+        while tb is not None:
+            file = Path(tb.tb_frame.f_code.co_filename).resolve()
+            if file.is_relative_to(ROOT):
+                frames.append(dict(file=file.relative_to(ROOT).as_posix(), line=tb.tb_lineno))
+            tb = tb.tb_next
+        chain.append(dict(type=type(current).__name__, module=type(current).__module__,
+                          frames=frames[-8:]))
+        current = current.__cause__ if current.__cause__ is not None else current.__context__
+    return dict(trial_key=plan.model_dump(mode="json", include={"run_id", "variant_id",
+        "execution_item_id", "mode", "repeat_index"}), phase=phase,
+        snapshot_variant_id=variant_id if phase == "source_snapshot" else None,
+        exception_chain=chain, chain_truncated=current is not None,
+        execution_status="not_run" if phase == "source_snapshot" else "eval_error", retried=False)
+
+
+def _started_failure(plan: PlannedTrial, private: Path, failure: dict[str, Any]) -> TrialResultV2:
+    from offerpilot.evaluation.registry import digest
+
+    # Never overwrite an existing trial's fragments, logs, or partial output.
+    archive = private.with_name(private.name + "-failure")
+    archive.mkdir(exist_ok=False)
+    key = plan.model_dump(mode="json", include={"run_id", "variant_id", "execution_item_id",
+                                               "mode", "repeat_index"})
+    atomic_json(archive / ".eval-trial.json", key)
+    partial = [{"path": str(p.resolve()), "sha256": file_hash(p), "bytes": p.stat().st_size}
+               for p in sorted(private.rglob("*")) if p.is_file() and not p.is_symlink()]
+    evidence = dict(trial_key=key, facts=dict(attempt_started=True,
+        attempted_private_directory=str(private), partial_evidence=partial,
+        partial_evidence_hash=digest(partial), execution_failure=failure,
+        control_closed=False, driver_completed=False,
+        consumption=dict(in_flight_unknown=True, provider_attempts=None)))
+    evidence_hash = seal(archive, evidence)
+    result = missing(plan, "started_trial_exception")
+    return result.model_copy(update=dict(execution_status="eval_error", evidence_hash=evidence_hash,
+        private_directory=str(archive), consumption=evidence["facts"]["consumption"]))
+
+
+def _stream_coverage(observations: list[dict[str, Any]]) -> dict[str, Any]:
+    expected = [v for v in observations if v.get("category") == "provider_response"
+                and v.get("wire_stream") is True]
+    terminals = [v for v in observations if v.get("category") == "provider_stream_terminal"]
+    gaps = []
+    expected_keys = Counter((v.get("epoch"), v.get("attempt")) for v in expected)
+    for terminal in terminals:
+        if (terminal.get("epoch"), terminal.get("attempt")) not in expected_keys:
+            gaps.append(dict(epoch=terminal.get("epoch"), attempt=terminal.get("attempt"),
+                             reason="stream_terminal_without_response"))
+    for response in expected:
+        matches = [v for v in terminals if (v.get("epoch"), v.get("attempt")) ==
+                   (response.get("epoch"), response.get("attempt"))]
+        if (expected_keys[(response.get("epoch"), response.get("attempt"))] != 1
+                or len(matches) != 1 or matches[0].get("identity") != response.get("identity")
+                or matches[0].get("observation_complete") is not True):
+            gaps.append(dict(epoch=response.get("epoch"), attempt=response.get("attempt"),
+                             reason="stream_terminal_missing_duplicate_or_incomplete"))
+    return dict(expected=len(expected), observed=len(terminals), complete=not gaps, gaps=gaps)
 
 
 def read_run(

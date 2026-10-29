@@ -87,14 +87,14 @@ class ProcessTree:
             except ProcessLookupError:
                 pass
 
-    def close(self) -> None:
+    def close(self, *, timeout: float = 5) -> None:
         if self.job:
             self.kernel.CloseHandle(self.job)
             self.job = None
         if self.watch_fd is not None:
             os.close(self.watch_fd)
             self.watch_fd = None
-            self.watcher.wait(timeout=5)
+            self.watcher.wait(timeout=timeout)
 
     def wait(self, timeout: float) -> int:
         result = self.process.wait(timeout=timeout)

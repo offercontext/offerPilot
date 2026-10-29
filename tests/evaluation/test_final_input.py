@@ -217,7 +217,10 @@ def test_transport_streaming_json_and_decoded_gzip_sse_keep_usage(
         raw = gzip.compress(raw)
         headers["content-encoding"] = "gzip"
 
+    physical_sends = []
+
     def reply(request):
+        physical_sends.append(request)
         return httpx.Response(200, headers=headers, stream=httpx.ByteStream(raw))
 
     payload = dict(
@@ -245,3 +248,9 @@ def test_transport_streaming_json_and_decoded_gzip_sse_keep_usage(
     returned = next(v for v in channel.events if v.get("category") == "provider_response")
     assert returned["request_id_hash"] is None
     assert returned["transport_stream"] and returned["wire_stream"] == wire_stream
+    assert len(physical_sends) == 1
+    terminal = [v for v in channel.events if v.get("category") == "provider_stream_terminal"]
+    assert len(terminal) == int(wire_stream)
+    if wire_stream:
+        assert terminal[0]["natural_eof"] and terminal[0]["sse_done_seen"]
+        assert terminal[0]["usage_seen"] and terminal[0]["observation_complete"]

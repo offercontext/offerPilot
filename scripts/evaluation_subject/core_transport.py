@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
@@ -261,6 +262,8 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             channel.emit("fault_reached", {"boundary": "http_before_send"}, ack=True)
         kwargs["follow_redirects"] = False
         started = time.monotonic()
+        started_at = datetime.now(timezone.utc).isoformat()
+        invocation_identity = getattr(state, "identity", None)
         trace_events: list[dict[str, Any]] = []
         previous_trace = request.extensions.get("trace")
 
@@ -292,6 +295,7 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
                 {
                     "category": "provider_response",
                     "attempt": attempt,
+                    "identity": invocation_identity,
                     "status": response.status_code,
                     "request_id_hash": hashlib.sha256(
                         response.headers["x-request-id"].encode()
@@ -331,41 +335,9 @@ def observe(channel: Any, endpoint: str, limits: dict[str, Any]) -> None:
             else:
                 # Observe the public decoded-byte iterator so gzip/deflate SSE
                 # is preserved for the SDK and the evidence observer alike.
-                original_iterator = response.iter_bytes
+                from scripts.evaluation_subject.core_stream import observe_stream
 
-                def observed_iterator(*args: Any, **kwargs: Any) -> Any:
-                    pending = b""
-                    for chunk in original_iterator(*args, **kwargs):
-                        pending += chunk
-                        if len(pending) > 1024 * 1024:
-                            raise ValueError("oversized provider SSE frame")
-                        while b"\n" in pending:
-                            line, pending = pending.split(b"\n", 1)
-                            if line.startswith(b"data:"):
-                                try:
-                                    value = json.loads(line[5:].strip())
-                                except ValueError:
-                                    continue
-                                if value.get("usage"):
-                                    channel.emit(
-                                        "model_observation",
-                                        {
-                                            "category": "usage",
-                                            "attempt": attempt,
-                                            "actual_model": value.get("model"),
-                                            "usage": value["usage"],
-                                            "stream": True,
-                                            "completion_id_hash": hashlib.sha256(
-                                                value["id"].encode()
-                                            ).hexdigest()
-                                            if isinstance(value.get("id"), str)
-                                            else None,
-                                        },
-                                        ack=True,
-                                    )
-                        yield chunk
-
-                setattr(response, "iter_bytes", observed_iterator)
+                observe_stream(channel, response, attempt, invocation_identity, started, started_at)
             return response
         except Exception as exc:
             chain: list[dict[str, Any]] = []

@@ -86,4 +86,19 @@ def load(private: Path, expected_hash: str | None = None) -> dict[str, Any]:
                 raise ValueError("private file corrupt")
         except (OSError, ValueError, KeyError, TypeError):
             errors["file:" + name] = "invalid"
+    facts = raw.get("facts", {})
+    if facts.get("attempt_started") is True:
+        try:
+            original = private.with_name(private.name.removesuffix("-failure"))
+            if (not private.name.endswith("-failure") or original.is_symlink()
+                    or Path(facts["attempted_private_directory"]).resolve() != original.resolve()
+                    or digest(facts["partial_evidence"]) != facts["partial_evidence_hash"]):
+                raise ValueError("partial evidence origin differs")
+            for record in facts["partial_evidence"]:
+                path = Path(record["path"])
+                if (not path.resolve().is_relative_to(original.resolve()) or path.is_symlink()
+                        or file_hash(path) != record["sha256"] or path.stat().st_size != record["bytes"]):
+                    raise ValueError("partial evidence changed")
+        except (OSError, ValueError, KeyError, TypeError):
+            errors["partial_evidence"] = "invalid"
     return raw
