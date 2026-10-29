@@ -72,12 +72,16 @@ assert pathlib.Path(offerpilot.db.__file__).resolve().is_relative_to(pathlib.Pat
 sys.argv = [seed, data]
 runpy.run_path(seed, run_name='__main__')
 """
+    # Keep a real __main__.__file__ for the isolated interpreter's audit path.
+    # -c plus this audit hook fails during bytecode I/O on the Windows runtime.
+    bootstrap_path = tmp_path / "seed_bootstrap.py"
+    bootstrap_path.write_text(bootstrap, encoding="utf-8")
     env = {key: os.environ[key] for key in ("PATH", "SYSTEMROOT", "WINDIR") if key in os.environ}
     env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path),
                LITELLM_LOCAL_MODEL_COST_MAP="True")
     try:
         subprocess.run(
-            [sys.executable, "-I", "-c", bootstrap, str(baseline_dir / "src"),
+            [sys.executable, "-I", str(bootstrap_path), str(baseline_dir / "src"),
              str(ROOT / "tests/fixtures/job_mail_master_seed.py"), str(data_dir)],
             cwd=baseline_dir, env=env, check=True, capture_output=True, text=True, timeout=120,
         )
