@@ -22,15 +22,25 @@ for offline regression; all consumed historical H/R pairs and deadlines stay exp
 - Fixed `deepseek-flash`, thinking disabled, temperature 0, JSON object output,
   maximum 768 output tokens, no tools/retry/fallback/repair call. UTF-8 byte counts
   are input-size limits/planning data, not a tokenizer or bill.
-- The proposed quote deadline is **2026-10-28 00:00 UTC**. It is only a candidate,
-  not renewed authorization. Require at least twenty minutes before admission;
-  wall/monotonic checks cannot extend it. Price changes require a new review.
+- The user renewed only this still-unexecuted six-review batch on 2026-10-29:
+  the new deadline is **2026-10-31 00:00 UTC** (Beijing 08:00). The previous
+  2026-10-28 window remains expired; never rerun or activate its old H/R pair.
+  Fresh H/R bindings, a new successful offline run and fresh owner environment
+  approval are still required. Require at least twenty minutes before admission;
+  wall/monotonic checks cannot extend the window. No retries or seventh call.
+- Official public pricing and model documentation were rechecked 2026-10-29:
+  `deepseek-flash`, peak cache-miss input 2 / output 8 CNY per million tokens,
+  context 1,048,576. The existing conservative accounting, cumulative 20 CNY cap,
+  3 CNY reservation and 48 prior calls / 411934 micro-CNY are unchanged.
+  Sources: https://api-docs.deepseek.com/zh-cn/quick_start/pricing/ and
+  https://api-docs.deepseek.com/zh-cn/api/list-models/. A changed quote requires
+  another review; this renewal does not reopen the historical twelve-call path.
 - New exact marker from `preflight.marker(H, shadow_review=True)`, new H and same-tree
   empty-child R, independently bound repository variables, successful offline gate,
   full four-batch history and a fresh owner environment approval are mandatory.
   Never change protection settings, inject credentials or push/run merely because
-  these candidate files exist. Full new-file disclosure and six provider calls
-  still require the user's combined approval.
+  these candidate files exist. The 2026-10-29 approval covers the renewal files and at most six provider
+  calls; it does not waive exact SHA binding or the owner environment review.
 - Only the explicit `summary.json`, `responses.jsonl`, `budget.jsonl`, and
   `requests.jsonl` artifact paths may be uploaded. Tests execute the real runner
   against a fake transport, collect those actual workflow paths and inspect the ZIP,

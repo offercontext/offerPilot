@@ -192,3 +192,11 @@ def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
     secret_steps = [step for job in workflow["jobs"].values() for step in job["steps"]
                     if "OFFERPILOT_COMPANION_DEEPSEEK_20261021" in step.get("env", {})]
     assert len(secret_steps) == 1 and ".run --live --shadow-review" in secret_steps[0]["run"]
+
+
+@pytest.mark.parametrize("phase", ["before", "paid"])
+def test_renewed_shadow_exact_twenty_minute_boundary_passes(monkeypatch, phase):
+    # Renewal is a new deadline, not a relaxation of the full-session requirement.
+    assert s.PRICE_VALID_UNTIL == 1793404800  # 2026-10-31T00:00:00Z
+    monkeypatch.setattr(p.time, "time", lambda: s.PRICE_VALID_UNTIL - 1200)
+    assert execute(fixture(phase), phase)["ok"]

@@ -23,7 +23,7 @@ BUDGET = old.BUDGET
 RESERVATION = old.RESERVATION
 PRIOR_SETTLED = 411_934
 PRIOR_REQUESTS = 48
-PRICE_VALID_UNTIL = int(datetime(2026, 10, 28, tzinfo=timezone.utc).timestamp())
+PRICE_VALID_UNTIL = int(datetime(2026, 10, 31, tzinfo=timezone.utc).timestamp())
 OPERATIONS = ("s01", "s02", "s03", "s04", "s05", "s06")
 OPERATIONS_SHA256 = hashlib.sha256(json.dumps(
     OPERATIONS, ensure_ascii=False, separators=(",", ":"), allow_nan=False,

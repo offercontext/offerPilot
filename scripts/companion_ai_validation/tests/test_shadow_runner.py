@@ -301,3 +301,36 @@ def test_main_shadow_gates_before_any_secret_access(tmp_path, monkeypatch, capsy
     assert run.main() == 1
     assert json.loads(capsys.readouterr().out)["error_code"] == code
     assert not reads and not constructed and not (tmp_path / "evidence").exists()
+
+
+def test_expired_shadow_admission_deadline_cannot_be_reused_after_renewal():
+    now, mono = gate.time.time(), gate.time.monotonic()
+    record = {**lineage.lineage_fields(), "schema": 2, "source_sha": "b" * 40,
+              "helper_sha": "a" * 40, "run_id": "123", "run_attempt": "1", "checked_at": int(now),
+              "checked_at_monotonic_ns": math.floor(mono * 1e9),
+              "quote_deadline_monotonic_ns": math.floor((mono + 3600) * 1e9)}
+    # Even artificially refreshing checked_at cannot renew the old approval's lineage.
+    record["price_valid_until"] = 1793145600  # 2026-10-28T00:00:00Z
+    with pytest.raises(gate.GateError, match="admission_lineage"):
+        run.check_admission(record, {}, now, shadow_review=True)
+
+
+def test_renewed_shadow_expiry_during_reservation_blocks_actual_send(tmp_path, monkeypatch):
+    fake = Fake()
+    broker = gate.Broker(tmp_path / "ledger", fake, "a" * 40, shadow_review=True)
+    original = broker._record
+
+    def expire_after_persist(event, **values):
+        original(event, **values)
+        if event == "reserved":
+            monkeypatch.setattr(gate.time, "time", lambda: lineage.PRICE_VALID_UNTIL)
+
+    monkeypatch.setattr(broker, "_record", expire_after_persist)
+    try:
+        token = broker.begin_stage("s01")
+        with pytest.raises(gate.GateError, match="price_review_expired"):
+            broker.request(token, shadow.frozen_request("s01"))
+        assert not fake.sent
+        assert broker.summary()["reserved_micro_cny"] == 3_000_000
+    finally:
+        broker.close()
