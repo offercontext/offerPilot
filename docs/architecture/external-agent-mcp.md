@@ -1,6 +1,6 @@
 # 外部 Agent MCP 接入
 
-范围：读取投递、事件、简历、面试原始笔记和当前 Knowledge；提出投递维护、面试创建/改期、简历维护和笔记维护，独立用户确认后回读。完整授权时共 23 个工具。仅 stdio，不调用 OfferPilot 模型，不需要 DSH 专用原生插件。架构与信任边界见 [ADR-0016](decisions/0016-expose-scoped-external-agent-mcp.md)。
+范围：读取投递、事件、简历、面试原始笔记和当前 Knowledge；提出投递维护、面试创建/改期、简历维护和笔记维护，独立用户确认后回读。完整授权时共 23 个工具。接口为通用 stdio MCP，不调用 OfferPilot 模型；另有可选 DSH 薄连接包。架构与信任边界见 [ADR-0016](decisions/0016-expose-scoped-external-agent-mcp.md)。
 
 ## 1. 安装和明确授权
 
@@ -68,6 +68,20 @@ oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
 ```
 
 生成常见 `mcpServers` 配置。将其中 command/args 合并到客户端实际维护的位置；不同客户端的配置根结构可能不同。
+
+### 可安装的 DSH bundle
+
+另提供 [dsh-offerpilot](../../plugins/dsh-offerpilot/README.md) 薄连接包，使用 `oc mcp config --format mcp` 的既有导出文件。`index.apply` → `loadConnection` 校验绝对路径、固定 server 模块与连接 ID → 官方 `dsh-mcp-client` → 本文同一 stdio 服务。未配置或配置损坏时失败，不创建授权或回退数据目录。包不含 Python 后端，需要已有 OfferPilot 安装；不增加模型提示词或审批能力。
+
+此包的兼容目标为 DSH / MCP client **0.2.1-rc.5**，与上面的历史 overlay rc.2 验证分开。用 `npm pack` 生成预构建 `.tgz`，再用 `dsh plugin --profile <name> add <tgz>` 安装。无需安装时构建脚本。旧 overlay 与插件不能同时启用；停用/卸载不等于撤销连接。
+
+本地集成入口（参数全部使用实际绝对路径，output 必须不存在）：
+
+```powershell
+node scripts/dsh-plugin-acceptance.mjs --package <tgz> --dsh-cli <DSH安装目录/lib/bin.js> --python <含OfferPilot和mcp的python> --output <新验收目录>
+```
+
+脚本创建虚构数据和独立 DSH_HOME，使用真实 CLI 安装包、加载完整 base / web profile、发现并执行受限工具，检查 pending/重试/取消、重启、撤销、只读授权与卸载；第二条真实虚构投递用于验证 `scope_denied`。Web 通过官方启动 token 换取 Cookie 后检查 HTTP 200，不关闭认证，日志脱敏启动 token。探针仅存在于验收 profile，不打入插件包。不使用模型、不批准提案，不能替代用户审批体验、桌面端人工走查或完整发布 gate；失败记录保留。DSH 可继续运行而把被撤销的插件标为失败，验收检查失败 fiber 和工具不可见，不误用宿主退出码。安装中的内置 peer 提示与运行时加载结果分别报告，不能仅凭 `--dump-config` 宣称接入成功。
 
 ## 3. 完整操作链
 

@@ -157,7 +157,7 @@ uv run oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
 ```
 
 把生成的 `mcpServers.offerpilot` 配置按客户端要求加入你自己的 Agent，重启或重新连接 MCP 后即可调用。
-DSH 使用 `--format dsh` 生成配置，并通过 `dsh web --patch <配置文件>` 加载，无需 OfferPilot 原生插件。
+DSH 可使用 `--format dsh` 生成配置，并通过 `dsh web --patch <配置文件>` 加载；也可安装 [OfferPilot DSH 插件包](plugins/dsh-offerpilot/README.md)，复用同一 MCP 接口。两种方式不要同时启用。
 以上命令默认连接源码版的 `~/.offerpilot`；自定义工作区应为各命令指定同一 `--data-dir`。
 
 默认只允许读取所选投递及事件；简历、笔记、Knowledge 和写提案需分别显式授权。
