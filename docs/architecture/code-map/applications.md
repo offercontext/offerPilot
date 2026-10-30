@@ -22,6 +22,8 @@
 4. 后续 JD 通过 `create_application_jd_version` → [ApplicationJDService.create_version](../../../src/offerpilot/repositories/application_jd_versions.py) 追加；新请求携带 `expected_current_version_id`，旧指针冲突。
 5. JD 分析、岗位匹配、准备建议和材料生成各自关联该版本；JD 更新后的来源失效要到消费方检查，见[材料](materials.md)、[岗位匹配](opportunity-offers.md)、[面试](interview.md)。
 
+2026-10-29 外部 MCP 的投递维护经 [business.prepare/recheck/execute](../../../src/offerpilot/external_agents/business.py) → `ApplicationsRepository.bind(session)`。创建只接收基础信息，不含 initial JD/HTTP intake receipt/重复提示，外部请求表同事务提供幂等。关闭原因与不可重开规则保持；软删除预览关联表数量及摘要，确认前新增/修改关联记录即冲突。入口和验证见[接入说明](../external-agent-mcp.md)、[业务回归](../../../tests/test_external_agent_business.py)。
+
 依据：[可靠单次录入 ADR](../decisions/0006-reliable-single-application-intake.md)、[JD 版本设计](../../superpowers/specs/2026-08-05-application-jd-versions-design.md)。设计文档保留历史状态，字段以当前代码和测试核对。
 
 ## 3. 生命周期与关联写入

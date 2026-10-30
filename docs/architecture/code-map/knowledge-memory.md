@@ -16,6 +16,8 @@
 
 完整面试记录、投递、JD 和普通对话不因存在就自动成为 Source；捕获需经过对应确认链。Source Brief 有独立实现及状态，但不得把旧 Brief/Wiki 管线当成当前统一知识消费路径。
 
+2026-10-29 外部 MCP `search_knowledge` 需独立全局读 grant；[business.read](../../../src/offerpilot/external_agents/business.py) 在单一读快照复用 `context_sources.knowledge.recall_knowledge`，保留当前 Note/Evidence 双通道、来源指纹/引用/hash 校验。响应预算整条省略，不生成 Knowledge、Brief 或搜索 trace。此授权不由投递 scope 推导。见[业务回归](../../../tests/test_external_agent_business.py)、[接入说明的预算边界](../external-agent-mcp.md#3-完整操作链)。
+
 ## 2. 导入、抽取和来源删除
 
 `upload_knowledge_source`（[api.py](../../../src/offerpilot/api.py)）→ `KnowledgeIngestService.ingest` 校验正文/资产/来源信息 → [KnowledgeRepository](../../../src/offerpilot/knowledge/repository.py) 保存来源和任务 → [KnowledgeWorkerRuntime / ExtractionWorker.execute](../../../src/offerpilot/knowledge/worker.py) → Snapshot/Evidence/索引。

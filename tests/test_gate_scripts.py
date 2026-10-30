@@ -64,11 +64,17 @@ def gate(request, tmp_path):
         for script in (repo / "scripts").glob("*.sh"):
             script.chmod(0o755)
     else:
-        for command in ("uv", "npm", "docker", "oc"):
+        for command in ("uv", "npm", "docker", "oc", "python"):
             (bin_dir / f"{command}.cmd").write_text(
                 "@echo off\n"
                 f'echo {command} %*>>"%GATE_LOG%"\n'
-                f'if "{command} %*"=="%GATE_FAIL%" exit /b 7\n'
+                + (
+                    'if "%GATE_FAIL%"=="python" exit /b 7\n'
+                    'if "%GATE_FAIL%"=="python-prepare" if "%~2"=="prepare" exit /b 7\n'
+                    'if "%GATE_FAIL%"=="python-verify" if "%~2"=="verify" exit /b 7\n'
+                    if command == "python"
+                    else f'if "{command} %*"=="%GATE_FAIL%" exit /b 7\n'
+                )
                 + (
                     'if "%*"=="run build" if not "%GATE_NO_ARTIFACT%"=="1" '
                     "(if not exist dist mkdir dist)\n"
@@ -80,6 +86,8 @@ def gate(request, tmp_path):
                 + (
                     'if "%*"=="tool install --force ." copy /y '
                     '"%~dp0oc.cmd" "%UV_TOOL_BIN_DIR%\\oc.cmd">nul\n'
+                    'if "%*"=="tool install --force ." mkdir "%UV_TOOL_DIR%\\offerpilot\\Scripts"\n'
+                    'if "%*"=="tool install --force ." copy /y "%~dp0python.cmd" "%UV_TOOL_DIR%\\offerpilot\\Scripts\\python.cmd">nul\n'
                     if command == "uv"
                     else ""
                 )
@@ -89,7 +97,7 @@ def gate(request, tmp_path):
         launcher = repo / "launch.ps1"
         launcher.write_text(
             r"""param([string]$Target, [int]$Port = 18765, [switch]$SkipBuild,
-    [switch]$RealAi, [switch]$Install, [switch]$Docker, [string]$PytestEvidence)
+    [switch]$RealAi, [switch]$Install, [switch]$Docker, [switch]$KeepArtifacts, [string]$PytestEvidence)
 $ErrorActionPreference = 'Stop'
 function Start-Process {
     Add-Content $env:GATE_LOG 'server start'
@@ -107,12 +115,13 @@ function taskkill.exe {
 function Invoke-WebRequest { return @{ Content = '{"status":"ok","root":true}' } }
 function powershell {
     param([switch]$NoProfile, [string]$ExecutionPolicy, [string]$File,
-        [int]$Port = 18765, [switch]$SkipBuild)
+        [int]$Port = 18765, [switch]$SkipBuild, [switch]$KeepArtifacts)
     $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $env:GATE_LAUNCHER, '-Target', $File)
     if ($File -like '*local-smoke*') {
         $childArgs += @('-Port', $Port)
         if ($SkipBuild) { $childArgs += '-SkipBuild' }
     }
+    if ($KeepArtifacts) { $childArgs += '-KeepArtifacts' }
     & (Join-Path $PSHOME 'powershell.exe') @childArgs
     $global:LASTEXITCODE = $LASTEXITCODE
 }
@@ -272,6 +281,8 @@ def test_powershell_smoke_cleanup_failure_cannot_report_success(gate):
         ("Install", "uv run oc --help"),
         ("Install", "uv tool install --force ."),
         ("Install", "oc --help"),
+        ("Install", "uv tool install --force .[mcp]"),
+        ("Install", "oc mcp --help"),
         ("Docker", "docker build -t offerpilot:smoke ."),
         (
             "Docker",
@@ -289,6 +300,28 @@ def test_powershell_optional_gate_failures_reach_parent(gate, flag, step):
     assert "Release gate passed" not in result.stdout
 
 
+@pytest.mark.parametrize("failure", ["", "python", "python-prepare", "python-verify"])
+def test_powershell_install_extra_and_acceptance_are_part_of_parent_gate(gate, failure):
+    shell, run, _ = gate
+    if shell != "powershell":
+        pytest.skip("Windows isolated installation orchestration")
+    result, calls = run(fail=failure, args=["-Install"])
+    assert (result.returncode != 0) == bool(failure), result.stdout
+    assert any(call.startswith("python -c ") for call in calls)
+    if failure:
+        if failure == "python":
+            assert "uv tool install --force .[mcp]" not in calls
+        else:
+            assert f"external-agent-acceptance.py {failure.removeprefix('python-')}" in calls[-1]
+        assert "Release gate passed" not in result.stdout
+    else:
+        assert "uv tool install --force .[mcp]" in calls
+        assert "oc mcp --help" in calls
+        assert any("external-agent-acceptance.py prepare" in call for call in calls)
+        assert any("external-agent-acceptance.py verify" in call for call in calls)
+        assert "Install gate passed" in result.stdout and "Release gate passed" in result.stdout
+
+
 @pytest.mark.parametrize("reject_evidence", [False, True])
 def test_powershell_release_requires_verified_pytest_evidence(gate, reject_evidence):
     shell, run, _ = gate
@@ -298,8 +331,9 @@ def test_powershell_release_requires_verified_pytest_evidence(gate, reject_evide
         "uv run --frozen python scripts/test_shards/gate.py aggregate "
         "--manifest pytest-evidence/manifest.json --output pytest-evidence"
     )
-    result, calls = run(args=["-PytestEvidence", "pytest-evidence"],
-                        fail=aggregate if reject_evidence else "")
+    result, calls = run(
+        args=["-PytestEvidence", "pytest-evidence"], fail=aggregate if reject_evidence else ""
+    )
     assert (result.returncode != 0) == reject_evidence, result.stdout
     assert calls[0] == aggregate
     assert "uv run pytest -q" not in calls

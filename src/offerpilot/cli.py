@@ -25,6 +25,7 @@ from offerpilot.config import (
 )
 from offerpilot.db import session_factory_for_data_dir
 from offerpilot.diagnostics import append_log_entry
+from offerpilot.external_agents.cli import app as mcp_app
 from offerpilot.repositories.application_jd_versions import ApplicationJDService
 from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
 from offerpilot.repositories.jd import JDAnalysesRepository
@@ -59,6 +60,7 @@ app.add_typer(question_app, name="question")
 app.add_typer(skill_app, name="skill")
 app.add_typer(wakeup_app, name="wakeup")
 app.add_typer(knowledge_app, name="knowledge")
+app.add_typer(mcp_app, name="mcp")
 
 
 @app.command()

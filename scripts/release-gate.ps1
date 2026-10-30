@@ -46,7 +46,7 @@ try {
     }
 
     if ($Install) {
-        powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-gate.ps1
+        powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-gate.ps1 -KeepArtifacts
         if ($LASTEXITCODE -ne 0) { throw "Install gate failed (exit $LASTEXITCODE)." }
     }
 
