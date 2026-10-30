@@ -33,7 +33,7 @@ jobs:
         run: |
           uv run python -m scripts.companion_ai_validation.test_gate
           uv run pytest -q tests/test_companion_ai_platform_contract.py
-          uv run ruff check scripts/companion_ai_validation scripts/companion_ai_validation/tests tests/test_companion_ai_platform_contract.py
+          uv run ruff check scripts/companion_ai_validation experiments/shadow_quote_locator experiments/shadow_quote_v2 tests/test_companion_ai_platform_contract.py
           uv run mypy scripts/companion_ai_validation/*.py --follow-imports=silent --explicit-package-bases
       - name: Read independent workflow and environment protection registration
         env:
@@ -72,7 +72,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OFFERPILOT_COMPANION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_HELPER_SHA }}
           OFFERPILOT_COMPANION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA }}
-        run: python -m scripts.companion_ai_validation.preflight --phase before --shadow-review
+        run: python -m scripts.companion_ai_validation.preflight --phase before --shadow-quote-v2
   paid:
     name: Companion approved real AI
     needs: [offline, preflight]
@@ -107,14 +107,14 @@ jobs:
           OFFERPILOT_COMPANION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_HELPER_SHA }}
           OFFERPILOT_COMPANION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA }}
         run: >-
-          python -m scripts.companion_ai_validation.preflight --phase paid --shadow-review
+          python -m scripts.companion_ai_validation.preflight --phase paid --shadow-quote-v2
           --admission-file "$RUNNER_TEMP/companion-ai-admission.json"
-      - name: Six fixed shadow reviews, no retries, inherited 20 CNY task budget
+      - name: Six fixed quote-v2 shadow reviews, no retries, inherited 20 CNY task budget
         env:
           OFFERPILOT_COMPANION_DEEPSEEK_20261021: ${{ secrets.OFFERPILOT_COMPANION_DEEPSEEK_20261021 }}
           OFFERPILOT_COMPANION_AI_MODEL: ${{ vars.OFFERPILOT_COMPANION_AI_MODEL }}
         run: >-
-          .venv/bin/python -m scripts.companion_ai_validation.run --live --shadow-review
+          .venv/bin/python -m scripts.companion_ai_validation.run --live --shadow-quote-v2
           --admission-file "$RUNNER_TEMP/companion-ai-admission.json"
           --evidence-dir "$GITHUB_WORKSPACE/artifacts/companion-ai"
       - name: Retain synthetic dialogue, structural result and numeric ledger

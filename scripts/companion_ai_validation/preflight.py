@@ -64,7 +64,18 @@ def obj(value: Any) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def marker(helper_sha: str, *, shadow_review: bool = False) -> str:
+def marker(helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False) -> str:
+    if shadow_quote_v2:
+        demand(not shadow_review, "PROTOCOL_CONFLICT")
+        from scripts.companion_ai_validation import shadow_quote_continuation as quote
+        return (
+            "test: request OfferPilot companion shadow quote v2\n\n"
+            f"OfferPilot-Companion-AI-Helper: {helper_sha}\n"
+            "OfferPilot-Companion-AI-Request: one-shot-20261021-shadow-quote-v2-5\n"
+            f"OfferPilot-Companion-AI-Predecessor: {quote.PREDECESSOR_RUN_ID}\n"
+            f"OfferPilot-Companion-AI-Ledger: {quote.LEDGER_SHA256}"
+        )
+    demand(not (shadow_review and shadow_quote_v2), "PROTOCOL_CONFLICT")
     if shadow_review:
         from scripts.companion_ai_validation import shadow_continuation as shadow
         return (
@@ -83,9 +94,9 @@ def marker(helper_sha: str, *, shadow_review: bool = False) -> str:
     )
 
 
-def exact_marker(value: Any, helper_sha: str, *, shadow_review: bool = False) -> bool:
+def exact_marker(value: Any, helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False) -> bool:
     # Git commit messages can include their terminal LF, not arbitrary whitespace.
-    expected = marker(helper_sha, shadow_review=shadow_review)
+    expected = marker(helper_sha, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
     return value in (expected, expected + "\n")
 
 
@@ -96,17 +107,22 @@ class Context:
     run_id: int
     repository_id: int
     shadow_review: bool = False
+    shadow_quote_v2: bool = False
 
 
-def validate_context(env: Mapping[str, str], *, shadow_review: bool = False) -> Context:
+def validate_context(env: Mapping[str, str], *, shadow_review: bool = False, shadow_quote_v2: bool = False) -> Context:
     demand(env.get("GITHUB_RUN_ATTEMPT") == "1", "RERUN_FORBIDDEN")
     helper, request = env.get(HELPER_VAR, ""), env.get(REQUEST_VAR, "")
     old_shas: tuple[str, ...] = (lineage.ORIGINAL_HELPER_SHA, lineage.ORIGINAL_SOURCE_SHA,
                 lineage.SECOND_HELPER_SHA, lineage.SECOND_SOURCE_SHA,
                 lineage.PREDECESSOR_HELPER_SHA, lineage.PREDECESSOR_SOURCE_SHA)
+    demand(not (shadow_review and shadow_quote_v2), "PROTOCOL_CONFLICT")
     if shadow_review:
         from scripts.companion_ai_validation import shadow_continuation as shadow
         old_shas += (shadow.PREDECESSOR_HELPER_SHA, shadow.PREDECESSOR_SOURCE_SHA)
+    if shadow_quote_v2:
+        from scripts.companion_ai_validation import shadow_quote_continuation as quote
+        old_shas += tuple(quote.ALL_HISTORICAL_IDENTITIES)
     demand(bool(SHA.fullmatch(helper) and SHA.fullmatch(request)) and helper != request
            and helper not in old_shas and request not in old_shas,
            "EXACT_SHA_APPROVAL_MISSING")
@@ -122,7 +138,7 @@ def validate_context(env: Mapping[str, str], *, shadow_review: bool = False) -> 
     run_id, repository_id = env.get("GITHUB_RUN_ID", ""), env.get("GITHUB_REPOSITORY_ID", "")
     demand(bool(re.fullmatch(r"[1-9][0-9]*", run_id))
            and bool(re.fullmatch(r"[1-9][0-9]*", repository_id)), "INVALID_RUN_IDENTITY")
-    return Context(helper, request, int(run_id), int(repository_id), shadow_review)
+    return Context(helper, request, int(run_id), int(repository_id), shadow_review, shadow_quote_v2)
 
 
 def trusted_repo(value: Any, repository_id: int) -> bool:
@@ -143,7 +159,8 @@ def validate_identity(ctx: Context, event: Any, request: Any, helper: Any, branc
         and event.get("created") is False and trusted_repo(event.get("repository"), ctx.repository_id)
         and obj(event.get("head_commit")).get("id") == ctx.request_sha
         and exact_marker(event["head_commit"].get("message"), ctx.helper_sha,
-                         shadow_review=ctx.shadow_review),
+                         shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {})),
         "PUSH_IDENTITY_MISMATCH",
     )
     parents = request.get("parents")
@@ -157,7 +174,8 @@ def validate_identity(ctx: Context, event: Any, request: Any, helper: Any, branc
         and obj(parents[0]).get("sha") == ctx.helper_sha
         and isinstance(tree, str) and bool(SHA.fullmatch(tree))
         and tree == obj(helper.get("tree")).get("sha")
-        and exact_marker(request.get("message"), ctx.helper_sha, shadow_review=ctx.shadow_review),
+        and exact_marker(request.get("message"), ctx.helper_sha, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {})),
         "REQUEST_MUST_BE_EMPTY_CHILD",
     )
 
@@ -268,7 +286,8 @@ def validate_history(ctx: Context, runs: list[dict[str, Any]],
            "CURRENT_RUN_UNVERIFIED")
     demand(set(jobs_by_run) == {run["id"] for run in runs}, "JOB_HISTORY_INCOMPLETE")
     helper_runs = []
-    pinned = historical_batches(shadow_review=ctx.shadow_review)
+    pinned = historical_batches(shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     paid_batches = {batch.run_id: batch for batch in pinned}
     helper_batches = {batch.helper_run_id: batch for batch in pinned}
     predecessor_runs: dict[int, dict[str, Any]] = {}
@@ -296,8 +315,9 @@ def validate_history(ctx: Context, runs: list[dict[str, Any]],
         if run["id"] in paid_batches:
             batch = paid_batches[run["id"]]
             demand(run["head_sha"] == batch.source_sha
-                   and run.get("conclusion") == "success"
-                   and all(completed(job, "success") for job in jobs.values()),
+                   and run.get("conclusion") == batch.conclusion
+                   and all(completed(job, batch.conclusion if name == PAID_JOB else "success")
+                           for name, job in jobs.items()),
                    "PREDECESSOR_RUN_MISMATCH")
             predecessor_runs[run["id"]] = run
         else:
@@ -404,7 +424,9 @@ class NoRedirect(HTTPRedirectHandler):
 class GitHubReader:
     """Fixed repository GET allowlist, verified TLS, no redirect or proxy reuse."""
 
-    def __init__(self, token: str, *, shadow_review: bool = False):
+    def __init__(self, token: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False):
+        demand(not (shadow_review and shadow_quote_v2), "PROTOCOL_CONFLICT")
+        self.shadow_quote_v2 = shadow_quote_v2
         self.shadow_review = shadow_review
         demand(isinstance(token, str) and bool(token) and "\n" not in token and "\r" not in token,
                "GITHUB_READ_TOKEN_MISSING")
@@ -428,9 +450,12 @@ class GitHubReader:
             re.escape(f"actions/artifacts/{lineage.PREDECESSOR_ARTIFACT_ID}"),
             r"actions/runs/[1-9][0-9]*/jobs\?filter=all&per_page=100&page=[1-9][0-9]*",
         )
-        if self.shadow_review:
+        if self.shadow_review or self.shadow_quote_v2:
             from scripts.companion_ai_validation import shadow_continuation as shadow
             allowed += (re.escape(f"actions/artifacts/{shadow.PREDECESSOR_ARTIFACT_ID}"),)
+        if self.shadow_quote_v2:
+            from scripts.companion_ai_validation import shadow_quote_continuation as quote
+            allowed += (re.escape(f"actions/artifacts/{quote.PREDECESSOR_ARTIFACT_ID}"),)
         demand(any(re.fullmatch(pattern, path) for pattern in allowed), "GITHUB_READ_PATH_DENIED")
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
                    "User-Agent": "offerpilot-companion-preflight"}
@@ -451,8 +476,12 @@ class GitHubReader:
             raise Blocked("GITHUB_READ_UNAVAILABLE") from None
 
 
-def verified_lineage(*, shadow_review: bool = False) -> dict[str, Any]:
+def verified_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False) -> dict[str, Any]:
+    demand(not (shadow_review and shadow_quote_v2), "PROTOCOL_CONFLICT")
     try:
+        if shadow_quote_v2:
+            from scripts.companion_ai_validation import shadow_quote_continuation
+            return shadow_quote_continuation.lineage_fields()
         if shadow_review:
             from scripts.companion_ai_validation import shadow_continuation
             return shadow_continuation.lineage_fields()
@@ -472,10 +501,21 @@ class HistoricalBatch:
     archive_size: int
     archive_sha256: str
     request_marker: str
+    conclusion: str = "success"
 
 
-def historical_batches(*, shadow_review: bool = False) -> tuple[HistoricalBatch, ...]:
-    """Only these three paid successes are admissible, never arbitrary history."""
+def historical_batches(*, shadow_review: bool = False, shadow_quote_v2: bool = False) -> tuple[HistoricalBatch, ...]:
+    """Admit only pinned history; quote v2 alone includes the exact fifth failure."""
+    if shadow_quote_v2:
+        demand(not shadow_review, "PROTOCOL_CONFLICT")
+        from scripts.companion_ai_validation import shadow_quote_continuation as quote
+        return historical_batches(shadow_review=True) + (HistoricalBatch(
+            quote.PREDECESSOR_RUN_ID, quote.PREDECESSOR_HELPER_RUN_ID,
+            quote.PREDECESSOR_SOURCE_SHA, quote.PREDECESSOR_HELPER_SHA,
+            quote.PREDECESSOR_TREE_SHA, quote.PREDECESSOR_ARTIFACT_ID,
+            quote.ARCHIVE_SIZE, quote.ARCHIVE_SHA256,
+            marker(quote.PREDECESSOR_HELPER_SHA, shadow_review=True), "failure"),)
+    demand(not (shadow_review and shadow_quote_v2), "PROTOCOL_CONFLICT")
     if shadow_review:
         from scripts.companion_ai_validation import shadow_continuation as shadow
         return historical_batches() + (HistoricalBatch(
@@ -522,7 +562,8 @@ def historical_batches(*, shadow_review: bool = False) -> tuple[HistoricalBatch,
 
 def validate_predecessor_metadata(ctx: Context, read: Reader, environment_id: int) -> None:
     """All three historical approvals are provenance, never current-run approval."""
-    for batch in historical_batches(shadow_review=ctx.shadow_review):
+    for batch in historical_batches(shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {})):
         request = obj(single(read, f"git/commits/{batch.source_sha}"))
         helper = obj(single(read, f"git/commits/{batch.helper_sha}"))
         parents = request.get("parents")
@@ -549,22 +590,27 @@ def validate_predecessor_metadata(ctx: Context, read: Reader, environment_id: in
                "PREDECESSOR_ARTIFACT_MISMATCH")
 
 
-def price_deadline(shadow_review: bool = False) -> float:
+def price_deadline(shadow_review: bool = False, *, shadow_quote_v2: bool = False) -> float:
+    if shadow_quote_v2:
+        demand(not shadow_review, "PROTOCOL_CONFLICT")
+        from scripts.companion_ai_validation import shadow_quote_continuation
+        return float(shadow_quote_continuation.PRICE_VALID_UNTIL)
+    demand(not (shadow_review and shadow_quote_v2), "PROTOCOL_CONFLICT")
     if shadow_review:
         from scripts.companion_ai_validation import shadow_continuation
         return float(shadow_continuation.PRICE_VALID_UNTIL)
     return PRICE_VALID_UNTIL
 
 
-def start_quote_window(*, shadow_review: bool = False) -> float:
-    return time.monotonic() + (price_deadline(shadow_review) - time.time())
+def start_quote_window(*, shadow_review: bool = False, shadow_quote_v2: bool = False) -> float:
+    return time.monotonic() + (price_deadline(shadow_review, shadow_quote_v2=shadow_quote_v2) - time.time())
 
 
-def check_quote_window(deadline: float, *, shadow_review: bool = False) -> None:
+def check_quote_window(deadline: float, *, shadow_review: bool = False, shadow_quote_v2: bool = False) -> None:
     wall, monotonic = time.time(), time.monotonic()
     demand(all(type(value) in (int, float) and 0 <= value < 9_223_372_036 and math.isfinite(value)
                for value in (wall, monotonic, deadline))
-           and wall + SESSION_SECONDS <= price_deadline(shadow_review)
+           and wall + SESSION_SECONDS <= price_deadline(shadow_review, shadow_quote_v2=shadow_quote_v2)
            and monotonic + SESSION_SECONDS <= deadline, "PRICE_REVIEW_EXPIRED")
 
 
@@ -584,15 +630,19 @@ def check_handoff_age(checked_wall: int, checked_ns: int) -> None:
 
 
 def preflight(*, phase: str, env: Mapping[str, str], event: Any, read: Reader,
-              quote_deadline: float | None = None, shadow_review: bool = False) -> dict[str, Any]:
-    ctx = validate_context(env, shadow_review=shadow_review)
+              quote_deadline: float | None = None, shadow_review: bool = False,
+              shadow_quote_v2: bool = False) -> dict[str, Any]:
+    ctx = validate_context(env, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
     demand(phase in ("before", "paid"), "INVALID_PHASE")
     # This step has no provider key. Keep the CLI's same monotonic anchor across
     # event reads, metadata/approval reads and the durable admission handoff.
-    deadline = (start_quote_window(shadow_review=ctx.shadow_review)
+    deadline = (start_quote_window(shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
                 if quote_deadline is None else quote_deadline)
-    check_quote_window(deadline, shadow_review=ctx.shadow_review)
-    verified_lineage(shadow_review=True) if ctx.shadow_review else verified_lineage()
+    check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
+    (verified_lineage(shadow_quote_v2=True) if ctx.shadow_quote_v2 else
+     verified_lineage(shadow_review=True) if ctx.shadow_review else verified_lineage())
     workflow_path = f"actions/workflows/{WORKFLOW.rsplit('/', 1)[-1]}"
     current = single(read, f"actions/runs/{ctx.run_id}")
     workflow = single(read, workflow_path)
@@ -610,7 +660,8 @@ def preflight(*, phase: str, env: Mapping[str, str], event: Any, read: Reader,
     validate_predecessor_metadata(ctx, read, environment_id)
     if phase == "paid":
         validate_review(single(read, f"actions/runs/{ctx.run_id}/approvals"), environment_id)
-    check_quote_window(deadline, shadow_review=ctx.shadow_review)
+    check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     return {"ok": True, "helper_sha": ctx.helper_sha, "request_sha": ctx.request_sha}
 
 
@@ -651,9 +702,11 @@ def inspect_metadata(read: Reader) -> dict[str, Any]:
 
 def write_admission(path: str, ctx: Context, quote_deadline: float | None = None) -> None:
     """An admission is a local handoff, not a reusable approval or budget reset."""
-    deadline = (start_quote_window(shadow_review=ctx.shadow_review)
+    deadline = (start_quote_window(shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
                 if quote_deadline is None else quote_deadline)
-    check_quote_window(deadline, shadow_review=ctx.shadow_review)
+    check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     # Stamp before verification/open/write/fsync. These are the same Linux
     # monotonic origin in the paid preflight and subsequent live entrypoint.
     checked_ns, deadline_ns = monotonic_ns(time.monotonic()), monotonic_ns(deadline)
@@ -661,13 +714,15 @@ def write_admission(path: str, ctx: Context, quote_deadline: float | None = None
     demand(type(checked_wall_raw) in (int, float) and 0 <= checked_wall_raw < 9_223_372_036
            and math.isfinite(checked_wall_raw), "ADMISSION_CLOCK_INVALID")
     checked_wall = int(checked_wall_raw)
-    fields = verified_lineage(shadow_review=True) if ctx.shadow_review else verified_lineage()
+    fields = (verified_lineage(shadow_quote_v2=True) if ctx.shadow_quote_v2 else
+     verified_lineage(shadow_review=True) if ctx.shadow_review else verified_lineage())
     record = {**fields, "schema": lineage.ADMISSION_SCHEMA,
               "source_sha": ctx.request_sha, "helper_sha": ctx.helper_sha,
               "run_id": str(ctx.run_id), "run_attempt": "1", "checked_at": checked_wall,
               "checked_at_monotonic_ns": checked_ns,
               "quote_deadline_monotonic_ns": deadline_ns}
-    check_quote_window(deadline, shadow_review=ctx.shadow_review)
+    check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     check_handoff_age(checked_wall, checked_ns)
     try:
         descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -680,7 +735,8 @@ def write_admission(path: str, ctx: Context, quote_deadline: float | None = None
         raise Blocked("ADMISSION_WRITE_BLOCKED") from None
     # A slow open/flush/fsync must not report successful admission. The workflow
     # never exposes the provider secret after a nonzero preflight exit.
-    check_quote_window(deadline, shadow_review=ctx.shadow_review)
+    check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     check_handoff_age(checked_wall, checked_ns)
 
 
@@ -693,7 +749,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         parser = SafeParser(add_help=False)
         parser.add_argument("--phase", choices=("inspect", "before", "paid"), required=True)
-        parser.add_argument("--shadow-review", action="store_true")
+        protocols = parser.add_mutually_exclusive_group()
+        protocols.add_argument("--shadow-review", action="store_true")
+        protocols.add_argument("--shadow-quote-v2", action="store_true")
         parser.add_argument("--helper-sha")
         parser.add_argument("--request-sha")
         parser.add_argument("--admission-file")
@@ -718,18 +776,26 @@ def main(argv: list[str] | None = None) -> int:
             env[HELPER_VAR] = args.helper_sha
         if args.request_sha is not None:
             env[REQUEST_VAR] = args.request_sha
-        ctx = validate_context(env, shadow_review=args.shadow_review)
-        deadline = start_quote_window(shadow_review=ctx.shadow_review)
-        check_quote_window(deadline, shadow_review=ctx.shadow_review)
+        ctx = validate_context(env, shadow_review=args.shadow_review,
+                               shadow_quote_v2=args.shadow_quote_v2)
+        deadline = start_quote_window(shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
+        check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
-        check_quote_window(deadline, shadow_review=ctx.shadow_review)
+        check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         result = preflight(phase=args.phase, env=env, event=event,
-                           read=(GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_review=True)
+                           read=(GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_quote_v2=True)
+                                 if ctx.shadow_quote_v2 else
+                                 GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_review=True)
                                  if ctx.shadow_review else GitHubReader(os.environ.get("GH_TOKEN", ""))),
-                           quote_deadline=deadline, shadow_review=ctx.shadow_review)
+                           quote_deadline=deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         if args.admission_file:
             write_admission(args.admission_file, ctx, deadline)
-        check_quote_window(deadline, shadow_review=ctx.shadow_review)
+        check_quote_window(deadline, shadow_review=ctx.shadow_review,
+                         **({"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         print(json.dumps(result, sort_keys=True))
         return 0
     except Exception as error:

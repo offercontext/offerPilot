@@ -5,7 +5,55 @@ second agent. It uses a fresh owned database, the real loopback `/api/chat`
 endpoint, twelve fixed synthetic ordinary turns and real bounded companion
 commands. No existing user configuration, account or record is loaded.
 
-## Six-target shadow candidate (offline preparation; not authorized to run)
+## Independent quote-v2 six-review batch (2026-10-30)
+
+The active workflow selects `--shadow-quote-v2`, a new protocol and one-shot batch,
+not a retry of the consumed offset-based batch. It reuses the six frozen drafts,
+targets, sources, blind labels and recorded disagreements without editing them.
+The model returns `protocol`, the supplied `target_id`, `verdict`, `evidence`
+(source ID plus nonempty exact quote), and `rationale`. The program maps the target
+ID to its fixed span and locates each quote uniquely within the named source.
+Zero/multiple matches (including overlaps), normalization/fuzzy matching, unknown
+sources, extra fields, overlong quotes and split grapheme boundaries are rejected.
+Computed indices use Python Unicode code points, end-exclusive. Structural success
+is not semantic correctness; the `ambiguous` disagreements remain reportable.
+
+- This independent ordinal 5 inherits all five real archives: **49 calls,
+  414284 micro-CNY settled, zero reserved/unknown**. The fifth run
+  [40812959831](https://github.com/offercontext/offerPilot/actions/runs/40812959831)
+  failed on its first response (`shadow_reference_span`); five slots were never
+  attempted. Its raw response, request, usage and ledger remain immutable. No
+  repaired response is presented as an actual success. The fourth archive still
+  lacks requests; none are reconstructed.
+- Up to six ordered one-call slots; failure stops the batch without retry,
+  repair, fallback or seventh call. Maximum lifetime count is 55. The cumulative
+  cap remains 20 CNY, each attempt reserves 3 CNY durably before send, and unknown
+  settlement retains the reservation and blocks further calls.
+- Fixed `deepseek-flash`, thinking disabled, temperature 0, JSON output and 768
+  output tokens. No tools, server search/fetch, generated draft or product change.
+  Official [pricing](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/) and
+  [model documentation](https://api-docs.deepseek.com/zh-cn/api/list-models/) were
+  checked on 2026-10-30: conservative peak cache-miss input 2 / output 8 CNY per
+  million tokens remain within the approved accounting. No cache/off-peak saving
+  is assumed and no provider call is used to check prices.
+- The user approved this independent batch and publication of its complete files
+  on 2026-10-30. Deadline: **2026-11-02 00:00 UTC (Beijing 08:00)**. Admission requires
+  at least twenty minutes remaining; wall and monotonic checks remain mandatory.
+  This does not reopen any prior H/R or failed run.
+- A fresh tested H, same-tree sole-child R, exact two SHA variables, complete
+  history and fresh owner environment approval are still required. H publication
+  does not activate R. No secret or protection setting is changed.
+- Original offset protocol and fake regressions remain available for historical
+  verification, but the active workflow never selects that consumed batch.
+  Quote-v2 fake fixtures and simulated ledger outputs are not real usage records.
+  All real raw responses, including failures, and all attempted requests are
+  captured before interpretation; the artifact allowlist remains exactly
+  `summary.json`, `responses.jsonl`, `budget.jsonl`, `requests.jsonl`.
+
+The fixed-controller migration/PR #51 route is abandoned; this batch uses the
+existing exact H/R helper route and does not merge or modify that controller.
+
+## Historical offset-based shadow batch (consumed; do not rerun)
 
 The workflow's new `--shadow-review` selector reviews only the six frozen drafts
 in `shadow_cases/cases.json`, with exact request bytes from `shadow_cases/requests/`.
