@@ -54,15 +54,30 @@ class Binding:
 
 class Permit:
     def __init__(
-        self, request_sha256: str, row_hash: str, *, live: Callable[[], bool], expires_at: float
+        self,
+        request_sha256: str,
+        row_hash: str,
+        *,
+        live: Callable[[], bool],
+        expires_at: float,
+        state_lock: Any = None,
     ) -> None:
         self.request_sha256, self.row_hash = request_sha256, row_hash
         self.live, self.expires_at = live, expires_at
         self.used = False
         self.lock = threading.Lock()
+        self.state_lock = state_lock if state_lock is not None else threading.Lock()
 
-    def consume(self, request_sha256: str) -> str:
-        with self.lock:
+    def consume(
+        self,
+        request_sha256: str,
+        *,
+        before_commit: Callable[[], None] = lambda: None,
+        deadline: float | None = None,
+    ) -> str:
+        # This short commit is the dispatch admission linearization point.
+        # before_commit must do bounded validation only, never archive/network IO.
+        with self.state_lock, self.lock:
             if (
                 self.used
                 or not self.live()
@@ -72,6 +87,12 @@ class Permit:
                 raise PermissionError(
                     "Expired, consumed, disconnected or different send permission"
                 )
+            before_commit()
+            now = time.monotonic()
+            if deadline is not None and now >= deadline:
+                raise TimeoutError("Original logical call budget exhausted before dispatch")
+            if not self.live() or now >= self.expires_at:
+                raise PermissionError("Control revoked or permission expired before commit")
             self.used = True
             return self.row_hash
 
@@ -95,6 +116,7 @@ class PipeClient:
         self.policy, self.key, self.ack_timeout = policy, key, ack_timeout
         self.pending: dict[int, queue.Queue[Any]] = {}
         self.dead = threading.Event()
+        self.state_lock = threading.Lock()
         self.write_lock, self.route_lock = threading.Lock(), threading.Lock()
         self.seq = 0
         self.finishing = False
@@ -103,7 +125,8 @@ class PipeClient:
         self.thread.start()
 
     def _fail(self) -> None:
-        self.dead.set()
+        with self.state_lock:
+            self.dead.set()
         with self.route_lock:
             for waiter in self.pending.values():
                 waiter.put_nowait(EOFError("Private parent control ended or became invalid"))
@@ -124,7 +147,8 @@ class PipeClient:
                     raise InvalidControlFrame("Duplicate, unsolicited or late ACK")
                 waiter.put_nowait(packet["data"])
                 if packet["kind"] == "finished":
-                    self.dead.set()
+                    with self.state_lock:
+                        self.dead.set()
                     return
         except BaseException:
             self._fail()
@@ -142,8 +166,9 @@ class PipeClient:
         )
         waiter: queue.Queue[Any] = queue.Queue()
         with self.write_lock:
-            if self.dead.is_set() or self.finishing or self.sending_closed:
-                raise PermissionError("Parent control is unavailable")
+            with self.state_lock:
+                if self.dead.is_set() or self.finishing or self.sending_closed:
+                    raise PermissionError("Parent control is unavailable")
             self.seq += 1
             seq = self.seq
             with self.route_lock:
@@ -178,7 +203,8 @@ class PipeClient:
                 estimate=estimate,
             )
         except SendPermissionDenied:
-            self.sending_closed = True
+            with self.state_lock:
+                self.sending_closed = True
             raise
         except BaseException:
             self._fail()
@@ -186,19 +212,21 @@ class PipeClient:
         return Permit(
             estimate.request_sha256,
             row,
-            live=lambda: not self.dead.is_set() and not self.sending_closed,
+            live=lambda: not self.dead.is_set() and not self.sending_closed and not self.finishing,
             expires_at=time.monotonic() + self.ack_timeout,
+            state_lock=self.state_lock,
         )
 
     def finish(self, evidence_sha256: str, *, native_exit: int) -> None:
         if not hex_value(evidence_sha256, 64) or type(native_exit) is not int:
             raise ValueError("Explicit evidence/CLI terminal required")
         with self.write_lock:
-            with self.route_lock:
-                if self.pending or self.dead.is_set():
-                    raise ValueError("Cannot finish ambiguous private control")
+            with self.state_lock:
+                with self.route_lock:
+                    if self.pending or self.dead.is_set():
+                        raise ValueError("Cannot finish ambiguous private control")
+                self.finishing = True
             self.seq += 1
-            self.finishing = True
             waiter: queue.Queue[Any] = queue.Queue()
             with self.route_lock:
                 self.pending[self.seq] = waiter

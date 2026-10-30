@@ -39,14 +39,24 @@ class EvidenceArchive:
         self.secrets = tuple(x.encode("utf8") for x in secrets if x)
         self.entry_limit, self.total_limit, self.fault = entry_limit, total_limit, fault
         self.total, self.number = 0, 0
-        self.incomplete = False
         self.lock = threading.RLock()
+        self._incomplete = False
         self.events: list[dict[str, Any]] = []
         self.active = 0
         self.streams: list[Any] = []
         self.failure_sink: Callable[[dict[str, Any]], None] | None = None
         self.failure_reported = False
         self.prefixes: dict[int, dict[str, Any]] = {}
+
+    @property
+    def incomplete(self) -> bool:
+        with self.lock:
+            return self._incomplete
+
+    @incomplete.setter
+    def incomplete(self, value: bool) -> None:
+        with self.lock:
+            self._incomplete = value
 
     def failed(self, phase: str, error_type: str) -> None:
         self.incomplete = True

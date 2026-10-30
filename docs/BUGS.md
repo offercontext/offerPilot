@@ -1087,6 +1087,24 @@ MockTransport 和 owned loopback。实现见 [ADR-0014](architecture/decisions/0
 金额守恒、控制终态、物理发送、模型结果和原始归档必须分别举证；
 模拟修复通过不能替代正式评测、真实模型或发布门禁。
 
+## 2026-10-30：N02 归档停顿跨过撤销后仍派发
+
+**影响**：离线 real-ai 控制器最终准入；不涉及真实费用或发布验收。
+
+**现象与根因**：唯一 permit 在请求体及派发 metadata 的 flush/fsync 前
+已消费。A 停在归档时，B 已收到有效 deny，A 恢复仍能进入 inner。
+真实私有 pipe、MockTransport 与 barrier 的原版复现为 9 失败、1 通过；
+不依赖 OS 强杀，也没有证明超额预留或真实付费。
+
+**修复**：阻塞归档先于最终短同步准入；共享锁复核控制存活、拒绝、归档
+故障、请求绑定与许可/逻辑期限，再消费 permit。锁不跨网络；准备记录与
+实际 inner 调用观察分开。准入前撤销阻断派发，准入后的在途请求不回滚。
+失败保留已 allow 行与费用，响应未知不改成零调用证明。详见
+[ADR-0014](architecture/decisions/0014-meter-official-real-ai-verification.md)。
+
+**教训**：durable allowance 不等于最终派发准入；两者之间的阻塞 I/O
+必须纳入撤销边界测试，未发送的准备记录不能冒充实际发送。
+
 ## BUG 模板
 
 ```markdown

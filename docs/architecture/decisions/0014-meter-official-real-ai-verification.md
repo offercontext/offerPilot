@@ -65,6 +65,20 @@ allowance 前重验。它不是完整系统配置快照，当前 quote 明确为
 不能借新 nonce 重试。产品原生独立生成/结构修复另建可追踪调用并全部
 计费。并发使用 ContextVar 和独立锁。
 
+N02 修正最终准入：请求 body/end 和 `provider-dispatch-ready` 的阻塞归档
+全部完成后，按 archive → channel state → permit 的固定锁序，短同步复核
+归档故障、transport 关闭、控制存活/deny/finishing、完整请求绑定和两项
+期限，再唯一消费 permit。归档 incomplete 的全部读写共用 archive 锁；
+deny、已观察 EOF、finished/finish 与消费共用 channel state 锁。准入内
+没有归档或网络 I/O，不用全局 active body 数阻止并发流。
+
+线性化点是最终准入提交：此前已观察的撤销阻止派发；此后请求作为在途
+处理，后续撤销不回滚准入，不保证物理首字节与撤销的时序。解锁后立即
+进入 inner，不跨整段 HTTP 持锁。准备记录不证明已发送；只有 inner 返回
+或抛错后才记 `provider-dispatch`。准入失败另记 aborted，响应和原始尾部
+保持 null/unknown，已 allow 行与费用不退还；进程在 inner 内死亡时，
+prepared 与 allow 只能支持发送状态未知，不能回填发送成功或零费用。
+
 ACK 上限5秒，耗时计入 elapsed 并从网络剩余 timeout 扣除。更短的产品
 timeout/output 不扩大到45秒或8192；流迭代检查逻辑剩余预算。这不修改
 历史流式4秒测试。Provider attempt 不等于外部已收到请求。

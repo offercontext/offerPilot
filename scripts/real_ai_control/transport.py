@@ -236,49 +236,84 @@ class ControlledTransport(httpx.BaseTransport):
             raise PermissionError("Unscoped SDK/repair send refused")
         scope.begin_send()
         permit = self.channel.permission(request, scope.identity)
-        # Revalidate the actual immutable serialized bytes and complete headers
-        # after ACK, immediately before atomic one-use permission consumption.
-        estimate = self.channel.policy.validate(
-            request, expected_key=self.channel.key, now=datetime.now(timezone.utc)
-        )
-        reservation = permit.consume(estimate.request_sha256)
         links = dict(
             logical_call_id=scope.identity,
             product_call_id=PRODUCT_CALL.get(),
             api_request_id=API_REQUEST.get(),
             runtime_identity=RUNTIME_IDENTITY.get(),
-            reservation_row_hash=reservation,
-            request_sha256=estimate.request_sha256,
+            reservation_row_hash=permit.row_hash,
+            request_sha256=permit.request_sha256,
         )
-        capture = self.archive.body("provider-request", links=links)
-        capture.feed(request.content)
-        capture.end(complete=True)
-        remaining = scope.deadline - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("Original logical call budget exhausted before dispatch")
-        original_timeout = request.extensions.get("timeout")
-        if (
-            not isinstance(original_timeout, dict)
-            or set(original_timeout) != {"connect", "read", "write", "pool"}
-            or any(
-                type(value) not in (int, float) or not 0 < value <= 45
-                for value in original_timeout.values()
-            )
-        ):
-            raise PermissionError("Explicit bounded SDK network timeouts required")
-        request.extensions["timeout"] = {
-            name: min(value, remaining) for name, value in original_timeout.items()
-        }
         from scripts.evaluation_subject.core_transport import SEND_PERMISSION
 
-        self.archive.event("provider-dispatch", links=links, external_receipt_confirmed=None)
+        try:
+            capture = self.archive.body("provider-request", links=links)
+            capture.feed(request.content)
+            capture.end(complete=True)
+            self.archive.event(
+                "provider-dispatch-ready", links=links, final_admission_confirmed=None,
+                transport_entered=None, external_receipt_confirmed=None,
+            )
+
+            def before_commit() -> None:
+                # No IO after this validation and before the admission commit.
+                if self.archive.incomplete or self.closed or not capture.finished or capture.failed:
+                    raise PermissionError("Evidence/transport no longer permits dispatch")
+                estimate = self.channel.policy.validate(
+                    request, expected_key=self.channel.key, now=datetime.now(timezone.utc)
+                )
+                if estimate.request_sha256 != permit.request_sha256:
+                    raise PermissionError("Archived request no longer matches its allowance")
+                remaining = scope.deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Original logical call budget exhausted before dispatch")
+                original_timeout = request.extensions.get("timeout")
+                if (
+                    not isinstance(original_timeout, dict)
+                    or set(original_timeout) != {"connect", "read", "write", "pool"}
+                    or any(
+                        type(value) not in (int, float) or not 0 < value <= 45
+                        for value in original_timeout.values()
+                    )
+                ):
+                    raise PermissionError("Explicit bounded SDK network timeouts required")
+                request.extensions["timeout"] = {
+                    name: min(value, remaining) for name, value in original_timeout.items()
+                }
+
+            # Lock order: archive -> channel state -> permit. No write/route
+            # locks, disk operations or network calls occur inside the commit.
+            with self.archive.lock:
+                permit.consume(
+                    permit.request_sha256, before_commit=before_commit, deadline=scope.deadline
+                )
+        except BaseException as error:
+            self.archive.incomplete = True
+            try:
+                self.archive.event(
+                    "provider-dispatch-aborted", links=links, error_type=type(error).__name__,
+                    transport_entered=False, response_received=None, body_complete=None,
+                )
+            except BaseException:
+                pass  # Preserve the original failure and any incomplete prefix.
+            raise
+
+        # Already-admitted calls are in flight. Later revocation cannot undo
+        # this commit; physical first-byte ordering is not claimed. In
+        # particular, never hold the shared admission locks across network IO.
         SEND_PERMISSION.permitted, SEND_PERMISSION.addresses = True, set()
         SEND_PERMISSION.attempt = scope.identity
         response: httpx.Response | None = None
+        dispatch_record_attempted = False
         try:
             response = self.inner.handle_request(request)
             scope.responses.append(response)
             self.responses.append(response)
+            dispatch_record_attempted = True
+            self.archive.event(
+                "provider-dispatch", links=links, transport_entered=True,
+                external_receipt_confirmed=None,
+            )
             return captured_response(response, self.archive, kind="provider-response", links=links)
         except BaseException as error:
             if response is not None:
@@ -286,6 +321,11 @@ class ControlledTransport(httpx.BaseTransport):
                     close_responses([response], self.archive)
                 except BaseException:
                     pass
+            if not dispatch_record_attempted:
+                self.archive.event(
+                    "provider-dispatch", links=links, transport_entered=True,
+                    external_receipt_confirmed=None,
+                )
             self.archive.event(
                 "provider-transport-error",
                 links=links,
@@ -300,9 +340,10 @@ class ControlledTransport(httpx.BaseTransport):
             SEND_PERMISSION.permitted, SEND_PERMISSION.addresses = False, set()
 
     def close(self) -> None:
-        if self.closed:
-            return
-        self.closed = True
+        with self.archive.lock:
+            if self.closed:
+                return
+            self.closed = True
         errors: list[BaseException] = []
         try:
             try:
