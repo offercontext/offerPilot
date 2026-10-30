@@ -75,6 +75,8 @@ oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
 
 此包的兼容目标为 DSH / MCP client **0.2.1-rc.5**，与上面的历史 overlay rc.2 验证分开。用 `npm pack` 生成预构建 `.tgz`，再用 `dsh plugin --profile <name> add <tgz>` 安装。无需安装时构建脚本。旧 overlay 与插件不能同时启用；停用/卸载不等于撤销连接。
 
+公开分发使用 `dsh-offerpilot-v0.1.0` GitHub Release，市场索引固定入口见[插件安装说明](../../plugins/dsh-offerpilot/README.md#从-dsh-插件市场安装)。索引保存在专用 `chore/20261030-dsh-market` 分支，使用 DSH format 1 的 Git source，锁定 Release 对应的完整提交 SHA 与 `plugins/dsh-offerpilot` 子目录；不用会漂移的分支名代替安装提交。Release 附件 URL 有重定向，因此索引通过 GitHub Raw 的直接 200 地址提供，不能把附件下载 URL 当作索引地址。
+
 本地集成入口（参数全部使用实际绝对路径，output 必须不存在）：
 
 ```powershell

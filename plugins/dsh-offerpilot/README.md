@@ -19,7 +19,7 @@ oc mcp config <返回的connection_id> --format mcp --data-dir D:\OfferPilotData
 
 输出目录应已存在，命令不会覆盖既有文件。默认只读投递与事件；按需创建带 `--allow-scheduling` 等显式权限的新连接。简历和 Knowledge 是独立全局授权，不能由投递权限推导。
 
-使用提供的 `.tgz`，无需构建脚本或 npm 发布：
+从 [GitHub Release](https://github.com/offercontext/offerPilot/releases/tag/dsh-offerpilot-v0.1.0) 下载 `dsh-offerpilot-0.1.0.tgz`；同页的 `SHA256SUMS` 可用于核对下载文件。无需构建脚本或 npm 发布：
 
 ```powershell
 dsh plugin --profile web add D:\Downloads\dsh-offerpilot-0.1.0.tgz
@@ -30,6 +30,22 @@ dsh web
 macOS/Linux 在同一终端先执行 `export OFFERPILOT_MCP_CONFIG=/absolute/path/mcp.json`，安装和启动命令相同。路径按各自系统调整。环境变量仅对该终端及子进程生效；桌面端从其他入口启动时，可在 DSH 插件配置中设置 `configFile` 的绝对路径并重启。`configFile` 优先于环境变量。不要在公开插件包中放入个人配置。
 
 如果已经加载旧的 `offerpilot.cordis.yml` overlay，先停止使用那个 overlay，再启用本插件；两者提供同一个 `mcp__offerpilot__*` 命名空间，不能重复加载。
+
+## 从 DSH 插件市场安装
+
+先完成上面的 OfferPilot 安装、连接授权和配置导出，再使用以下市场入口：
+
+1. 在 DSH 的插件页面启用实验性「自定义插件市场」。
+2. 打开「发现」→「添加索引源」，添加：
+
+   ```text
+   https://raw.githubusercontent.com/offercontext/offerPilot/chore/20261030-dsh-market/index.json
+   ```
+
+3. 搜索 `OfferPilot` 或 `求职`，选择 **OfferPilot 求职助手**，核对 `0.1.0`、GitHub 仓库与固定提交来源后安装。
+4. 在插件配置中填入导出的 MCP JSON 绝对路径（`configFile`），然后重启 DSH；终端启动也可使用上面的 `OFFERPILOT_MCP_CONFIG`。
+
+市场通过固定 Git 提交的 `plugins/dsh-offerpilot` 子目录安装，Release 提供同版本 `.tgz`。索引不是 DSH 内置市场，用户需要主动添加；版本不兼容时不能强行安装。本包已有 JavaScript 运行文件，无需批准安装时构建脚本。市场索引独立维护，后续版本会添加到同一索引地址。
 
 ## 使用
 
