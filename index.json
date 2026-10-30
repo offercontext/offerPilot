@@ -1,0 +1,37 @@
+{
+  "format": 1,
+  "title": { "en": "OfferPilot plugins", "zh": "OfferPilot 插件市场" },
+  "description": {
+    "en": "OfferPilot's local job-search MCP integration for DeepSeek Harness.",
+    "zh": "OfferPilot 本地求职助手：连接投递、简历、面试日程和知识资料。"
+  },
+  "plugins": [
+    {
+      "name": "dsh-offerpilot",
+      "title": { "en": "OfferPilot Job Search Assistant", "zh": "OfferPilot 求职助手" },
+      "description": {
+        "en": "Connect to an existing local OfferPilot MCP backend. Read authorized applications, resumes, interview schedules, notes and knowledge. Writes remain proposals requiring independent user approval. Requires DSH 0.2.1-rc.5 and a separately installed OfferPilot backend.",
+        "zh": "连接已安装的本地 OfferPilot MCP 后端，查询已授权的投递、简历、面试日程、笔记与知识资料。写入仅生成提案，仍需用户独立审批。需要 DSH 0.2.1-rc.5；本插件不附带 Python 后端。"
+      },
+      "author": "OfferContext",
+      "homepage": "https://github.com/offercontext/offerPilot/releases/tag/dsh-offerpilot-v0.1.0",
+      "repository": {
+        "url": "https://github.com/offercontext/offerPilot",
+        "directory": "plugins/dsh-offerpilot"
+      },
+      "versions": [
+        {
+          "version": "0.1.0",
+          "publishTimestamp": 1793354908,
+          "engines": { "dsh": "0.2.1-rc.5" },
+          "source": {
+            "type": "git",
+            "url": "https://github.com/offercontext/offerPilot",
+            "commit": "4572a92b190b6a430328c65292a08d38727b5a17",
+            "path": "plugins/dsh-offerpilot"
+          }
+        }
+      ]
+    }
+  ]
+}
