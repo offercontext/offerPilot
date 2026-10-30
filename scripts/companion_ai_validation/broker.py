@@ -51,9 +51,13 @@ class GateError(RuntimeError):
     """Safe error codes only: never stringify upstream errors."""
 
 
-def profile_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False) -> ModuleType:
-    if type(shadow_review) is not bool or type(shadow_quote_v2) is not bool or (shadow_review and shadow_quote_v2):
+def profile_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False) -> ModuleType:
+    if (any(type(mode) is not bool for mode in (shadow_review, shadow_quote_v2, shadow_projection))
+            or sum((shadow_review, shadow_quote_v2, shadow_projection)) > 1):
         raise GateError("experiment_mode")
+    if shadow_projection:
+        from scripts.companion_ai_validation import shadow_projection_continuation
+        return shadow_projection_continuation
     if shadow_quote_v2:
         from scripts.companion_ai_validation import shadow_quote_continuation
         return shadow_quote_continuation
@@ -68,6 +72,7 @@ class RunWindow:
     """One non-extending clock anchor, captured before admission or source I/O."""
     shadow_review: bool = False
     shadow_quote_v2: bool = False
+    shadow_projection: bool = False
     price_valid_until: float = field(init=False)
     started_monotonic: float = field(init=False)
     started_wall: float = field(init=False)
@@ -76,8 +81,8 @@ class RunWindow:
     _last_monotonic: float = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        lineage = profile_lineage(shadow_review=self.shadow_review, shadow_quote_v2=self.shadow_quote_v2)
-        quote = lineage.PRICE_VALID_UNTIL if (self.shadow_review or self.shadow_quote_v2) else PRICE_VALID_UNTIL
+        lineage = profile_lineage(shadow_review=self.shadow_review, shadow_quote_v2=self.shadow_quote_v2, shadow_projection=self.shadow_projection)
+        quote = lineage.PRICE_VALID_UNTIL if (self.shadow_review or self.shadow_quote_v2 or self.shadow_projection) else PRICE_VALID_UNTIL
         object.__setattr__(self, "price_valid_until", quote)
         monotonic, wall = time.monotonic(), time.time()
         if not math.isfinite(monotonic) or not math.isfinite(wall):
@@ -149,8 +154,8 @@ def _integer(value: Any, maximum: int) -> int:
     return value
 
 
-def usage_cost(response: dict[str, Any], *, shadow_review: bool = False, shadow_quote_v2: bool = False) -> tuple[int, int, int]:
-    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
+def usage_cost(response: dict[str, Any], *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False) -> tuple[int, int, int]:
+    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
     usage = response.get("usage")
     if not isinstance(usage, dict):
         raise GateError("missing_usage")
@@ -160,7 +165,7 @@ def usage_cost(response: dict[str, Any], *, shadow_review: bool = False, shadow_
     }:
         raise GateError("untrusted_usage")
     prompt = _integer(usage.get("prompt_tokens"), CONTEXT_TOKENS)
-    completion = _integer(usage.get("completion_tokens"), 768 if (shadow_review or shadow_quote_v2) else OUTPUT_TOKENS)
+    completion = _integer(usage.get("completion_tokens"), 768 if (shadow_review or shadow_quote_v2 or shadow_projection) else OUTPUT_TOKENS)
     total = _integer(usage.get("total_tokens"), CONTEXT_TOKENS)
     hit = _integer(usage.get("prompt_cache_hit_tokens"), CONTEXT_TOKENS)
     miss = _integer(usage.get("prompt_cache_miss_tokens"), CONTEXT_TOKENS)
@@ -290,16 +295,20 @@ class HTTPSUpstream:
 class Broker:
     def __init__(self, journal_path: Path, send: Callable[[bytes], tuple[int, bytes]],
                  source_sha: str, *, window: RunWindow | None = None, shadow_review: bool = False,
-                 shadow_quote_v2: bool = False):
+                 shadow_quote_v2: bool = False, shadow_projection: bool = False):
         require_linux()
-        window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
+        window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
         if len(source_sha) != 40 or any(c not in "0123456789abcdef" for c in source_sha):
             raise GateError("source_sha")
         self._shadow_review = shadow_review
         self._shadow_quote_v2 = shadow_quote_v2
-        lineage_module = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
+        self._shadow_projection = shadow_projection
+        if ((window.shadow_review, window.shadow_quote_v2, window.shadow_projection)
+                != (shadow_review, shadow_quote_v2, shadow_projection)):
+            raise GateError("continuation_contract_mismatch")
+        lineage_module = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
         self._operations = lineage_module.OPERATIONS
-        self._max_requests = 6 if (shadow_review or shadow_quote_v2) else MAX_REQUESTS
+        self._max_requests = 6 if (shadow_review or shadow_quote_v2 or shadow_projection) else MAX_REQUESTS
         # There is no caller-, CLI- or environment-supplied opening balance. The
         # only continuation inherits the exact fully replayed original ledger.
         try:
@@ -404,8 +413,10 @@ class Broker:
         if self._calls:
             # No SDK retry, structural repair, follow-up or second completion.
             raise GateError("ticket_consumed")
-        if self._shadow_review or self._shadow_quote_v2:
-            if self._shadow_quote_v2:
+        if self._shadow_review or self._shadow_quote_v2 or self._shadow_projection:
+            if self._shadow_projection:
+                from scripts.companion_ai_validation.shadow_projection_driver import frozen_request
+            elif self._shadow_quote_v2:
                 from scripts.companion_ai_validation.shadow_quote_driver import frozen_request
             else:
                 from scripts.companion_ai_validation.shadow_driver import frozen_request
@@ -481,7 +492,7 @@ class Broker:
                 raise GateError("gate_closed")
             payload = self._validate(raw)
             local_stream = payload.get("stream", False)
-            if self._shadow_review or self._shadow_quote_v2:
+            if self._shadow_review or self._shadow_quote_v2 or self._shadow_projection:
                 upstream_raw = raw
             else:
                 payload["stream"] = False
@@ -505,7 +516,7 @@ class Broker:
             if status != 200:
                 raise GateError("upstream_status")
             response = decode(response_raw)
-            cost, prompt, completion = usage_cost(response, shadow_review=self._shadow_review, shadow_quote_v2=self._shadow_quote_v2)
+            cost, prompt, completion = usage_cost(response, shadow_review=self._shadow_review, shadow_quote_v2=self._shadow_quote_v2, shadow_projection=self._shadow_projection)
             response_content(response)
             pending_state = dict(self._state)
             self._state["settled_micro_cny"] += cost

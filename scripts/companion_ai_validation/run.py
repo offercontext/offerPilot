@@ -39,8 +39,8 @@ def clean_environment() -> None:
 
 
 def check_admission(record: Any, metadata: dict[str, str], now: float, *,
-                    shadow_review: bool = False, shadow_quote_v2: bool = False) -> str:
-    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
+                    shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False) -> str:
+    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
     expected = lineage.LINEAGE_KEYS | {
         "schema", "source_sha", "helper_sha", "run_id", "run_attempt", "checked_at",
         "checked_at_monotonic_ns", "quote_deadline_monotonic_ns",
@@ -53,7 +53,7 @@ def check_admission(record: Any, metadata: dict[str, str], now: float, *,
         lineage.validate_lineage(record)
     except continuation.ContinuationError as exc:
         raise GateError("admission_lineage") from exc
-    if (shadow_review or shadow_quote_v2) and (not isinstance(record["source_sha"], str)
+    if (shadow_review or shadow_quote_v2 or shadow_projection) and (not isinstance(record["source_sha"], str)
                           or not isinstance(record["helper_sha"], str)
                           or record["source_sha"] in lineage.ALL_HISTORICAL_IDENTITIES
                           or record["helper_sha"] in lineage.ALL_HISTORICAL_IDENTITIES):
@@ -85,14 +85,14 @@ def check_admission(record: Any, metadata: dict[str, str], now: float, *,
                 "offercontext/offerPilot/.github/workflows/companion-real-ai.yml"
                 "@refs/heads/feat/20261021-companion-life-v1")):
         raise GateError("admission_identity")
-    check_admission_time(record, now, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
+    check_admission_time(record, now, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
     return sha
 
 
 def check_admission_time(record: dict[str, Any], now: float, *,
-                         shadow_review: bool = False, shadow_quote_v2: bool = False) -> None:
-    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
-    deadline = lineage.PRICE_VALID_UNTIL if (shadow_review or shadow_quote_v2) else PRICE_VALID_UNTIL
+                         shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False) -> None:
+    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
+    deadline = lineage.PRICE_VALID_UNTIL if (shadow_review or shadow_quote_v2 or shadow_projection) else PRICE_VALID_UNTIL
     checked = record["checked_at"]
     if type(checked) is not int or not 0 <= now - checked <= 120:
         raise GateError("admission_expired")
@@ -139,9 +139,9 @@ class RequestEvidence:
     The broker has already validated and reserved the request. Durable capture
     must finish before transport; failure retains that conservative reservation.
     """
-    def __init__(self, evidence_dir: Path, *, shadow_review: bool = False, shadow_quote_v2: bool = False):
+    def __init__(self, evidence_dir: Path, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False):
         self._operations: tuple[str, ...] = profile_lineage(
-            shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2).OPERATIONS
+            shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection).OPERATIONS
         self._fd = os.open(evidence_dir / "requests.jsonl",
                            os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self._count = 0
@@ -223,10 +223,13 @@ class ResponseEvidence:
 
 def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
             evidence_dir: Path, *, window: RunWindow | None = None,
-            shadow_review: bool = False, shadow_quote_v2: bool = False) -> dict[str, Any]:
+            shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False) -> dict[str, Any]:
     require_linux()
-    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
-    window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2)
+    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
+    window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection)
+    if shadow_projection:
+        from scripts.companion_ai_validation.shadow_projection_driver import execute as execute_projection
+        return execute_projection(send, source_sha, evidence_dir, window=window)
     if shadow_quote_v2:
         from scripts.companion_ai_validation.shadow_quote_driver import execute as execute_quote
         return execute_quote(send, source_sha, evidence_dir, window=window)
@@ -312,17 +315,18 @@ def main() -> int:
         modes = parser.add_mutually_exclusive_group()
         modes.add_argument("--shadow-review", action="store_true")
         modes.add_argument("--shadow-quote-v2", action="store_true")
+        modes.add_argument("--shadow-projection", action="store_true")
         parser.add_argument("--admission-file", type=Path, required=True)
         parser.add_argument("--evidence-dir", type=Path, required=True)
         args = parser.parse_args()
-        window = RunWindow(shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2)
+        window = RunWindow(shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection)
         keys = ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_NAME",
                 "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_WORKFLOW_SHA", "GITHUB_WORKFLOW_REF")
         metadata = {name: os.environ.get(name, "") for name in keys}
         with args.admission_file.open("rb") as admission_file:
             admission = decode(admission_file.read(MAX_BYTES + 1))
         source_sha = check_admission(admission, metadata, window.effective_wall(),
-                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2)
+                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection)
         window.restrict_quote_deadline(admission["quote_deadline_monotonic_ns"])
         # Verify checked-out files, not merely a supplied environment string.
         git_environment = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1",
@@ -349,17 +353,19 @@ def main() -> int:
         # Checkout/provenance checks may stall. They never extend admission age
         # or the fixed quote, and predecessor bytes must still verify here.
         check_admission(admission, metadata, window.effective_wall(),
-                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2)
+                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection)
         # The final lineage verification can also stall. No further file or
         # metadata I/O may sit between this anchored check and secret access.
         check_admission_time(admission, window.effective_wall(),
-                             shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2)
+                             shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection)
         # Read the one explicitly authorized environment secret only after all gates.
         key = os.environ.pop(KEY_NAME, "")
         clean_environment()
         transport = HTTPSUpstream(key, window=window)
         key = ""
-        if args.shadow_quote_v2:
+        if args.shadow_projection:
+            report = execute(transport, source_sha, args.evidence_dir, window=window, shadow_projection=True)
+        elif args.shadow_quote_v2:
             report = execute(transport, source_sha, args.evidence_dir, window=window, shadow_quote_v2=True)
         elif args.shadow_review:
             report = execute(transport, source_sha, args.evidence_dir, window=window,

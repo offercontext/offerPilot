@@ -5,9 +5,54 @@ second agent. It uses a fresh owned database, the real loopback `/api/chat`
 endpoint, twelve fixed synthetic ordinary turns and real bounded companion
 commands. No existing user configuration, account or record is loaded.
 
-## Independent quote-v2 six-review batch (2026-10-30)
+## Independent input-only projection batch (2026-10-30)
 
-The active workflow selects `--shadow-quote-v2`, a new protocol and one-shot batch,
+The active workflow selects `--shadow-projection`, independent ordinal 6. It
+inherits all six immutable real batches: **52 calls, 419388 micro-CNY settled,
+zero reserved/unknown**. The sixth run
+[41002088459](https://github.com/offercontext/offerPilot/actions/runs/41002088459)
+attempted three calls; s03 failed unique-quote validation, and s04–s06 were never
+attempted. That failure remains unchanged and cannot be resumed.
+
+Only the reference text for fixed s03/s04 is projected: the duplicated 51-codepoint
+SHORT summary is removed from the review view, retaining the exact LONG summary.
+The four other provider request bodies are byte-identical to the sixth batch,
+with no metadata exception. Model, parameters, system/label prompt, target, schema
+and validator remain frozen. This is a verified literal blue-color template,
+not general event deduplication. Composite source identity is checked against the
+fourth archive; the recent-choice completion time is linked from the participation
+record, not an independent timestamp. Missing or conflicting identity cannot be
+silently merged. All facts and restrictions were manually checked, not inferred
+from LONG being longer. Original source bytes and both summary provenance paths
+are retained; only kept/passthrough chunks support exact character back-mapping.
+Cross-chunk quotes fail closed. Original duplicated inputs still fail unchanged.
+
+The one-shot limit is six ordered calls, at most 58 lifetime calls, no retry,
+repair, fallback or seventh call. The same **20 CNY cumulative cap / 3 CNY per-call
+reservation** applies. Deadline **2026-11-02 00:00 UTC (Beijing 08:00)**, with at
+least twenty minutes remaining before admission. Existing deadlines do not
+reopen consumed batches. The user approved this independent batch and full files
+for offercontext/offerPilot's feat/20261021-companion-life-v1 on 2026-10-30.
+Fresh H/R, CI, SHA-variable readback and owner environment review remain required;
+no master/controller/security setting changes are included.
+
+The four-file evidence allowlist is unchanged: exact requests, raw responses
+(including failure), ledger and summary. Projection mappings and counts live in
+summary: planned, attempted, structurally valid, not-attempted and incomplete.
+A semantic label disagreement is not a protocol failure. s01's historic
+contradicted label remains recorded but disputed: third-party naming does not
+logically exclude user ownership; unknown can be reasonable. No prompt is
+strengthened to force that gold label. Citation validity does not prove relevance
+or entailment. This small non-randomized study cannot establish general semantic
+quality or causal improvement; it only examines citation feasibility/evidence
+preservation. Product context generation is unchanged.
+
+Official pricing was rechecked on 2026-10-30: conservative peak input 2/output 8
+CNY per million tokens remains unchanged; no provider tools/search/fetch are used.
+
+## Historical quote-v2 six-review batch (consumed, 2026-10-30)
+
+That batch selected `--shadow-quote-v2`, a new protocol and one-shot batch,
 not a retry of the consumed offset-based batch. It reuses the six frozen drafts,
 targets, sources, blind labels and recorded disagreements without editing them.
 The model returns `protocol`, the supplied `target_id`, `verdict`, `evidence`
