@@ -27,7 +27,7 @@
           "source": {
             "type": "git",
             "url": "https://github.com/offercontext/offerPilot",
-            "commit": "4572a92b190b6a430328c65292a08d38727b5a17",
+            "commit": "17d59a7672c199f6bcb06b93ed1c90a063bccf7b",
             "path": "plugins/dsh-offerpilot"
           }
         }
