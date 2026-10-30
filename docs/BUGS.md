@@ -1060,6 +1060,33 @@ U01 模型文字二次确认/备注能力描述、U02 unknown_tool、U05 标签�
 
 **教训：** 墙钟时间不提供严格事件顺序；相同时间戳需要领域修订序列来确定因果关系，排序提示不能替代逐项完整性验证。
 
+## 2026-10-30：离线 real-ai 控制器的预留与终态归档边界
+
+**影响**：新控制器离线资格验证；没有真实 Provider/Judge 请求或总账修改。
+
+### 现象与根因
+
+- 新账本原型只在最终 verify 核对前缀，外部截断后仍可能返回下次 allowance。
+- generator 在首次 next 前 close 不执行 finally，留下 SDK 原始流未关闭。
+- Windows 标准流包装器关闭不保证 OS fd 立即 EOF；仅等待 EOF 的终态协议
+  使子读取线程在解释器退出时仍持有 stdin 缓冲锁。
+- MockTransport 的已缓存 Response 不再迭代原 stream，普通 tee 因而遗留
+  一个 active body；不能把它误当作真实网络流已完整归档。
+- 仅清理 proxy 环境变量不能清理 Windows 注册表代理；隔离 loopback 被
+  网络围栏正确阻断。这个新引导失败不解释历史其他连接超时。
+
+### 修复与约束
+
+保持账本 fd/身份并逐次核对前缀；显式可关闭的流对象；请求绑定 finished
+ACK 后等待全树和真实 EOF；缓存/流式 body 分层归档；隔离 HTTPX 明确
+trust_env=false。失败原样保留，新版本资格测试使用假账户、真实 SDK、
+MockTransport 和 owned loopback。实现见 [ADR-0014](architecture/decisions/0014-meter-official-real-ai-verification.md)。
+
+### 教训
+
+金额守恒、控制终态、物理发送、模型结果和原始归档必须分别举证；
+模拟修复通过不能替代正式评测、真实模型或发布门禁。
+
 ## BUG 模板
 
 ```markdown
