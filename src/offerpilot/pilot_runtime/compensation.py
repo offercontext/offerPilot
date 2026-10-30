@@ -888,9 +888,12 @@ class CompensationHandlerRegistry(TransientToolRuntimeValue):
 
     def _ensure_integrity(self) -> None:
         try:
+            # The public bindings access checks the complete Bundle, including
+            # this exact view; do not repeat it for the adjacent token read.
             bindings = self._compensation_view.ordered_handler_bindings
             if (
-                self._compensation_view.bundle_instance_token is not self._bundle_instance_token
+                object.__getattribute__(self._compensation_view, "bundle_instance_token")
+                is not self._bundle_instance_token
                 or self._operation_port_token is not self._operation_port_token_seal
                 or self._operation_port is not self._operation_port_seal
                 or len(bindings) != len(self._ordered_specs)

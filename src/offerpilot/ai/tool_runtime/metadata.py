@@ -852,12 +852,7 @@ class BundleInstanceToken(TransientToolRuntimeValue):
             issued = self._issued.get(expected_type)
             if type(view) is not expected_type or issued is None or issued[0] is not view:
                 raise TypeError("metadata view was not issued by this Bundle token")
-            try:
-                matches = _bundle_view_matches_integrity_snapshot(view, issued[1])
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ValueError("metadata view integrity drift") from exc
-            if not matches:
-                raise ValueError("metadata view integrity drift")
+            # The complete Bundle check above already checked this exact view.
 
     def _require_issued_view_integrity(
         self,
@@ -1258,14 +1253,10 @@ _BundleView: TypeAlias = (
 
 def _bundle_view_integrity_snapshot(value: object) -> object:
     if type(value) is ProviderToolContract:
-        value._ensure_provider_integrity()
         return (
             ProviderToolContract,
             id(value),
-            value.name,
-            value.description,
-            id(value.payload),
-            id(value.parameters),
+            *value._checked_identity_snapshot(),
         )
     if type(value) is BundleInstanceToken:
         return (BundleInstanceToken, id(value))
@@ -1338,14 +1329,7 @@ def _bundle_view_matches_integrity_snapshot(value: object, expected: object) -> 
     if kind is ProviderToolContract:
         if type(value) is not ProviderToolContract or len(snapshot) != 6:
             return False
-        value._ensure_provider_integrity()
-        return (
-            id(value) == snapshot[1]
-            and object.__getattribute__(value, "name") == snapshot[2]
-            and object.__getattribute__(value, "description") == snapshot[3]
-            and id(object.__getattribute__(value, "payload")) == snapshot[4]
-            and id(object.__getattribute__(value, "parameters")) == snapshot[5]
-        )
+        return id(value) == snapshot[1] and value._checked_identity_snapshot() == snapshot[2:]
     if kind is BundleInstanceToken:
         return (
             type(value) is BundleInstanceToken and len(snapshot) == 2 and id(value) == snapshot[1]
@@ -2961,10 +2945,16 @@ class ToolOperationMetadataPort(TransientToolRuntimeValue):
 
     def _ensure_integrity(self) -> None:
         try:
+            # Check the whole Bundle once for this operation. Reading these
+            # sealed fields through their public getters would repeat that scan.
+            self._bundle_instance_token._ensure_integrity()
             if (
-                self._operation_view.bundle_instance_token is not self._bundle_instance_token
-                or self._legacy_boundary.bundle_instance_token is not self._bundle_instance_token
-                or self._compensation_view.bundle_instance_token is not self._bundle_instance_token
+                object.__getattribute__(self._operation_view, "bundle_instance_token")
+                is not self._bundle_instance_token
+                or object.__getattribute__(self._legacy_boundary, "bundle_instance_token")
+                is not self._bundle_instance_token
+                or object.__getattribute__(self._compensation_view, "bundle_instance_token")
+                is not self._bundle_instance_token
                 or getattr(self._compensation_registry, "bundle_instance_token", None)
                 is not self._bundle_instance_token
                 or getattr(self._compensation_registry, "compensation_view", None)
