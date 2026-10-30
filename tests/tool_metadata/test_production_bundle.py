@@ -803,10 +803,10 @@ def test_runtime_pending_ports_require_only_one_complete_graph_validation(
     calls = 0
     original = BundleInstanceToken._ensure_integrity
 
-    def counted(token: BundleInstanceToken) -> None:
+    def counted(token: BundleInstanceToken, *, last_view: object | None = None) -> None:
         nonlocal calls
         calls += 1
-        original(token)
+        original(token, last_view=last_view)
 
     monkeypatch.setattr(BundleInstanceToken, "_ensure_integrity", counted)
     components._ensure_integrity()
