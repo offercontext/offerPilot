@@ -170,8 +170,9 @@ def test_fsync_expiry_refuses_success(monkeypatch, tmp_path):
         p.write_admission(str(tmp_path / "admission.json"), ctx)
 
 
-def test_cli_paid_reads_seventh_and_current_approval(tmp_path, monkeypatch):
-    env, event, data = fixture("paid")
+@pytest.mark.parametrize("phase", ["before", "paid"])
+def test_cli_reads_seventh_and_requires_current_approval_only_when_paid(tmp_path, monkeypatch, phase):
+    env, event, data = fixture(phase)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     path, output = tmp_path / "event.json", tmp_path / "admission.json"
@@ -185,10 +186,16 @@ def test_cli_paid_reads_seventh_and_current_approval(tmp_path, monkeypatch):
             return deepcopy(data[path])
         return read
     monkeypatch.setattr(p, "GitHubReader", reader)
-    assert p.main(["--phase", "paid", "--shadow-single-target", "--admission-file", str(output)]) == 0
-    q.validate_lineage(json.loads(output.read_text()))
+    args = ["--phase", phase, "--shadow-single-target"]
+    if phase == "paid":
+        args += ["--admission-file", str(output)]
+    assert p.main(args) == 0
+    if phase == "paid":
+        q.validate_lineage(json.loads(output.read_text()))
+    else:
+        assert not output.exists()
     assert f"actions/artifacts/{q.PREDECESSOR_ARTIFACT_ID}" in calls
-    assert "actions/runs/16/approvals" in calls
+    assert ("actions/runs/16/approvals" in calls) == (phase == "paid")
 
 
 @pytest.mark.parametrize("mode", [{}, {"shadow_review": True}, {"shadow_quote_v2": True}, {"shadow_projection": True}, {"shadow_single_target": True}])
@@ -358,3 +365,38 @@ def test_runner_expired_admission_never_rejuvenated(tmp_path, elapsed):
     with pytest.raises(runner.GateError, match="admission_expired"):
         runner.check_admission(record, env, q.PRICE_VALID_UNTIL - 3600 + elapsed,
                                shadow_single_target=True)
+
+
+@pytest.mark.parametrize("job_name,phase", [("preflight", "before"), ("paid", "paid")])
+def test_deployed_lineage_uses_frozen_project_interpreter(job_name, phase):
+    from pathlib import Path
+    import yaml
+    root = Path(__file__).resolve().parents[3]
+    job = yaml.safe_load((root / p.WORKFLOW).read_text())["jobs"][job_name]
+    steps = job["steps"]
+    checks = [(i, step) for i, step in enumerate(steps)
+              if f"preflight --phase {phase}" in step.get("run", "")]
+    assert len(checks) == 1
+    index, check = checks[0]
+    assert check["run"].startswith("uv run --frozen python -m scripts.companion_ai_validation.preflight ")
+    setup = [i for i, step in enumerate(steps)
+             if step.get("uses") == "astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e"
+             and step.get("with") == {"version": "0.12.19"}]
+    sync = [i for i, step in enumerate(steps) if step.get("run") == "uv sync --frozen"]
+    assert len(setup) == len(sync) == 1 and setup[0] < sync[0] < index
+    for step in steps[:index + 1]:
+        assert "OFFERPILOT_COMPANION_DEEPSEEK_20261021" not in step.get("env", {})
+
+
+def test_stdlib_only_interpreter_cannot_silently_skip_seventh_archive():
+    # Match setup-python without project installation; never borrow pytest's site-packages.
+    from pathlib import Path
+    import subprocess
+    import sys
+    root = Path(__file__).resolve().parents[3]
+    result = subprocess.run([sys.executable, "-S", "-c",
+        "from scripts.companion_ai_validation.preflight import verified_lineage; "
+        "verified_lineage(shadow_single_target=True)"], cwd=root,
+        capture_output=True, text=True, timeout=30, env={"PATH": "/usr/bin:/bin"})
+    assert result.returncode != 0
+    assert "ModuleNotFoundError: No module named 'regex'" in result.stderr
