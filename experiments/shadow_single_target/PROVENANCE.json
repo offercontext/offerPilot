@@ -1,0 +1,32 @@
+{
+  "source_delivery": "single-target-v02-adapter-20261031",
+  "source_manifest_sha256": "d28ea3b9eae35edc3a445b5fb60929eb3e5de23fead37d56034d491ca73f1518",
+  "source_files_sha256": {
+    "adapter.py": "927feed9c3944f279c32cb490a0a7c43cd2050daab1c85bf9019b941016699f6",
+    "common.py": "d7e651bc07130fbc065a2755d868aec76aa1d764d36a88447f2fc6efdf2c629a",
+    "mechanics.py": "b071f52d641a240d3db6cef3f87a625b146b50894d1f8300fb82eeefc100d2e4",
+    "annotation_checks.py": "2ff3a58ca2fb0e004112ed0cad01339d1e768420ca71b81897d1d454ffaf2c7c",
+    "locator.py": "acc67e129a947b5f4214c56b2e60d49825f8ca8e0dc02e4e27895614ba128f78",
+    "OUTPUT_SCHEMA.json": "46e771d12d839d275498ead953e74fdeb3ed0fc612a56d72321a4b00a2d232f0",
+    "SINGLE_TARGET_CONTRACT.txt": "0237ffd65b2395c99bc1a8d132692e82ed83564872dbc1b449c73e89416f9493"
+  },
+  "transformations": [
+    "package-relative imports",
+    "ruff formatting only in core validators",
+    "new shadow protocol version and single-response mode",
+    "public adapter boundary type annotations",
+    "contract title/profile mode clarified; no semantic taxonomy change"
+  ],
+  "originals_modified": false,
+  "candidate_source": "two-stage-candidate-v02-20261031/host/ADDITIONAL_INPUTS.json",
+  "candidate_source_sha256": "c0e0c10e53f603cf811cb912a46853cf7a78b19d011dd30dd71c80cfccfb971f",
+  "selected_source_ids": [
+    "NEW05",
+    "NEW03",
+    "NEW04",
+    "NEW06",
+    "NEW07",
+    "NEW08"
+  ],
+  "selected_id_rule": "item_ + sha256(single-target-shadow-v0.2-1:SOURCE_ID) first 16 hex"
+}

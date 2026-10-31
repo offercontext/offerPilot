@@ -185,13 +185,13 @@ def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
                 for step in job["steps"]]
     for fragment in ("preflight --phase before", "preflight --phase paid", ".run --live"):
         selected = [command for command in commands if fragment in command]
-        assert len(selected) == 1 and "--shadow-projection" in selected[0]
+        assert len(selected) == 1 and "--shadow-single-target" in selected[0]
     paid = workflow["jobs"]["paid"]
     assert paid["environment"] == p.ENVIRONMENT
     assert workflow["permissions"] == {"contents": "read", "actions": "read"}
     secret_steps = [step for job in workflow["jobs"].values() for step in job["steps"]
                     if "OFFERPILOT_COMPANION_DEEPSEEK_20261021" in step.get("env", {})]
-    assert len(secret_steps) == 1 and ".run --live --shadow-projection" in secret_steps[0]["run"]
+    assert len(secret_steps) == 1 and ".run --live --shadow-single-target" in secret_steps[0]["run"]
 
 
 @pytest.mark.parametrize("phase", ["before", "paid"])

@@ -396,3 +396,24 @@ outside the default production `tests/` collection. Default Windows/macOS tests
 retain an explicit early platform-rejection contract; durability is never a
 no-op or silently skipped safety check. Live entrypoints reject unsupported
 platforms before reading admission/key, creating evidence or sending network.
+
+## Single-target v0.2 batch (2026-10-31)
+
+The active workflow selects `--shadow-single-target`. This separate experimental
+profile fixes six synthetic targets, one request each, deepseek-flash and 4096
+output tokens. A/B are expressed in the same response. It is not product release
+acceptance. See [protocol and preregistered stopping rules](../../experiments/shadow_single_target/README.md).
+The predecessor is the immutable seventh paid artifact (run 41032423741), replayed
+with all six earlier archives: cumulative 58 calls / 429280 micro-CNY / zero
+reservation. The total cap remains 20 CNY and each request reserves 3 CNY.
+The quote/authorization cutoff remains 2026-11-02 00:00 UTC (Beijing 08:00).
+
+Use `preflight.marker(H, shadow_single_target=True)` for the new exact empty-child
+request marker. Old markers, old H/R identities and old-profile admissions cannot
+authorize this batch. H must first pass offline checks; configure exact H/R
+variables before publishing R. Only the owner may approve the resulting GitHub
+environment Review. No approval or provider call follows from offline tests.
+Raw requests/responses, hashes, provider finish reason/usage and the durable ledger
+remain in the same four-file artifact allowlist. A semantic disagreement with the
+host-only preregistration halts remaining targets without claiming protocol
+invalidity or semantic ground truth; it never causes repair or another call.

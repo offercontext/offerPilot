@@ -143,9 +143,9 @@ def test_six_review_runner_actual_workflow_zip_retains_exact_bytes(shadow_quote_
     commands = [shlex.split(command) for command in paid_commands]
     assert any(tokens[:3] == [".venv/bin/python", "-m",
                               "scripts.companion_ai_validation.run"]
-               and {"--shadow-projection", "--live"} <= set(tokens[3:]) for tokens in commands)
+               and {"--shadow-single-target", "--live"} <= set(tokens[3:]) for tokens in commands)
     assert any(tokens[:3] == ["python", "-m", "scripts.companion_ai_validation.preflight"]
-               and "--shadow-projection" in tokens
+               and "--shadow-single-target" in tokens
                and ("--phase", "paid") in zip(tokens, tokens[1:]) for tokens in commands)
     raw = package._collect_zip(workspace, package.WORKFLOW.read_text())
     bodies = _unpack(raw, workspace)

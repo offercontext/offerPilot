@@ -94,7 +94,8 @@ def validate(content: str, case: dict[str, Any]) -> dict[str, Any]:
 
 class RawResponses:
     """Bounded raw bytes before any envelope/usage/content interpretation."""
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, operations: tuple[str, ...] = tuple(REQUEST_HASHES)):
+        self.operations = operations
         self.fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self.count = 0
         try:
@@ -108,7 +109,7 @@ class RawResponses:
             raise
 
     def record(self, operation: str, status: int, raw: bytes) -> None:
-        if (self.count >= 6 or operation != tuple(REQUEST_HASHES)[self.count]
+        if (self.count >= 6 or operation != self.operations[self.count]
                 or type(status) is not int or type(raw) is not bytes
                 or len(raw) > gate.MAX_BYTES + 1):
             raise gate.GateError("shadow_response_capture")

@@ -45,7 +45,8 @@ def main() -> int:
     ledger = CompletionLedger()
     code = pytest.main(["-q", str(root / "scripts/companion_ai_validation/tests"),
                         str(root / "experiments/shadow_quote_locator/test_locator.py"),
-                        str(root / "experiments/shadow_quote_v2/test_harness.py")], plugins=[ledger])
+                        str(root / "experiments/shadow_quote_v2/test_harness.py"),
+                        str(root / "experiments/shadow_single_target")], plugins=[ledger])
     report = ledger.report(int(code))
     output = root / "artifacts/companion-ai-offline.json"
     output.parent.mkdir(exist_ok=True)
