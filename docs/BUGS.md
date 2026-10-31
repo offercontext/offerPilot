@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 邮件专项 CI 对无关改动重复执行整套回归（2026-10-31）
+
+**现象：** master PR/push 包括纯文档和 DSH 包变更都会安装两端依赖、重复运行通用单测/静态检查/构建及邮件浏览器、Windows 锁验收。
+
+**根因：** 为保证必需检查始终产生结果而取消 workflow 路径过滤，但没有在 job 内区分专项影响；部分检查已经由完整 CI 覆盖。
+
+**修复：** 保留两个原检查名和全部触发入口，在步骤内部按完整 Git diff 路由。已知无关改动跳过重步骤；web/浏览器 fixture 仅跑浏览器；原生锁测试仅跑 Windows；后端、依赖、未知范围及手动触发全跑。去掉完整 CI 已覆盖的通用测试/ruff/mypy。缺失路由输出、失败/取消/跳过的上游明确失败，不依赖 skipped 自动视为成功。
+
+**教训：** 省略重任务必须先取得明确无关证据；PR 使用 base→merge candidate、push 使用全部 before→after，重命名要保留旧路径。专项检查和完整 CI 的成功不能混称。
+
 ## Windows CMD 包装截断 DSH Git 子目录参数（2026-10-31）
 
 **现象：** PowerShell 显式调用 `dsh.cmd plugin ... add 'github:...#<SHA>&path:/plugins/dsh-offerpilot'` 后，pnpm 报 `ERR_PNPM_INVALID_DEPENDENCY_NAME`。失败日志实际只有 `pnpm add "github:...#<SHA>"`，不含子目录。此前据此将市场安装判为失败并改装 tgz，判断范围过大。
