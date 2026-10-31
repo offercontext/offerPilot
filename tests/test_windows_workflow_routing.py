@@ -9,7 +9,11 @@ They are not a general GitHub Actions or PowerShell interpreter.
 from __future__ import annotations
 
 import itertools
+import os
 import re
+import shutil
+import subprocess
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -316,3 +320,58 @@ def test_dependency_failure_keeps_diagnostics_without_checkout_and_success_keeps
         "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
         "HELPER_SAFETY_RESULT", "SHARD_RESULT", "MANIFEST_RESULT",
     }
+
+
+@pytest.mark.parametrize("dependency,result", [(None, "success")] + [
+    (dependency, result)
+    for dependency in ("HELPER_SAFETY_RESULT", "SHARD_RESULT", "MANIFEST_RESULT")
+    for result in ("failure", "cancelled", "skipped", None)
+])
+def test_dependency_preflight_native_exit_and_evidence(tmp_path, dependency, result):
+    shell = shutil.which("pwsh")
+    if not shell:
+        if os.name == "nt":
+            pytest.fail("Windows workflow requires pwsh; native preflight must not be skipped")
+        pytest.skip("Native preflight requires pwsh (mandatory on Windows)")
+    # Execute the actual workflow body, without checkout or repository dependencies.
+    script = textwrap.dedent(_dependency_preflight().split("        run: |\n", 1)[1])
+    launcher = tmp_path / "preflight.ps1"
+    launcher.write_text("$ErrorActionPreference = 'Stop'\n" + script, encoding="utf-8")
+    runner_temp = tmp_path / "runner temp"
+    runner_temp.mkdir()
+    workspace = tmp_path / "empty workspace"
+    workspace.mkdir()
+    summary = tmp_path / "step summary.txt"
+    env = os.environ.copy()
+    env.update(
+        RUNNER_TEMP=str(runner_temp), GITHUB_STEP_SUMMARY=str(summary),
+        GITHUB_SHA="fixture-commit", GITHUB_SERVER_URL="https://github.com",
+        GITHUB_REPOSITORY="fixture/repository", GITHUB_RUN_ID="123", GITHUB_RUN_ATTEMPT="2",
+        HELPER_SAFETY_RESULT="success", SHARD_RESULT="success", MANIFEST_RESULT="success",
+    )
+    if dependency:
+        if result is None:
+            env.pop(dependency)  # Missing, not merely an explicitly empty value.
+        else:
+            env[dependency] = result
+    completed = subprocess.run(
+        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(launcher)],
+        cwd=workspace, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
+    )
+    assert (completed.returncode == 0) is (dependency is None), completed.stderr
+    if dependency:
+        expected_error = ("Linux helper safety must succeed" if dependency == "HELPER_SAFETY_RESULT"
+                          else "Collection and all shards must succeed")
+        assert expected_error in completed.stderr
+    expected = [
+        "Full regression dependency preflight (all must be success).",
+        "Commit: fixture-commit",
+        "Run: https://github.com/fixture/repository/actions/runs/123",
+        "Attempt: 2",
+        f"Linux helper safety: {env.get('HELPER_SAFETY_RESULT', '')}",
+        f"Pytest manifest: {env.get('MANIFEST_RESULT', '')}",
+        f"Pytest shards: {env.get('SHARD_RESULT', '')}",
+    ]
+    assert (runner_temp / "full-regression-preflight.txt").read_text(encoding="utf-8-sig").splitlines() == expected
+    assert summary.read_text(encoding="utf-8-sig").splitlines() == expected
+    assert list(workspace.iterdir()) == []
