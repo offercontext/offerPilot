@@ -2,7 +2,6 @@
 
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
-import json
 import threading
 
 import pytest
@@ -70,7 +69,7 @@ def test_successful_provider_check_does_not_cache_equal_nested_replacement():
         module._bundle_view_matches_integrity_snapshot(contract, expected)
 
 
-def test_target_view_drift_during_other_view_scan_is_still_rejected(tmp_path, monkeypatch):
+def test_target_view_drift_during_other_view_scan_is_still_rejected(monkeypatch):
     bundle, _, _ = _bundle()
     provider = bundle.provider_view()
     token = object.__getattribute__(provider, "bundle_instance_token")
@@ -111,15 +110,15 @@ def test_target_view_drift_during_other_view_scan_is_still_rejected(tmp_path, mo
         finally:
             resume.set()
         outcome = future.result(timeout=3)
-    (tmp_path / "scan-mutation-observation.json").write_text(json.dumps(dict(
-        target_checked_before_pause=checked_before_pause, outcome=outcome,
-    )))
-    assert outcome == "ValueError"
+    assert outcome == "ValueError", {
+        "target_checked_before_pause": checked_before_pause,
+        "outcome": outcome,
+    }
 
 
 @pytest.mark.parametrize("operation", ["capture", "match"])
 def test_provider_drift_during_snapshot_field_reads_is_still_rejected(
-    tmp_path, monkeypatch, operation,
+    monkeypatch, operation,
 ):
     contract = synthetic_provider_contract()
     expected = module._bundle_view_integrity_snapshot(contract)
@@ -159,7 +158,4 @@ def test_provider_drift_during_snapshot_field_reads_is_still_rejected(
         finally:
             resume.set()
         outcome = future.result(timeout=3)
-    (tmp_path / "provider-last-check-observation.json").write_text(json.dumps(dict(
-        operation=operation, outcome=outcome,
-    )))
-    assert outcome == "ValueError"
+    assert outcome == "ValueError", {"operation": operation, "outcome": outcome}
