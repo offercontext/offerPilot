@@ -388,6 +388,30 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
+      - name: Require successful dependencies before regression setup
+        env:
+          SHARD_RESULT: ${{ needs.pytest-shards.result }}
+          MANIFEST_RESULT: ${{ needs.pytest-manifest.result }}
+          HELPER_SAFETY_RESULT: ${{ needs.simplification-helper-safety.result }}
+        run: |
+          # Outside the checkout tree so evidence survives checkout cleanup.
+          $report = @(
+            "Full regression dependency preflight (all must be success).",
+            "Commit: $env:GITHUB_SHA",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Linux helper safety: $env:HELPER_SAFETY_RESULT",
+            "Pytest manifest: $env:MANIFEST_RESULT",
+            "Pytest shards: $env:SHARD_RESULT"
+          )
+          $report | Tee-Object -FilePath "$env:RUNNER_TEMP/full-regression-preflight.txt"
+          $report | Add-Content $env:GITHUB_STEP_SUMMARY
+          if ($env:HELPER_SAFETY_RESULT -ne 'success') {
+            throw "Linux helper safety must succeed; skipped, failed or missing is not success"
+          }
+          if ($env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success') {
+            throw "Collection and all shards must succeed; timeout/cancellation/skipped is not success"
+          }
       - uses: actions/checkout@v4
         with:
           # Frontend source gates audit historical ranges and HEAD ancestry.
@@ -428,25 +452,23 @@ jobs:
           npm.cmd ci --prefix web
           if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
       - name: Verify full pytest evidence and complete every remaining release phase
-        env:
-          SHARD_RESULT: ${{ needs.pytest-shards.result }}
-          MANIFEST_RESULT: ${{ needs.pytest-manifest.result }}
-          HELPER_SAFETY_RESULT: ${{ needs.simplification-helper-safety.result }}
         run: |
           New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
           Start-Transcript -Path desktop/ci-evidence/full-release-gate.log
-          if ($env:HELPER_SAFETY_RESULT -ne 'success') {
-            throw "Linux helper safety must succeed; skipped, failed or missing is not success"
-          }
-          if ($env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success') {
-            throw "Collection and all shards must succeed; timeout/cancellation/skipped is not success"
-          }
           # This verifies exact execution coverage before ruff, mypy, frontend
           # tests/build, real CLI/HTTP smoke, local verification and install gate.
           # Runtime skips remain explicitly disclosed as skips, never passed tests.
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence
           if ($LASTEXITCODE -ne 0) { throw "Complete repository release gate failed" }
           Stop-Transcript
+      - name: Preserve dependency preflight even without checkout
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-full-regression-preflight-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/full-regression-preflight.txt
+          if-no-files-found: warn
+          retention-days: 7
       - name: Preserve full gate evidence even on failure
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

@@ -149,6 +149,8 @@ def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
 @pytest.mark.parametrize("job", ["pytest-manifest", "pytest-shards", "full-regression"])
 def test_regression_jobs_restore_and_verify_history_before_expensive_work(job):
     steps = re.split(r"^      - ", _job(job), flags=re.M)[1:]
+    if job == "full-regression":
+        assert steps.pop(0) == _dependency_preflight()
     assert steps[0].startswith("uses: actions/checkout@v4\n")
     assert re.search(r"^        with:\n(?:          #[^\n]*\n)*"
                      r"          fetch-depth: 0\n          persist-credentials: false\n", steps[0], re.M)
@@ -240,3 +242,77 @@ def test_final_status_requires_both_jobs_success(package_result, regression_resu
     assert status.count("throw ") == 1
     assert not re.search(r"\b(exit|return|continue-on-error)\b", status)
     assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in status
+
+
+def _dependency_preflight() -> str:
+    steps = re.split(r"^      - ", _job("full-regression"), flags=re.M)[1:]
+    assert steps[0].startswith("name: Require successful dependencies before regression setup\n")
+    assert steps[1].startswith("uses: actions/checkout@v4\n")
+    return steps[0]
+
+
+@pytest.mark.parametrize(
+    "results", tuple(itertools.product(("success", "failure", "cancelled", "skipped", ""), repeat=3)),
+)
+def test_dependency_preflight_rejects_every_non_success_before_setup(results):
+    preflight = _dependency_preflight()
+    names = ("HELPER_SAFETY_RESULT", "SHARD_RESULT", "MANIFEST_RESULT")
+    for name, job in zip(names, ("simplification-helper-safety", "pytest-shards", "pytest-manifest")):
+        assert f"{name}: ${{{{ needs.{job}.result }}}}" in preflight
+    # Bounded source-contract evaluator, not a PowerShell runtime simulation.
+    # Require unconditional throw bodies and exactly the original two guards.
+    guards = re.findall(r'if \(([^\n]+)\) \{\n\s+throw "[^\n]+"\n\s+\}', preflight)
+    assert guards == [
+        "$env:HELPER_SAFETY_RESULT -ne 'success'",
+        "$env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success'",
+    ]
+    values = dict(zip(names, results))
+    rejects = any(
+        any(values[name].casefold() != expected.casefold()
+            for name, expected in re.findall(r"\$env:(\w+) -ne '([^']+)'", guard))
+        for guard in guards
+    )
+    assert rejects is (results != ("success", "success", "success"))
+    assert preflight.count("if (") == preflight.count("throw ") == 2
+    assert not re.search(r"\b(exit|return|continue-on-error)\b", preflight)
+    assert not re.search(r"^        if:", preflight, re.M)
+
+
+def test_dependency_failure_keeps_diagnostics_without_checkout_and_success_keeps_full_gate():
+    preflight = _dependency_preflight()
+    # Checkout cleans the workspace; diagnostics must live outside it on both paths.
+    evidence = '"$env:RUNNER_TEMP/full-regression-preflight.txt"'
+    assert f"$report | Tee-Object -FilePath {evidence}" in preflight
+    assert "$report | Add-Content $env:GITHUB_STEP_SUMMARY" in preflight
+    assert preflight.index("Tee-Object") < preflight.index("throw ")
+    for field in ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+                  "HELPER_SAFETY_RESULT", "SHARD_RESULT", "MANIFEST_RESULT"):
+        assert f"$env:{field}" in preflight
+    steps = re.split(r"^      - ", _job("full-regression"), flags=re.M)[1:]
+    # No new skip/continue-on-error policy: success still reaches the complete gate,
+    # while a failed first step skips setup and always preserves the diagnostic.
+    assert re.findall(r"^        if: (.+)$", "".join(steps), re.M) == ["${{ always() }}"] * 2
+    assert "continue-on-error:" not in "".join(steps)
+    gate = next(step for step in steps if step.startswith("name: Verify full pytest evidence"))
+    assert "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence" in gate
+    assert 'if ($LASTEXITCODE -ne 0) { throw "Complete repository release gate failed" }' in gate
+    assert "needs." not in gate
+    upload = steps[-1]
+    assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in upload
+    assert upload.split("          path: |\n", 1)[1].strip() == (
+        "desktop/ci-evidence/\n            pytest-evidence/"
+    )
+    diagnostic = steps[-2]
+    assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in diagnostic
+    assert "name: windows-full-regression-preflight-${{ github.sha }}-${{ github.run_attempt }}" in diagnostic
+    assert "path: ${{ runner.temp }}/full-regression-preflight.txt\n" in diagnostic
+    assert "retention-days: 7\n" in diagnostic
+    # Upload only this diagnostic, not runner temp files, secrets or the environment.
+    assert re.findall(r"^          path: (.+)$", diagnostic, re.M) == [
+        "${{ runner.temp }}/full-regression-preflight.txt",
+    ]
+    assert set(re.findall(r"\$env:(\w+)", preflight)) == {
+        "RUNNER_TEMP", "GITHUB_STEP_SUMMARY", "GITHUB_SHA", "GITHUB_SERVER_URL",
+        "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT",
+        "HELPER_SAFETY_RESULT", "SHARD_RESULT", "MANIFEST_RESULT",
+    }
