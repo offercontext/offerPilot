@@ -135,6 +135,34 @@ $results = @($files | ForEach-Object {
 
 
 @pytest.mark.skipif(not _powershell_available(), reason="Windows PowerShell is required")
+def test_frontend_gate_collects_localization_and_rejects_changed_test_support(tmp_path: Path) -> None:
+    repository_root, script, web_root = _make_gate_fixture(tmp_path)
+    for relative in ("src/i18n/catalogs.test.ts", "tests/localization/mounted.test.tsx"):
+        path = web_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("it('localization', () => expect(true).toBe(true));\n", encoding="utf-8")
+    support = web_root / "tests/localization/messages.json"
+    support.write_text('{"label":"before"}\n', encoding="utf-8")
+    result_dir = tmp_path / "results"
+    collected = _run_gate(result_dir, "-Collect", script=script, repository_root=repository_root)
+    assert collected.returncode == 0, collected.stdout + collected.stderr
+    manifest_path = result_dir / "frontend-manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    assert set(manifest["groups"]["lib"]) == {
+        "src\\lib\\lib.test.ts", "src\\i18n\\catalogs.test.ts",
+        "tests\\localization\\mounted.test.tsx",
+    }
+    assert len(manifest["files"]) == 12
+    support.write_text('{"label":"after"}\n', encoding="utf-8")
+    environment = _fake_npm_environment(tmp_path, manifest_path, web_root)
+    environment["FAKE_VITEST_GROUP"] = "lib"
+    run = _run_gate(result_dir, "-Group", "lib", env=environment,
+                    script=script, repository_root=repository_root)
+    assert run.returncode != 0
+    assert "source_hash does not match" in (run.stdout + run.stderr)
+
+
+@pytest.mark.skipif(not _powershell_available(), reason="Windows PowerShell is required")
 def test_frontend_group_rejects_missing_expected_file(tmp_path: Path) -> None:
     repository_root, script, web_root = _make_gate_fixture(tmp_path)
     result_dir = tmp_path / "results"

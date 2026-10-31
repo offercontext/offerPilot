@@ -44,7 +44,7 @@ function Get-TestFiles {
 
 function Get-Groups([string[]]$TestFiles) {
     $groups = [ordered]@{
-        agent = @($TestFiles | Where-Object { $_ -match '\\test_(ai_|chat_|config|settings_api|auth_api|cli)' })
+        agent = @($TestFiles | Where-Object { $_ -match '\\agent_loop\\' -or $_ -match '\\test_(ai_|chat_|config|settings_api|auth_api|cli)' })
         domain = @($TestFiles | Where-Object { $_ -match '\\test_(applications|events|notes|resumes|offers|questions|jd_resume_ai_api|module_workflows)' })
         knowledge = @($TestFiles | Where-Object { $_ -match '\\test_(knowledge|ki)' })
         proposals = @($TestFiles | Where-Object { $_ -match '\\test_(opportunity_fit|interview|material|evidence|smoke)' })

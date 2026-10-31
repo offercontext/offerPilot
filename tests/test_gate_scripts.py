@@ -54,8 +54,22 @@ def gate(request, tmp_path):
                 f'command="{command} $*"\n'
                 'printf "%s\\n" "$command" >> "$GATE_LOG"\n'
                 'if [[ "$command" == "$GATE_FAIL" ]]; then exit 7; fi\n'
-                'if [[ "$command" == "curl "* ]]; then '
-                "printf '%s\\n' '{\"status\":\"ok\"}' '<div id=\"root\"></div>'; fi\n"
+                'if [[ "$command" == "curl "* && "${GATE_CURL_NONZERO:-0}" == 1 ]]; then\n'
+                '  if [[ -f "$GATE_CURL_READY" ]]; then exit 19; fi\n'
+                '  : > "$GATE_CURL_READY"\nfi\n'
+                'if [[ "$command" == "uv run python -m scripts.test_selection.backend_gate "* ]]; then\n'
+                '  if [[ "${GATE_BACKEND_FAIL:-0}" != 0 ]]; then exit "$GATE_BACKEND_FAIL"; fi\n'
+                '  if [[ "$command" == *" --verify" && "${GATE_BACKEND_RECEIPT:-0}" == 1 ]]; then printf "%s\\n" "BACKEND_FULL_VERIFIED '
+                + "b" * 64
+                + '"; fi\nfi\n'
+                'if [[ "$command" == "uv run oc eval release-execute "* && "${GATE_EVAL_FAIL:-0}" != 0 ]]; then exit "$GATE_EVAL_FAIL"; fi\n'
+                'if [[ "$command" == "uv run oc eval release-receipt "* && "${GATE_EVAL_RECEIPT:-0}" == 1 ]]; then printf "%s\\n" "EVAL_ENFORCE_VERIFIED '
+                + "a" * 64
+                + '"; fi\n'
+                + 'if [[ "$command" == "curl "* ]]; then '
+                'if [[ "${GATE_CURL_NO_MATCH:-0}" == 1 ]]; then printf "%s\\n" invalid-response; else '
+                "printf '%s\\n' '{\"status\":\"ok\"}' '<div id=\"root\"></div>'; fi; "
+                'if [[ "${GATE_CURL_STREAM:-0}" == 1 ]]; then printf "%262144s\\n" trailing; fi; fi\n'
                 'if [[ "$command" == "npm run build" && "${GATE_NO_ARTIFACT:-}" != 1 ]]; '
                 "then mkdir -p dist; printf '<div id=\"root\"></div>' > dist/index.html; fi\n",
                 encoding="utf-8",
@@ -68,6 +82,8 @@ def gate(request, tmp_path):
             (bin_dir / f"{command}.cmd").write_text(
                 "@echo off\n"
                 f'echo {command} %*>>"%GATE_LOG%"\n'
+                + ('if "%~1 %~2 %~3"=="run oc eval" goto eval_stub\n' if command == "uv" else "")
+                + ('if "%~1 %~2 %~3 %~4"=="run python -m scripts.test_selection.backend_gate" goto backend_stub\n' if command == "uv" else "")
                 + (
                     'if "%GATE_FAIL%"=="python" exit /b 7\n'
                     'if "%GATE_FAIL%"=="python-prepare" if "%~2"=="prepare" exit /b 7\n'
@@ -91,13 +107,31 @@ def gate(request, tmp_path):
                     if command == "uv"
                     else ""
                 )
-                + "exit /b 0\n",
+                + "exit /b 0\n"
+                + (
+                    ':backend_stub\nif not "%GATE_BACKEND_FAIL%"=="0" exit /b %GATE_BACKEND_FAIL%\n'
+                    'if "%~7"=="--verify" if "%GATE_BACKEND_RECEIPT%"=="1" echo BACKEND_FULL_VERIFIED '
+                    + "b" * 64 + '\nexit /b 0\n'
+                    if command == "uv" else ""
+                )
+                + (
+                    ':eval_stub\nif "%~4"=="release-execute" if not "%GATE_EVAL_FAIL%"=="0" exit /b %GATE_EVAL_FAIL%\nif "%~4"=="release-receipt" if "%GATE_EVAL_RECEIPT%"=="1" echo EVAL_ENFORCE_VERIFIED '
+                    + "a" * 64
+                    + "\nexit /b 0\n"
+                    if command == "uv"
+                    else ""
+                ),
                 encoding="utf-8",
             )
         launcher = repo / "launch.ps1"
         launcher.write_text(
             r"""param([string]$Target, [int]$Port = 18765, [switch]$SkipBuild,
-    [switch]$RealAi, [switch]$Install, [switch]$Docker, [switch]$KeepArtifacts, [string]$PytestEvidence)
+    [switch]$RealAi, [switch]$Install, [switch]$Docker,
+    [switch]$KeepArtifacts, [string]$PytestEvidence,
+    [string]$EvalSuite, [string]$EvalPolicy, [string]$EvalVariants, [string]$EvalOutput,
+    [string]$EvalBaselineId, [string]$EvalBaselineStore, [string]$EvalReview,
+    [string]$EvalExperiment, [string]$EvalProviderProfile, [string]$EvalGrant,
+    [switch]$IsolateBackendTests, [string]$BackendOutput)
 $ErrorActionPreference = 'Stop'
 function Start-Process {
     Add-Content $env:GATE_LOG 'server start'
@@ -138,8 +172,30 @@ finally { Set-Content $env:GATE_RESTORED_DATA $env:OFFERPILOT_DATA }
         env["GATE_CLEANUP_LOG"] = str(repo / "cleanup.log")
         env["GATE_RESTORED_DATA"] = str(repo / "restored-data.txt")
 
-    def run(script="release-gate", *, fail="", args=(), artifact=True, cleanup_fail=False):
+    def run(
+        script="release-gate",
+        *,
+        fail="",
+        args=(),
+        artifact=True,
+        cleanup_fail=False,
+        eval_fail=0,
+        eval_receipt=False,
+        backend_fail=0,
+        backend_receipt=False,
+        curl_stream=False,
+        curl_nonzero=False,
+        curl_no_match=False,
+    ):
         env["GATE_FAIL"] = fail
+        env["GATE_EVAL_FAIL"] = str(eval_fail)
+        env["GATE_EVAL_RECEIPT"] = "1" if eval_receipt else "0"
+        env["GATE_BACKEND_FAIL"] = str(backend_fail)
+        env["GATE_BACKEND_RECEIPT"] = "1" if backend_receipt else "0"
+        env["GATE_CURL_STREAM"] = "1" if curl_stream else "0"
+        env["GATE_CURL_NONZERO"] = "1" if curl_nonzero else "0"
+        env["GATE_CURL_NO_MATCH"] = "1" if curl_no_match else "0"
+        env["GATE_CURL_READY"] = str(repo / 'curl-ready')
         env["GATE_CLEANUP_FAIL"] = "1" if cleanup_fail else "0"
         if not artifact:
             (repo / "web/dist/index.html").unlink(missing_ok=True)
@@ -189,6 +245,122 @@ def test_release_builds_once_and_retains_cli_smoke_and_local_verify(gate):
     assert "Release gate passed" in result.stdout
 
 
+@pytest.mark.parametrize('failure', [0, 1, 2, 3])
+def test_full_isolated_backend_gate_preserves_native_failure_and_remaining_checks(gate, failure):
+    shell, run, repo = gate
+    output = str(repo / 'backend evidence')
+    args = (['--isolate-backend-tests', '--backend-output', output] if shell == 'bash'
+            else ['-IsolateBackendTests', '-BackendOutput', output])
+    result, calls = run(args=args, backend_fail=failure, backend_receipt=True)
+    assert any('python -m scripts.test_selection.backend_gate' in call for call in calls)
+    assert ('Release gate passed' in result.stdout) == (failure == 0)
+    assert (result.returncode == 0) == (failure == 0)
+    assert ('uv run ruff check .' in calls) == (failure == 0)
+    assert ('uv run oc verify --profile local --static-dir web/dist' in calls) == (failure == 0)
+    assert 'uv run pytest -q' not in calls
+
+
+def test_isolated_backend_zero_exit_without_receipt_is_rejected(gate):
+    shell, run, repo = gate
+    args = (['--isolate-backend-tests', '--backend-output', str(repo / 'backend')] if shell == 'bash'
+            else ['-IsolateBackendTests', '-BackendOutput', str(repo / 'backend')])
+    result, calls = run(args=args)
+    assert result.returncode != 0 and 'Release gate passed' not in result.stdout
+    assert 'uv run ruff check .' not in calls
+
+
+def test_isolated_backend_mode_requires_explicit_output(gate):
+    shell, run, _ = gate
+    result, calls = run(args=['--isolate-backend-tests' if shell == 'bash' else '-IsolateBackendTests'])
+    assert result.returncode != 0 and not calls
+
+
+@pytest.mark.parametrize("gate", ["powershell"], indirect=True)
+def test_powershell_release_rejects_conflicting_backend_modes_before_commands(gate):
+    _shell, run, repo = gate
+    result, calls = run(args=[
+        "-PytestEvidence", "pytest-evidence", "-IsolateBackendTests",
+        "-BackendOutput", str(repo / "backend"),
+    ])
+    assert result.returncode != 0 and "mutually exclusive" in result.stdout
+    assert calls == []
+
+
+def eval_arguments(shell, repo):
+    names = [
+        "suite",
+        "policy",
+        "variants",
+        "output",
+        "baseline-id",
+        "baseline-store",
+        "review",
+        "experiment",
+    ]
+    return [
+        value
+        for name in names
+        for value in [
+            "--eval-" + name
+            if shell == "bash"
+            else "-Eval" + "".join(p.title() for p in name.split("-")),
+            str(repo / ("eval-" + name)),
+        ]
+    ]
+
+
+def test_release_eval_missing_parameters_stops_before_product_checks(gate):
+    shell, run, _ = gate
+    result, calls = run(args=["--eval-suite" if shell == "bash" else "-EvalSuite", "missing.json"])
+    assert result.returncode != 0 and not calls
+    assert "Release gate passed" not in result.stdout
+
+
+def test_release_eval_zero_exit_without_preflight_artifact_is_rejected(gate):
+    shell, run, repo = gate
+    result, calls = run(args=eval_arguments(shell, repo))
+    assert result.returncode != 0
+    assert len(calls) == 1 and "release-preflight" in calls[0]
+    assert "Release gate passed" not in result.stdout
+
+
+def test_release_eval_zero_exit_without_final_receipt_is_rejected(gate):
+    shell, run, repo = gate
+    output = repo / "eval-output"
+    output.mkdir()
+    (output / "release-preflight.json").write_text('{"synthetic":true}')
+    result, calls = run(args=eval_arguments(shell, repo))
+    assert result.returncode != 0
+    assert any("release-execute" in c for c in calls)
+    assert "Release gate passed" not in result.stdout
+
+
+def test_release_eval_forged_receipt_without_enforce_confirmation_is_rejected(gate):
+    shell, run, repo = gate
+    output = repo / "eval-output"
+    output.mkdir()
+    for name in ["release-preflight.json", "release-evaluation.json"]:
+        (output / name).write_text('{"synthetic_forged":true}')
+    result, calls = run(args=eval_arguments(shell, repo))
+    assert result.returncode != 0
+    assert any("release-receipt" in c for c in calls)
+    assert "Release gate passed" not in result.stdout
+
+
+@pytest.mark.parametrize("code", [0, 1, 2, 3])
+def test_release_eval_propagates_each_exit_and_requires_enforce_confirmation(gate, code):
+    shell, run, repo = gate
+    output = repo / "eval-output"
+    output.mkdir()
+    for name in ["release-preflight.json", "release-evaluation.json"]:
+        (output / name).write_text('{"synthetic_orchestration_fixture":true}')
+    result, calls = run(args=eval_arguments(shell, repo), eval_fail=code, eval_receipt=True)
+    assert any("release-execute" in c for c in calls)
+    assert (result.returncode == 0) == (code == 0), result.stdout
+    assert ("Release gate passed" in result.stdout) == (code == 0)
+    assert any("release-receipt" in c for c in calls) == (code == 0)
+
+
 @pytest.mark.parametrize(
     "step",
     [
@@ -214,6 +386,26 @@ def test_standalone_smoke_builds_even_when_dist_exists(gate):
     result, calls = run("local-smoke")
     assert result.returncode == 0, result.stdout + result.stderr
     assert calls.count("npm run build") == 1
+
+
+def test_bash_smoke_consumes_complete_valid_http_responses(gate):
+    shell, run, _ = gate
+    if shell != 'bash':
+        pytest.skip('Bash pipefail and grep stream regression')
+    result, calls = run('local-smoke', curl_stream=True)
+    assert result.returncode == 0, result.stdout
+    assert 'uv run oc smoke --static-dir web/dist' in calls
+
+
+@pytest.mark.parametrize('failure', ['curl_nonzero', 'curl_no_match'])
+def test_bash_smoke_rejects_http_failure_and_missing_match(gate, failure):
+    shell, run, _ = gate
+    if shell != 'bash':
+        pytest.skip('Bash curl/grep pipeline regression')
+    result, calls = run('local-smoke', **{failure: True})
+    assert result.returncode != 0
+    assert 'uv run oc smoke --static-dir web/dist' not in calls
+    assert 'Local smoke passed' not in result.stdout
 
 
 def test_smoke_skip_build_reuses_artifact_and_preserves_port(gate):

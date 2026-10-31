@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import time
+from threading import Event
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
@@ -188,3 +189,83 @@ def test_runtime_confirmation_allocates_next_generation_without_provider_retry(t
         assert finished["state"] == "completed", finished
         assert finished["execution_generation"] == second["execution_generation"]
         assert model.calls == 1
+
+
+class _BlockedStatusModel:
+    def __init__(self) -> None:
+        self.entered = Event()
+        self.release = Event()
+
+    def complete(self, messages, tools):  # type: ignore[no-untyped-def]
+        self.entered.set()
+        assert self.release.wait(30)
+        return Assistant(content="迟到的回复")
+
+
+def test_runtime_status_rereads_durable_terminal_after_manager_transition(tmp_path, monkeypatch) -> None:
+    model = _BlockedStatusModel()
+    app = create_app(data_dir=tmp_path, chat_model=model)
+    with TestClient(app) as client:
+        submission = client.post("/api/pilot/runtime/v1/turns", json={
+            "request_id": str(uuid4()), "conversation_id": 0, "message": "状态读取竞态",
+        }).json()
+        manager = app.state.runtime_manager
+        original_status = manager.status
+        transition = True
+
+        def timeout_before_status(turn_id, generation=None):
+            nonlocal transition
+            if transition:
+                transition = False
+                # Reproduce the watchdog winning between the durable read and
+                # the manager read, using its real timeout/control path.
+                handle = manager._lookup(turn_id, generation)
+                with manager._lock:
+                    manager._finish_unknown_locked(handle, "deadline")
+            return original_status(turn_id, generation)
+
+        try:
+            assert model.entered.wait(30)
+            monkeypatch.setattr(manager, "status", timeout_before_status)
+            url = submission["links"]["status_url"]
+            raced = client.get(url)
+            assert raced.status_code == 200, raced.text
+            assert original_status(submission["turn_id"], 1)["state"] == "result_unknown"
+            assert raced.json()["state"] == "interrupted"
+            assert raced.json()["execution"]["state"] == "interrupted"
+            assert raced.json()["execution_generation"] == 1
+            assert raced.json()["terminal"] == {}
+            model.release.set()
+            assert manager.wait(submission["turn_id"], timeout=30)
+            assert client.get(url).json()["state"] == "interrupted"
+        finally:
+            model.release.set()
+
+
+def test_runtime_status_rechecks_source_visibility_after_manager_read(tmp_path, monkeypatch) -> None:
+    model = _BlockedStatusModel()
+    app = create_app(data_dir=tmp_path, chat_model=model)
+    with TestClient(app) as client:
+        application = client.post("/api/applications", json={
+            "company_name": "状态来源", "position_name": "工程师",
+        }).json()
+        submission = client.post("/api/pilot/runtime/v1/turns", json={
+            "request_id": str(uuid4()), "conversation_id": 0,
+            "context_type": "application", "context_ref": str(application["id"]),
+            "message": "来源撤回竞态",
+        }).json()
+        manager = app.state.runtime_manager
+        original_status = manager.status
+
+        def withdraw_before_status(turn_id, generation=None):
+            deleted = client.delete(f"/api/applications/{application['id']}")
+            assert deleted.status_code == 200, deleted.text
+            return original_status(turn_id, generation)
+
+        try:
+            assert model.entered.wait(30)
+            monkeypatch.setattr(manager, "status", withdraw_before_status)
+            response = client.get(submission["links"]["status_url"])
+            assert response.status_code == 404, response.text
+        finally:
+            model.release.set()

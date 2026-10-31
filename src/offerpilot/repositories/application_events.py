@@ -314,7 +314,10 @@ class ApplicationEventsRepository:
         constraint: ApplicationScopeConstraint,
         event_id: int,
         data: ApplicationEventCreate,
+        *,
+        provided_fields: frozenset[str] | None = None,
     ) -> Optional[ApplicationEvent]:
+        """Write an explicit field set atomically, or retain full replacement when omitted."""
         # 原事件必须落在授权范围，目标 application_id 也必须满足约束；防止借更新把事件移出范围。
         binding = self._require_scoped(constraint)
         event_id = require_scoped_positive_int64(event_id, "application event id")
@@ -337,8 +340,19 @@ class ApplicationEventsRepository:
             if application_id != allowed_id:
                 raise ScopeAccessDenied("application scope denied")
             statement = statement.where(ApplicationEvent.application_id == allowed_id)
+        values = _event_values(data, tags_key="_tags")
+        if provided_fields is not None:
+            public_fields = frozenset("tags" if key == "_tags" else key for key in values)
+            if not provided_fields or not provided_fields.issubset(public_fields):
+                raise ValueError("invalid application event update fields")
+            # Omitted columns stay in the database, including concurrently changed values.
+            values = {
+                key: value
+                for key, value in values.items()
+                if ("tags" if key == "_tags" else key) in provided_fields
+            }
         statement = (
-            statement.values(**_event_values(data, tags_key="_tags"))
+            statement.values(**values)
             .returning(ApplicationEvent)
             .execution_options(populate_existing=True)
         )

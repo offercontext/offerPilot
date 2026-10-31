@@ -1475,6 +1475,24 @@ class ProductionToolMetadataComponents(TransientToolRuntimeValue):
         self._ensure_integrity()
         return self._pending_persistence_route_port
 
+    def pending_persistence_ports(
+        self,
+        expected_bundle: ToolMetadataBundleV1,
+    ) -> tuple[ToolOperationMetadataPort, PendingPersistenceRoutePort]:
+        """Validate one complete graph before handing off its paired ports.
+
+        Reading the public ports and then comparing their public Bundle tokens
+        repeats the same recursive graph checks. Keep this handoff atomic and
+        revalidate on every call; nothing is cached across invocations.
+        """
+
+        if expected_bundle is not self._bundle:
+            raise ValueError("Runtime Tool Metadata Bundle provenance mismatch")
+        self._ensure_integrity()
+        if self._pending_persistence_route_port._operation_port is not self._operation_port:
+            raise ValueError("Runtime Pending Persistence Route Port provenance mismatch")
+        return self._operation_port, self._pending_persistence_route_port
+
     @property
     def compensation_registry(self) -> CompensationHandlerRegistry:
         self._ensure_integrity()

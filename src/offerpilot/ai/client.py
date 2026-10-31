@@ -11,8 +11,6 @@ from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-from litellm import acompletion, completion
-
 from offerpilot.ai.types import Assistant, Message, ToolCall
 from offerpilot.ai.provider_stream import interruptible_stream, provider_control
 from offerpilot.ai.control import AgentLoopControlError
@@ -45,6 +43,23 @@ from offerpilot.image_contracts import (
     ImageReference, ImageInputError, VISION_ADAPTERS, IMAGE_REQUEST_BODY_CAP,
     require_image_call_limits,
 )
+
+
+def _load_provider_sdk() -> Any:
+    """Keep the fixed SDK import lazy and confined to one adapter-owned location."""
+    import litellm
+
+    return litellm
+
+
+def completion(*args: Any, **kwargs: Any) -> Any:
+    """Load the SDK at first use, preserving this module's patchable call boundary."""
+    return _load_provider_sdk().completion(*args, **kwargs)
+
+
+async def acompletion(*args: Any, **kwargs: Any) -> Any:
+    """Keep the async stream boundary lazy as well as patchable."""
+    return await _load_provider_sdk().acompletion(*args, **kwargs)
 
 
 class ProviderCallError(RuntimeError):
@@ -429,10 +444,20 @@ class ConfiguredAIClient:
         tool_calls: dict[int, dict[str, Any]] = {}
         provider_blocks: dict[str, Any] = {}
         check_active = provider_control()
+
+        def invoke_stream() -> Any:
+            if check_active is None:
+                return completion(**payload)
+            check_active()
+            # SDK initialization can block. Keep it on the Agent worker so
+            # the shared transport loop can still cancel other requests.
+            _load_provider_sdk()
+            check_active()
+            return interruptible_stream(lambda: acompletion(**payload), check_active)
+
         stream = _private_image_completion(
             provider, payload, private=any(message.images for message in messages),
-            invoke=lambda: interruptible_stream(lambda: acompletion(**payload), check_active)
-            if check_active is not None else completion(**payload),
+            invoke=invoke_stream,
         )
         try:
             for chunk in stream:

@@ -1,0 +1,291 @@
+{
+  "schema_version": 2,
+  "policy_id": "core-release-v5",
+  "version": 5,
+  "suite_id": "harness-core-v1",
+  "suite_hash": "4df1ca2d5eba1846fdd1f1adfe0d02e9a9de9aace56a463e8e1064aa4317eed1",
+  "purposes": [
+    "release"
+  ],
+  "absolute": [
+    {
+      "execution_item_id": "E01.runtime_read",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "query.exact_result"
+      ]
+    },
+    {
+      "execution_item_id": "E02.runtime_clarify",
+      "mode": "deterministic",
+      "case_version": 2,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "clarify.before_write",
+        "scope.correct_target"
+      ]
+    },
+    {
+      "execution_item_id": "E03.runtime_reject",
+      "mode": "deterministic",
+      "case_version": 2,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "reject.no_continuation"
+      ]
+    },
+    {
+      "execution_item_id": "E04.runtime_edit",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "approval.effective_payload",
+        "receipt.edited"
+      ]
+    },
+    {
+      "execution_item_id": "E05.runtime_replay",
+      "mode": "deterministic",
+      "case_version": 2,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "operation.idempotent"
+      ]
+    },
+    {
+      "execution_item_id": "E05.runtime_conflict",
+      "mode": "deterministic",
+      "case_version": 2,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "request.conflict"
+      ]
+    },
+    {
+      "execution_item_id": "E06.legacy_saved",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "full_recovery",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "recovery.saved_receipt",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E06.runtime_saved",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "observation_only",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "observation.saved",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E06.legacy_missing",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "full_recovery",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "recovery.pending_then_expired",
+        "recovery.saved_receipt",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E06.runtime_missing_observe",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "observation_only",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "observation.missing",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E07.runtime_reattach",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "stream.same_generation",
+        "budget.continuity"
+      ]
+    },
+    {
+      "execution_item_id": "E08.runtime_unknown",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "unknown.fenced"
+      ]
+    },
+    {
+      "execution_item_id": "E08.runtime_deadline",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "budget.product_origin",
+        "budget.actual_limits",
+        "budget.continuity"
+      ]
+    },
+    {
+      "execution_item_id": "E08.runtime_model_budget",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "budget.product_origin",
+        "budget.actual_limits"
+      ]
+    },
+    {
+      "execution_item_id": "E08.runtime_tool_budget",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "budget.product_origin",
+        "budget.actual_limits"
+      ]
+    },
+    {
+      "execution_item_id": "E09.memory_override",
+      "mode": "deterministic",
+      "case_version": 2,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.used"
+      ]
+    },
+    {
+      "execution_item_id": "E09.memory_withdraw",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.withdrawn"
+      ]
+    },
+    {
+      "execution_item_id": "E10.knowledge_dual_retrieval",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.used"
+      ]
+    },
+    {
+      "execution_item_id": "E10.evidence_injection",
+      "mode": "deterministic",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.used",
+        "source.no_write_intent"
+      ]
+    }
+  ],
+  "relative": {
+    "baseline_required": true,
+    "approved_baseline_id": null,
+    "block_new_failures": true,
+    "latency_cost": "observe"
+  },
+  "review_rules": [],
+  "exception_rules": [],
+  "independent_review_required": true,
+  "rationale": "Freeze E09 withdrawal and E10 source cases at v3: missing withdrawal observations stay unknown; final input must bind both actual source units and versions, including the unchanged injection stimulus. Nineteen D items, three fresh repeats, all hard rules and independent review remain required. Answer quality and citation grounding remain separately human reviewed; synthetic reference labels do not qualify runtime evidence.",
+  "review_reference": "docs/architecture/harness-evaluation-p2-p3-implementation.md"
+}

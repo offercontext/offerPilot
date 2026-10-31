@@ -416,6 +416,100 @@ def _classification_violations(path: Path, source: str) -> list[str]:
             and isinstance(selection.args[0], ast.Name) and selection.args[0].id == model_name
         )
 
+    def harness_evidence_identity_is_allowed(node: ast.AST) -> bool:
+        # Harness assertions bind evidence to the expected proposal; they do not
+        # select a production executor. Keep the exception to these exact ports.
+        expected = {
+            SRC / "evaluation" / "core_actions.py": (
+                "drive", False,
+                "pending.get('tool_name') != 'update_application_event' "
+                "or args.get('id') != aliases['technical_interview'] "
+                "or instant(args.get('scheduled_at')) != instant('2026-10-14T15:00:00+08:00')",
+            ),
+            SRC / "evaluation" / "runner.py": (
+                "run_trial", False,
+                "pending.get('tool_name') != 'update_application_event' "
+                "or original.get('id') != facts['aliases']['technical_interview'] "
+                "or instant(original.get('scheduled_at')) != instant('2026-10-14T15:00:00+08:00')",
+            ),
+            SRC / "evaluation" / "graders" / "p0.py": (
+                "approval", True,
+                "a.approved and a.pending.get('tool_name') == 'update_application_event' "
+                "and original.get('id') == expected.get('technical_interview') "
+                "and instant(original['scheduled_at']) == instant('2026-10-14T15:00:00+08:00') "
+                "and a.pending.get('operation_id') == a.operation_id",
+            ),
+        }.get(path)
+        if expected is None or not isinstance(node, ast.Compare):
+            return False
+        owner = _enclosing_function(node, parents)
+        owner_name, positive, predicate = expected
+        if (
+            owner is None or owner.name != owner_name
+            or len(node.ops) != 1
+            or not isinstance(node.ops[0], ast.Eq if positive else ast.NotEq)
+            or len(node.comparators) != 1
+            or not isinstance(node.comparators[0], ast.Constant)
+            or node.comparators[0].value != "update_application_event"
+            or not isinstance(node.left, ast.Call)
+            or not isinstance(node.left.func, ast.Attribute)
+            or node.left.func.attr != "get"
+            or node.left.keywords or len(node.left.args) != 1
+            or not isinstance(node.left.args[0], ast.Constant)
+            or node.left.args[0].value != "tool_name"
+        ):
+            return False
+        receiver = node.left.func.value
+        if positive:
+            if not (
+                isinstance(receiver, ast.Attribute) and receiver.attr == "pending"
+                and isinstance(receiver.value, ast.Name) and receiver.value.id == "a"
+            ):
+                return False
+        elif not isinstance(receiver, ast.Name) or receiver.id != "pending":
+            return False
+        container: ast.AST = node
+        parent = parents.get(container)
+        if isinstance(parent, ast.BoolOp):
+            if not isinstance(parent.op, ast.And if positive else ast.Or):
+                return False
+            container, parent = parent, parents.get(parent)
+        # Validate the whole predicate, including every sibling: an additional
+        # execute_prepared() operand must not inherit the identity exception.
+        if ast.dump(container) != ast.dump(ast.parse(predicate, mode="eval").body):
+            return False
+        if not positive:
+            return (
+                isinstance(parent, ast.If) and parent.test is container and not parent.orelse
+                and len(parent.body) == 1 and isinstance(parent.body[0], ast.Raise)
+                and isinstance(parent.body[0].exc, ast.Call)
+                and isinstance(parent.body[0].exc.func, ast.Name)
+                and parent.body[0].exc.func.id == "ProductFailure"
+                and not parent.body[0].exc.keywords and len(parent.body[0].exc.args) == 1
+                and isinstance(parent.body[0].exc.args[0], ast.Constant)
+                and isinstance(parent.body[0].exc.args[0].value, str)
+            )
+        if not (
+            isinstance(parent, ast.Assign) and parent.value is container
+            and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name)
+            and parent.targets[0].id == "proposal_ok"
+        ):
+            return False
+        final = owner.body[-1]
+        if not (
+            isinstance(final, ast.Return) and isinstance(final.value, ast.Call)
+            and isinstance(final.value.func, ast.Name) and final.value.func.id == "result"
+            and not final.value.keywords and len(final.value.args) == 3
+            and isinstance(final.value.args[0], ast.Constant)
+            and final.value.args[0].value == "approval.before_commit"
+            and isinstance(final.value.args[1], ast.Name) and final.value.args[1].id == "proposal_ok"
+            and isinstance(final.value.args[2], ast.Constant)
+            and final.value.args[2].value == "approved_ingress"
+        ):
+            return False
+        uses = [item for item in ast.walk(owner) if isinstance(item, ast.Name) and item.id == "proposal_ok"]
+        return len(uses) == 2 and set(uses) == {parent.targets[0], final.value.args[1]}
+
     def literal_is_allowed(node: ast.AST) -> bool:
         if external_literal_role(path, node, parents, SRC):
             return True
@@ -424,6 +518,7 @@ def _classification_violations(path: Path, source: str) -> list[str]:
             if (
                 smoke_assertion_is_allowed(smoke_owner)
                 or repository_identity_filter_is_allowed(smoke_owner)
+                or harness_evidence_identity_is_allowed(smoke_owner)
             ):
                 return True
             smoke_owner = parents.get(smoke_owner)
@@ -1502,6 +1597,71 @@ def test_tool_specs_allow_only_static_declarations_not_name_switches() -> None:
         SRC / "ai" / "tool_specs" / "applications.py",
         source,
     )
+
+
+@pytest.mark.parametrize(
+    ("module", "owner"),
+    (("core_actions", "drive"), ("runner", "run_trial")),
+)
+def test_harness_proposal_identity_allowlist_is_exact_failure_assertion_only(
+    module: str, owner: str,
+) -> None:
+    path = SRC / "evaluation" / f"{module}.py"
+    predicate = {
+        "core_actions": (
+            "pending.get('tool_name') != 'update_application_event' "
+            "or args.get('id') != aliases['technical_interview'] "
+            "or instant(args.get('scheduled_at')) != instant('2026-10-14T15:00:00+08:00')"
+        ),
+        "runner": (
+            "pending.get('tool_name') != 'update_application_event' "
+            "or original.get('id') != facts['aliases']['technical_interview'] "
+            "or instant(original.get('scheduled_at')) != instant('2026-10-14T15:00:00+08:00')"
+        ),
+    }[module]
+    source = (
+        f"def {owner}(pending, args):\n"
+        f"    if {predicate}:\n"
+        "        raise ProductFailure('wrong original proposal')\n"
+    )
+    assert _classification_violations(path, source) == []
+    assert _classification_violations(Path("fixture.py"), source)
+    for changed in (
+        source.replace(f"def {owner}(", "def dispatch("),
+        source.replace("pending.get", "operation.get"),
+        source.replace("'tool_name'", "'operation'"),
+        source.replace("update_application_event", "create_application"),
+        source.replace(" != 'update_application_event'", " == 'update_application_event'"),
+        source.replace("raise ProductFailure('wrong original proposal')", "return execute_tool()"),
+        source.replace("or instant(", "or execute_prepared() or instant("),
+        source + "    else:\n        return execute_tool()\n",
+    ):
+        assert _classification_violations(path, changed), changed
+    reflection = source + "    return getattr(pending, 'adapter_kind')\n"
+    assert _classification_violations(path, reflection)
+
+
+def test_harness_grader_identity_allowlist_is_exact_read_only_result_only() -> None:
+    path = SRC / "evaluation" / "graders" / "p0.py"
+    source = (
+        "def approval(a):\n"
+        "    proposal_ok = (a.approved and a.pending.get('tool_name') == 'update_application_event' "
+        "and original.get('id') == expected.get('technical_interview') "
+        "and instant(original['scheduled_at']) == instant('2026-10-14T15:00:00+08:00') "
+        "and a.pending.get('operation_id') == a.operation_id)\n"
+        "    return result('approval.before_commit', proposal_ok, 'approved_ingress')\n"
+    )
+    assert _classification_violations(path, source) == []
+    assert _classification_violations(Path("fixture.py"), source)
+    for changed in (
+        source.replace("def approval(", "def route("),
+        source.replace("a.pending.get", "a.operation.get"),
+        source.replace("update_application_event", "create_application"),
+        source.replace("return result(", "return execute_tool("),
+        source.replace("a.approved and", "a.approved and execute_prepared() and"),
+        source.replace("    return result(", "    if proposal_ok:\n        execute_tool()\n    return result("),
+    ):
+        assert _classification_violations(path, changed), changed
 
 
 @pytest.mark.parametrize(

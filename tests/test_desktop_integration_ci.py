@@ -4,6 +4,8 @@ These source checks complement, not replace, the real Windows installation job.
 """
 from pathlib import Path
 import re
+import shlex
+import tomllib
 
 import pytest
 
@@ -30,9 +32,10 @@ def test_mail_native_lock_job_keeps_the_startup_guard_and_locked_dependencies():
     command = "uv run --frozen pytest --noconftest -q tests/test_job_mail_process_lock.py"
     assert f"run: {command}\n" in native
     assert native.index("uv sync --frozen") < native.index(command)
-    assert 'addopts = "-p tests._offline_network_guard"' in (
-        ROOT / "pyproject.toml"
-    ).read_text(encoding="utf-8")
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert shlex.split(project["tool"]["pytest"]["ini_options"]["addopts"]) == [
+        "-p", "tests._offline_network_guard", "--strict-markers",
+    ]
     for bypass in ("pip install pytest", "-p no:", "-o addopts", "PYTEST_ADDOPTS", "continue-on-error"):
         assert bypass not in native
 

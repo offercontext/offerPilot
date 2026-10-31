@@ -822,12 +822,18 @@ class BundleInstanceToken(TransientToolRuntimeValue):
                 ),
             )
 
-    def _ensure_integrity(self) -> None:
+    def _ensure_integrity(self, *, last_view: object | None = None) -> None:
         try:
             self._ensure_registry_integrity()
+            deferred: tuple[object, object] | None = None
             for view, expected_snapshot in self._issued.values():
+                if view is last_view:
+                    deferred = (view, expected_snapshot)
+                    continue
                 if not _bundle_view_matches_integrity_snapshot(view, expected_snapshot):
                     raise ValueError("metadata Bundle view integrity drift")
+            if deferred is not None and not _bundle_view_matches_integrity_snapshot(*deferred):
+                raise ValueError("metadata Bundle view integrity drift")
         except (AttributeError, TypeError, ValueError) as exc:
             raise ValueError("Bundle instance token integrity drift") from exc
 
@@ -848,16 +854,13 @@ class BundleInstanceToken(TransientToolRuntimeValue):
 
     def _require_view(self, view: object, expected_type: type[object]) -> None:
         with self._lock:
-            self._ensure_integrity()
+            self._ensure_integrity(last_view=view)
             issued = self._issued.get(expected_type)
             if type(view) is not expected_type or issued is None or issued[0] is not view:
                 raise TypeError("metadata view was not issued by this Bundle token")
-            try:
-                matches = _bundle_view_matches_integrity_snapshot(view, issued[1])
-            except (AttributeError, TypeError, ValueError) as exc:
-                raise ValueError("metadata view integrity drift") from exc
-            if not matches:
-                raise ValueError("metadata view integrity drift")
+            # Validate the exact requested view last, retaining detection of
+            # target drift during other-view scans without visiting it twice.
+            # Every later public access still performs the full Bundle check.
 
     def _require_issued_view_integrity(
         self,
@@ -1258,15 +1261,18 @@ _BundleView: TypeAlias = (
 
 def _bundle_view_integrity_snapshot(value: object) -> object:
     if type(value) is ProviderToolContract:
-        value._ensure_provider_integrity()
-        return (
+        snapshot = (
             ProviderToolContract,
             id(value),
             value.name,
             value.description,
-            id(value.payload),
-            id(value.parameters),
+            id(object.__getattribute__(value, "_payload_snapshot")),
+            id(object.__getattribute__(value, "_parameters_snapshot")),
         )
+        # Keep the complete recursive seal check last so drift during the
+        # preceding field reads is rejected without property revalidation.
+        value._ensure_provider_integrity()
+        return snapshot
     if type(value) is BundleInstanceToken:
         return (BundleInstanceToken, id(value))
     if is_dataclass(value) and not isinstance(value, type):
@@ -1335,17 +1341,22 @@ def _bundle_view_matches_integrity_snapshot(value: object, expected: object) -> 
         return False
     snapshot = cast(tuple[object, ...], expected)
     kind = snapshot[0]
+    if value is None or type(value) in {bool, int, float, str}:
+        return len(snapshot) == 2 and kind is type(value) and value == snapshot[1]
     if kind is ProviderToolContract:
         if type(value) is not ProviderToolContract or len(snapshot) != 6:
             return False
-        value._ensure_provider_integrity()
-        return (
+        matches = (
             id(value) == snapshot[1]
             and object.__getattribute__(value, "name") == snapshot[2]
             and object.__getattribute__(value, "description") == snapshot[3]
-            and id(object.__getattribute__(value, "payload")) == snapshot[4]
-            and id(object.__getattribute__(value, "parameters")) == snapshot[5]
+            # Read the exact roots, then validate both complete trees last.
+            # Public properties would each repeat the same recursive check.
+            and id(object.__getattribute__(value, "_payload_snapshot")) == snapshot[4]
+            and id(object.__getattribute__(value, "_parameters_snapshot")) == snapshot[5]
         )
+        value._ensure_provider_integrity()
+        return matches
     if kind is BundleInstanceToken:
         return (
             type(value) is BundleInstanceToken and len(snapshot) == 2 and id(value) == snapshot[1]
@@ -1394,8 +1405,6 @@ def _bundle_view_matches_integrity_snapshot(value: object, expected: object) -> 
             _bundle_view_matches_integrity_snapshot(item, item_snapshot)
             for item, item_snapshot in zip(value, expected_items)
         )
-    if value is None or type(value) in {bool, int, float, str}:
-        return len(snapshot) == 2 and kind is type(value) and value == snapshot[1]
     if isinstance(
         value,
         (

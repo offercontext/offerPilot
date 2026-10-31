@@ -264,6 +264,10 @@ Haru 采用 Live2D 官方样例角色，并非 OfferPilot 原创角色，归属�
 
 详细操作与问题排查见[用户指南](docs/product-manual/产品说明书.md#s12)。
 
+## 开发验证
+
+源码开发可使用 `uv run oc eval` 执行隔离 Harness 评估、重复比较及审核包生成，以及 `scripts/select_tests.py` 生成和执行增量测试计划。配置、证据边界与命令见 [核心操作指南](docs/architecture/harness-core-operations.md)；[P0 开发指南](docs/architecture/harness-p0-development.md)保留旧入口。真实模型运行须提供 provider profile 和费用 grant；这些检查不替代完整发布门禁。
+
 ## 许可证
 
 [AGPLv3](LICENSE)
