@@ -779,6 +779,7 @@ class _ContextAdapter(ContextAssembler):
         "_persistence",
         "_system_message",
         "_general_system_message",
+        "_custom_persona_system_message",
         "_clarification_message",
         "_page_messages",
     )
@@ -791,10 +792,12 @@ class _ContextAdapter(ContextAssembler):
         clarification_message: Callable[[tuple[PendingAction, str] | None, str], object | None],
         page_messages: Callable[[Mapping[str, object] | None], Sequence[object]],
         general_system_message: Callable[[], object] | None = None,
+        custom_persona_system_message: Callable[[bool], object] | None = None,
     ) -> None:
         self._persistence = persistence
         self._system_message = system_message
         self._general_system_message = general_system_message
+        self._custom_persona_system_message = custom_persona_system_message
         self._clarification_message = clarification_message
         self._page_messages = page_messages
 
@@ -804,6 +807,7 @@ class _ContextAdapter(ContextAssembler):
             clarification_message=self._clarification_message,
             page_messages=self._page_messages,
             general_system_message=self._general_system_message,
+            custom_persona_system_message=self._custom_persona_system_message,
         )
 
     @staticmethod
@@ -872,7 +876,14 @@ class _ContextAdapter(ContextAssembler):
         )
         policy = self._general_system_message if general else self._system_message
         assert policy is not None
-        values.insert(0, policy())
+        persona_message = _attribute(source, "persona_message")
+        if persona_message is not None:
+            if self._custom_persona_system_message is None:
+                raise ValueError("custom persona policy compiler unavailable")
+            values.insert(0, self._custom_persona_system_message(general))
+            values.append(persona_message)
+        else:
+            values.insert(0, policy())
         if context_message is not None:
             values.append(context_message)
         if isinstance(request, StartTurnRequest):
@@ -1738,6 +1749,7 @@ def build_pilot_runtime(
     clarification_message: Callable[[tuple[PendingAction, str] | None, str], object | None],
     page_context_messages: Callable[[Mapping[str, object] | None], Sequence[object]],
     general_system_message: Callable[[], object] | None = None,
+    custom_persona_system_message: Callable[[bool], object] | None = None,
     title_from_message: Callable[[str], str] | None = None,
     clock: Callable[[], object] | None = None,
 ) -> PilotRuntime:
@@ -1775,6 +1787,7 @@ def build_pilot_runtime(
         clarification_message=clarification_message,
         page_messages=page_context_messages,
         general_system_message=general_system_message,
+        custom_persona_system_message=custom_persona_system_message,
     )
     driver = _AgentDriver(context_source_loader)
     policy_resolver = _PolicyCatalogResolver(

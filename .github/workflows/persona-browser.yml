@@ -1,0 +1,82 @@
+name: Custom persona synthetic HTTP Chromium acceptance
+on:
+  push:
+    branches: [feat/20261031-custom-companion-persona]
+# This dedicated feature branch is the complete trigger boundary. No paid job,
+# dispatch, deployment environment, provider secret or write token is used.
+permissions:
+  contents: read
+concurrency:
+  group: persona-browser-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  synthetic-persona-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies without model credentials
+        run: |
+          uv sync --frozen
+          npm ci --prefix web
+      - name: Verify isolated server and strict request guards offline
+        run: |
+          uv run pytest -q tests/test_persona_browser_harness.py
+          node --test web/tests/persona/network-guard.test.mjs
+          node --test web/tests/companion/fixture-contract.mjs
+          node web/tests/simplification/fixture-contract.mjs
+      - name: Build actual production UI
+        run: npm run build --prefix web
+      - name: Install Chromium and its system dependencies
+        working-directory: web
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Exercise real HTTP app with fresh synthetic database and fake model only
+        shell: bash
+        run: |
+          set -euo pipefail
+          data_dir="$(mktemp -d "$RUNNER_TEMP/persona-browser-data-XXXXXX")"
+          mkdir -p artifacts/persona-browser
+          uv run python scripts/persona_browser_server.py \
+            --data-dir "$data_dir" --port 18763 --static-dir "$PWD/web/dist" \
+            --evidence-dir "$PWD/artifacts/persona-browser" \
+            > artifacts/persona-browser/server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true; wait "$server_pid" 2>/dev/null || true' EXIT
+          ready=false
+          for attempt in $(seq 1 90); do
+            if curl --noproxy '*' --fail --silent http://127.0.0.1:18763/__persona_browser__/health > /dev/null; then
+              ready=true
+              break
+            fi
+            if ! kill -0 "$server_pid" 2>/dev/null; then
+              echo 'Synthetic server exited before readiness' >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          "$ready"
+          node web/tests/persona/run.mjs artifacts/persona-browser
+      - name: Preserve synthetic UI evidence, never credentials or database files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: persona-browser-${{ github.sha }}
+          path: artifacts/persona-browser
+          if-no-files-found: warn
+          retention-days: 14

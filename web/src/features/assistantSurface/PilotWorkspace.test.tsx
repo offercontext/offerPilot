@@ -8,6 +8,7 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 import PilotWorkspace from './PilotWorkspace';
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 
 vi.mock('@/components/ChatPanel', () => ({

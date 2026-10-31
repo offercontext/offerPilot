@@ -10,6 +10,7 @@ import CompanionLifeStatus from './CompanionLifeStatus';
 import CompanionLifeSettings from './CompanionLifeSettings';
 import { CompanionLifeContext, type CompanionLifeController } from './useCompanionLife';
 import type { CompanionSnapshot } from './contracts';
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/i18n/modal', () => ({ localizedModal: vi.fn() }));
 let root: Root, host: HTMLDivElement, life: CompanionLifeController;
 const state: CompanionSnapshot = { identity: 'one', revision: 4, persona_version: 'companion-v1', settings: { enabled: true, proactivity: 'default', hide_status: false }, state: { interests: [], activity: { id: 'activity', template_id: 'paper_boat', title: '折一只纸小船', status: 'active', step_index: 0, step_count: 3, step_title: '挑一张想象中的彩纸', participants: ['companion'], promise: null, started_at: 1, updated_at: 1 }, wish: { id: 'wish', activity_id: 'activity', text: '一起给纸小船起个名字' } }, recent_events: [], shared_participation: [], presence: { session_id: 'session', session_quiet: false, active: true, blocked: false, blockers: [] } };

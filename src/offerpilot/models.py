@@ -2725,12 +2725,12 @@ class AgentContextSnapshot(Base):
             name="ck_agent_context_key_uuid",
         ),
         CheckConstraint(
-            "manifest_schema_version IN (1, 2, 3)",
+            "manifest_schema_version IN (1, 2, 3, 4)",
             name="ck_agent_context_manifest_schema",
         ),
         CheckConstraint(
             "(manifest_schema_version = 1 AND length(CAST(manifest_json AS BLOB)) <= 16384) "
-            "OR (manifest_schema_version IN (2, 3) AND length(CAST(manifest_json AS BLOB)) <= 65536)",
+            "OR (manifest_schema_version IN (2, 3, 4) AND length(CAST(manifest_json AS BLOB)) <= 65536)",
             name="ck_agent_context_manifest_size",
         ),
         CheckConstraint(

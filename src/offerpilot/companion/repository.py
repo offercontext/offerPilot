@@ -25,6 +25,7 @@ from .models import (
 )
 
 from .persona import PERSONA_VERSION
+from .persona_repository import read_active_persona_spec
 MIN_STEP_SECONDS = 300
 IDLE_COOLDOWN_SECONDS = 1800
 PRESENCE_TTL_SECONDS = 60
@@ -373,7 +374,14 @@ class CompanionRepository:
             if now - activity["updated_at"] < minimum:
                 return False
         if activity is None or activity["status"] in ("completed", "abandoned"):
-            template = TEMPLATES[row.sequence % len(TEMPLATES)]
+            # Expression interests do not grant capabilities. This whitelist is
+            # consulted only for a new activity; existing activities and shared
+            # promises continue against the complete registry below.
+            allowed = read_active_persona_spec(session).enabled_activity_templates
+            candidates = tuple(item for item in TEMPLATES if item["id"] in allowed)
+            if not candidates:
+                return False
+            template = candidates[row.sequence % len(candidates)]
             row.sequence += 1
             activity = {"id": str(uuid4()), "template_id": template["id"], "title": template["title"],
                 "status": "active", "step_index": 0, "step_count": len(template["steps"]),

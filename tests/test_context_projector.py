@@ -1080,7 +1080,7 @@ def test_manifest_v2_is_canonical_private_and_validated_by_shared_entrypoint() -
         signals=("trusted_page",),
     )
     validated = validate_context_manifest_json(prepared.manifest_json)
-    assert validated["manifest_schema_version"] == 3
+    assert validated["manifest_schema_version"] == 4
     assert "private-provider" not in prepared.manifest_json
     assert "logical_input_fingerprint" not in prepared.manifest_json
 
@@ -1733,7 +1733,7 @@ def test_real_chat_adapter_uses_projected_surface_and_persists_v3_manifest(
     assert events[-1].event_type == "segment.finished"
     snapshots = [snapshot for snapshot in snapshots if snapshot.snapshot_kind == "model_input"]
     assert snapshots
-    assert snapshots[0].manifest_schema_version == 3
+    assert snapshots[0].manifest_schema_version == 4
     manifest = validate_surface_manifest_v2(snapshots[0].manifest_json)
     assert manifest["tools"]
     contributor_statuses = {

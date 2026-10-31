@@ -192,3 +192,20 @@ test('execution evidence records the state actually returned at each ordered rea
   assert.equal(api.requests.at(-1).execution, null);
   assert.equal(running.execution.state, 'running', 'later fixture changes cannot rewrite earlier execution evidence');
 });
+
+
+test('persona default read preserves life and does not permit persona writes or lookalikes', () => {
+  const api = createCompanionFixture(), before = api.snapshot();
+  const read = api.handle('GET', `${ORIGIN}/api/companion/persona`);
+  assert.equal(read.status, 200);
+  assert.equal(read.data.spec.display_name, 'Haru');
+  read.data.spec.display_name = 'Mutated client copy';
+  assert.equal(api.handle('GET', `${ORIGIN}/api/companion/persona`).data.spec.display_name, 'Haru');
+  assert.deepEqual(api.snapshot(), before);
+  assert.deepEqual(api.violations, []);
+  for (const [method, path] of [['POST', '/api/companion/persona/mutations'],
+    ['GET', '/api/companion/persona?unknown=1'], ['GET', '/api/companion/persona/unknown']]) {
+    assert.notEqual(api.handle(method, `${ORIGIN}${path}`, {}).status, 200);
+  }
+  assert.deepEqual(api.snapshot(), before);
+});

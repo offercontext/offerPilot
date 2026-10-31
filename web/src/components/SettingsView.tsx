@@ -1,3 +1,4 @@
+import CompanionPersonaSettings from '@/features/companionPersona/CompanionPersonaSettings';
 import CompanionLifeSettings from '@/features/companionLife/CompanionLifeSettings';
 import { liveText } from '@/i18n/liveText';
 import { localizedModal } from '@/i18n/modal';
@@ -289,6 +290,7 @@ export default function SettingsView({
 
       <ContextPolicySettings />
       <ConfirmedMemorySettings />
+      <CompanionPersonaSettings />
       <CompanionLifeSettings />
 
       <Typography.Title id="settings-connections" level={3}>{t("连接与自动任务")}</Typography.Title>

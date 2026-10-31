@@ -1,3 +1,4 @@
+import { companionText, useCompanionName } from '@/features/companionPersona/useCompanionName';
 import { t, useLocale, formatNumber } from '@/i18n';
 import {
   useEffect,
@@ -64,6 +65,7 @@ interface Props {
 
 export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }: Props) {
   useLocale();
+  const companionName = useCompanionName();
   const surface = useAssistantSurface();
   const controller = usePilotConversationController();
   const draft = controller.composerDraft;
@@ -185,7 +187,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
       className={styles.window}
       role="dialog"
       aria-modal="false"
-      aria-label={t("Haru 轻量对话")}
+      aria-label={companionText(t("Haru 轻量对话"), companionName)}
       tabIndex={-1}
       data-expand-direction={windowPosition.direction}
       style={{ left: windowPosition.left, top: windowPosition.top, width: surfaceSize.width }}
@@ -198,7 +200,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
     >
       <header className={styles.header}>
         <div>
-          <strong>Haru</strong>
+          <strong>{companionName}</strong>
           <span
             role="status"
             aria-live="polite"
@@ -222,7 +224,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
           >
             <ExpandAltOutlined />
           </button>
-          <button type="button" aria-label={t("关闭 Haru 对话")} onClick={close}>
+          <button type="button" aria-label={companionText(t("关闭 Haru 对话"), companionName)} onClick={close}>
             <CloseOutlined />
           </button>
         </div>
@@ -261,7 +263,7 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
       <div className={styles.messages} aria-live="polite" aria-relevant="additions text">
         {controller.turns.length === 0 ? (
           <div className={styles.empty}>
-            <strong>{t("Haru 是 Pilot 的轻量窗口")}</strong>
+            <strong>{companionText(t("Haru 是 Pilot 的轻量窗口"), companionName)}</strong>
             <span>
               {t("简单问题可以在这里完成；需要查看资料、编辑内容或确认操作时，会展开到 Pilot。对话不会丢失。")}
             </span>
@@ -315,14 +317,14 @@ export default function HaruChatWindow({ returnFocusRef, onExpand, anchorRect }:
       ) : null}
 
       <footer className={styles.composer}>
-        <label htmlFor="haru-composer" className={styles.srOnly}>{t("给 Haru 发消息")}</label>
+        <label htmlFor="haru-composer" className={styles.srOnly}>{companionText(t("给 Haru 发消息"), companionName)}</label>
         <textarea
           id="haru-composer"
           ref={inputRef}
           rows={2}
           value={draft}
           disabled={!controller.hasKey || Boolean(controller.pending) || controller.executionControl.execution?.state === 'running'}
-          placeholder={t(controller.pending ? '请先在 Pilot 中确认' : '问 Haru…')}
+          placeholder={companionText(t(controller.pending ? '请先在 Pilot 中确认' : '问 Haru…'), companionName)}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={onInputKeyDown}
         />

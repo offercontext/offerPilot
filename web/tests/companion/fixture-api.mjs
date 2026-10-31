@@ -71,6 +71,12 @@ export function createCompanionFixture() {
       }
       return finish(result);
     }
+    // Read-only default persona for the authored-name hook/settings shell.
+    // This life gate does not grant persona mutations or model preview calls.
+    if (method === 'GET' && pathname === '/api/companion/persona' && !parsed.search) {
+      const result = base.handle(method, parsed.href, body);
+      return finish(answer(result.data, result.status));
+    }
     if (method === 'GET' && pathname === '/api/companion' && !parsed.search) return finish(answer(state));
     if (method === 'POST' && pathname === '/api/companion/presence' && !parsed.search) {
       if (!keysAre(body, ['identity', 'client_id', 'sequence', ...signalKeys]) || body.identity !== state.identity

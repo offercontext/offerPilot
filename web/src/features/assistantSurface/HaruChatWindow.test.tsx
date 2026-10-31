@@ -11,6 +11,7 @@ import HaruChatWindow from './HaruChatWindow';
 import { getPilotExecution } from '@/services/chat';
 import { setLocale } from '@/i18n';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 vi.mock('@/services/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/chat')>(),

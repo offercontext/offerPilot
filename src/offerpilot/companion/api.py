@@ -10,12 +10,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from .contracts import CompanionEventCommand, CompanionPresenceCommand, CompanionResetCommand, CompanionSettingsCommand
 from .repository import CompanionConflict, CompanionRepository
+from .persona_api import register_persona_routes
 
 logger = logging.getLogger(__name__)
 
 
 def register_companion_routes(app: FastAPI, sessions: sessionmaker[Session],
                               on_change: Callable[[], None] | None = None) -> CompanionRepository:
+    register_persona_routes(app, sessions)
     repository = CompanionRepository(sessions)
     app.state.companion_repository = repository
 

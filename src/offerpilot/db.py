@@ -19,6 +19,7 @@ from offerpilot.confirmed_memory import models as _confirmed_memory_models  # no
 from offerpilot.context_sources import models as _context_sources_models  # noqa: F401
 from offerpilot.proactive import models as _proactive_models  # noqa: F401
 from offerpilot.companion import models as _companion_models  # noqa: F401
+from offerpilot.companion import persona_models as _persona_models  # noqa: F401
 from offerpilot.knowledge import note_lifecycle as _knowledge_note_lifecycle  # noqa: F401
 
 SessionFactory = sessionmaker[Session]
@@ -82,6 +83,7 @@ def init_database(db_path: Path) -> SessionFactory:
     _record_migration(engine, "0035_companion_chat", "Ground bounded companion chat actions in actual admitted user messages")
     _ensure_column(engine, "companion_events", "template_id", "TEXT")
     _record_migration(engine, "0036_companion_activity_binding", "Bind virtual objects to sourced activity identities without guessing legacy history")
+    _record_migration(engine, "0037_companion_persona", "Add isolated immutable companion persona revisions and command receipts")
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
         _ensure_column(engine, "pilot_executions", "runtime_epoch", "TEXT"),
@@ -110,6 +112,7 @@ def init_database(db_path: Path) -> SessionFactory:
         "Add atomic Application creation receipts and local workspace identity",
     )
     _ensure_context_projector_manifest_v2_schema(engine)
+    _record_migration(engine, "0038_persona_context_manifest", "Permit persona source manifests while preserving historical snapshots")
     confirmation_receipt_migrations = [
         _ensure_column(
             engine,
@@ -1292,7 +1295,7 @@ def _record_migration(engine, version: str, description: str) -> None:  # type: 
 
 
 def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignore[no-untyped-def]
-    """Preserve snapshot rows while adding the P4 manifest version to V1/V2 checks."""
+    """Preserve snapshot rows while adding persona manifests to historical V1/V2/V3 checks."""
 
     with engine.begin() as conn:
         row = conn.execute(
@@ -1304,22 +1307,35 @@ def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignor
         if row is None or row[0] is None:
             return
         create_sql = str(row[0])
-        if "manifest_schema_version IN (1, 2, 3)" in create_sql:
+        if "manifest_schema_version IN (1, 2, 3, 4)" in create_sql:
             return
-        if "manifest_schema_version IN (1, 2)" in create_sql:
+        if "manifest_schema_version IN (1, 2, 3)" in create_sql:
             rebuilt_sql = create_sql.replace(
-                "manifest_schema_version IN (1, 2)", "manifest_schema_version IN (1, 2, 3)",
-            ).replace("manifest_schema_version = 2", "manifest_schema_version IN (2, 3)")
+                "manifest_schema_version IN (1, 2, 3)", "manifest_schema_version IN (1, 2, 3, 4)",
+            ).replace("manifest_schema_version IN (2, 3)", "manifest_schema_version IN (2, 3, 4)")
+        elif "manifest_schema_version IN (1, 2)" in create_sql:
+            rebuilt_sql = create_sql.replace(
+                "manifest_schema_version IN (1, 2)", "manifest_schema_version IN (1, 2, 3, 4)",
+            ).replace("manifest_schema_version = 2", "manifest_schema_version IN (2, 3, 4)")
         elif "manifest_schema_version = 1" in create_sql:
             rebuilt_sql = create_sql.replace(
-                "manifest_schema_version = 1", "manifest_schema_version IN (1, 2, 3)",
+                "manifest_schema_version = 1", "manifest_schema_version IN (1, 2, 3, 4)",
             ).replace(
                 "length(CAST(manifest_json AS BLOB)) <= 16384",
                 "((manifest_schema_version = 1 AND length(CAST(manifest_json AS BLOB)) <= 16384) "
-                "OR (manifest_schema_version IN (2, 3) AND length(CAST(manifest_json AS BLOB)) <= 65536))",
+                "OR (manifest_schema_version IN (2, 3, 4) AND length(CAST(manifest_json AS BLOB)) <= 65536))",
             )
         else:
             raise RuntimeError("unsupported agent_context_snapshots schema")
+        # Preserve explicit indexes and triggers as well as the table's inline
+        # foreign-key/unique/check constraints. Capture SQL before ALTER rewrites
+        # its table references, then recreate only after the old table is gone.
+        dependent_sql = [
+            str(item[0]) for item in conn.execute(text(
+                "SELECT sql FROM sqlite_master WHERE tbl_name = 'agent_context_snapshots' "
+                "AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name"
+            ))
+        ]
         columns = [
             str(item[1])
             for item in conn.execute(text("PRAGMA table_info(agent_context_snapshots)"))
@@ -1334,6 +1350,8 @@ def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignor
             f"SELECT {quoted} FROM agent_context_snapshots_0027"
         )
         conn.exec_driver_sql("DROP TABLE agent_context_snapshots_0027")
+        for statement in dependent_sql:
+            conn.exec_driver_sql(statement)
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS idx_agent_context_segment_step "
             "ON agent_context_snapshots (run_id, execution_segment_id, model_step)"

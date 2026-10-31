@@ -1,3 +1,4 @@
+import { companionText, useCompanionName } from '@/features/companionPersona/useCompanionName';
 import { createPortal } from 'react-dom';
 import { classifyMascotFailure, type MascotFailureReason } from './mascotFailure';
 import { t, useLocale, formatNumber } from '@/i18n';
@@ -104,6 +105,7 @@ export default function PilotMascot({
 }: Props) {
   const pageVisible = useMascotVisibility();
   useLocale();
+  const companionName = useCompanionName();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const internalTriggerRef = useRef<HTMLButtonElement>(null);
   const triggerRef = externalTriggerRef ?? internalTriggerRef;
@@ -440,7 +442,7 @@ export default function PilotMascot({
       data-notification={notification?.status}
       data-animation-level={animationLevel}
       data-interview-studio-companion={studioPlacement ? 'true' : undefined}
-      aria-label={t("Haru 助手")}
+      aria-label={companionText(t("Haru 助手"), companionName)}
       style={dockedFallback
         ? { position: 'relative', width: frameWidth, height: frameHeight, inset: 'auto', zIndex: 1 }
         : { width: frameWidth, height: frameHeight, left: `${frameLeft}px`, top: `${frameTop}px`, right: 'auto', bottom: 'auto' }}
@@ -488,7 +490,7 @@ export default function PilotMascot({
         ) : null}
         <span className={styles.nameplate} aria-hidden="true">
           <span className={styles.statusDot} />
-          Haru
+          {companionName}
         </span>
       </button>
       {menuOpen ? (

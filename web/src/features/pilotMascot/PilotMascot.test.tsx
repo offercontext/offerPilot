@@ -2,10 +2,12 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { publishPersona } from '@/features/companionPersona/useCompanionName';
 import { setLocale } from '@/i18n';
 import PilotMascot, { type PilotMascotRuntime } from './PilotMascot';
 import type { PilotMascotRuntimeController } from './live2dRuntime';
 
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 let container: HTMLDivElement;
 let root: Root;
 
@@ -629,4 +631,12 @@ describe('PilotMascot', () => {
     }
   });
 
+});
+
+it('uses the saved companion name for the visible nameplate and accessible entry', async () => {
+  await renderMascot();
+  act(() => publishPersona({ profile_id: 'fixture', revision: 1, content_hash: 'hash', policy_version: 'core', presets: [], spec: { display_name: 'Nova', traits: [], speaking_style: '', verbosity: 'balanced', interests_text: '', fictional_background: '', additional_style_notes: '', enabled_activity_templates: [] } }));
+  expect(container.textContent).toContain('Nova');
+  expect(container.querySelector('[aria-label="Nova 助手"]')).not.toBeNull();
+  expect(container.querySelector('[aria-label="Haru 助手"]')).toBeNull();
 });
