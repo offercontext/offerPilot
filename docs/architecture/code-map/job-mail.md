@@ -44,3 +44,19 @@
 | 桌面可用而网页失败 | Origin/认证、本机 secure setup、连接状态 | [安全设置](../../../tests/test_job_mail_secure_setup.py)、[桌面集成](../../../tests/test_desktop_job_mail_integration.py) |
 
 日志仅用诊断所需标识和安全错误；不要在排查记录中输出邮箱密码、授权码、完整邮件或无关个人信息。
+
+### 邮件专项 CI
+
+[邮件工作流](../../../.github/workflows/job-mail-assistant.yml) 始终响应 master PR/push 和手动触发，保留 `synthetic-acceptance`、`windows-native-lock` 两个检查入口，不使用 workflow 级 paths 过滤。[范围判定脚本](../../../scripts/job-mail-ci-scope.py) 根据 PR base→merge candidate 或 push before→after 的完整 Git diff 决定重任务：
+
+| 改动范围 | 浏览器专项 | Windows 原生锁 |
+|---|---|---|
+| docs、根 Markdown、DSH 插件及其验收脚本 | 不运行 | 不运行（轻量 Linux 检查返回结果） |
+| web、邮件浏览器脚本及 fixture | 运行 | 不运行 |
+| 原生锁测试自身 | 不运行 | 运行 |
+| 后端/共享测试、依赖、工作流、未知路径 | 运行 | 运行 |
+| 手动触发、缺失/无效差异范围 | 运行 | 运行 |
+
+范围为空或不可确定时保守执行；删除和重命名包含旧路径。两个输出必须明确为 true/false，Windows 入口始终检查上游结果：失败、取消、跳过或缺失结果不能变为成功。回归入口：[范围与失败传播测试](../../../tests/test_job_mail_ci_scope.py)。
+
+通用 pytest、ruff、mypy 与前端单测由 [完整 CI](../../../.github/workflows/desktop-windows.yml) 负责，邮件工作流不再重复执行；浏览器所需生产构建、等待工具测试、两项真实合成浏览器验收及 Windows 原生锁仍保留。邮件专项通过不代表完整 CI 通过，也不代表真实邮箱/模型验收；master 的直接 push 不自动启动完整 CI，仍需正常 PR 门禁或显式 dispatch。
