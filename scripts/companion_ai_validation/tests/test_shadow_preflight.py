@@ -186,6 +186,14 @@ def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
     for fragment in ("preflight --phase before", "preflight --phase paid", ".run --live"):
         selected = [command for command in commands if fragment in command]
         assert len(selected) == 1 and "--shadow-single-target" in selected[0]
+    # More time for provider-credential-free offline verification does not extend paid authority.
+    from scripts.companion_ai_validation import broker
+    assert workflow["jobs"]["offline"]["timeout-minutes"] == 30
+    assert workflow["jobs"]["preflight"]["timeout-minutes"] == 5
+    assert workflow["jobs"]["paid"]["timeout-minutes"] == 25
+    assert broker.SESSION_SECONDS == 20 * 60
+    assert broker.REQUEST_SECONDS == 90
+    assert broker.BUDGET == 20_000_000 and broker.RESERVATION == 3_000_000
     paid = workflow["jobs"]["paid"]
     assert paid["environment"] == p.ENVIRONMENT
     assert workflow["permissions"] == {"contents": "read", "actions": "read"}

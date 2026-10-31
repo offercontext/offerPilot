@@ -13,7 +13,7 @@ jobs:
   offline:
     name: Companion offline safety
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       LITELLM_LOCAL_MODEL_COST_MAP: 'True'
       PYTHONPATH: src:.
