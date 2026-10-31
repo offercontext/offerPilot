@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Windows CMD 包装截断 DSH Git 子目录参数（2026-10-31）
+
+**现象：** PowerShell 显式调用 `dsh.cmd plugin ... add 'github:...#<SHA>&path:/plugins/dsh-offerpilot'` 后，pnpm 报 `ERR_PNPM_INVALID_DEPENDENCY_NAME`。失败日志实际只有 `pnpm add "github:...#<SHA>"`，不含子目录。此前据此将市场安装判为失败并改装 tgz，判断范围过大。
+
+**根因：** npm 的 `.cmd` 包装器使用 `%*` 转发参数；PowerShell 的外层单引号没有作为 CMD 双引号保留，`&` 被当成命令分隔符。最小 argv 探针经 `.cmd` 丢失 `&path:`，经 `node ...` 参数数组完整保留。公开市场生成完整 `git+https://...git#<SHA>&path:/...`，其安装服务直接调用包管理器，不经过该包装器。没有发现市场索引的 SHA、path 或 pnpm Git 子目录解析缺陷。
+
+**修复：** 本机通过 Node CLI 的完整参数切回固定 Git 安装；文档明确 Windows 入口边界。新增 `dsh-market-install-acceptance.mjs` 与探针，从公开市场搜索进入真实 `pluginManager.installBundle`，覆盖安装、启用、工具发现和只读调用，避免只验证搜索后另装 tgz。保留最初探针方法名错误、缺少连接导致的激活失败，均不计通过；提供有效连接后的全新 profile 验证通过。索引和已发布插件保持原 SHA，无需替换资产或扩大构建权限。
+
+**教训：** 将命令参数传递、市场搜索、包安装、插件激活和工具调用分层验证；包管理器 exit 0 不代表激活成功。Windows Git spec 中的 `&path:` 必须完整到达 pnpm，不用 shell 字符串拼接自动化参数。
+
 ## 前端源码审计重复遍历导致性能门禁超限（2026-10-31）
 
 **现象：** `17d59a76` 完整 CI 的 20 个 pytest 分片通过后，前端审计性能用例耗时 30,186ms，超过原有 30,000ms 门限；前端结果为 3009 passed / 1 failed，完整发布门禁失败。

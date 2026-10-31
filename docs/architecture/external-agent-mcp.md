@@ -77,6 +77,16 @@ oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
 
 公开分发使用 `dsh-offerpilot-v0.1.0` GitHub Release，市场索引固定入口见[插件安装说明](../../plugins/dsh-offerpilot/README.md#从-dsh-插件市场安装)。索引保存在专用 `chore/20261030-dsh-market` 分支，使用 DSH format 1 的 Git source，锁定 Release 对应的完整提交 SHA 与 `plugins/dsh-offerpilot` 子目录；不用会漂移的分支名代替安装提交。Release 附件 URL 有重定向，因此索引通过 GitHub Raw 的直接 200 地址提供，不能把附件下载 URL 当作索引地址。
 
+Windows 手动执行 Git 子目录安装时，不要通过 npm 的 `dsh.cmd` 包装器传递含 `&path:` 的 spec：PowerShell 外层单引号不保证 CMD 收到双引号，`&` 可能被截为命令分隔符。自动化应使用 `spawn(process.execPath, [cliPath, ...args])`，不拼 shell 字符串；终端可用 `node <DSH安装目录/lib/bin.js> plugin --profile web add '<完整Git安装spec>'`。市场页面通过 `pluginManager.installBundle(spec)` 安装，不经过该 `.cmd` 入口，不需要手动下载 Release 包。不要将命令行包装器错误误报为市场索引或 Git 子目录不兼容，也不要按通用 prepare 提示放开构建脚本权限。
+
+市场直装回归独立于 tarball 验收，必须覆盖实际安装服务，而不只检查搜索结果或另行调用 CLI。先准备一个有效的、已有授权的 MCP 配置（可使用虚构数据配置），执行：
+
+```powershell
+node scripts/dsh-market-install-acceptance.mjs --dsh-cli <DSH安装目录/lib/bin.js> --mcp-config <MCP配置绝对路径> --output <不存在的新目录> --index https://raw.githubusercontent.com/offercontext/offerPilot/chore/20261030-dsh-market/index.json --commit 19aeaeda91f13c6bad13acb53409ce57653b548d
+```
+
+该入口在新 DSH_HOME 中搜索中英文名称、校验固定 SHA 和子目录、使用市场页面同一安装服务进行 Git 安装与启用，然后发现工具并只读查询投递和日程。它不创建授权、不调用模型、不修改业务数据；结束时释放服务，保留报告和脱敏日志。网络错误、安装失败和缺失连接导致的激活失败均不算通过。替换市场版本时同步传入其预期 SHA。
+
 本地集成入口（参数全部使用实际绝对路径，output 必须不存在）：
 
 ```powershell
