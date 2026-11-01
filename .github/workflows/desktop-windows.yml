@@ -405,14 +405,15 @@ jobs:
   # 729.25 total job-minutes across 12 shards. Twenty shards add eight startups,
   # roughly 16-27 minutes at observed overhead, plus repeated fixture costs.
   # Twenty was chosen for planning-scenario margin; estimates are not guarantees.
-  # Two shards run at once; packaging can be a third runner. Each shard retains
+  # Four shards may run at once in the authorized concurrency trial; packaging
+  # may use another runner. Quota, wall time and billing are not guaranteed. Each retains
   # its 120-minute limit (2400 aggregate shard-minute ceiling).
   # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
   # duration-lpt-v1 uses pinned historical durations only to balance scheduling;
   # every collected node still runs exactly once under the full manifest gate.
   # Whole-file isolation and the reviewed chat-node exception remain unchanged.
   # Estimates do not certify passing tests; each shard keeps its 120-minute limit
-  # and at most two pytest shards run concurrently.
+  # and at most four pytest shards run concurrently.
   pytest-shards:
     name: Complete pytest shard ${{ matrix.shard }} of 20
     if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
@@ -421,7 +422,7 @@ jobs:
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     steps:

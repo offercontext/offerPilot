@@ -73,7 +73,7 @@ PyInstaller 必须在目标平台构建。在 Linux 构建并 smoke 通过，仅
 CI 包含独立构建、完整 pytest 分片和聚合门禁：
 
 1. `Experimental installer and desktop smoke`：锁定依赖安装后，执行 desktop/auth/static pytest、桌面 Node 测试、全仓 ruff、桌面与 API mypy、前端构建、布局回归、PyInstaller 冻结及 frozen/packaged-resource smoke。额外保留 installed-ui / real-ai helper 离线单测、真实 React/jsdom 契约、cleanup 与 Haru fixture 单测，不调用历史包或真实 provider。最后构建本次未签名 NSIS，并执行下节的安装与卸载 smoke。任一步失败都不能上传安装器；最长 60 分钟。
-2. `Collect complete pytest manifest` 与 12 个完整分片：`duration-lpt-v1` 仅使用固定耗时做调度，所有收集节点必须恰好执行一次。保留整文件隔离，仅原审阅的 `test_chat_api.py` 可按节点拆分；每片 120 分钟，最多两片并发，失败不取消其他片。完整 Git 历史先行校验。
+2. `Collect complete pytest manifest` 与 20 个完整分片：`duration-lpt-v1` 仅使用固定耗时做调度，所有收集节点必须恰好执行一次。保留整文件隔离，仅原审阅的 `test_chat_api.py` 可按节点拆分；每片 120 分钟，最多四片并发（有界试验），失败不取消其他片。完整 Git 历史先行校验。此次仅调整并发，不刷新历史耗时或改变覆盖/隔离；对比实际 job-min、日志墙钟及峰值，平台配额与实际计费未知，不承诺耗时减半或费用不变。
 3. `Full release regression (required for release)`：核验同源码、配置、环境、run/attempt 的完整分片证据后，执行 `scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence` 的其余全量门禁，包括 ruff、mypy、前端全量测试与构建、CLI/HTTP smoke、`oc verify --profile local` 和 Python CLI 安装检查；最长 90 分钟。缺失、重复、失败或跨运行分片证据均不能通过。
 4. `Validation results (both jobs must pass)` 汇总打包和完整回归的实际结果。失败、超时、取消、跳过都不是通过。artifact 可先于全量结果出现，不代表发布就绪。
 

@@ -228,7 +228,7 @@ def test_collection_failure_removes_stale_manifest(tiny_repo):
 
 def test_workflow_keeps_complete_gate_and_bounded_non_cancelling_shards():
     workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
-    assert "      max-parallel: 2" in workflow.splitlines()
+    assert "      max-parallel: 4" in workflow.splitlines()
     assert "fail-fast: false" in workflow
     shards = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
     assert "cancel-in-progress:" not in shards
@@ -649,7 +649,7 @@ def test_workflow_preserves_120_minute_shard_budget():
     workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
     shard_job = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
     assert "timeout-minutes: 120" in shard_job
-    assert "      max-parallel: 2" in shard_job.splitlines()
+    assert "      max-parallel: 4" in shard_job.splitlines()
     assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]" in shard_job
 
 

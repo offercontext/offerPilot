@@ -94,7 +94,7 @@ def test_package_only_escape_hatch_is_bound_to_old_push_branch():
         assert re.findall(r'^    if: (.+)$', _job(job), re.M) == [
             f'"${{{{ {guard} }}}}"',
         ], f"Mode guard for {job} must stay bound to the old push branch"
-    assert "timeout-minutes: 120" in WORKFLOW and "max-parallel: 2" in WORKFLOW
+    assert "timeout-minutes: 120" in WORKFLOW and "max-parallel: 4" in WORKFLOW
     assert "scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence" in WORKFLOW
 
 

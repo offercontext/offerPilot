@@ -138,7 +138,7 @@ def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
         assert re.findall(r"^    timeout-minutes: (\d+)$", _job(job), re.M) == [minutes]
     shards = _job("pytest-shards")
     assert re.findall(r"^      fail-fast: (.+)$", shards, re.M) == ["false"]
-    assert re.findall(r"^      max-parallel: (\d+)$", shards, re.M) == ["2"]
+    assert re.findall(r"^      max-parallel: (\d+)$", shards, re.M) == ["4"]
     matrix = re.findall(r"^        shard: \[([^\]]+)\]$", shards, re.M)
     assert len(matrix) == 1
     assert [int(value.strip()) for value in matrix[0].split(",")] == list(range(20))
