@@ -91,6 +91,18 @@ for (const route of ['/api/offers/7/negotiation/proposals', '/api/offers/compari
   assert.deepEqual(taskPanelFixtureResponse('GET', route), { status: 200, data: [] });
   assert.equal(taskPanelFixtureResponse('POST', route), undefined);
 }
+const archivedDimensions = '/api/offers/comparison-dimensions?include_archived=true';
+assert.deepEqual(taskPanelFixtureResponse('GET', archivedDimensions), { status: 200, data: [] });
+assert.deepEqual(taskPanelFixtureResponse('GET', TASK_PANEL_ORIGIN + archivedDimensions), { status: 200, data: [] });
+for (const route of [archivedDimensions + '&unknown=true', archivedDimensions + '&include_archived=true',
+  '/api/offers/comparison-dimensions?include_archived=false', '/api/offers/comparison-dimensions?include_archived=1',
+  '/api/offers/7/comparison-values?include_archived=true', '/api/companion?include_archived=true',
+  'https://example.invalid' + archivedDimensions, 'http://user:secret@127.0.0.1:5174' + archivedDimensions]) {
+  assert.equal(taskPanelFixtureResponse('GET', route), undefined, route);
+}
+for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']) {
+  assert.equal(taskPanelFixtureResponse(method, archivedDimensions), undefined, method);
+}
 persona.data.spec.display_name = 'changed only in this response';
 assert.equal(taskPanelFixtureResponse('GET', '/api/companion/persona').data.spec.display_name, 'Haru', 'responses must not share mutable state');
 console.log('Desktop layout synthetic read, presence, and explicit lifecycle wake contract passed.');

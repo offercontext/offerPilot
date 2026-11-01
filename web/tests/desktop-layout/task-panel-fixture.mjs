@@ -22,8 +22,12 @@ export function createTaskPanelFixture() {
   }
   function handle(method, url, body) {
     const parsed = new URL(url, TASK_PANEL_ORIGIN);
-    if (parsed.origin !== TASK_PANEL_ORIGIN || parsed.username || parsed.password
-      || parsed.search || parsed.hash) return undefined;
+    if (parsed.origin !== TASK_PANEL_ORIGIN || parsed.username || parsed.password || parsed.hash) return undefined;
+    // The Offer drawer reads archived comparison dimensions too. This one
+    // exact read query is not an exemption for companion or other endpoints.
+    if (method === 'GET' && parsed.pathname === '/api/offers/comparison-dimensions'
+      && parsed.search === '?include_archived=true') return { status: 200, data: [] };
+    if (parsed.search) return undefined;
     const request = { method, path: parsed.pathname, query: parsed.search, body };
     const snapshot = companion.snapshot();
     const presence = isContentFreePresenceRequest(request) && body.identity === snapshot.identity;
