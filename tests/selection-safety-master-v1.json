@@ -1,0 +1,474 @@
+{
+  "schema_version": 1,
+  "baseline_id": "selection-safety-master-v1",
+  "tests": [
+    {
+      "id": "tests/pilot_runtime/test_confirmation.py::test_approve_claims_executes_once_and_delivers_once",
+      "reason": "HITL"
+    },
+    {
+      "id": "tests/pilot_runtime/test_confirmation.py::test_real_sqlite_two_connections_have_one_claim_and_one_executor",
+      "reason": "concurrent ownership"
+    },
+    {
+      "id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[after_persist]",
+      "reason": "checkpoint and receipt recovery"
+    },
+    {
+      "id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[before_persist]",
+      "reason": "checkpoint and receipt recovery"
+    },
+    {
+      "id": "tests/test_auth_api.py::test_auth_enabled_requires_bearer_token_for_api_routes",
+      "reason": "auth"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvent]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvidenceBundle]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationJDVersion]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationMaterialKit]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationOutcome]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationSubmissionSnapshot]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewNote]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewReadinessSignal]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[JDAnalysis]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[MaterialRevisionProposal]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Offer]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewSession]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewStage]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReview]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Question]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ResumeMatch]",
+      "reason": "conditional delete"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker build -t offerpilot:smoke .]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-oc --help]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv run oc --help]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv tool install --force .]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker build -t offerpilot:smoke .]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-oc --help]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv run oc --help]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv tool install --force .]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "reason": "Windows native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm run build]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm test]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run mypy src]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc smoke --static-dir web/dist]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc verify --profile local --static-dir web/dist]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run pytest -q]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run ruff check .]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm run build]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm test]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run mypy src]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc smoke --static-dir web/dist]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc verify --profile local --static-dir web/dist]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run pytest -q]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run ruff check .]",
+      "reason": "native failure propagation"
+    },
+    {
+      "id": "tests/test_knowledge_delete_persistence.py::test_purge_does_not_delete_db_when_quarantine_move_fails",
+      "reason": "delete recovery"
+    },
+    {
+      "id": "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
+      "reason": "source withdrawal during status observation fails closed"
+    },
+    {
+      "id": "tests/test_managed_runtime_api.py::test_runtime_status_rereads_durable_terminal_after_manager_transition",
+      "reason": "same-generation durable terminal wins after manager observation"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_partition_preserves_every_node_and_keeps_files_together",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_setup_skip_is_explicitly_counted_without_becoming_a_pass",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[boolean_exit]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[duplicate]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[extra]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[failed]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[missing]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[teardown]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_full_backend_refuses_inherited_pytest_filters_before_any_execution",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_native_zero_without_backend_execution_report_is_incomplete",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_real_backend_failure_stops_remaining_groups_and_never_verifies",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_real_isolated_backend_run_verifies_full_coverage_and_refuses_tampered_report",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_backend_reconciliation_failure_dominates_skip_and_missing",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_deleted_test_blocks_merge_and_stale_mapping",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_dependency_closure_cycles_and_p2_direct",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_document_no_changes_and_snapshot_invalidation",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[cleanup-1]",
+      "reason": "selection failure propagation"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[corrupt-1]",
+      "reason": "selection failure propagation"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[missing-1]",
+      "reason": "selection failure propagation"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[mutate-2]",
+      "reason": "selection failure propagation"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[timeout-3]",
+      "reason": "selection failure propagation"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[downgraded]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[duplicate]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[missing]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[none]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[unclassified]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v1]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v2]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_frontend_reconciliation_missing_duplicate_and_skip",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_git_paths_staged_unstaged_untracked_rename_and_unknown_base",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_harness_candidate_cannot_point_away_from_selected_root",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[backend-none]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[unknown-full]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths0]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths1]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths2]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths3]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_latest_public_safety_baseline_preserves_v1_and_adds_status_races",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_safety_registration_preserves_existing_source_identities",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[dev]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[full]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[merge]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_new_test_without_metadata_is_not_silently_skipped",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_offerpilot_mapping_cannot_downgrade_latest_safety_baseline",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_owned_process_exits_when_controller_crashes",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[p0]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[unknown_priority]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_plan_execute_catches_regression",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_skip_is_not_success",
+      "reason": "skip is incomplete"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_registered_selector_cli_really_invokes_help",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_runtime_markdown_and_broken_document_links_do_not_pass",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[False]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[True]",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_unknown_surface_and_priority_are_conservative",
+      "reason": "master port selector fail-closed guard"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[0]",
+      "reason": "actual integration evidence"
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[3]",
+      "reason": "actual integration evidence"
+    },
+    {
+      "id": "tests/test_write_operations.py::test_locked_modify_executes_effective_args_against_original_proposal",
+      "reason": "effective approved args"
+    },
+    {
+      "id": "tests/tool_authority/test_approval_transaction.py::test_approve_reject_race_has_one_terminal_winner_and_one_executor",
+      "reason": "approval race"
+    },
+    {
+      "id": "tests/tool_authority/test_replay_topology.py::test_final_terminal_replay_has_no_pending_projection",
+      "reason": "idempotent replay"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[applications-update_application_status_scoped-second_id-None-None]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-delete_application_event_scoped-second_event_id-ApplicationEvent-None]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-update_application_event_scoped-second_event_id-ApplicationEvent-notes]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-delete_note_scoped-second_note_id-InterviewNote-None]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-update_note_scoped-second_note_id-InterviewNote-company]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-save_offer_assessment_scoped-second_offer_id-Offer-assessment]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-update_offer_scoped-second_offer_id-Offer-notes]",
+      "reason": "scope"
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_soft_deleted_current_parent_denies_every_scoped_write_without_side_effect",
+      "reason": "scope"
+    }
+  ]
+}
