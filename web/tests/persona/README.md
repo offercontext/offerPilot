@@ -28,7 +28,7 @@ uv run python scripts/persona_browser_server.py \
 In the same authorized network namespace:
 
 ```sh
-node --test web/tests/persona/network-guard.test.mjs
+node --test web/tests/persona/network-guard-contract.mjs
 node web/tests/persona/run.mjs artifacts/persona-browser
 ```
 
