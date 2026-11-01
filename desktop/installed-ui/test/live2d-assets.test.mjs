@@ -277,7 +277,7 @@ test('browser asset completion is awaited before all existing final safety guard
     'No unmocked API endpoint',
     'No external network or websocket attempt',
     'No uncaught browser runtime error',
-    'Every write is an explicitly synthetic operation',
+    'Every write is explicitly synthetic or validated content-free presence',
   ].map(label => source.indexOf(`    check('${label}'`, work));
   const assetAssertion = source.indexOf("    assert.equal(result.live2dAssets.status, 'passed'", work);
   const passed = source.indexOf("    result.status = 'passed';", work);
@@ -285,6 +285,9 @@ test('browser asset completion is awaited before all existing final safety guard
   assert.ok(ordered.every(position => position >= 0));
   assert.deepEqual([...ordered].sort((left, right) => left - right), ordered);
   assert.equal(new Set(ordered).size, ordered.length);
+  assert.match(source.slice(guards[3], assetAssertion),
+    /api\.requests\.filter\(request => request\.method !== 'GET'\)\s*\.every\(request => allowedWrites\.has\(`\$\{request\.method\} \$\{request\.path\}`\) \|\| isContentFreePresenceRequest\(request\)\)/);
+
 });
 
 
