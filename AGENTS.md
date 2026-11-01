@@ -18,7 +18,8 @@
 
 - 改文件前运行 `git status --short --branch`。不覆盖、回滚、stash 或整理用户未提交改动；提交只包含本任务文件。
 - 保证任务隔离：工作区干净、当前分支专用于本任务且无并行施工时，可以复用；存在用户未提交改动、多个任务或 Agent 并行施工时，使用独立 worktree。新建时默认基于最新相关上游分支，命名见 §3；不以隔离为由覆盖或整理用户改动。
-- 涉及产品口径时优先用 `lark-cli` 读取相关飞书 PRD / ADR / Check 表；涉及代码行为时先读对应本地文档、当前代码和附近测试。
+- 涉及产品口径时先核对用户当前确认的要求及相关本地文档；飞书 PRD / ADR / Check 表仅供历史参考，需要时用 `lark-cli` 读取。涉及代码行为时先读对应本地文档、当前代码和附近测试。
+- 排查业务功能时先读 [业务代码地图](docs/architecture/code-map/README.md)，按业务和症状下钻到功能链、代码符号及测试；地图只作导航，仍核对当前分支和实际证据。改变入口、调用关系或关键业务边界时，按[文档规范 §7](docs/architecture/documentation-rules.md#7-业务代码地图与就近注释)同步对应地图及就近注释。
 - 对可能变化的状态检查真实仓库、文档或运行时。浏览器验收优先内置 Codex browser，仅在用户明确要求时使用 Chrome。
 - Git 操作（含远程传输）直接用 Git CLI，不因 Git 加载 `web-access`。该技能仅用于实际网页搜索、访问或浏览器交互。
 
@@ -31,7 +32,9 @@
 
 ## 4. 事实源
 
-OfferPilot 的产品和架构事实源是飞书 wiki：
+产品和架构判断应结合用户当前确认的要求及相关本地文档；实际实现状态以当前代码、测试和运行时证据核对，不能仅凭文档推断功能已完成。存在影响实现的冲突且无法核实时，向用户确认。
+
+以下飞书 wiki 内容已有陈旧部分，仅供历史参考，不再作为当前产品和架构事实源，也不作为强制验收依据；采用其中的要求前需核对其当前有效性：
 
 - 主 wiki：https://ycn8095q3nc7.feishu.cn/wiki/K6BQw1X5Piksm2kDex3cMQMenvf
 - Root docx token：`Q353d2stRowjrFx8fmkc6uPmnQb`
@@ -64,7 +67,7 @@ OfferPilot 的产品和架构事实源是飞书 wiki：
 - `assessment` 不是一级 `event_type`；应表示为 `event_type=written_test` 且 `subtype=assessment`。
 - Conversation、Chat API、前端 Chat 上下文和 Agent runtime context 使用 `context_type/context_ref`。不要扩展旧 `offer_id` 上下文字段。
 - 投递场景使用 `context_type=application` 和 `context_ref=<application_id>`。workspace/global 对话应默认到合理的 workspace context。
-- 面试功能按 §4 的当前 PRD / ADR 及相关实施契约核对；[早期版本阶段范围](docs/archive/early-interview-version-scope.md)仅作历史记录，不作为当前功能禁令，也不据此推断功能已完成。
+- 面试功能按 §4 的依据优先级核对用户当前确认的要求及相关本地实施契约；飞书 PRD / ADR 仅供历史参考。[早期版本阶段范围](docs/archive/early-interview-version-scope.md)仅作历史记录，不作为当前功能禁令，也不据此推断功能已完成。
 - Knowledge 的长期产品职责、领域模型和数据流以 `docs/architecture/knowledge-system.md` 为唯一事实源；旧 Source -> Wiki 方向及其 Spec、Plan、ADR 已删除。
 
 ## 7. 验证与 Code Review

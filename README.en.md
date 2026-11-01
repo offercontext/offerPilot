@@ -6,6 +6,7 @@
 
 OfferPilot by offercontext brings applications, resumes, interviews and offers into one workspace.
 Its built-in Pilot agent uses your saved job-search materials to find information, draft content and call tools.
+You can also connect your own local agent through MCP, using its model and conversation environment to access authorized OfferPilot data and tools.
 Changes to important job-search records require your confirmation by default. It does not automatically apply for jobs or contact recruiters.
 
 For AI builders, the same project offers illustrated scenarios, small experiments and source walkthroughs
@@ -62,6 +63,46 @@ See the [installation instructions](README.md#快速开始)
 and [user guide in Chinese](docs/product-manual/产品说明书.md).
 
 Basic application tracking does not require AI configuration.
+
+## Use your own local agent (MCP)
+
+Connect DSH, Claude Code or another agent that supports local stdio MCP. Your agent manages the conversation and model;
+OfferPilot provides authorized local data and tools without calling its built-in model. No separate OfferPilot model configuration is needed for this connection.
+If your agent uses a cloud model, retrieved data may still be sent to that provider and incur fees.
+
+| Capability | What your agent can do |
+| --- | --- |
+| Read information | Read authorized applications, events, resumes and raw interview notes; search current Knowledge |
+| Propose changes | Create, update or delete applications, resumes and notes; schedule or reschedule interviews |
+| Read back results | Check the saved status and actual records after you approve in a separate trusted terminal |
+
+After installing from source, run these commands in the repository to install the MCP extra and start the updated app once to initialize or upgrade the database:
+
+```bash
+uv sync --frozen --extra mcp
+uv run oc start
+```
+
+You can then stop the app; MCP runs independently. Create a read-only connection, replacing `12` with an existing application ID:
+
+```bash
+uv run oc mcp connect my-agent --application-id 12
+```
+
+Use the returned `connection_id` to export the client configuration:
+
+```bash
+uv run oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
+```
+
+Add the generated `mcpServers.offerpilot` entry using your agent's configuration format, then reconnect MCP.
+For DSH, export with `--format dsh` and load it with `dsh web --patch <config-file>`; no OfferPilot native plugin is required.
+These commands default to the source edition's `~/.offerpilot`; use the same `--data-dir` for every command when connecting another workspace.
+
+Connections initially allow only application and event reads within the selected scope. Resumes, notes, Knowledge and write proposals require separate explicit grants.
+Resume and Knowledge reads grant global access independently of the selected applications. Proposals do not save changes until you review and approve them in a separate trusted terminal;
+the MCP surface has no approval tool. See the [grant options, revocation, setup and local trust boundaries (Chinese)](docs/architecture/external-agent-mcp.md).
+This describes source-edition support, not MCP availability in the Windows test installer linked above.
 
 ## How it helps during your job search
 

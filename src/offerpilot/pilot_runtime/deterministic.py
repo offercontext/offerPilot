@@ -971,6 +971,10 @@ class DeterministicPilotAdapter:
                 and service.matches(message_id, request.message, self._conversation_id(conversation)))
 
     def matches(self, request: StartTurnRequest, conversation: object) -> bool:
+        # An attached image must reach the multimodal route, even when its text
+        # also resembles a companion command. Never silently consume only text.
+        if request.image_attachment_ids:
+            return False
         if self._companion_matches(request, conversation):
             return True
         if request.pilot_action is not None:
@@ -1009,6 +1013,8 @@ class DeterministicPilotAdapter:
 
     def validate_new_request(self, request: StartTurnRequest) -> None:
         """Validate deterministic intent before a new Conversation is created."""
+        if request.image_attachment_ids:
+            return
 
         action = self._action_from_request(request)
         if action is None:

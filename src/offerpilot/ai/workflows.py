@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（JD/简历分析）、questions.md（复盘生成题库）。
+
 import json
 from dataclasses import dataclass
 from math import isfinite
@@ -218,6 +220,8 @@ def generate_questions(
     application_id: int = 0,
     count: int = 8,
 ) -> GeneratedQuestionsResult:
+    # 当前只从面试笔记的 questions 字段生成题库；来源为空时在加载模型之前失败。
+    # 这是题库生成路径，不隐式读取 Knowledge，也不创建模拟面试 Attempt。
     source = source.strip() or "notes"
     if source != "notes":
         raise WorkflowError("不支持的来源类型", 400)
@@ -396,6 +400,7 @@ def persist_generated_questions(
     application_id: int | None,
     topic: str = "",
 ) -> tuple[list[Any], int]:
+    # 同时对已保存题目和本批结果做文本归一化去重；skipped 只计重复题，非结构项直接忽略。
     if not isinstance(generated, list):
         return [], 0
     seen = set(repo.hashes())

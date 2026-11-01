@@ -4,8 +4,8 @@ on:
     branches: [master, feat/20261009-job-mail-assistant]
   pull_request:
     branches: [master]
-  # Deliberately no paths filter: shared auth/schema/UI changes can affect mail,
-  # and a required PR check must not remain pending after a docs-only change.
+  # Always report the existing required checks. Scope expensive steps inside
+  # the jobs; workflow-level path filters can leave required checks pending.
   workflow_dispatch:
 permissions:
   contents: read
@@ -16,45 +16,65 @@ jobs:
   synthetic-acceptance:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    outputs:
+      native_lock: ${{ steps.scope.outputs.native_lock }}
     env:
       LITELLM_LOCAL_MODEL_COST_MAP: 'True'
       PYTHONPATH: src
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fixed pre-mail commit is needed by the real upgrade regression.
+          fetch-depth: 0 # Complete PR base or push before/after range, including deletions.
+          persist-credentials: false
+      - name: Determine mail-specific work from the complete change range
+        id: scope
+        run: python scripts/job-mail-ci-scope.py
+      - name: Require explicit scope decisions before conditional work
+        shell: python {0}
+        env:
+          BROWSER_REQUIRED: ${{ steps.scope.outputs.browser }}
+          NATIVE_REQUIRED: ${{ steps.scope.outputs.native_lock }}
+        run: |
+          import os
+          import sys
+          if any(os.environ.get(key) not in ('true', 'false')
+                 for key in ('BROWSER_REQUIRED', 'NATIVE_REQUIRED')):
+              sys.exit('Missing or invalid mail CI scope output')
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.8.22'
+        if: ${{ steps.scope.outputs.browser == 'true' }}
       - uses: actions/setup-python@v5
+        if: ${{ steps.scope.outputs.browser == 'true' }}
         with:
           python-version: '3.12'
       - uses: actions/setup-node@v4
+        if: ${{ steps.scope.outputs.browser == 'true' }}
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install locked dependencies
+        if: ${{ steps.scope.outputs.browser == 'true' }}
         run: |
           uv sync --frozen
           npm ci --prefix web
-      - name: Backend safety and existing domain regression
+      # Unit tests, ruff, mypy and frontend unit tests belong to the full
+      # desktop-windows.yml gate. Build is still needed to serve the real UI.
+      - name: Build browser fixture UI and test browser wait helper
+        if: ${{ steps.scope.outputs.browser == 'true' }}
         run: |
-          uv run pytest -q tests/test_job_mail*.py tests/test_application_events_repository.py tests/test_events_api.py tests/test_calendar_api.py tests/test_auth_api.py tests/test_event_lifecycle_v1.py
-          uv run ruff check src/offerpilot/job_mail src/offerpilot/api.py src/offerpilot/cli.py src/offerpilot/db.py tests/test_job_mail*.py tests/fixtures/job_mail_app.py tests/fixtures/job_mail_scheduler_app.py tests/fixtures/job_mail_master_seed.py
-          uv run mypy src/offerpilot/job_mail src/offerpilot/api.py src/offerpilot/cli.py src/offerpilot/db.py --follow-imports=silent
-      - name: Frontend regression and production build
-        run: |
-          npm test --prefix web -- src/features/jobMail src/services/jobMail.test.ts src/services/jobMailSecureSetup.test.ts src/layout/AppShell.test.ts src/components/SettingsView.test.ts src/features/reminders src/features/dashboard src/features/pilotMascot
           npm run build --prefix web
           node --test scripts/job-mail-browser-wait.test.mjs
       - name: Install isolated browser harness
         id: browser-harness
+        if: ${{ steps.scope.outputs.browser == 'true' }}
         run: |
           sudo apt-get update
           sudo apt-get install -y fonts-noto-cjk
           npm install --prefix "$RUNNER_TEMP/mail-browser" playwright-core@1.55.1
       - name: Existing synthetic browser regression
+        if: ${{ steps.scope.outputs.browser == 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -87,7 +107,7 @@ jobs:
           curl -fsS http://127.0.0.1:38091/api/job-mail/status >/dev/null
           node scripts/job-mail-browser-smoke.mjs
       - name: Synthetic scheduler browser acceptance and screenshots
-        if: ${{ !cancelled() && steps.browser-harness.outcome == 'success' }}
+        if: ${{ !cancelled() && steps.scope.outputs.browser == 'true' && steps.browser-harness.outcome == 'success' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -120,7 +140,7 @@ jobs:
           curl -fsS http://127.0.0.1:38091/api/job-mail/status >/dev/null
           node scripts/job-mail-scheduler-browser.mjs
       - name: Preserve synthetic evidence only
-        if: always()
+        if: ${{ always() && steps.scope.outputs.browser == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: job-mail-synthetic-evidence-${{ github.sha }}
@@ -133,19 +153,41 @@ jobs:
           retention-days: 7
   windows-native-lock:
     needs: synthetic-acceptance
-    runs-on: windows-latest
+    if: ${{ always() }}
+    # Irrelevant changes still get a real successful check without a Windows VM.
+    runs-on: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' && 'windows-latest' || 'ubuntu-latest' }}
     timeout-minutes: 10
     env:
       PYTHONPATH: src
     steps:
+      - name: Require valid scope and successful upstream check
+        shell: python {0}
+        env:
+          UPSTREAM_RESULT: ${{ needs.synthetic-acceptance.result }}
+          NATIVE_REQUIRED: ${{ needs.synthetic-acceptance.outputs.native_lock }}
+        run: |
+          import os
+          import sys
+          result = os.environ.get('UPSTREAM_RESULT')
+          required = os.environ.get('NATIVE_REQUIRED')
+          if result != 'success' or required not in ('true', 'false'):
+              sys.exit('Mail scope/browser check did not succeed with a valid scope')
+          print('Native lock required' if required == 'true' else 'Native lock not required for this change')
       - uses: actions/checkout@v4
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.8.22'
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
       - name: Install locked test and offline-guard dependencies
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
         run: uv sync --frozen
       - name: Verify native lock exclusion and crash release
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
         run: uv run --frozen pytest --noconftest -q tests/test_job_mail_process_lock.py

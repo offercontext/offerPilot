@@ -270,6 +270,57 @@ def _provider_nodes_equal(left: object, right: object) -> bool:
     return _provider_content_snapshot(left) == _provider_content_snapshot(right)
 
 
+def _provider_matches_seals(value: object, content: Any, identity: Any) -> bool:
+    """Check the original seals in one walk without allocating replacement trees."""
+    if type(content) is not tuple or len(content) != 2:
+        return False
+    if type(value) in {_FrozenProviderMapping, _FrozenProviderSequence} and (
+        type(identity) is not tuple
+        or len(identity) != 3
+        or type(content[1]) is not tuple
+        or type(identity[2]) is not tuple
+    ):
+        return False
+    if type(value) is _FrozenProviderMapping:
+        entries = value._entries
+        if (
+            content[0] != "object"
+            or id(value) != identity[0]
+            or id(entries) != identity[1]
+            or len(entries) != len(content[1])
+            or len(entries) != len(identity[2])
+        ):
+            return False
+        return all(
+            type(sealed_content) is tuple
+            and len(sealed_content) == 2
+            and type(sealed_identity) is tuple
+            and len(sealed_identity) == 2
+            and key == sealed_content[0] == sealed_identity[0]
+            and _provider_matches_seals(item, sealed_content[1], sealed_identity[1])
+            for (key, item), sealed_content, sealed_identity in zip(
+                entries, content[1], identity[2]
+            )
+        )
+    if type(value) is _FrozenProviderSequence:
+        values = value._values
+        if (
+            content[0] != "array"
+            or id(value) != identity[0]
+            or id(values) != identity[1]
+            or len(values) != len(content[1])
+            or len(values) != len(identity[2])
+        ):
+            return False
+        return all(
+            _provider_matches_seals(item, sealed_content, sealed_identity)
+            for item, sealed_content, sealed_identity in zip(values, content[1], identity[2])
+        )
+    if value is None or type(value) in {bool, int, float, str}:
+        return identity is None and content == (type(value).__name__, value)
+    return False
+
+
 @dataclass(frozen=True, init=False)
 class ProviderToolContract:
     name: str
@@ -396,21 +447,18 @@ class ProviderToolContract:
         payload = object.__getattribute__(self, "_payload_snapshot")
         parameters = object.__getattribute__(self, "_parameters_snapshot")
         try:
-            current = (
-                _provider_content_snapshot(payload),
-                _provider_content_snapshot(parameters),
-                _provider_identity_snapshot(payload),
-                _provider_identity_snapshot(parameters),
+            matches = _provider_matches_seals(
+                payload,
+                object.__getattribute__(self, "_payload_content_seal"),
+                object.__getattribute__(self, "_payload_identity_seal"),
+            ) and _provider_matches_seals(
+                parameters,
+                object.__getattribute__(self, "_parameters_content_seal"),
+                object.__getattribute__(self, "_parameters_identity_seal"),
             )
-        except TypeError as exc:
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
             raise ValueError("Provider contract integrity drift") from exc
-        expected = (
-            object.__getattribute__(self, "_payload_content_seal"),
-            object.__getattribute__(self, "_parameters_content_seal"),
-            object.__getattribute__(self, "_payload_identity_seal"),
-            object.__getattribute__(self, "_parameters_identity_seal"),
-        )
-        if current != expected:
+        if not matches:
             raise ValueError("Provider contract integrity drift")
         if type(payload) is not _FrozenProviderMapping:
             raise ValueError("Provider contract integrity drift")
@@ -425,6 +473,16 @@ class ProviderToolContract:
             raise ValueError("Provider contract integrity drift")
         if function.get("parameters") is not parameters:
             raise ValueError("Provider contract integrity drift")
+
+    def _checked_identity_snapshot(self) -> tuple[str, str, int, int]:
+        """Validate once and expose only scalars, never private query nodes."""
+        self._ensure_provider_integrity()
+        return (
+            self.name,
+            self.description,
+            id(object.__getattribute__(self, "_payload_snapshot")),
+            id(object.__getattribute__(self, "_parameters_snapshot")),
+        )
 
     def __deepcopy__(self, memo: dict[int, object]) -> ProviderToolContract:
         del memo

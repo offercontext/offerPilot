@@ -730,6 +730,8 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
     if (state && attemptId) void generateNextQuestion(state, attemptId);
   };
 
+  // 排查链见 docs/architecture/code-map/interview-mock.md：回答提交和下一题是
+  // 两个请求。先取得回答保存成功，再决定是否出题；连续语音由其控制器续接。
   const submitAnswer = async (answerOverride?: string) => {
     const answer = (answerOverride ?? state?.answer ?? '').trim();
     const businessGeneration = businessGenerationRef.current;

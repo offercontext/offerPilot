@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（简历导入、主简历、派生版本）。
+
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -54,6 +56,7 @@ class ResumesRepository:
         return ResumesRepository(self._session_factory, session)
 
     def create(self, data: ResumeCreate) -> Resume:
+        # 未显式指定主简历时，仅首份活跃简历自动成为主简历；指定主简历会清除其他主标记。
         title = data.title or data.name
         name = data.name or title
         file_path = data.file_path or data.source_file_path
@@ -109,7 +112,8 @@ class ResumesRepository:
             return len(list(session.scalars(statement)))
 
     def delete(self, resume_id: int) -> None:
-        with self._session_factory() as session:
+        # 软删除主简历时选择最早的活跃非主简历接任；删除不清空派生版本的历史来源。
+        with repository_session(self._session_factory, self._session) as session:
             resume = session.get(Resume, resume_id)
             if resume is not None and resume.deleted_at is None:
                 was_master = bool(resume.is_master)
@@ -123,9 +127,11 @@ class ResumesRepository:
                     )
                     if replacement is not None:
                         replacement.is_master = True
-                session.commit()
+                finish_repository_write(session, self._session)
 
     def update(self, resume_id: int, changes: dict[str, Any]) -> Optional[Resume]:
+        # 只处理支持的更新字段；切换主简历在同一写事务中清除其他主标记，
+        # 但显式取消主标记不会在这里自动另选主简历。
         with repository_session(self._session_factory, self._session) as session:
             resume = session.get(Resume, resume_id)
             if resume is None or resume.deleted_at is not None:
@@ -157,7 +163,8 @@ class ResumesRepository:
             return resume
 
     def copy(self, resume_id: int, *, title: str = "") -> Optional[Resume]:
-        with self._session_factory() as session:
+        # 复制生成非主简历并保留 parent_resume_id；样例复制标为 sample_copy，不覆盖原稿。
+        with repository_session(self._session_factory, self._session) as session:
             original = session.get(Resume, resume_id)
             if original is None or original.deleted_at is not None:
                 return None
@@ -173,7 +180,7 @@ class ResumesRepository:
                 content_json=original.content_json,
             )
             session.add(copied)
-            session.commit()
+            finish_repository_write(session, self._session)
             session.refresh(copied)
             return copied
 

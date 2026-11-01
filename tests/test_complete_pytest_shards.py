@@ -433,7 +433,12 @@ def test_previous_count_balanced_manifest_cannot_use_duration_policy(tmp_path):
         gate.validate_manifest(manifest)
 
 
-def test_frozen_history_provenance_and_all_6773_nodes_keep_exact_coverage():
+def test_frozen_history_provenance_and_all_6773_nodes_keep_exact_coverage(monkeypatch):
+    # Preserve every original baseline/refresh assertion against immutable v1.
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v1.json"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256",
+                        "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77")
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 1)
     history = gate.load_duration_history()
     assert {key: value for key, value in history["source"]["baseline"].items()
             if key != "history_sha256"} == {
@@ -582,7 +587,7 @@ def test_equal_cost_file_and_shard_ties_are_stable(monkeypatch):
 
 
 @pytest.mark.parametrize("field,value", [
-    ("strategy", "count-v3"), ("history_version", 2), ("history_sha256", "0" * 64),
+    ("strategy", "count-v3"), ("history_version", 1), ("history_sha256", "0" * 64),
     ("fallback_ms", 0), ("fallback_strategy", "global-max-only"),
 ])
 def test_manifest_duration_policy_is_bound_and_cannot_be_overridden(tmp_path, field, value):
@@ -608,7 +613,7 @@ def test_frozen_history_digest_rejects_edits_but_allows_checkout_crlf(tmp_path, 
     path = tmp_path / "history.json"
     monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", path)
     path.write_bytes(original.replace(b"\n", b"\r\n"))
-    assert gate.load_duration_history()["fallback_ms"] == 257834
+    assert gate.load_duration_history()["fallback_ms"] == 309160
     path.write_bytes(original + b" ")
     with pytest.raises(ValueError, match="digest mismatch"):
         gate.load_duration_history()
@@ -636,3 +641,127 @@ def test_workflow_preserves_120_minute_shard_budget():
     assert "timeout-minutes: 120" in shard_job
     assert "max-parallel: 2" in shard_job
     assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]" in shard_job
+
+
+@pytest.fixture
+def duration_refresh(monkeypatch):
+    spec = importlib.util.spec_from_file_location("duration_refresh", SCRIPT.with_name("refresh_durations.py"))
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "gate", gate)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_windows_v2_refresh_preserves_frozen_v1_and_maximum_observations():
+    baseline_path = SCRIPT.with_name("durations-v1.json")
+    assert hashlib.sha256(baseline_path.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == (
+        "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77"
+    )
+    baseline, history = gate.read(baseline_path), gate.load_duration_history()
+    source = history["source"]
+    assert history["version"] == 2
+    assert source["previous_history_sha256"] == (
+        "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77"
+    )
+    assert source["scope"] == "scheduling-only; not completed execution evidence"
+    assert source["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    assert history["historical_skips"] == baseline["historical_skips"]
+    assert source["added_nodes"] == 494 and source["raised_nodes"] == 3102
+    assert len(source["node_observations"]) == 7482
+    assert [(r["run_id"], r["artifact_id"], r["artifact_sha256"]) for r in source["runs"]] == [
+        ("40059938410", 12556478824, "9b2007beee66f412dc3da75540e4f34b29503631ed72c7f235d25bb3d9e6fb13"),
+        ("40085762532", 12567269333, "1c707cab7b97dd2660ed682e9ff16f5a60feb2ce64bb81b6c1963f5f668466bb"),
+    ]
+    for run, expected_count in zip(source["runs"], (7477, 7265), strict=True):
+        assert run["identity"]["platform"] == "Windows"
+        assert run["identity"]["run"] == run["run_id"]
+        assert [s["shard"] for s in run["shards"]] == list(range(20))
+        assert sum(s["complete_passed_nodes"] for s in run["shards"]) == expected_count
+        assert sum(s["selected_nodes"] for s in run["shards"]) == run["manifest_nodes"]
+        for shard in run["shards"]:
+            assert shard["selected_nodes"] == shard["complete_passed_nodes"] + shard["excluded_or_missing_nodes"]
+    assert source["runs"][1]["shards"][19]["exit_code"] == 2
+    expected = dict(baseline["duration_ms"])
+    for node, audit in source["node_observations"].items():
+        assert audit["previous_ms"] == baseline["duration_ms"].get(node)
+        assert audit["observations"]
+        for observation in audit["observations"]:
+            assert observation["run_id"] in {"40059938410", "40085762532"}
+            assert 0 <= observation["shard"] < 20
+            assert type(observation["observed_ms"]) is int and observation["observed_ms"] > 0
+        expected[node] = max(audit["previous_ms"] or 0, *(o["observed_ms"] for o in audit["observations"]))
+        assert audit["effective_ms"] == expected[node]
+    assert history["duration_ms"] == expected
+    assert all(history["duration_ms"][node] >= cost for node, cost in baseline["duration_ms"].items())
+    assert history["fallback_ms"] == max(expected.values()) == 309160
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "failed", "skipped", "xfail",
+                                      "no_xfail", "negative", "nan", "infinite", "boolean"])
+def test_refresh_excludes_incomplete_or_nonpassed_nodes(duration_refresh, mutation):
+    phases = [{"when": phase, "outcome": "passed", "xfail": False, "duration_seconds": 0.0011}
+              for phase in ("setup", "call", "teardown")]
+    assert duration_refresh.complete_passed_ms(phases) == 4  # Ceil total, not ceil each phase.
+    if mutation == "missing":
+        phases.pop()
+    elif mutation == "duplicate":
+        phases.append(phases[1].copy())
+    elif mutation in {"failed", "skipped"}:
+        phases[1]["outcome"] = mutation
+    elif mutation == "xfail":
+        phases[1]["xfail"] = True
+    elif mutation == "no_xfail":
+        del phases[1]["xfail"]
+    else:
+        phases[1]["duration_seconds"] = {"negative": -1, "nan": float("nan"),
+                                         "infinite": float("inf"), "boolean": True}[mutation]
+    assert duration_refresh.complete_passed_ms(phases) is None
+
+
+def test_refresh_accepts_only_complete_nodes_from_failed_or_timed_out_shard(tmp_path, duration_refresh):
+    nodes = [f"tests/test_synthetic_{i:02}.py::test_case" for i in range(20)]
+    baseline = {"duration_ms": dict.fromkeys(nodes, 10), "historical_skips": {},
+                "fallback_ms": 10, "unit": "ceil_total_phase_milliseconds"}
+    source = {"run_id": "synthetic"}
+    manifest = {"version": 4, "identity": {"run": "synthetic", "platform": "Windows"},
+                "nodes": nodes, "shards": gate._partition(nodes, 20, baseline),
+                "partition": {"history_sha256": duration_refresh.BASELINE_SHA256}}
+    gate.write(tmp_path / "manifest.json", manifest)
+    for index, selected in enumerate(manifest["shards"]):
+        phases = [{"when": phase, "outcome": "passed", "xfail": False, "duration_seconds": 0.02}
+                  for phase in ("setup", "call", "teardown")]
+        if index == 19:
+            phases.pop()  # A timed-out call without teardown is not a complete measurement.
+        gate.write(tmp_path / f"shard-{index}.json", {
+            "identity": manifest["identity"], "manifest": gate.digest(manifest), "index": index,
+            "exit_code": 2, "selected": selected, "reports": {selected[0]: phases},
+        })
+    result = duration_refresh.refresh(baseline, [tmp_path], [source])
+    assert len(result["source"]["node_observations"]) == 19
+    assert result["duration_ms"][manifest["shards"][19][0]] == 10
+    assert set(result["duration_ms"].values()) == {10, 60}
+    assert result == duration_refresh.refresh(baseline, [tmp_path], [source])
+    bad = gate.read(tmp_path / "shard-0.json")
+    bad["identity"] = {"run": "another", "platform": "Windows"}
+    gate.write(tmp_path / "shard-0.json", bad)
+    with pytest.raises(ValueError, match="identity"):
+        duration_refresh.refresh(baseline, [tmp_path], [source])
+
+
+def test_refreshed_history_partition_keeps_exact_nodes_and_module_lifecycles():
+    history = gate.load_duration_history()
+    # Include retained historical skips and new, unmeasured nodes: none may be dropped.
+    nodes = sorted(history["duration_ms"] | history["historical_skips"])
+    nodes += ["tests/test_future_module.py::test_first", "tests/test_future_module.py::test_second"]
+    shards = gate.partition(nodes, 20)
+    assert len(shards) == 20 and all(shards)
+    assert shards == gate.partition(list(reversed(nodes)), 20)
+    assert sorted(sum(shards, [])) == sorted(nodes)
+    assert len(set(sum(shards, []))) == len(nodes)
+    for filename in {node.split("::", 1)[0] for node in nodes} - gate.NODE_SPLIT_FILES:
+        assert sum(any(node.split("::", 1)[0] == filename for node in shard) for shard in shards) == 1
+    manifest = {"version": 4, "partition": gate.partition_policy(), "nodes": nodes,
+                "shards": shards, "allowed_skips": None}
+    gate.validate_manifest(manifest)
+    assert manifest["allowed_skips"] is None
+    assert gate.digest(manifest) == gate.digest({**manifest, "shards": gate.partition(nodes[::-1], 20)})

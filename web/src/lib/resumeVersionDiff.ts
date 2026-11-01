@@ -92,6 +92,8 @@ const MODULE_ORDER: DiffModule[] = [
 ];
 const KIND_ORDER: DiffKind[] = ['added', 'removed', 'changed'];
 
+// 业务地图：docs/architecture/code-map/materials.md。比较用户选定的两个结构化快照，
+// 只返回差异展示，不合并正文；差异数量也不代表哪份简历更好。
 export function diffResumeContent(
   baselineContent: unknown,
   targetContent: unknown,

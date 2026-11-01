@@ -26,7 +26,7 @@ class AIProviderProfile(BaseModel):
     supports_vision: bool = False
     supports_json_schema: bool = False
 
-    @field_validator("supports_json_schema", mode="before")
+    @field_validator("supports_json_schema", "supports_vision", mode="before")
     @classmethod
     def normalize_json_schema_capability(cls, value: Any) -> bool:
         return value if type(value) is bool else False

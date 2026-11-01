@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/README.md（岗位匹配、初筛与深入分析）。
+# 本层校验模型输出和证据引用；生成结果的保存/确认由 opportunity_fit_reviews Repository 负责。
+# 回归入口：tests/test_opportunity_fit_reviews_ai.py。
+
 import copy
 import json
 from dataclasses import dataclass
@@ -101,6 +105,7 @@ def build_source_snapshot(
     jd_source_label: str,
     candidate_assertions: list[str],
 ) -> dict[str, Any]:
+    # 显式冻结 JD、简历和用户补充，保留各自证据命名空间；不把岗位要求当作候选人经历。
     resume_json = canonical_json(resume_content)
     jd_hash = sha256_text(jd_text)
     return {
@@ -289,6 +294,8 @@ def _validate_v2_stage(
     *,
     expected_stage: str,
 ) -> ValidatedOpportunityOutput:
+    # V2 初筛/深析共用有证据的分析结构；旧版 decision 等字段不能混入新契约。
+    # 校验的是结构与引用可追溯性，不将模型分析自动变成投递决策或事实确认。
     if not isinstance(payload, dict):
         raise OpportunityFitModelError(
             "opportunity fit v2 must be an object",
@@ -321,6 +328,7 @@ def _validate_v2_stage(
     _v2_require_bounded_string(summary.get("rationale"), "summary rationale")
     summary_refs = _validate_v2_refs(summary.get("evidence_refs"), snapshot)
     safe_empty = summary_text == _V2_SAFE_EMPTY_TEXT
+    # 证据不足必须使用完整的固定 safe-empty 形态，不能混入无引用结论或非空分析项。
     if not summary_refs and not safe_empty:
         raise OpportunityFitModelError("summary needs evidence_refs", failure_category="missing_evidence_ref")
     if safe_empty and summary.get("rationale") != _V2_SAFE_EMPTY_RATIONALE:
@@ -373,6 +381,7 @@ def _validate_v2_stage(
         question_ids.add(question_id)
         ids.add(question_id)
         if question_id in _V2_QUESTION_TEXT:
+            # 固定通用问题允许没有引用；针对当前资料提出的问题必须附可回溯证据。
             if item.get("text") != _V2_QUESTION_TEXT[question_id]:
                 raise OpportunityFitModelError("fixed question text is invalid", failure_category="semantic_invalid")
             _validate_v2_refs(item.get("evidence_refs"), snapshot)
@@ -407,6 +416,8 @@ def _v2_require_bounded_string(value: Any, label: str, maximum: int = 1000) -> s
 
 
 def _validate_v2_refs(refs: Any, snapshot: dict[str, Any]) -> list[dict[str, str]]:
+    # V2 引用只来自 JD/简历/用户补充的允许路径，excerpt 必须是该快照字段的子串。
+    # 这与材料改写要求引用字段全文相等不同，排查时不能复用其匹配假设。
     if not isinstance(refs, list):
         raise OpportunityFitModelError("evidence_refs must be an array", failure_category="invalid_field_type")
     if len(refs) > 4:
@@ -498,6 +509,8 @@ def _generate(
     prompt: str,
     validator: Callable[[dict[str, Any]], ValidatedOpportunityOutput],
 ) -> ValidatedOpportunityOutput:
+    # 一次生成加最多一次契约修复；修复保留冻结输入，只传错误分类而不回灌失败正文。
+    # Provider 失败直接返回 provider_error，不消耗内容修复机会来重复外部调用。
     repair_category = "invalid_json"
     for attempt in range(2):
         user = prompt

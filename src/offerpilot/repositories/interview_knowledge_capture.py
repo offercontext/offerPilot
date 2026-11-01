@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（从复盘沉淀知识）。
+# preview 仅保存候选内容；confirm 才创建 Knowledge 来源、证据与笔记版本。
+# 回归入口：tests/test_interview_knowledge_capture_repository.py、
+# tests/test_interview_knowledge_capture_api.py。
+
 import json
 import hashlib
 from dataclasses import dataclass
@@ -171,6 +176,8 @@ class InterviewKnowledgeCaptureRepository:
         mode: str,
         raw_fragments: list[dict[str, Any]],
     ) -> CaptureAttemptView:
+        # key 绑定原笔记指纹和选中片段，不绑定 direct/ai 模式；切换预览可沿用它。
+        # 未确认尝试受有效期和来源校验约束，已确认尝试只返回保存的结果。
         if mode not in {"direct", "ai"}:
             raise FragmentValidationError("preview mode is invalid")
         with self._session_factory() as session:
@@ -222,6 +229,8 @@ class InterviewKnowledgeCaptureRepository:
         attempt_key: str,
         fragments: list[CanonicalFragment],
     ) -> AiPreviewClaim:
+        # 在写事务中领取唯一的本次 AI 预览权；生成中或已有终态预览时不重复调用。
+        # revision/token 随领取更新，后续完成或失败回写必须携带这对身份。
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             note = _visible_note(session, note_id)
@@ -275,6 +284,8 @@ class InterviewKnowledgeCaptureRepository:
         preview: dict[str, Any],
         error_code: str = "",
     ) -> bool:
+        # 仅当前生成者可完成预览；迟到响应返回 False，不覆盖新预览或确认结果。
+        # 无内容保留为 safe_empty，由确认入口继续校验用户提交的内容。
         status = "safe_empty" if not preview.get("blocks") else "ai_ready"
         with self._session_factory() as session:
             result = session.execute(
@@ -347,6 +358,8 @@ class InterviewKnowledgeCaptureRepository:
         title: str,
         blocks: list[dict[str, Any]],
     ) -> ConfirmedCapture:
+        # 确认是持久化边界：先恢复已确认结果，再校验有效期、来源和片段引用。
+        # 新确认在同一事务内建立来源/快照/证据、笔记版本和引用关系，最后标记尝试。
         from offerpilot.ai.interview_knowledge_capture import (
             InterviewKnowledgePreviewError,
             validate_interview_knowledge_preview,
@@ -361,6 +374,8 @@ class InterviewKnowledgeCaptureRepository:
             if attempt is None:
                 raise InterviewKnowledgeCaptureNotFound()
             if attempt.preview_status == "confirmed" and attempt.confirmed_note_version_id:
+                # 响应丢失后的重复确认只返回原版本，不按新 title/blocks 再创建笔记。
+                # 仍校验目标笔记可见性；此分支不依赖原预览是否已过期。
                 version = session.get(KnowledgeNoteVersion, attempt.confirmed_note_version_id)
                 if version is None:
                     raise InterviewKnowledgeCaptureNotFound()
@@ -412,6 +427,7 @@ class InterviewKnowledgeCaptureRepository:
             source_hash = hashlib.sha256(
                 f"{note_id}|{current_fingerprint}|{snapshot_digest}|{CAPTURE_SCHEMA_VERSION}".encode("utf-8")
             ).hexdigest()
+            # 相同笔记内容指纹与片段快照可复用来源/证据；不同确认尝试仍各建知识笔记。
             source = session.scalar(select(KnowledgeSource).where(KnowledgeSource.source_hash == source_hash))
             evidence_by_fragment: dict[str, KnowledgeEvidence] = {}
             if source is None:
@@ -515,6 +531,7 @@ class InterviewKnowledgeCaptureRepository:
                 or 0
             ) + 1
             submitted_preview_json = canonical_json(canonical_content)
+            # 用户编辑过的确认内容必须保留独立来源标记，不能冒充原始摘录或 AI 原稿。
             if submitted_preview_json != attempt.preview_json:
                 origin = "user_edited_preview"
             else:
@@ -557,6 +574,7 @@ class InterviewKnowledgeCaptureRepository:
             attempt.preview_status = "confirmed"
             attempt.confirmed_note_version_id = version.id
             attempt.provider_call_token = ""
+            # 只有全部证据引用落库后一起提交，避免留下已确认但缺少版本/证据的结果。
             session.commit()
             return ConfirmedCapture(
                 version_id=version.id,

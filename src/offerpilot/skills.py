@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/settings-desktop.md（技能登记与信任开关）。
+
 from hashlib import sha256
 import json
 from typing import Any
@@ -24,6 +26,7 @@ def loaded_skill_ids(cfg: Config) -> list[str]:
 
 
 def register_skill(cfg: Config, payload: dict[str, Any]) -> Config:
+    # 登记的是 manifest 元数据与来源标记，不在此下载或运行包；启用必须同时受信任。
     manifest = _manifest_from_payload(payload)
     skill_id = _required_text(manifest, "id", "manifest.id")
     requested_id = str(payload.get("id") or skill_id).strip()

@@ -10,8 +10,15 @@ import {
 import HaruChatWindow from './HaruChatWindow';
 import { getPilotExecution } from '@/services/chat';
 import { setLocale } from '@/i18n';
+import { publishPersona } from '@/features/companionPersona/useCompanionName';
+import type { PersonaView } from '@/services/persona';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
 vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
+import { readChatImage } from '@/services/chatImages';
+vi.mock('@/services/chatImages', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/chatImages')>(),
+  readChatImage: vi.fn().mockResolvedValue(new Blob(['image'], { type: 'image/png' })),
+}));
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 vi.mock('@/services/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/chat')>(),
@@ -112,6 +119,17 @@ function SharedDraftHarness() {
   return <HaruChatWindow returnFocusRef={{ current: null }} />;
 }
 
+function ImageHistoryHarness() {
+  const controller = usePilotConversationController();
+  const surface = useAssistantSurface();
+  useEffect(() => {
+    controller.setTurns([{ role: 'user', content: '', image_attachments: [{ id: 'img_history', sha256: 'hash',
+      mime_type: 'image/png', width: 2, height: 2, size_bytes: 5, normalization_version: 'image-normalize-v1' }] }]);
+    surface.openHaru();
+  }, []);
+  return <HaruChatWindow returnFocusRef={{ current: null }} />;
+}
+
 function LoadingHarness() {
   const controller = usePilotConversationController();
   const surface = useAssistantSurface();
@@ -124,6 +142,46 @@ function LoadingHarness() {
 }
 
 describe('HaruChatWindow', () => {
+  it('keeps the custom companion name in the image composer and its accessible label across languages', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:custom-persona-image');
+      static revokeObjectURL = vi.fn();
+    });
+    await act(async () => root?.render(<AssistantSurfaceProvider><ImageHistoryHarness /></AssistantSurfaceProvider>));
+    const view: PersonaView = { profile_id: 'test-persona', revision: 1, content_hash: 'test', policy_version: 'test', presets: [],
+      spec: { display_name: '小晴', traits: [], speaking_style: '', verbosity: 'balanced', interests_text: '',
+        fictional_background: '', additional_style_notes: '', enabled_activity_templates: [] } };
+    try {
+      act(() => publishPersona(view));
+      const composer = host!.querySelector<HTMLTextAreaElement>('#haru-composer')!;
+      expect(host!.querySelector('label[for="haru-composer"]')!.textContent).toBe('给 小晴 发消息');
+      expect(composer.placeholder).toBe('问 小晴…');
+      expect(host!.querySelector('[aria-label="添加图片"]')).not.toBeNull();
+      expect(host!.querySelector('img[alt="图片 1，点击放大"]')).not.toBeNull();
+      act(() => setLocale('en-US'));
+      expect(host!.querySelector('label[for="haru-composer"]')!.textContent).toBe('Message 小晴');
+      expect(composer.placeholder).toBe('Ask 小晴…');
+      expect(host!.querySelector('[aria-label="Add images"]')).not.toBeNull();
+    } finally {
+      act(() => publishPersona({ ...view, spec: { ...view.spec, display_name: 'Haru' } }));
+    }
+  });
+
+  it('closes the image preview before closing Haru when Escape is pressed', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:history');
+      static revokeObjectURL = vi.fn();
+    });
+    await act(async () => root?.render(<AssistantSurfaceProvider><ImageHistoryHarness /></AssistantSurfaceProvider>));
+    expect(readChatImage).toHaveBeenCalledWith('img_history');
+    act(() => host!.querySelector<HTMLImageElement>('img[alt="图片 1，点击放大"]')!.click());
+    const dialog = host!.querySelector<HTMLElement>('#haru-chat-window')!;
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host!.querySelector('#haru-chat-window')).not.toBeNull();
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host!.querySelector('#haru-chat-window')).toBeNull();
+  });
+
   it('blocks keyboard submission when only a remote execution is running', async () => {
     vi.mocked(getPilotExecution).mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' });
     await act(async () => root?.render(
@@ -145,6 +203,7 @@ describe('HaruChatWindow', () => {
   afterEach(() => {
     act(() => root?.unmount());
     host?.remove();
+    vi.unstubAllGlobals();
     setLocale('zh-CN');
   });
 

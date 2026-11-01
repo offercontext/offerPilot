@@ -26,6 +26,7 @@ from typing import (
 from uuid import UUID
 
 from offerpilot.ai.tool_runtime.contracts import TransientToolRuntimeValue
+from offerpilot.image_contracts import ImageReference, image_ids, image_references
 
 from .errors import RuntimeFailureCode
 
@@ -779,9 +780,19 @@ class StartTurnRequest:
     page_context: ImmutablePayload | None = None
     attachments: tuple[AttachmentReference, ...] = ()
     pilot_action: PilotActionDescriptor | None = None
+    image_attachment_ids: tuple[str, ...] = ()
+    images: tuple[ImageReference, ...] = ()
 
     def __post_init__(self) -> None:
-        _require_text(self.message, field_name="message", allow_empty=False)
+        _require_text(self.message, field_name="message", allow_empty=bool(self.image_attachment_ids))
+        if type(self.image_attachment_ids) is not tuple:
+            raise TypeError("image_attachment_ids must be a tuple")
+        image_ids(self.image_attachment_ids)
+        image_references(self.images)
+        if self.images and tuple(image.id for image in self.images) != self.image_attachment_ids:
+            raise ValueError("image_reference_mismatch")
+        if self.image_attachment_ids and self.pilot_action is not None:
+            raise ValueError("图片消息不能同时提交确定性业务动作")
         if self.conversation_id is not None:
             _require_int(self.conversation_id, field_name="conversation_id")
             if self.conversation_id < 0:

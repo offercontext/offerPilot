@@ -1,3 +1,6 @@
+// 业务地图：docs/architecture/code-map/interview-mock.md。
+// 本状态机只决定页面下一步；回答保存成功后才能进入下一题。
+// question_succeeded 清理上一题 key，result_unknown 则保留原 key 用于对账。
 export type StudioPhase =
   | 'question_ready'
   | 'answering'

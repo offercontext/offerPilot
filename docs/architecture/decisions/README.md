@@ -5,6 +5,10 @@
 
 ## 当前记录
 
+### 外部 Agent 接入
+
+- [ADR-0016: 以受限 MCP 提案连接外部 Agent](./0016-expose-scoped-external-agent-mcp.md) — Accepted for implementation
+
 ### 产品入口与草稿
 
 - [ADR-0015: 精简入口并保留领域草稿所有权](./0015-simplify-product-entry-and-draft-ownership.md) — Accepted
@@ -41,6 +45,7 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 - [ADR-0010: 由 Runtime 持有 Pilot 执行，客户端只订阅进度](./0010-own-pilot-execution-in-runtime.md) — Accepted
 - [ADR-0011: 按确认、范围和预算装配可选上下文](./0011-bound-optional-context-sources.md) — Accepted
 - [ADR-0012: 持久化有界的本地主动任务](./0012-bound-local-proactive-jobs.md) — Accepted
+- [ADR-0013: 持久化受当前模型能力约束的原生图片消息](./0013-persist-native-image-messages.md) — Accepted
 
 ### 决策链
 

@@ -6,6 +6,7 @@ from threading import Event
 from time import monotonic, sleep
 from uuid import uuid4
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -82,6 +83,15 @@ def _wait_for_status(
     latest: dict = {}
     while monotonic() < deadline:
         response = client.get(f"/api/pilot/runtime/v1/turns/{turn_id}")
+        if (
+            response.status_code == 503
+            and response.json().get("error_code") == "runtime_source_unavailable"
+        ):
+            # A verified transient visibility read failure is not absence.
+            # Keep the original deadline and never retry a genuine 404.
+            latest = response.json()
+            sleep(0.05)
+            continue
         assert response.status_code == 200, response.text
         latest = response.json()
         if latest.get("state") in terminal:
@@ -398,3 +408,47 @@ def test_open_sse_stops_before_emitting_private_frames_after_source_loss() -> No
         assert read_checks == 10
     finally:
         manager.close(wait=True)
+
+
+@pytest.mark.parametrize("recovery", [True, False])
+def test_status_polling_bounds_explicit_temporary_source_failures(monkeypatch, recovery):
+    elapsed = [0.0]
+    calls = []
+    monkeypatch.setattr(f"{__name__}.monotonic", lambda: elapsed[0])
+
+    def advance(seconds):
+        elapsed[0] += seconds
+
+    monkeypatch.setattr(f"{__name__}.sleep", advance)
+
+    class Client:
+        def get(self, url):
+            calls.append(url)
+            if recovery and len(calls) == 2:
+                return httpx.Response(200, json={"state": "completed"})
+            return httpx.Response(503, json={"error_code": "runtime_source_unavailable"})
+
+    if recovery:
+        assert _wait_for_status(
+            Client(), "synthetic", {"completed"}, timeout=0.1
+        ) == {"state": "completed"}
+    else:
+        with pytest.raises(AssertionError, match="runtime did not reach"):
+            _wait_for_status(Client(), "synthetic", {"completed"}, timeout=0.1)
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    "status,code", [(404, "turn_not_found"), (503, "other_unavailable")]
+)
+def test_status_polling_never_retries_absence_or_unclassified_errors(status, code):
+    calls = []
+
+    class Client:
+        def get(self, url):
+            calls.append(url)
+            return httpx.Response(status, json={"error_code": code})
+
+    with pytest.raises(AssertionError, match=code):
+        _wait_for_status(Client(), "synthetic", {"completed"})
+    assert len(calls) == 1

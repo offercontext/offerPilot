@@ -1,3 +1,6 @@
+
+# 业务路由导航：docs/architecture/code-map/route-coverage.md；功能链从 code-map/README.md 下钻。
+# 本文件集中 HTTP 装配，业务事务通常由 Repository/Service 持有；入口成功不等于下游写入成功。
 import hashlib
 import json
 import logging
@@ -75,6 +78,9 @@ from offerpilot.ai.workflows import (
     truncate_for_prompt as _truncate_for_prompt,
 )
 from offerpilot.ai.client import ConfiguredAIClient
+from offerpilot.chat_images import ChatImageCollector, ChatImageStore
+from offerpilot.chat_image_routes import image_router, image_capability, image_error, require_image_capability
+from offerpilot.image_contracts import ImageInputError, ImageReference, image_ids, image_references
 from offerpilot.job_mail.api import job_mail_origin_guard_response, register_job_mail_routes
 from offerpilot.job_mail.transport import MailTransport
 from offerpilot.job_mail.model_adapter import Extractor
@@ -116,7 +122,7 @@ from offerpilot.config import (
     resolve_data_dir,
     save_config,
 )
-from offerpilot.context_projector.loader import ContextSourceLoader, fetch_rows
+from offerpilot.context_projector.loader import ContextSourceLoader, SourceTemporarilyUnavailable, fetch_rows
 from offerpilot.context_projector.contracts import ProjectionError
 from offerpilot.context_projector.budget import PROVIDER_FRAMING_RESERVE
 from offerpilot.context_sources.binding_scope import frozen_readiness_scope
@@ -423,6 +429,7 @@ from offerpilot.schemas import (
     resume_payload,
 )
 from offerpilot.skills import SkillRegistryError, register_skill, skills_payload, update_skill
+from offerpilot.resume_rules import is_empty_resume_draft, content_has_value
 from offerpilot.chat_transport import (
     execute_runtime_sync,
     outcome_http_response,
@@ -436,6 +443,10 @@ _KNOWLEDGE_MAIN_UPLOAD_LIMIT = 5 * 1024 * 1024
 _KNOWLEDGE_ASSET_UPLOAD_LIMIT = 10 * 1024 * 1024
 _KNOWLEDGE_BUNDLE_UPLOAD_LIMIT = 50 * 1024 * 1024
 _KNOWLEDGE_ASSET_COUNT_LIMIT = 50
+
+
+class RuntimeSourceUnavailable(RuntimeError):
+    """Source visibility could not be verified within its bounded read budget."""
 
 
 class _KnowledgeUploadLimitExceeded(ValueError):
@@ -1110,6 +1121,8 @@ def create_app(
     resolved_data_dir = data_dir or resolve_data_dir()
     resolved_static_dir = static_dir or _find_static_dir()
     session_factory = session_factory_for_data_dir(resolved_data_dir)
+    chat_images = ChatImageStore(session_factory, resolved_data_dir)
+    image_collector = ChatImageCollector(chat_images)
     app_config = load_config(resolved_data_dir)
     applications = ApplicationsRepository(session_factory)
     application_creation = ApplicationCreationService(session_factory)
@@ -1291,6 +1304,8 @@ def create_app(
         brief_worker,
     )
     app = FastAPI(title="OfferPilot")
+    app.include_router(image_router(chat_images, lambda: load_config(resolved_data_dir),
+                                    _provider_for_connection_test))
     knowledge_runtime = KnowledgeWorkerRuntime(
         knowledge_runner,
         knowledge_repository,
@@ -1380,6 +1395,19 @@ def create_app(
                 "Content-Type, Authorization, X-OfferPilot-Token"
             )
         return response
+
+    @app.exception_handler(RuntimeSourceUnavailable)
+    async def runtime_source_unavailable_handler(
+        request: Request, exc: RuntimeSourceUnavailable,
+    ) -> JSONResponse:
+        # No cached terminal, source identifiers, or exception text may escape
+        # while the visibility check is inconclusive.
+        return JSONResponse(
+            {"error": "任务来源暂时无法核验，请稍后重试。",
+             "error_code": "runtime_source_unavailable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store", "Retry-After": "1"},
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -1510,6 +1538,7 @@ def create_app(
 
     app.state.pilot_runtime = build_pilot_runtime(
         data_dir=resolved_data_dir,
+        image_reader=chat_images.read_for_model,
         chat=chat,
         applications=applications,
         application_jd_versions=application_jd_versions,
@@ -1555,6 +1584,7 @@ def create_app(
 
     @app.on_event("startup")
     def _start_knowledge_worker() -> None:
+        image_collector.start()
         knowledge_runtime.start()
         proactive_runtime.start()
         job_mail_runtime.start()
@@ -1573,6 +1603,7 @@ def create_app(
 
         attempt_cleanup(job_mail_runtime.stop)
         attempt_cleanup(proactive_runtime.stop)
+        attempt_cleanup(image_collector.stop)
         attempt_cleanup(runtime_manager.close)
         attempt_cleanup(turn_control_registry.close)
         attempt_cleanup(lambda: knowledge_runtime.stop(timeout=5))
@@ -3171,6 +3202,9 @@ def create_app(
             )
         return JSONResponse(_interview_preparation_proposal_json(proposal))
 
+    # 业务地图：docs/architecture/code-map/interview.md（准备建议）。
+    # 此入口先解析选择并核对 JD/来源，再重放或生成 Proposal；不要从 UI
+    # 的“生成”按钮直接推定一定会调用模型，preflight 也可能返回原尝试。
     @app.post("/api/applications/{app_id}/interview-preparation-proposals")
     def create_interview_preparation_proposal(
         app_id: int,
@@ -4826,6 +4860,7 @@ def create_app(
 
     @app.delete("/api/resumes/{resume_id}")
     def delete_resume(resume_id: int) -> JSONResponse:
+        # 公开 HTTP 入口禁止删除非空主简历；Repository 的主简历接任能力不代表此入口允许任意删除。
         resume = resumes.get(resume_id)
         if resume is None or resume.deleted_at is not None:
             return error_response(404, "Resume not found")
@@ -4960,6 +4995,7 @@ def create_app(
     ) -> tuple[StartTurnRequest, PilotRuntime, TurnAdmission, str, DurableRuntimeInvocationControl] | JSONResponse:
         request_id = payload.get("request_id", str(uuid4()))
         frozen_source: list[_FrozenChatSourceMessages] = []
+        frozen_images: list[tuple[ImageReference, ...]] = []
         admission: TurnAdmission | None = None
         leases: list[ExecutionLease] = []
         control: DurableRuntimeInvocationControl | None = None
@@ -4970,6 +5006,7 @@ def create_app(
             "page_context": json.loads(json.dumps(request.page_context, default=dict)),
             "attachments": [{"kind": ref.kind, "id": ref.ref} for ref in request.attachments],
             "pilot_action": json.loads(request.pilot_action.value) if request.pilot_action is not None else None,
+            **({"image_attachment_ids": list(request.image_attachment_ids)} if request.image_attachment_ids else {}),
         }
 
         def failure(response: JSONResponse) -> JSONResponse:
@@ -4983,6 +5020,9 @@ def create_app(
 
         def freeze(session: Session, conversation: Any) -> Mapping[str, str]:
             cast(PilotRuntime, app.state.pilot_runtime).validate_start_admission(request)
+            if request.image_attachment_ids:
+                require_image_capability(load_config(resolved_data_dir))
+            frozen_images.append(chat_images.resolve_in_session(session, request.image_attachment_ids, conversation))
             loader = _TransactionChatSourceLoader(session)
             source = _load_chat_source_messages(
                 cast(Any, loader), conversation,
@@ -5008,6 +5048,8 @@ def create_app(
 
         try:
             def claim(session: Session, turn: Any) -> None:
+                if frozen_images[0]:
+                    chat_images.bind_in_session(session, frozen_images[0], turn.conversation_id, turn.user_message_id)
                 leases.append(pilot_controls.claim_start_in_session(session, turn.id))
 
             admission = pilot_timeline.admit(request_id, canonical, freeze_sources=freeze, on_admitted=claim)
@@ -5026,7 +5068,9 @@ def create_app(
                     frozen_source[0], persona_sessions=session_factory,
                 )),
             )
-            return replace(request, conversation_id=admission.conversation_id), runtime, admission, request_id, control
+            return replace(request, conversation_id=admission.conversation_id, images=frozen_images[0]), runtime, admission, request_id, control
+        except ImageInputError as exc:
+            return failure(image_error(exc))
         except TurnControlConflict:
             return error_response(409, "当前对话已有执行中任务或待确认操作，请先处理原任务。", code="turn_execution_active")
         except AdmissionGone:
@@ -5152,6 +5196,7 @@ def create_app(
                 {"kind": item.kind, "id": item.ref} for item in request.attachments
             ],
             "pilot_action": pilot_action,
+            **({"image_attachment_ids": list(request.image_attachment_ids)} if request.image_attachment_ids else {}),
         }
 
     def _runtime_finish_control(
@@ -5330,7 +5375,15 @@ def create_app(
 
         try:
             return bool(context_source_loader.load(read, lambda value: value))
-        except Exception:
+        except SourceTemporarilyUnavailable:
+            logging.getLogger(__name__).warning(
+                "Runtime source visibility unavailable (SourceTemporarilyUnavailable)"
+            )
+            raise RuntimeSourceUnavailable() from None
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Runtime source visibility rejected (%s)", type(exc).__name__,
+            )
             return False
 
     def _runtime_stream_readable(turn_id: str, generation: int) -> bool:
@@ -5527,6 +5580,7 @@ def create_app(
         bool,
     ]:
         frozen_source: list[_FrozenChatSourceMessages] = []
+        frozen_images: list[tuple[ImageReference, ...]] = []
         frozen_readiness: list[ReadinessContextBinding | None] = []
         leases: list[ExecutionLease] = []
         refs = _runtime_source_refs(request)
@@ -5540,6 +5594,9 @@ def create_app(
 
         def freeze(session: Session, conversation: Any) -> Mapping[str, str]:
             cast(PilotRuntime, app.state.pilot_runtime).validate_start_admission(request)
+            if request.image_attachment_ids:
+                require_image_capability(load_config(resolved_data_dir))
+            frozen_images.append(chat_images.resolve_in_session(session, request.image_attachment_ids, conversation))
             source = _load_chat_source_messages(
                 cast(Any, _TransactionChatSourceLoader(session)),
                 conversation,
@@ -5581,6 +5638,8 @@ def create_app(
             }
 
         def claim(session: Session, turn: Any) -> None:
+            if frozen_images[0]:
+                chat_images.bind_in_session(session, frozen_images[0], turn.conversation_id, turn.user_message_id)
             leases.append(
                 pilot_controls.claim_start_in_session(
                     session,
@@ -5632,7 +5691,7 @@ def create_app(
                 pilot_controls.finish(leases[0], "failed")
             raise
         return (
-            replace(request, conversation_id=admission.conversation_id),
+            replace(request, conversation_id=admission.conversation_id, images=frozen_images[0]),
             bound_runtime,
             admission,
             control,
@@ -5674,6 +5733,8 @@ def create_app(
                 typed,
                 request_id,
             )
+        except ImageInputError as exc:
+            return image_error(exc)
         except TurnControlConflict:
             return error_response(409, "当前对话已有执行中任务或待确认操作，请先处理原任务。", code="turn_execution_active")
         except AdmissionGone:
@@ -5967,6 +6028,8 @@ def create_app(
                 response["interrupt"] = result
                 return JSONResponse(response, headers={"Cache-Control": "no-store"})
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except RuntimeSourceUnavailable:
+            raise
         except TurnControlConflict:
             return error_response(409, "停止命令标识已对应其他任务或代次。", code="turn_command_conflict")
         except ValueError:
@@ -6711,6 +6774,7 @@ def create_app(
     @app.delete("/api/chat/conversations/{conversation_id}")
     def delete_conversation(conversation_id: int) -> dict[str, str]:
         chat.delete_conversation(conversation_id)
+        chat_images.collect()
         return {"status": "deleted"}
 
     @app.post("/api/interview-practice-cases")
@@ -6765,6 +6829,9 @@ def create_app(
             return recovery_error("interview_practice_case_not_found", "快速练习档案不存在。")
         return JSONResponse(_interview_practice_case_json(case))
 
+    # 模拟问答链路：docs/architecture/code-map/interview-mock.md。
+    # 快速模拟与事件绑定各自校验归属/来源；领取生成权之后才进入共享
+    # mock_execution。调查“没有下一题”时区分重放、202 与实际模型调用。
     @app.post("/api/interview-practice-cases/{case_id}/mock-interview/attempts")
     def start_quick_practice_attempt(
         case_id: int, payload: dict[str, Any] = Body(...)
@@ -8724,6 +8791,7 @@ def _normalize_runtime_start_request(
     payload: dict[str, Any],
 ) -> StartTurnRequest | JSONResponse:
     try:
+        raw_image_ids = image_ids(payload.get("image_attachment_ids", []))
         page_context = _normalize_chat_page_context(payload.get("page_context"))
         raw_attachments = (
             _normalize_chat_attachments(payload["attachments"]) if "attachments" in payload else []
@@ -8731,7 +8799,7 @@ def _normalize_runtime_start_request(
     except ValueError as exc:
         return error_response(422, str(exc))
     message = str(payload.get("message") or "")
-    if not message:
+    if not message and not raw_image_ids:
         return error_response(400, "message is required")
     raw_conversation_id = payload.get("conversation_id", 0)
     if raw_conversation_id is None:
@@ -8808,6 +8876,7 @@ def _normalize_runtime_start_request(
             page_context=immutable_page,
             attachments=attachments,
             pilot_action=descriptor,
+            image_attachment_ids=raw_image_ids,
         )
     except (TypeError, ValueError, KeyError) as exc:
         return error_response(422, str(exc))
@@ -8924,6 +8993,7 @@ def _runtime_http_response(outcome: object) -> JSONResponse:
 
 
 def _auth_guard_response(request: Request, data_dir: Path) -> JSONResponse | None:
+    # API 登录鉴权与业务作用域校验分层：通过此处仍须通过各 Repository/工具的归属和来源检查。
     path = request.url.path
     if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status"}:
         return None
@@ -9266,6 +9336,7 @@ def _stored_messages_to_ai(messages: list[Any], pending_tool_call_id: str = "") 
             tool_calls=_load_tool_calls(message.tool_calls),
             tool_call_id=message.tool_call_id,
             provider_blocks=_load_provider_blocks(message.provider_blocks),
+            images=image_references(json.loads(getattr(message, "image_refs_json", "[]") or "[]")),
             surface_contributor="conversation_history",
         )
         for message in messages
@@ -9315,6 +9386,7 @@ class _FrozenStoredMessage:
     tool_calls: str
     tool_call_id: str
     provider_blocks: str
+    image_refs_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -9540,7 +9612,7 @@ def _load_chat_source_messages(
         history_rows = fetch_rows(
             connection.execute(
                 """
-                SELECT id, role, content, tool_calls, tool_call_id, provider_blocks
+                SELECT id, role, content, tool_calls, tool_call_id, provider_blocks, image_refs_json
                 FROM chat_messages WHERE conversation_id = ? ORDER BY id ASC
                 """,
                 (scope.conversation_id,),
@@ -9618,6 +9690,7 @@ def _load_chat_source_messages(
                 tool_calls=str(row[3] or ""),
                 tool_call_id=str(row[4] or ""),
                 provider_blocks=str(row[5] or ""),
+                image_refs_json=str(row[6] or "[]"),
             )
             for row in history_rows
         ]
@@ -10077,6 +10150,7 @@ def _settings_payload(cfg: Config, data_dir: Path | None = None) -> dict[str, An
         "data_dir": str((data_dir or resolve_data_dir()).resolve()),
         "chat_auto_approve_writes": cfg.chat_auto_approve_writes,
         "active_provider_id": active.id,
+        "image_capability": image_capability(cfg),
         "fallback_provider_ids": cfg.fallback_provider_ids,
         "providers": [_provider_payload(profile) for profile in cfg.provider_profiles()],
         "base_url": active.base_url,
@@ -10142,6 +10216,10 @@ def _provider_from_payload(
 ) -> AIProviderProfile:
     api_key = payload.get("api_key")
     preserved_key = current.api_key if current is not None else ""
+    same_vision_target = current is not None and all(
+        str(payload.get(field) or getattr(current, field)) == getattr(current, field)
+        for field in ("provider", "base_url", "model")
+    )
     return AIProviderProfile(
         id=str(payload.get("id") or (current.id if current is not None else "default")),
         label=str(payload.get("label") or (current.label if current is not None else "Default")),
@@ -10161,6 +10239,7 @@ def _provider_from_payload(
             )
             is True
         ),
+        supports_vision=(payload.get("supports_vision", current.supports_vision if same_vision_target and current is not None else False) is True),
     )
 
 
@@ -10301,6 +10380,7 @@ def _provider_payload(profile: AIProviderProfile) -> dict[str, Any]:
         "model": profile.model,
         "enabled": profile.enabled,
         "supports_json_schema": profile.supports_json_schema,
+        "supports_vision": profile.supports_vision,
         "context_window": profile.context_window,
         "max_output_tokens": profile.max_output_tokens,
         "has_api_key": bool(profile.api_key),
@@ -11719,16 +11799,11 @@ def _content_json_from_payload(value: Any) -> dict[str, Any] | JSONResponse:
 
 
 def _resume_is_empty_draft(resume: Any) -> bool:
-    content = normalize_resume_content(resume.content_json)
-    return not str(resume.parsed_data or "").strip() and not _resume_content_has_value(content)
+    return is_empty_resume_draft(resume)
 
 
 def _resume_content_has_value(value: Any) -> bool:
-    if isinstance(value, dict):
-        return any(_resume_content_has_value(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_resume_content_has_value(item) for item in value)
-    return bool(str(value or "").strip())
+    return content_has_value(value)
 
 
 def _resume_sample(sample_id: str) -> dict[str, Any] | None:

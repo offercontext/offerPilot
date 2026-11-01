@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（创建与完成专项练习）。
+# Plan 记录已确认练习重点到目标面试的练习，不是模拟问答的 Attempt。
+# 回归入口：tests/test_adaptive_interview_practice_repository.py。
+
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -207,6 +211,8 @@ class AdaptivePracticeRepository:
         expected_target_fingerprint: str,
         idempotency_key: str,
     ) -> tuple[dict[str, Any], bool]:
+        # key + 完整请求指纹先恢复原计划，再为新请求读取实时来源/目标。
+        # 来源指纹绑定已确认 Signal，目标指纹绑定将要练习的面试，两者独立校验。
         _require_positive_int(readiness_signal_version_id, "readiness signal version")
         _require_positive_int(target_application_event_id, "target application event")
         _require_sha256(expected_source_fingerprint, "source fingerprint")
@@ -233,6 +239,7 @@ class AdaptivePracticeRepository:
             if replay is not None:
                 return replay
 
+            # 新 key 不能绕过同一 Signal Version + 目标事件只能创建一个计划的约束。
             projection = project_practice_focus(
                 session,
                 signal_version_id=readiness_signal_version_id,
@@ -278,6 +285,7 @@ class AdaptivePracticeRepository:
             ):
                 raise AdaptivePracticeUnavailable("adaptive practice source snapshot is incomplete")
             primary = source.evidence[0]
+            # 用首条已确认的来源证据选择固定 drill；这里不调用模型重新推断练习重点。
             drill = _DRILLS.get(primary.source_path)
             if drill is None:
                 raise AdaptivePracticeUnavailable("adaptive practice source path is unsupported")
@@ -346,6 +354,8 @@ class AdaptivePracticeRepository:
         self_assessment: str,
         idempotency_key: str,
     ) -> tuple[dict[str, Any], bool]:
+        # 完成只保存作答、自评与反思，保留开始时的来源快照。
+        # 相同 key/内容先重放，再检查 in_progress 与 revision，防止重试重复完成。
         response = response_text.strip()
         reflection = reflection_text.strip()
         if not response or len(response) > 8000 or len(reflection) > 4000:

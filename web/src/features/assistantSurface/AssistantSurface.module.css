@@ -369,8 +369,8 @@
 .composer {
   min-height: 72px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
   align-items: end;
   margin: 0 16px 16px;
   padding: 8px;
@@ -380,6 +380,25 @@
     0 0 0 1px rgb(16 24 40 / 9%),
     0 2px 8px rgb(32 44 73 / 6%);
 }
+
+.composerTools { display: flex; align-items: center; gap: 6px; }
+.composerTools > button { flex: 0 0 40px; }
+.imageHint { flex: 1; min-width: 0; color: var(--op-muted); font-size: 12px; line-height: 1.5; }
+.imageTray { display: flex; flex-wrap: wrap; gap: 12px; padding: 10px 8px 0; }
+.imageDraft { position: relative; width: 68px; min-width: 0; }
+.imageStatus { display: block; margin-top: 4px; color: var(--op-muted); font-size: 11px; text-align: center; }
+.composer .imageRemove {
+  position: absolute; top: -8px; right: -8px; z-index: 1;
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--op-surface); border: 1px solid var(--op-border);
+  color: var(--op-ink); font-size: 11px;
+}
+.composer .imageRetry { width: 100%; height: 28px; color: var(--op-primary); font-size: 12px; }
+.imageErrors { display: grid; gap: 4px; color: var(--op-danger, #c23b3b); font-size: 12px; overflow-wrap: anywhere; }
+.imageErrors:empty { display: none; }
+.imageValidationError { margin: 2px 8px; color: var(--op-danger, #c23b3b); font-size: 12px; }
+.messageImages { display: flex; flex-wrap: wrap; gap: 10px; max-width: 100%; }
+.composerDragging { box-shadow: 0 0 0 2px var(--op-primary); background: color-mix(in srgb, var(--op-primary) 6%, var(--op-surface)); }
 
 .composer textarea {
   width: 100%;

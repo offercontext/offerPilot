@@ -4,7 +4,7 @@
 
 ## 按任务定位
 
-- 产品 PRD / ADR / Check 表：AGENTS.md §4 的飞书入口。
+- 产品要求及参考依据：AGENTS.md §4；其中的飞书 PRD / ADR / Check 表仅供历史参考。
 - REST / SQLite / CLI 契约：[python-rewrite-contract.md](docs/python-rewrite-contract.md)。
 - Knowledge / Memory / retrieval：[knowledge-system.md](docs/architecture/knowledge-system.md)。
 - 发布验收：[p0-release-checklist.md](docs/p0-release-checklist.md) 与 `scripts/release-gate.sh`。

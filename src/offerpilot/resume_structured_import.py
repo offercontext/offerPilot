@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（原文分类预览与用户确认）。
+
 import hashlib
 import json
 import re
@@ -223,6 +225,8 @@ def apply_structured_fields(
     current_content: Mapping[str, Any],
     fields: Sequence[StructuredField],
 ) -> dict[str, Any]:
+    # 只向空字段/空集合填入已验证分类结果，保留用户已有结构化内容。
+    # 生成预览与最终保存分开；来源指纹和确认由调用此函数的入口负责校验。
     result = deepcopy(dict(current_content))
 
     contact_fields = [field for field in fields if field.path.startswith("contact.")]

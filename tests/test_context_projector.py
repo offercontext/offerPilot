@@ -490,6 +490,61 @@ def test_projection_is_repeatable_and_preserves_current_request() -> None:
     assert first.audit.selected_tool_names == selection.selected_names
 
 
+def test_image_history_is_omitted_as_whole_turn_groups_with_truthful_marker() -> None:
+    from offerpilot.image_contracts import ImageReference
+    image = ImageReference('img_' + '1' * 32, 'a' * 64, 'image/png', 100, 80, 40)
+    history = tuple(message for i in range(10) for message in (
+        FrozenMessage.freeze(Message('user', f'image {i}', images=(image,)), source_message_id=i * 2 + 1),
+        frozen('assistant', f'answer {i}', message_id=i * 2 + 2),
+    ))
+    signals = ToolSelectionSignals(current_request='继续讨论图片')
+    surface = ModelSurfaceProjector().project(ProjectionRequest(
+        model_call_id='image-history', contributors=contributors('继续讨论图片'), history=history,
+        tool_signals=signals, provider_budgets=(ProviderBudget(context_window=131072),),
+        selection=_selection_for(signals),
+    ))
+    assert sum(len(message.images) for message in surface.messages) == 8
+    assert 'history_images_omitted' in surface.audit.signals
+    assert '2 张历史图片' in surface.messages[0].content
+    selected = [message for message in surface.messages if message.source_message_id]
+    assert len(selected) == 16
+    assert all(selected[i].role == 'user' and selected[i + 1].role == 'assistant' for i in range(0, 16, 2))
+
+
+def test_invalid_history_tool_chain_still_reports_omitted_images() -> None:
+    from offerpilot.image_contracts import ImageReference
+    image = ImageReference('img_' + '3' * 32, 'c' * 64, 'image/png', 100, 80, 40)
+    history = (
+        FrozenMessage.freeze(Message('user', '原图', images=(image,)), source_message_id=1),
+        FrozenMessage.freeze(Message('tool', '孤立结果', tool_call_id='missing'), source_message_id=2),
+    )
+    signals = ToolSelectionSignals(current_request='刚才的图片呢')
+    surface = ModelSurfaceProjector().project(ProjectionRequest(
+        model_call_id='invalid-image-history', contributors=contributors('刚才的图片呢'),
+        history=history, tool_signals=signals, provider_budgets=(ProviderBudget(),),
+        selection=_selection_for(signals),
+    ))
+    assert not any(message.images for message in surface.messages)
+    assert '1 张历史图片' in surface.messages[0].content
+    assert 'history_images_omitted' in surface.audit.signals
+    assert surface.audit.truncated
+
+
+def test_current_image_cannot_be_silently_dropped_to_fit_budget() -> None:
+    from offerpilot.image_contracts import ImageReference, ImageInputError
+    image = ImageReference('img_' + '2' * 32, 'b' * 64, 'image/png', 100, 4000, 4000)
+    values = list(contributors('看图'))
+    values[CONTRIBUTOR_ORDER.index('current_request')] = ContributorResult(
+        'current_request', 'ready', (FrozenMessage.freeze(Message('user', '看图', images=(image,))),),
+    )
+    signals = ToolSelectionSignals(current_request='看图')
+    with pytest.raises(ImageInputError, match='image_context_budget_exceeded'):
+        ModelSurfaceProjector().project(ProjectionRequest(
+            model_call_id='image-too-large', contributors=tuple(values), history=(), tool_signals=signals,
+            provider_budgets=(ProviderBudget(context_window=32000),), selection=_selection_for(signals),
+        ))
+
+
 def test_projection_mandatory_overflow_fails_before_provider() -> None:
     signals = ToolSelectionSignals(current_request="offer")
     request = ProjectionRequest(
@@ -1433,7 +1488,7 @@ def test_maximal_semantic_manifest_reaches_every_array_limit_under_cap() -> None
         secret=b"k" * 32,
         provider_identities=tuple(f"provider-{index}" for index in range(8)),
         provider_view=_selector_bundle().provider_view(),
-        signals=MANIFEST_SIGNAL_VALUES,
+        signals=MANIFEST_SIGNAL_VALUES[:32],
     )
     manifest = validate_surface_manifest_v2(prepared.manifest_json)
     assert len(prepared.manifest_json.encode("utf-8")) < 65_536
@@ -1488,7 +1543,7 @@ def test_manifest_v2_budget_guard_interrupts_maximal_audit_at_exact_checkpoint()
             secret=b"k" * 32,
             provider_identities=tuple(f"provider-{index}" for index in range(8)),
             provider_view=_selector_bundle().provider_view(),
-            signals=MANIFEST_SIGNAL_VALUES,
+            signals=MANIFEST_SIGNAL_VALUES[:32],
             budget_check=guard,
         )
 
@@ -1576,7 +1631,7 @@ def test_manifest_v2_sha_updates_fixed_byte_chunks(monkeypatch: pytest.MonkeyPat
         secret=b"k" * 32,
         provider_identities=tuple(f"provider-{index}" for index in range(8)),
         provider_view=_selector_bundle().provider_view(),
-        signals=MANIFEST_SIGNAL_VALUES,
+        signals=MANIFEST_SIGNAL_VALUES[:32],
     )
 
     assert len(prepared.manifest_json.encode("utf-8")) > 4096

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/opportunity-offers.md（初筛确认与深入分析）。
+
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
@@ -141,6 +143,8 @@ class OpportunityFitReviewsRepository:
         model: ChatModel,
         jd_version_id: int | None = None,
     ) -> tuple[OpportunityFitReviewSession, OpportunityFitReviewStage, bool, str]:
+        # 先持久化 stage 的生成所有权，再调用模型；同 key/快照重放，租约过期才接管。
+        # 确认凭据绑定本代结果，生成成功还须通过最终来源和所有权检查。
         confirmation_secret = self._require_confirmation_secret()
         provider_token = ""
         should_call_provider = False
@@ -363,6 +367,8 @@ class OpportunityFitReviewsRepository:
     def confirm_triage_v2(
         self, application_id: int, review_id: int, stage_id: int, confirmation_token: str
     ) -> OpportunityFitReviewStage:
+        # 初筛确认是一次性消费：先核对当前 JD、有效期和签名，再以代次/哈希条件更新。
+        # confirmed 的重复确认返回已消费错误，不能当作普通幂等写直接复用。
         confirmation_secret = self._require_confirmation_secret()
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -469,6 +475,8 @@ class OpportunityFitReviewsRepository:
         idempotency_key: str,
         model: ChatModel,
     ) -> tuple[OpportunityFitReviewStage, bool]:
+        # 深入分析只继承已确认初筛的冻结快照和来源指纹，不用这次请求重建候选人事实。
+        # 父初筛归属、当前 JD 与快照完整性在 claim 前检查，落库前仍检查所有权和来源。
         with self._session_factory() as session:
             # Serialize the parent/source decision with the deep-review claim.
             session.execute(text("BEGIN IMMEDIATE"))

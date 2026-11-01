@@ -22,9 +22,10 @@ import sys
 NODE_SPLIT_FILES = frozenset({"tests/test_chat_api.py"})
 MANIFEST_VERSION = 4
 PARTITION_STRATEGY = "duration-lpt-v1"
-DURATION_HISTORY_PATH = Path(__file__).with_name("durations-v1.json")
+DURATION_HISTORY_PATH = Path(__file__).with_name("durations-v2.json")
 # SHA256 of the checked-in history with checkout CRLF normalized to LF.
-DURATION_HISTORY_SHA256 = "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77"
+DURATION_HISTORY_SHA256 = "8d8ae33673e05619c70e69846c3bdb4014e5fe38e4ed6d774fe4b110744324d9"
+DURATION_HISTORY_VERSION = 2
 # pytest exports each node plus a phase suffix in PYTEST_CURRENT_TEST. Leave
 # headroom below Windows' 32767 UTF-16-unit environment value limit.
 MAX_NODE_ID_UTF16_UNITS = 32700
@@ -127,7 +128,7 @@ def load_duration_history():
     history = json.loads(raw)
     if (set(history) != {"version", "source", "unit", "fallback_ms", "duration_ms",
                          "historical_skips"}
-            or type(history["version"]) is not int or history["version"] != 1
+            or type(history["version"]) is not int or history["version"] != DURATION_HISTORY_VERSION
             or history["unit"] != "ceil_total_phase_milliseconds"):
         raise ValueError("Unsupported duration history")
     costs, skipped = history["duration_ms"], history["historical_skips"]

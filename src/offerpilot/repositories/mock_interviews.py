@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview-mock.md。
+# 本层拥有冻结来源、幂等重放、生成权和提交条件；AI 模块只负责生成/校验，
+# 不能用模型成功返回替代这里的来源与代次检查。
+
 import json
 import re
 from dataclasses import dataclass
@@ -127,6 +131,9 @@ class MockInterviewRepository:
         preparation_selection: dict[str, Any] | None = None,
         jd_version_id: int | None = None,
     ) -> MockInterviewStartResult:
+        # 事件绑定入口：Attempt key 和首题 key 分别保护整场创建与第一题身份。
+        # 重放仍检查来源及准备建议选择；新建冻结选定 JD/简历/准备资料，
+        # 只创建待生成首题，真正的模型调用由执行服务持有生成权后进行。
         if not jd_text.strip():
             raise ValueError("jd_text must not be blank")
         _validate_key(attempt_idempotency_key, "attempt_idempotency_key")
@@ -170,6 +177,7 @@ class MockInterviewRepository:
                 if turn.turn_status == "generating_question" and (
                     lease_until is None or lease_until <= datetime.now(timezone.utc)
                 ):
+                    # 首题尚未完成且租约失效才换代接管；有效租约重放不再次调用模型。
                     existing.generation_revision += 1
                     existing.provider_call_token = _token()
                     existing.provider_lease_until = _lease_until()
@@ -253,6 +261,8 @@ class MockInterviewRepository:
         answer_text: str,
         turn_idempotency_key: str,
     ) -> MockInterviewAttempt:
+        # 已提交答案只能以同 key、同文本重放，不能借重试修改历史回答。
+        # 更新 transcript 指纹让后续出题/反馈提交能识别自己使用的是哪一版问答。
         _validate_key(turn_idempotency_key, "turn_idempotency_key")
         with self._session_factory() as session:
             self._begin_immediate(session)
@@ -297,6 +307,8 @@ class MockInterviewRepository:
         attempt_idempotency_key: str,
         initial_question_idempotency_key: str,
     ) -> MockInterviewStartResult:
+        # 快速模拟以 practice_case 为归属，使用 case 冻结资料，不伪造投递/事件 ID。
+        # 同 key 恢复旧 Attempt；新建另行检查 case active，首题沿用租约接管规则。
         _validate_key(attempt_idempotency_key, "attempt_idempotency_key")
         _validate_key(initial_question_idempotency_key, "initial_question_idempotency_key")
         with self._session_factory() as session:
@@ -392,6 +404,8 @@ class MockInterviewRepository:
     def claim_question(
         self, attempt_id: int, turn_no: int, question_idempotency_key: str
     ) -> MockInterviewQuestionClaim | None:
+        # 在同一写事务内领取生成权并冻结对话。返回 None 时调用方应读取状态；
+        # replay_turn 表示已有可回答问题，二者都不授权直接发起新的模型调用。
         _validate_key(question_idempotency_key, "question_idempotency_key")
         if turn_no < 1 or turn_no > MAX_INTERVIEW_TURNS:
             raise ValueError("interview turn limit reached")
@@ -496,6 +510,8 @@ class MockInterviewRepository:
             )
             if attempt is None or turn is None:
                 return None
+            # 模型调用在事务外完成；期间可能已有新 owner 或回答变化。
+            # 旧结果必须同时匹配代次、token 和对话指纹，才能成为当前题目。
             if (
                 attempt.generation_revision != revision
                 or attempt.provider_call_token != provider_call_token

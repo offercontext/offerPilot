@@ -103,7 +103,8 @@ def parse_chat_intent(message: str, *, shared_kind: str | None = None,
 def freeze_chat_command(session: Session, conversation: Any, request: Any) -> dict[str, str]:
     """Called in the existing turn admission transaction, before provider work."""
     if (conversation.context_type != 'workspace' or conversation.mode != 'general'
-            or conversation.pending_tool_call_id or request.attachments or request.pilot_action is not None):
+            or conversation.pending_tool_call_id or request.attachments
+            or getattr(request, 'image_attachment_ids', ()) or request.pilot_action is not None):
         return {}
     row = session.get(CompanionState, 1)
     if row is None or not CompanionPolicy.model_validate_json(row.settings_json).enabled:

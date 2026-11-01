@@ -6,6 +6,7 @@
 
 OfferPilot 由 offercontext 维护，把投递、简历、面试与 Offer 放进同一个工作台。
 内置 Pilot 结合你保存的求职资料查询信息、起草内容、调用工具，并在你确认后更新关键求职记录。
+也支持通过 MCP 接入你自己的本地 Agent，沿用它的模型与对话环境，调用 OfferPilot 中已授权的求职资料和工具。
 它不会自动投递，也不会替你联系招聘方。
 
 想研究 Agent 的 AI builder，也可以从同一个求职场景出发，沿着图解、小实验与源码，
@@ -123,6 +124,47 @@ macOS Keychain 或 Linux Secret Service；仅安装 Python 包不等于系统安
 先记录一个岗位，不必先配置 AI。打开投递看板，添加公司和岗位，再进入详情保存岗位描述。
 
 需要 AI 辅助时，再到“设置 → AI 与模型 → 配置 AI”填写模型服务信息，测试连接、应用到 Provider 列表，最后点击页面顶部“保存”。完整步骤见[第一次使用指南](docs/product-manual/产品说明书.md#start)。
+
+## 使用自己的本地 Agent（MCP）
+
+你可以在 DSH、Claude Code 或其他支持本地 stdio MCP 的 Agent 中调用 OfferPilot。
+OfferPilot 提供本地数据与工具，模型和对话由你自己的 Agent 管理；这条接入链路不调用 OfferPilot 内置模型，
+无需为它单独配置模型服务。若外部 Agent 使用云端模型，读取到的资料仍可能发送给该服务商并产生费用。
+
+| 能力 | 可以做什么 |
+| --- | --- |
+| 查询资料 | 读取授权范围内的投递、事件、简历和面试原始笔记，检索当前 Knowledge |
+| 提出维护请求 | 新建、更新或删除投递、简历和笔记，以及安排面试、调整面试时间 |
+| 确认后回读 | 你在独立可信终端核对并确认后，Agent 查询保存状态与实际记录 |
+
+**源码版接入：**先完成上方源码安装，在仓库目录安装 MCP 扩展，并启动新版应用一次以初始化或升级数据库：
+
+```bash
+uv sync --frozen --extra mcp
+uv run oc start
+```
+
+随后可退出应用；MCP 服务独立运行。在终端创建只读连接（将 `12` 换成已有投递的 ID）：
+
+```bash
+uv run oc mcp connect my-agent --application-id 12
+```
+
+将输出的 `connection_id` 代入下面命令，生成客户端配置：
+
+```bash
+uv run oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
+```
+
+把生成的 `mcpServers.offerpilot` 配置按客户端要求加入你自己的 Agent，重启或重新连接 MCP 后即可调用。
+DSH 可使用 `--format dsh` 生成配置，并通过 `dsh web --patch <配置文件>` 加载；也可安装 [OfferPilot DSH 插件包](plugins/dsh-offerpilot/README.md)，复用同一 MCP 接口。两种方式不要同时启用。
+以上命令默认连接源码版的 `~/.offerpilot`；自定义工作区应为各命令指定同一 `--data-dir`。
+
+默认只允许读取所选投递及事件；简历、笔记、Knowledge 和写提案需分别显式授权。
+简历和 Knowledge 读取权是独立的全局授权，不受所选投递范围限制。写提案不会直接保存，
+仍需你在独立可信终端确认；MCP 不提供模型自调用的确认工具。
+完整授权参数、撤销连接、客户端配置及本机信任边界见[接入说明](docs/architecture/external-agent-mcp.md)。
+此处说明源码版能力，不代表上方已发布的 Windows 测试安装包包含 MCP。
 
 ## 求职过程中，可以怎样使用它
 

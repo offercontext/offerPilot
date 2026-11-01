@@ -1,7 +1,7 @@
 name: Companion synthetic Chromium acceptance
 on:
   push:
-    branches: [feat/20261021-companion-life-v1]
+    branches: [feat/20261021-companion-life-v1, feat/20261101-companion-integrated-candidate]
     paths:
       - 'web/src/features/companionLife/**'
       - 'web/src/features/assistantSurface/**'

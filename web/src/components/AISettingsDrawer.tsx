@@ -42,6 +42,7 @@ import {
   type UpdateSettingsPayload,
 } from '@/services/chat';
 import { ONBOARDING_QUERY_KEY } from '@/services/onboarding';
+import { testProviderImage } from '@/services/chatImages';
 import workflowStyles from './ui/WorkflowSurface.module.css';
 
 interface Props {
@@ -65,6 +66,7 @@ interface FormValues {
   max_output_tokens: number;
   enabled: boolean;
   supports_json_schema: boolean;
+  supports_vision: boolean;
   chat_auto_approve_writes: boolean;
 }
 
@@ -100,6 +102,7 @@ export default function AISettingsDrawer({ open, onClose }: Props) {
   const [fallbackProviderIds, setFallbackProviderIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState('default');
   const [connectionResult, setConnectionResult] = useState<ProviderConnectionTestResult | null>(null);
+  const [imageResult, setImageResult] = useState<ProviderConnectionTestResult | null>(null);
 
   useEffect(() => () => { testRevision.current += 1; }, []);
 
@@ -134,6 +137,7 @@ export default function AISettingsDrawer({ open, onClose }: Props) {
     setFallbackProviderIds(settingsQuery.data.fallback_provider_ids ?? []);
     setEditingId(nextActiveId);
     setConnectionResult(null);
+    setImageResult(null);
     form.setFieldsValue(providerToForm(nextProviders.find((item) => item.id === nextActiveId), settingsQuery.data));
   }, [form, open, settingsQuery.data]);
 
@@ -221,6 +225,24 @@ export default function AISettingsDrawer({ open, onClose }: Props) {
   });
 
   const hasKey = Boolean(activeProvider?.has_api_key);
+  const imageTestMutation = useMutation({
+    mutationFn: async () => {
+      const revision = testRevision.current;
+      try {
+        const values = await form.validateFields();
+        if (revision !== testRevision.current) return null;
+        const existing = savedProviders.current.find((item) => item.id === values.id);
+        const provider = formToProvider(values, existing);
+        const result = await testProviderImage({ provider: providerPayload(provider) });
+        return { result, revision };
+      } catch {
+        return { result: { ok: false, error: t("图片测试失败，请检查配置后重试。") }, revision };
+      }
+    },
+    onSuccess: (response) => {
+      if (response && response.revision === testRevision.current) setImageResult(response.result);
+    },
+  });
   const hasBudget = Boolean(activeProvider && hasValidProviderBudget(activeProvider));
 
   function startNewProvider() {
@@ -246,12 +268,18 @@ export default function AISettingsDrawer({ open, onClose }: Props) {
   function editProvider(provider: EditableProvider) {
     const autoApprove = form.getFieldValue('chat_auto_approve_writes');
     testRevision.current += 1;
+    setImageResult(null);
     setEditingId(provider.id);
     setConnectionResult(null);
     form.setFieldsValue({ ...providerToForm(provider, settingsQuery.data), chat_auto_approve_writes: autoApprove });
   }
 
-  function retainProviderDraft(_: Partial<FormValues>, values: FormValues) {
+  function retainProviderDraft(changed: Partial<FormValues>, values: FormValues) {
+    setImageResult(null);
+    if ('model' in changed || 'base_url' in changed || 'provider' in changed) {
+      form.setFieldValue('supports_vision', false);
+      values = { ...values, supports_vision: false };
+    }
     testRevision.current += 1;
     setConnectionResult(null);
     const { chat_auto_approve_writes: _permission, ...draft } = values;
@@ -488,6 +516,13 @@ export default function AISettingsDrawer({ open, onClose }: Props) {
             <Switch />
           </Form.Item>
 
+          <Form.Item label={t("接受图片输入")} name="supports_vision" valuePropName="checked"
+            tooltip={t("确认当前模型与接口支持原生图片输入后开启；修改模型或接口后需重新确认。")}>
+            <Switch />
+          </Form.Item>
+          <Typography.Paragraph type="secondary">
+            {t("图片直接发送给当前默认模型；包含图片时，只使用同样开启图片输入的备用模型。")}
+          </Typography.Paragraph>
           <Form.Item label={t("Fallback 供应商")}>
             <Select
               mode="multiple"
@@ -514,8 +549,12 @@ export default function AISettingsDrawer({ open, onClose }: Props) {
 
           <Space wrap className={workflowStyles.actionGroup}>
             <Button icon={<SyncOutlined />} loading={testMutation.isPending} onClick={() => testMutation.mutate()}>
-              {t("测试连接")}</Button>
+              {t("测试连接")}
+            </Button>
+            <Button loading={imageTestMutation.isPending} onClick={() => imageTestMutation.mutate()}>{t("测试图片识别（会产生费用）")}</Button>
           </Space>
+          {imageResult ? <Alert style={{ marginTop: 12 }} type={imageResult.ok ? 'success' : 'error'} showIcon
+            message={imageResult.ok ? imageResult.message || t("图片识别通过") : imageResult.error || t("图片识别失败")} /> : null}
 
           {connectionResult ? (
             <Alert
@@ -578,6 +617,7 @@ function providerToForm(provider?: EditableProvider, settings?: Settings): FormV
     max_output_tokens: provider?.max_output_tokens ?? 0,
     enabled: provider?.enabled ?? true,
     supports_json_schema: provider?.supports_json_schema ?? false,
+    supports_vision: provider?.supports_vision ?? false,
     chat_auto_approve_writes: settings?.chat_auto_approve_writes ?? false,
   };
 }
@@ -594,6 +634,7 @@ function formToProvider(values: FormValues, existing?: EditableProvider): Editab
     max_output_tokens: values.max_output_tokens,
     enabled: values.enabled,
     supports_json_schema: values.supports_json_schema,
+    supports_vision: values.supports_vision,
     has_api_key: Boolean(existing?.has_api_key),
   };
 }
@@ -615,6 +656,7 @@ function providerPayload(provider: EditableProvider): Omit<AIProviderProfile, 'h
     max_output_tokens: provider.max_output_tokens,
     enabled: provider.enabled,
     supports_json_schema: provider.supports_json_schema,
+    supports_vision: provider.supports_vision ?? false,
   };
   if (provider.api_key?.trim()) {
     payload.api_key = provider.api_key.trim();
@@ -627,6 +669,7 @@ function providerMatchesSavedFields(provider: EditableProvider, saved: EditableP
     provider.provider === saved.provider &&
     provider.base_url === saved.base_url &&
     provider.model === saved.model &&
+    Boolean(provider.supports_vision) === Boolean(saved.supports_vision) &&
     provider.context_window === saved.context_window &&
     provider.max_output_tokens === saved.max_output_tokens &&
     provider.enabled === saved.enabled &&

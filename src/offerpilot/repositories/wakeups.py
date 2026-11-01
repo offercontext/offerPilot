@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/workbench-automation.md（Wakeup 与主动队列的区别）。
+
 from dataclasses import dataclass
 from datetime import datetime
 import json
@@ -44,6 +46,7 @@ class WakeupsRepository:
             return list(session.scalars(statement))
 
     def dispatch_due(self, now: datetime, limit: int = 25) -> list[Wakeup]:
+        # 这里只把到期记录标为 dispatched 并返回；不会在此发送通知、调用模型或执行 payload。
         limit = min(max(limit or 25, 1), 100)
         with self._session_factory() as session:
             statement = (

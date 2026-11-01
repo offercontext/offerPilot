@@ -1,6 +1,8 @@
 """Single Application intake. No fetching, model calls, or business deduplication."""
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/applications.md（录入、重复提示与创建恢复）。
+
 import hashlib
 import json
 import unicodedata
@@ -33,6 +35,8 @@ class ApplicationCreationService:
     def create(
         self, data: ApplicationCreate, initial_jd: Any, key: Any,
     ) -> tuple[dict[str, Any], bool]:
+        # 创建回执与投递、可选首版 JD 同事务保存；相同 key 只恢复原回执。
+        # 重复岗位是用户决策，duplicates 只提示，不代替这里的请求幂等。
         if key is not None:
             _validate_idempotency_key(key)
         jd = None
@@ -98,6 +102,8 @@ class ApplicationCreationService:
             raise
 
     def duplicates(self, company: str, position: str, url: str) -> dict[str, Any]:
+        # 只查询未删除投递，按 URL、名称完全匹配、名称前缀排序给出最多 20 条提示。
+        # 相似度不构成自动合并或拒绝创建的依据。
         def normalized(value: str) -> str:
             return ' '.join(unicodedata.normalize('NFKC', value).casefold().split())
 

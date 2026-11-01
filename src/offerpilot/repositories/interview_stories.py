@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（经历故事、手动版本与建议确认）。
+
 import json
 import hashlib
 import math
@@ -1112,6 +1114,8 @@ class InterviewStoriesRepository:
         expected_current_version_id: int | None,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        # 手动保存也要验证所选来源与证据引用；故事、首版和重放回执在一个事务中提交。
+        # 先恢复相同请求的已保存结果，再重新读取来源，避免历史成功因来源后续变化被重复创建。
         _require_exact_null("new story current version id", expected_current_version_id)
         request_fingerprint = _manual_request_fingerprint(
             target_story_id=None,
@@ -1182,6 +1186,8 @@ class InterviewStoriesRepository:
         expected_story_revision: int | None,
         idempotency_key: str,
     ) -> dict[str, Any]:
+        # 新版本同时校验当前版本指针和故事 revision；正文、证据快照追加保存。
+        # 推进指针后使旧目标的活跃建议失效，防止并发建议覆盖手动编辑。
         _require_positive_int("expected current version id", expected_current_version_id)
         _require_positive_int("expected story revision", expected_story_revision)
         request_fingerprint = _manual_request_fingerprint(

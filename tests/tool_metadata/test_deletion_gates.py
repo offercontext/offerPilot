@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from offerpilot.ai.tool_specs.common import resolve_identity_argument, resolve_parent_application
+from tests.tool_metadata._external_mcp_boundary import authority_dependency_violations, external_literal_role
 
 
 ROOT = Path(__file__).parents[2]
@@ -416,6 +417,8 @@ def _classification_violations(path: Path, source: str) -> list[str]:
         )
 
     def literal_is_allowed(node: ast.AST) -> bool:
+        if external_literal_role(path, node, parents, SRC):
+            return True
         smoke_owner: ast.AST | None = node
         while smoke_owner is not None:
             if (
@@ -1013,6 +1016,172 @@ def test_task12_has_no_name_based_or_reflective_classification() -> None:
         for violation in _classification_violations(path, source)
     ]
     assert violations == []
+
+
+def test_external_mcp_and_pilot_authority_dependencies_remain_separate() -> None:
+    violations = [
+        f"{path.relative_to(ROOT).as_posix()}:{violation}"
+        for path, source in _production_sources().items()
+        for violation in authority_dependency_violations(path, source, SRC)
+    ]
+    assert violations == []
+
+
+@pytest.mark.parametrize(
+    "relative",
+    ["external_agents/rogue.py", "external_agents/service.py", "external_agents/catalog.py",
+     "external_agents/schemas.py", "external_agents/server.py", "external_agents/migration.py"],
+)
+@pytest.mark.parametrize(
+    "source,code",
+    [
+        ("ROUTES = {'create_application', 'update_application_status'}", "name-set"),
+        (
+            "def route(tool_name):\n    return tool_name.startswith('create_')",
+            "string-prefix-routing",
+        ),
+        ("def route(spec):\n    return getattr(spec, 'adapter_kind')", "reflective-classification"),
+        ("def route(tool_name):\n    return tool_name == 'create_application'", "name-switch"),
+    ],
+)
+def test_external_directory_does_not_exempt_pilot_classification(relative, source, code):
+    assert any(code in value for value in _classification_violations(SRC / relative, source))
+
+
+@pytest.mark.parametrize("relative,source", [
+    ("catalog.py", "def permitted(tool, grant):\n    return tool in {'create_application', 'update_note'}"),
+    ("schemas.py", "def route():\n    INPUTS = {'create_application': 1, 'update_note': 2}"),
+    ("server.py", "def route():\n    DESCRIPTIONS = {'create_application': 'a', 'update_note': 'b'}"),
+    ("migration.py", "def route(sql):\n    return 'create_application' not in sql"),
+    ("service.py", "class ExternalAgentService:\n    def call(self, tool):\n        return tool == 'create_application'"),
+    ("service.py", "class Other:\n    def call(self, tool):\n        return tool == 'get_application'"),
+    ("schemas.py", "class RequestData(Other):\n    action: Literal['create_application', 'update_note']"),
+    ("schemas.py", "class RequestData(StrictInput):\n    operation: Literal['create_application', 'update_note']"),
+])
+def test_external_literal_exceptions_require_exact_owner_declaration_and_shape(relative, source):
+    assert _classification_violations(SRC / "external_agents" / relative, source)
+
+
+@pytest.mark.parametrize("relative,source", [
+    ("catalog.py", "def permitted(tool, grant):\n    return tool in {'list_applications', 'get_application', 'list_events', 'get_event', 'get_request', 'cancel_request'}"),
+    ("catalog.py", "def permitted(tool, grant):\n    if tool in {'list_applications', 'get_application', 'list_events', 'get_event', 'get_request', 'cancel_request'}:\n        return grant"),
+    ("service.py", "class ExternalAgentService:\n    def call(self, tool):\n        return tool == 'get_application'"),
+    ("service.py", "class ExternalAgentService:\n    def call(self, tool):\n        if tool == 'get_application':\n            return provider_registry[tool]"),
+    ("migration.py", "def ensure_business_schema(engine):\n    changed = 'create_application' not in sql"),
+    ("migration.py", "def ensure_business_schema(engine):\n    if 'create_application' not in sql:\n        return sql"),
+    ("service.py", "class ExternalAgentService:\n    def _decide_business(self, request, outcome):\n        if request.action == 'create_application':\n            request.application_id = outcome['application']['id']\n        else:\n            return request"),
+])
+def test_same_owner_wrong_control_flow_is_not_a_literal_role(relative, source):
+    assert _classification_violations(SRC / "external_agents" / relative, source)
+
+
+@pytest.mark.parametrize("validator,source,code", [
+    (_exact_symbol_violations, "from old import BindingTarget as Target", "BindingTarget"),
+    (_provider_registry_violations, "registry = {c.name: c for c in provider_contracts}", "provider-dict-registry"),
+    (_fallback_and_shadow_violations, "def dispatch(provider_registry, legacy_registry, name):\n    return provider_registry.get(name) or legacy_registry.get(name)", "typed-to-legacy-fallback"),
+])
+def test_external_literal_roles_do_not_disable_other_architecture_gates(validator, source, code):
+    assert any(code in value for value in validator(SRC / "external_agents/rogue.py", source))
+
+
+@pytest.mark.parametrize(
+    "relative,source",
+    [
+        ("external_agents/catalog.py", "from offerpilot.ai.tool_specs import common as alias"),
+        ("external_agents/service.py", "from ..pilot_runtime import service as alias"),
+        ("external_agents/catalog.py", "from offerpilot import ai as alias\nvalue = alias.tool_specs"),
+        ("external_agents/rogue.py", "import offerpilot.agent_runtime as alias"),
+        ("external_agents/rogue.py", "from offerpilot.product_actions import coordinator"),
+        ("pilot_runtime/composition.py", "from offerpilot.external_agents import catalog"),
+        ("ai/tool_specs/applications.py", "from ...external_agents import service"),
+        ("agent_runtime/service.py", "import offerpilot.external_agents.catalog as alias"),
+        ("product_actions/catalog.py", "from offerpilot.external_agents.catalog import permitted"),
+    ],
+)
+def test_cross_authority_static_imports_cannot_be_hidden_by_alias_or_relative_path(
+    relative, source
+):
+    assert authority_dependency_violations(SRC / relative, source, SRC)
+
+
+@pytest.mark.parametrize("relative", ["external_agents/catalog.py", "pilot_runtime/composition.py"])
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import importlib as loader\nalias = loader.import_module\nalias('offerpilot.' + 'external_agents.catalog')",
+        "from importlib import import_module as load\ncopy = load\ncopy('offerpilot.external_agents.catalog')",
+        "loader = __import__\nloader('offerpilot.external_agents.catalog')",
+        "import importlib\nloader = getattr(importlib, 'import_' + 'module')\nloader('offerpilot.external_agents.catalog')",
+        "import importlib\ngetter = getattr\nloader = getter(importlib, 'import_' + 'module')\nloader(name='offerpilot.external_agents.catalog')",
+        "from importlib import import_module as load\nload(name='offerpilot.external_agents.catalog')",
+        "import offerpilot as root\nvalue = root.external_agents.catalog",
+        "root = __import__('offerpilot')\nvalue = root.external_agents.catalog",
+        "from offerpilot import *",
+        "run = exec\nrun('print(1)')",
+        "import builtins as b\nrun = b.eval\nrun('1')",
+        "run = __builtins__['eval']\nrun('1')",
+    ],
+)
+def test_cross_authority_dynamic_imports_and_execution_are_rejected(relative, source):
+    if relative.startswith("external_agents/"):
+        source = source.replace("external_agents.catalog", "ai.tool_runtime")
+    assert authority_dependency_violations(SRC / relative, source, SRC)
+
+
+@pytest.mark.parametrize("relative", ["external_agents/catalog.py", "pilot_runtime/composition.py"])
+@pytest.mark.parametrize("source", [
+    "import builtins\nloader = builtins.__dict__['__import__']\nloader('CROSS')",
+    "loader = __builtins__.get('__import__')\nloader('CROSS')",
+    "import builtins\nrun = builtins.__dict__['eval']\nrun('1')",
+    "import runpy\nrunpy.run_module('CROSS')",
+    "from runpy import run_module as run\nrun('CROSS')",
+    "from importlib.util import spec_from_file_location as load\nload('CROSS', 'x.py')",
+    "loader.create_module(spec)",
+    "import importlib.util as u\nspec = u.spec_from_file_location('CROSS', 'x.py')\nspec.loader.exec_module(module)",
+    "import importlib\nimportlib.import_module(module_name)",
+])
+def test_indirect_or_unresolved_dynamic_loading_fails_closed(relative, source):
+    cross = "offerpilot.ai.tool_runtime" if relative.startswith("external_agents/") else "offerpilot.external_agents.catalog"
+    assert authority_dependency_violations(SRC / relative, source.replace("CROSS", cross), SRC)
+
+
+def test_external_shared_ai_types_are_not_model_runtime_or_sealed_authority():
+    source = "from offerpilot.ai.types import Message\nfrom offerpilot import ai as alias\nvalue = alias.types"
+    assert authority_dependency_violations(SRC / "external_agents/schemas.py", source, SRC) == []
+
+
+def test_external_surface_still_cannot_call_internal_model_runtime():
+    source = "from offerpilot.ai.client import ConfiguredAIClient"
+    assert authority_dependency_violations(SRC / "external_agents/service.py", source, SRC)
+
+
+@pytest.mark.parametrize("relative", ["external_agents/service.py", "pilot_runtime/composition.py"])
+@pytest.mark.parametrize("source", [
+    "import sys\nb = sys.modules['builtins']\nload = b.__dict__['__import__']\nload('CROSS')",
+    "from sys import modules as cache\nvalue = cache['CROSS']",
+    "import sys as s\ngetter = getattr\ncache = getter(s, 'mod' + 'ules')\nvalue = cache['CROSS']",
+    "import sys\ncache = sys.__dict__['modules']\nvalue = cache['CROSS']",
+    "import sys\nproject = vars\ncache = project(sys)['modules']\nvalue = cache['CROSS']",
+])
+def test_cached_module_access_cannot_cross_authority_boundaries(relative, source):
+    cross = "offerpilot.ai.tool_runtime" if relative.startswith("external_agents/") else "offerpilot.external_agents.catalog"
+    assert authority_dependency_violations(SRC / relative, source.replace("CROSS", cross), SRC)
+
+
+def test_external_server_can_still_use_normal_sys_transport_and_executable_fields():
+    source = "import sys\ncommand = sys.executable\noutput = sys.stdout\nerror = sys.stderr\nversion = sys.version"
+    assert authority_dependency_violations(SRC / "external_agents/server.py", source, SRC) == []
+
+
+def test_authority_can_still_inspect_ordinary_data_objects():
+    source = "def project(data):\n    return vars(data)"
+    assert authority_dependency_violations(SRC / "pilot_runtime/service.py", source, SRC) == []
+
+
+def test_owner_cli_and_database_can_integrate_external_storage_without_minting_pilot_authority():
+    source = "from offerpilot.external_agents import models"
+    assert authority_dependency_violations(SRC / "db.py", source, SRC) == []
+    assert authority_dependency_violations(SRC / "cli.py", source, SRC) == []
 
 
 def test_task12_bundle_catalog_and_legacy_component_ownership_is_closed() -> None:

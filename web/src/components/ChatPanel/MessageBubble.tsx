@@ -6,6 +6,8 @@ import type { EvidenceTarget, UITurn } from './model';
 import ProcessTimeline from './ProcessTimeline';
 import PilotTaskCard from './PilotTaskCard';
 import styles from './ChatPanel.module.css';
+import ChatImagePreview from './ChatImagePreview';
+import type { ChatImageReference } from '@/services/chatImages';
 
 /** Code block with a hover copy button. */
 function Pre({ children }: { children?: React.ReactNode }) {
@@ -48,6 +50,7 @@ interface Props {
   actionsDisabled?: boolean;
   onAction?: (action: string) => void;
   taskCardsEnabled?: boolean;
+  onReferenceImage?: (image: ChatImageReference) => void;
 }
 
 export default function MessageBubble({
@@ -57,6 +60,7 @@ export default function MessageBubble({
   actionsDisabled = false,
   onAction = () => undefined,
   taskCardsEnabled = true,
+  onReferenceImage,
 }: Props) {
   useLocale();
   const isUser = turn.role === 'user';
@@ -86,7 +90,13 @@ export default function MessageBubble({
         {(isUser || turn.content.trim()) ? (
           <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
             {isUser ? (
-              turn.content
+              <>
+                {turn.content}
+                {turn.image_attachments?.length ? <div className={styles.imageRail}>
+                  {turn.image_attachments.map((image, imageIndex) => <ChatImagePreview key={image.id} image={image} label={t("图片 {index}", { index: imageIndex + 1 })}
+                    onReference={!actionsDisabled && onReferenceImage ? () => onReferenceImage(image) : undefined} />)}
+                </div> : null}
+              </>
             ) : (
               <div className={styles.markdown}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: Pre, table: MarkdownTable }}>

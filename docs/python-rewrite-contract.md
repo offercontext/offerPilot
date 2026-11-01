@@ -166,6 +166,12 @@ Compatibility footnotes:
 
 Chat/settings compatibility footnotes:
 
+- 原生图片消息新增有序 `image_attachment_ids`（最多 4 张）；纯图片请求可使用空 `message`。
+  上传 `POST /api/chat/attachments` 使用 multipart；鉴权预览为 `GET /api/chat/attachments/{id}`；
+  有效能力为 `GET /api/chat/image-capability`。消息与时间线返回 `image_attachments`，不返回文件路径或 Base64。
+  Provider 设置往返保留 `supports_vision`；`POST /api/settings/providers/test-image` 执行独立的图片样例测试。
+  数据、预算、恢复与清理边界见 [ADR-0013](architecture/decisions/0013-persist-native-image-messages.md)。
+
 - `GET /api/chat/conversations/{id}` does not currently 404 just because the message list is empty.
 - `PUT /api/settings` preserves the existing API key when `api_key` is blank or omitted.
 - AI calls try `active_provider_id` first; if it fails and `fallback_provider_id` is valid, enabled, and keyed, the fallback provider is attempted and the provider event is written to diagnostics logs.

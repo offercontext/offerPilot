@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 跨层定位见 docs/architecture/code-map/interview-mock.md。
+# 两种入口共用 Provider -> 条件提交 -> trace；来源准入和 claim 仍由
+# handler/Repository 负责，因此不能在执行失败后自行新建一次 Attempt。
+
 import hashlib
 import json
 from dataclasses import dataclass, field
@@ -193,6 +197,7 @@ class MockInterviewExecutionService:
                 provider_mock_interview_snapshot(attempt),
                 list(claim.turns),
             )
+            # Provider 成功与业务提交成功分别观察：迟到结果可能无法落库。
             completed = self.repository.complete_question(
                 attempt.id,
                 turn_no,

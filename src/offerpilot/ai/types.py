@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from offerpilot.image_contracts import ImageReference
+
 
 @dataclass
 class ToolCall:
@@ -18,6 +20,7 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_call_id: str = ""
     provider_blocks: dict[str, Any] = field(default_factory=dict)
+    images: tuple[ImageReference, ...] = ()
     # Transient projector routing metadata. Adapters and persistence omit it.
     surface_contributor: str = ""
     surface_signal: str = ""
