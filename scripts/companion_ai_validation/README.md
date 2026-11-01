@@ -1,13 +1,40 @@
-# Companion bounded validation and six-target shadow candidate
+# Companion bounded validation
 
 This is a Linux-only acceptance harness, not an installed product feature or a
-second agent. It uses a fresh owned database, the real loopback `/api/chat`
-endpoint, twelve fixed synthetic ordinary turns and real bounded companion
-commands. No existing user configuration, account or record is loaded.
+second agent. The active fixed five-turn retest uses three fresh synthetic
+workspaces and the real loopback `/api/pilot/runtime/v1/turns` backend. It does not
+claim Web-to-provider coverage or load existing user configuration or records.
 
-## Independent input-only projection batch (2026-10-30)
+## Fixed five-turn experience retest (2026-11-01)
 
-The active workflow selects `--shadow-projection`, independent ordinal 6. It
+The active workflow selects `--experience-retest`, independent ordinal 9, pinned
+to the repaired product `e570fd170cc476324d0580bed894cc2c394f63b1`. It sends only
+original x01 → x02 → x03 (with newly generated conversation history), x09, x11;
+original synthetic setup and source deletion remain real runtime operations.
+Controls consume zero model calls. All provider requests count toward the fixed
+five-call ceiling, including unintended retries, titles and tool loops.
+
+The opening balance strictly replays nine immutable artifacts: **73 calls,
+558124 micro-CNY settled, zero reserved/unknown**. The cumulative maximum is 78
+calls, with the unchanged **20 CNY cap / 3 CNY per-call reservation**. Each request
+uses at most 512 output tokens, thinking disabled, no retry/fallback and no
+external search/fetch/tools. Mechanical/state/budget/truncation anomalies stop
+the batch; semantics are reviewed independently after the run, not auto-graded.
+
+The deadline is **2026-11-03 00:00 UTC (Beijing 08:00)**. The provider-credential-free
+offline job has 60 minutes (it still uses a read-only GitHub metadata token);
+preflight has 5 minutes and the paid job 25 minutes. The paid session remains
+1200 seconds, each request 90 seconds. Exact H/R, unchanged protected environment,
+fresh SHA readback and the owner's own environment review remain mandatory.
+
+The previous `--experience` twelve-turn mode, all original questions, evidence,
+ledger history and semantic findings remain unchanged. None of its unused
+allowance can be resumed. Historical protocols below describe their own batches,
+not the active workflow or a new spending authorization.
+
+## Historical input-only projection batch (2026-10-30)
+
+That batch selected `--shadow-projection`, independent ordinal 6. It
 inherits all six immutable real batches: **52 calls, 419388 micro-CNY settled,
 zero reserved/unknown**. The sixth run
 [41002088459](https://github.com/offercontext/offerPilot/actions/runs/41002088459)

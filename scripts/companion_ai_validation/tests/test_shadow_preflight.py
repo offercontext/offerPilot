@@ -178,6 +178,7 @@ def test_shadow_cli_cannot_write_admission_without_current_owner(tmp_path, monke
 
 def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
     from pathlib import Path
+    import shlex
     import yaml
     root = Path(__file__).resolve().parents[3]
     workflow = yaml.safe_load((root / p.WORKFLOW).read_text())
@@ -185,10 +186,12 @@ def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
                 for step in job["steps"]]
     for fragment in ("preflight --phase before", "preflight --phase paid", ".run --live"):
         selected = [command for command in commands if fragment in command]
-        assert len(selected) == 1 and "--experience" in selected[0]
+        assert len(selected) == 1
+        tokens = shlex.split(selected[0])
+        assert "--experience-retest" in tokens and "--experience" not in tokens
     # More time for provider-credential-free offline verification does not extend paid authority.
     from scripts.companion_ai_validation import broker
-    assert workflow["jobs"]["offline"]["timeout-minutes"] == 30
+    assert workflow["jobs"]["offline"]["timeout-minutes"] == 60
     assert workflow["jobs"]["preflight"]["timeout-minutes"] == 5
     assert workflow["jobs"]["paid"]["timeout-minutes"] == 25
     assert broker.SESSION_SECONDS == 20 * 60
@@ -199,7 +202,11 @@ def test_workflow_uses_same_shadow_profile_in_both_gates_and_live_entrypoint():
     assert workflow["permissions"] == {"contents": "read", "actions": "read"}
     secret_steps = [step for job in workflow["jobs"].values() for step in job["steps"]
                     if "OFFERPILOT_COMPANION_DEEPSEEK_20261021" in step.get("env", {})]
-    assert len(secret_steps) == 1 and ".run --live --experience" in secret_steps[0]["run"]
+    assert len(secret_steps) == 1
+    secret_tokens = shlex.split(secret_steps[0]["run"])
+    assert secret_tokens[:3] == [".venv/bin/python", "-m", "scripts.companion_ai_validation.run"]
+    assert {"--live", "--experience-retest"} <= set(secret_tokens)
+    assert "--experience" not in secret_tokens
 
 
 @pytest.mark.parametrize("phase", ["before", "paid"])

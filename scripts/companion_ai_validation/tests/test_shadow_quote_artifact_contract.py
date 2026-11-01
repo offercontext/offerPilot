@@ -139,13 +139,13 @@ def test_six_review_runner_actual_workflow_zip_retains_exact_bytes(shadow_quote_
     workflow = yaml.safe_load(package.WORKFLOW.read_text())
     paid_commands = [step.get("run", "") for step in workflow["jobs"]["paid"]["steps"]]
     # The v2 runner remains a historical byte/evidence regression; the active
-    # workflow now deliberately selects the new input-projection profile.
+    # workflow now deliberately selects the fixed five-case experience retest.
     commands = [shlex.split(command) for command in paid_commands]
     assert any(tokens[:3] == [".venv/bin/python", "-m",
                               "scripts.companion_ai_validation.run"]
-               and {"--experience", "--live"} <= set(tokens[3:]) for tokens in commands)
+               and {"--experience-retest", "--live"} <= set(tokens[3:]) for tokens in commands)
     assert any(tokens[:6] == ["uv", "run", "--frozen", "python", "-m", "scripts.companion_ai_validation.preflight"]
-               and "--experience" in tokens
+               and "--experience-retest" in tokens and "--experience" not in tokens
                and ("--phase", "paid") in zip(tokens, tokens[1:]) for tokens in commands)
     raw = package._collect_zip(workspace, package.WORKFLOW.read_text())
     bodies = _unpack(raw, workspace)
