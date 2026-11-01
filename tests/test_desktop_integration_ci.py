@@ -30,7 +30,7 @@ def test_mail_native_lock_job_keeps_the_startup_guard_and_locked_dependencies():
     command = "uv run --frozen pytest --noconftest -q tests/test_job_mail_process_lock.py"
     assert f"run: {command}\n" in native
     assert native.index("uv sync --frozen") < native.index(command)
-    assert 'addopts = "-p tests._offline_network_guard"' in (
+    assert 'addopts = "-p tests._offline_network_guard --strict-markers"' in (
         ROOT / "pyproject.toml"
     ).read_text(encoding="utf-8")
     for bypass in ("pip install pytest", "-p no:", "-o addopts", "PYTEST_ADDOPTS", "continue-on-error"):
@@ -59,7 +59,7 @@ def test_prs_use_full_read_only_merge_candidate_validation_without_duplicate_can
     assert "paths:" not in trigger and "paths-ignore:" not in trigger
     assert "permissions:\n  contents: read\n" in WORKFLOW
     for forbidden in ("pull_request_target", "secrets.", "environment:", "contents: write",
-                      "actions: write", "workflow_run:", "-RealAi", "cancel-in-progress:"):
+                      "actions: write", "workflow_run:", "-RealAi"):
         assert forbidden not in WORKFLOW
     for job in ("validation-package", "pytest-manifest", "pytest-shards", "full-regression",
                 "simplification-helper-safety"):
@@ -90,10 +90,11 @@ def test_package_only_escape_hatch_is_bound_to_old_push_branch():
         guard = f"!({expression})"
         if job == "full-regression":
             guard = f"always() && {guard}"
+        guard = "needs.pr-feedback.outputs.mode != 'selected' && " + guard
         assert re.findall(r'^    if: (.+)$', _job(job), re.M) == [
             f'"${{{{ {guard} }}}}"',
         ], f"Mode guard for {job} must stay bound to the old push branch"
-    assert "timeout-minutes: 120" in WORKFLOW and "max-parallel: 2" in WORKFLOW
+    assert "timeout-minutes: 120" in WORKFLOW and "max-parallel: 4" in WORKFLOW
     assert "scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence" in WORKFLOW
 
 

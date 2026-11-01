@@ -189,19 +189,48 @@ def test_nontransient_visibility_error_still_fails_closed(tmp_path, monkeypatch,
 def test_open_sse_closes_without_retained_content_when_visibility_becomes_unavailable(
     tmp_path, monkeypatch
 ):
+    from threading import Event
+
+    import offerpilot.api as api
+
     original = ContextSourceLoader.load
+    original_response = api.runtime_subscription_response
     reads = []
+    admitted_reads = []
+    stream_failures = []
+    stream_entered = Event()
     with completed_turn(tmp_path) as (client, _, _, url, _):
 
         def unavailable_after_admission(self, read, freeze):
             if is_visibility_read(read):
                 reads.append(True)
-                if len(reads) > 1:
+                if stream_entered.is_set():
+                    stream_failures.append(True)
                     raise SourceTemporarilyUnavailable()
-            return original(self, read, freeze)
+            result = original(self, read, freeze)
+            if is_visibility_read(read):
+                admitted_reads.append(True)
+            return result
+
+        def observe_stream_guard(subscription, **kwargs):
+            can_read = kwargs["can_read"]
+
+            def marked_can_read():
+                # The original StreamingResponse invokes this after response.start.
+                stream_entered.set()
+                return can_read()
+
+            kwargs["can_read"] = marked_can_read
+            return original_response(subscription, **kwargs)
 
         monkeypatch.setattr(ContextSourceLoader, "load", unavailable_after_admission)
+        monkeypatch.setattr(api, "runtime_subscription_response", observe_stream_guard)
         response = client.get(url + "/events")
         assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/event-stream")
+        assert admitted_reads
+        assert stream_entered.is_set()
+        assert stream_failures
         assert len(reads) >= 2
         assert response.text == ""
+        assert PRIVATE_TEXT not in response.text

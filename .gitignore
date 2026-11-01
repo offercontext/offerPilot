@@ -47,6 +47,7 @@ build/
 .worktrees/
 
 # Root-level workflow artifacts (planning/tickets/verification screenshots)
+/artifacts/test-plans/
 /IMPLEMENTATION_PLAN.md
 /tickets*.md
 /*.png
