@@ -44,7 +44,7 @@ function Get-TestFiles {
 
 function Get-Groups([string[]]$TestFiles) {
     $groups = [ordered]@{
-        agent = @($TestFiles | Where-Object { $_ -match '\\test_(ai_|chat_|config|settings_api|auth_api|cli)' })
+        agent = @($TestFiles | Where-Object { $_ -match '\\agent_loop\\' -or $_ -match '\\test_(ai_|chat_|config|settings_api|auth_api|cli)' })
         domain = @($TestFiles | Where-Object { $_ -match '\\test_(applications|events|notes|resumes|offers|questions|jd_resume_ai_api|module_workflows)' })
         knowledge = @($TestFiles | Where-Object { $_ -match '\\test_(knowledge|ki)' })
         proposals = @($TestFiles | Where-Object { $_ -match '\\test_(opportunity_fit|interview|material|evidence|smoke)' })
@@ -53,6 +53,8 @@ function Get-Groups([string[]]$TestFiles) {
     $assigned = @($groups.Values | ForEach-Object { $_ })
     $groups.misc = @($TestFiles | Where-Object { $assigned -notcontains $_ })
     $assigned = @($groups.Values | ForEach-Object { $_ })
+    $duplicates = @(Get-OrdinalDuplicates $assigned)
+    if ($duplicates.Count -gt 0) { throw "multiply assigned test files: $($duplicates -join ', ')" }
     $unassigned = @($TestFiles | Where-Object { $assigned -notcontains $_ })
     if ($unassigned.Count -gt 0) { throw "unassigned test files: $($unassigned -join ', ')" }
     $groups

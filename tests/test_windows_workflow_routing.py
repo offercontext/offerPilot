@@ -121,7 +121,7 @@ def test_default_workflow_and_regression_dependency_contract_remain_full():
     assert "$env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success'" in full
     assert "scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence" in full
     assert 'if ($LASTEXITCODE -ne 0) { throw "Complete repository release gate failed" }' in full
-    assert "cancel-in-progress:" not in WORKFLOW
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in WORKFLOW
 
 
 def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
@@ -143,7 +143,7 @@ def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
     assert [int(value.strip()) for value in matrix[0].split(",")] == list(range(20))
     assert "gate.py collect --count 20 --manifest" in _job("pytest-manifest")
     assert "name: Complete pytest shard ${{ matrix.shard }} of 20" in shards
-    assert "cancel-in-progress:" not in WORKFLOW
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in WORKFLOW
     assert "continue-on-error:" not in WORKFLOW
     assert 'if ($LASTEXITCODE -ne 0) { throw "Full pytest shard failed" }' in shards
     assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in shards
@@ -375,3 +375,35 @@ def test_dependency_preflight_native_exit_and_evidence(tmp_path, dependency, res
     assert (runner_temp / "full-regression-preflight.txt").read_text(encoding="utf-8-sig").splitlines() == expected
     assert summary.read_text(encoding="utf-8-sig").splitlines() == expected
     assert list(workspace.iterdir()) == []
+
+
+def test_product_supersession_is_isolated_to_the_same_pr():
+    # Pin the small expression rather than pretending to interpret arbitrary GHA.
+    assert ("  group: windows-product-${{ github.event_name == 'pull_request' && "
+            "format('pr-{0}', github.event.pull_request.number) || "
+            "format('run-{0}', github.run_id) }}") in WORKFLOW
+    assert "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in WORKFLOW
+    assert WORKFLOW.count('cancel-in-progress:') == 1
+    assert "types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]" in WORKFLOW
+    # No broader branch, repository or paid-workflow concurrency namespace.
+    concurrency = WORKFLOW.split('concurrency:\n', 1)[1].split('\n\n', 1)[0]
+    assert 'github.ref' not in concurrency and 'companion' not in concurrency
+    assert 'simplification' not in concurrency and 'workflow_dispatch' not in concurrency
+    assert 'actions: write' not in WORKFLOW
+
+
+def test_fixture_checks_move_early_without_duplication_or_gate_removal():
+    package = _job('validation-package')
+    node_command = ('node --test desktop/browser-cleanup-diagnostic/test-routing.mjs '
+                    'desktop/haru-ui-preview/fixture-api.test.cjs '
+                    'desktop/haru-ui-preview/visual.test.mjs')
+    assert package.count(node_command) == 1
+    assert package.index('npm.cmd ci --prefix web') < package.index(node_command)
+    assert package.index(node_command) < package.index('node web/tests/desktop-layout/run.mjs')
+    assert package.index('node web/tests/desktop-layout/run.mjs') < package.index(
+        'uv run --frozen pytest -v tests/test_desktop.py')
+    assert package.count('node web/tests/desktop-layout/run.mjs') == 1
+    assert 'desktop/ci-evidence/00-fixture-contracts.log' in package
+    assert 'finally {\n            Stop-Transcript' in package
+    # Until conservative selector migration is validated, even draft code stays full.
+    assert 'github.event.pull_request.draft' not in WORKFLOW

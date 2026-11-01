@@ -9,13 +9,18 @@ on:
       - feat/20261005-windows-desktop-validation
   pull_request:
     branches: [master]
-    # No paths filter: every PR receives the complete required status.
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
+    # No paths filter: every PR currently receives the complete validation status.
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Do not cancel existing runs implicitly; supersession needs explicit approval.
+# Approved supersession applies only to ordinary product CI for the SAME PR.
+# Push/manual runs remain independent; paid workflows use unrelated groups.
+concurrency:
+  group: windows-product-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 # Package-only is opt-in on push, from the first-line commit prefix including
 # its trailing space. GitHub startsWith is case-insensitive: uppercase/lowercase
@@ -104,6 +109,23 @@ jobs:
           npm.cmd ci --prefix desktop/real-ai-validation --ignore-scripts --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { throw "Offline safety helper install failed" }
           Stop-Transcript
+      - name: Required early Node and preview fixture contracts
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/00-fixture-contracts.log
+          try {
+            node --test desktop/browser-cleanup-diagnostic/test-routing.mjs desktop/haru-ui-preview/fixture-api.test.cjs desktop/haru-ui-preview/visual.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw "Historical routing and preview fixture regression failed" }
+          } finally {
+            Stop-Transcript
+          }
+      - name: Required rendered viewport and interaction regression
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03b-layout.log
+          node web/node_modules/typescript/bin/tsc --project web/tests/desktop-layout/tsconfig.json
+          if ($LASTEXITCODE -ne 0) { throw "Layout fixture types failed" }
+          node web/tests/desktop-layout/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Rendered layout regression failed" }
+          Stop-Transcript
       - name: Required desktop, auth and static regression tests
         run: |
           Start-Transcript -Path desktop/ci-evidence/02-focused-tests.log
@@ -123,8 +145,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Offline AI safety regression failed" }
           node web/node_modules/vitest/vitest.mjs run --config desktop/real-ai-validation/test-ui/vitest.config.mjs
           if ($LASTEXITCODE -ne 0) { throw "Offline helper React regression failed" }
-          node --test desktop/browser-cleanup-diagnostic/test-routing.mjs desktop/haru-ui-preview/fixture-api.test.cjs desktop/haru-ui-preview/visual.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw "Historical routing and preview fixture regression failed" }
           uv run --frozen pytest -q desktop/browser-cleanup-diagnostic/test_diagnostic.py
           if ($LASTEXITCODE -ne 0) { throw "Offline cleanup diagnostic regression failed" }
           Stop-Transcript
@@ -137,14 +157,6 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Desktop type check failed" }
           npm.cmd run build --prefix web
           if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
-          Stop-Transcript
-      - name: Required rendered viewport and interaction regression
-        run: |
-          Start-Transcript -Path desktop/ci-evidence/03b-layout.log
-          node web/node_modules/typescript/bin/tsc --project web/tests/desktop-layout/tsconfig.json
-          if ($LASTEXITCODE -ne 0) { throw "Layout fixture types failed" }
-          node web/tests/desktop-layout/run.mjs
-          if ($LASTEXITCODE -ne 0) { throw "Rendered layout regression failed" }
           Stop-Transcript
       - name: Freeze existing Python backend
         run: |

@@ -59,7 +59,7 @@ def test_prs_use_full_read_only_merge_candidate_validation_without_duplicate_can
     assert "paths:" not in trigger and "paths-ignore:" not in trigger
     assert "permissions:\n  contents: read\n" in WORKFLOW
     for forbidden in ("pull_request_target", "secrets.", "environment:", "contents: write",
-                      "actions: write", "workflow_run:", "-RealAi", "cancel-in-progress:"):
+                      "actions: write", "workflow_run:", "-RealAi"):
         assert forbidden not in WORKFLOW
     for job in ("validation-package", "pytest-manifest", "pytest-shards", "full-regression",
                 "simplification-helper-safety"):

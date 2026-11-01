@@ -76,3 +76,23 @@ do not infer full-gate success from targeted tests or a reviewer's assessment.
 
 If a check cannot run in your environment, include the command, failure reason,
 and residual risk in the pull request or handoff note.
+
+### Product CI feedback
+
+The Windows product workflow runs on PR opening, updates, reopening and draft
+transitions. A newer run supersedes an older run only for the same PR in that
+workflow. Other PRs, manual dispatches, historical validation-branch pushes and
+paid-provider workflows do not share its cancellation group. Manual dispatch
+still requests complete validation; do not use it for every small iteration.
+
+Node routing/preview fixture contracts run immediately after locked dependencies
+are installed, followed by rendered viewport checks, before the slower backend
+checks. They are reordered, not removed or duplicated. Existing evidence uploads
+remain; cancellation preserves existing logs/artifacts but cannot guarantee a
+partially executed upload finishes.
+
+Draft code changes still run the complete gate until the existing Harness test
+selector has been safely adapted to the current repository. Test grouping is not
+impact analysis. No branch-protection settings are changed by this workflow:
+maintainers must verify the exact candidate's complete evidence before merging.
+A skipped job is not that evidence, even if GitHub treats its status as passing.
