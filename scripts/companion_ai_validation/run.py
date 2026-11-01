@@ -39,8 +39,8 @@ def clean_environment() -> None:
 
 
 def check_admission(record: Any, metadata: dict[str, str], now: float, *,
-                    shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> str:
-    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
+                    shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> str:
+    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
     expected = lineage.LINEAGE_KEYS | {
         "schema", "source_sha", "helper_sha", "run_id", "run_attempt", "checked_at",
         "checked_at_monotonic_ns", "quote_deadline_monotonic_ns",
@@ -53,7 +53,7 @@ def check_admission(record: Any, metadata: dict[str, str], now: float, *,
         lineage.validate_lineage(record)
     except continuation.ContinuationError as exc:
         raise GateError("admission_lineage") from exc
-    if (shadow_review or shadow_quote_v2 or shadow_projection or shadow_single_target) and (not isinstance(record["source_sha"], str)
+    if (shadow_review or shadow_quote_v2 or shadow_projection or shadow_single_target or experience) and (not isinstance(record["source_sha"], str)
                           or not isinstance(record["helper_sha"], str)
                           or record["source_sha"] in lineage.ALL_HISTORICAL_IDENTITIES
                           or record["helper_sha"] in lineage.ALL_HISTORICAL_IDENTITIES):
@@ -85,14 +85,14 @@ def check_admission(record: Any, metadata: dict[str, str], now: float, *,
                 "offercontext/offerPilot/.github/workflows/companion-real-ai.yml"
                 "@refs/heads/feat/20261021-companion-life-v1")):
         raise GateError("admission_identity")
-    check_admission_time(record, now, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
+    check_admission_time(record, now, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
     return sha
 
 
 def check_admission_time(record: dict[str, Any], now: float, *,
-                         shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> None:
-    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
-    deadline = lineage.PRICE_VALID_UNTIL if (shadow_review or shadow_quote_v2 or shadow_projection or shadow_single_target) else PRICE_VALID_UNTIL
+                         shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> None:
+    lineage = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
+    deadline = lineage.PRICE_VALID_UNTIL if (shadow_review or shadow_quote_v2 or shadow_projection or shadow_single_target or experience) else PRICE_VALID_UNTIL
     checked = record["checked_at"]
     if type(checked) is not int or not 0 <= now - checked <= 120:
         raise GateError("admission_expired")
@@ -139,9 +139,9 @@ class RequestEvidence:
     The broker has already validated and reserved the request. Durable capture
     must finish before transport; failure retains that conservative reservation.
     """
-    def __init__(self, evidence_dir: Path, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False):
+    def __init__(self, evidence_dir: Path, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False):
         self._operations: tuple[str, ...] = profile_lineage(
-            shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target).OPERATIONS
+            shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience).OPERATIONS
         self._fd = os.open(evidence_dir / "requests.jsonl",
                            os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self._count = 0
@@ -186,7 +186,8 @@ class RequestEvidence:
 
 class ResponseEvidence:
     """Bounded successful synthetic samples survive a later failed matrix turn."""
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, operations: tuple[str, ...] = OPERATIONS):
+        self._operations = operations
         self._fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         self._count, self._size = 0, 0
 
@@ -195,8 +196,8 @@ class ResponseEvidence:
                   "provenance", "ordinary_turn_read_only", "source_verified",
                   "source_facts_before_projection"}
         if (not isinstance(entry, dict) or set(entry) != fields
-                or self._count >= len(OPERATIONS)
-                or entry.get("operation") != OPERATIONS[self._count]
+                or self._count >= len(self._operations)
+                or entry.get("operation") != self._operations[self._count]
                 or entry.get("source_verified") is not True
                 or entry.get("ordinary_turn_read_only") is not True
                 or not isinstance(entry.get("assistant_text"), str)
@@ -223,10 +224,10 @@ class ResponseEvidence:
 
 def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
             evidence_dir: Path, *, window: RunWindow | None = None,
-            shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> dict[str, Any]:
+            shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> dict[str, Any]:
     require_linux()
-    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
-    window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
+    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
+    window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
     if shadow_single_target:
         from scripts.companion_ai_validation.shadow_single_target_driver import execute as execute_single
         return execute_single(send, source_sha, evidence_dir, window=window)
@@ -242,6 +243,7 @@ def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
     # Defer production imports until runtime environment is sanitized by main.
     # Offline callers are protected by pytest's early loopback-only network guard.
     from scripts.companion_ai_validation.driver import MatrixFailure, run_matrix
+    lineage = profile_lineage(experience=experience)
 
     evidence_dir.mkdir(mode=0o700, parents=True, exist_ok=False)
     requests: RequestEvidence | None = None
@@ -254,35 +256,41 @@ def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
         broker._check_window()
         return send(body)
 
-    broker = Broker(evidence_dir / "budget.jsonl", captured_send, source_sha, window=window)
+    broker = Broker(evidence_dir / "budget.jsonl", captured_send, source_sha, window=window, experience=experience)
     outcome: dict[str, Any] = {"passed": False, "error_code": "incomplete"}
     samples: ResponseEvidence | None = None
     try:
-        requests = RequestEvidence(evidence_dir)
-        samples = ResponseEvidence(evidence_dir / "responses.jsonl")
+        requests = RequestEvidence(evidence_dir, experience=experience)
+        samples = ResponseEvidence(evidence_dir / "responses.jsonl", operations=lineage.OPERATIONS)
         with tempfile.TemporaryDirectory(prefix="offerpilot-companion-owned-") as owned:
             data_dir = Path(owned) / "data"
             data_dir.mkdir(mode=0o700)
             with serve(broker) as base_url:
-                @contextmanager
-                def stage(operation: str) -> Iterator[None]:
-                    token = broker.begin_stage(operation)
-                    write_config(data_dir, base_url, token)
-                    try:
-                        yield
-                    except BaseException:
-                        broker.reject()
+                def stage_for_data_dir(owned_data_dir: Path) -> Callable[[str], Any]:
+                    @contextmanager
+                    def stage(operation: str) -> Iterator[None]:
+                        token = broker.begin_stage(operation)
+                        write_config(owned_data_dir, base_url, token)
                         try:
+                            yield
+                        except BaseException:
+                            broker.reject()
+                            try:
+                                broker.close_stage()
+                            except GateError:
+                                pass
+                            raise
+                        else:
                             broker.close_stage()
-                        except GateError:
-                            pass
-                        raise
-                    else:
-                        broker.close_stage()
+                    return stage
 
-                outcome = run_matrix(data_dir, stage, record_response=samples.record)
+                if experience:
+                    from scripts.companion_ai_validation.experience_driver import run_matrix as experience_matrix
+                    outcome = experience_matrix(data_dir, stage_for_data_dir, record_response=samples.record)
+                else:
+                    outcome = run_matrix(data_dir, stage_for_data_dir(data_dir), record_response=samples.record)
                 summary = broker.summary()
-                if (summary["halted"] or summary["stages_complete"] != len(OPERATIONS)
+                if (summary["halted"] or summary["stages_complete"] != len(lineage.OPERATIONS)
                         or summary["reserved_micro_cny"] != 0):
                     raise GateError("matrix_not_settled")
     except (GateError, MatrixFailure) as exc:
@@ -306,6 +314,12 @@ def execute(send: Callable[[bytes], tuple[int, bytes]], source_sha: str,
         except GateError:
             outcome = {"passed": False, "error_code": "journal_failure"}
         report = {"schema": continuation.ADMISSION_SCHEMA, "matrix": outcome, "budget": summary}
+        if experience:
+            from scripts.companion_ai_validation import experience_candidate as candidate
+            report["product_candidate"] = {"source_sha": candidate.SOURCE_SHA,
+                                           "tree_sha": candidate.TREE_SHA,
+                                           "objects": candidate.OBJECTS,
+                                           "web_executed": False}
         (evidence_dir / "summary.json").write_bytes(encode(report) + b"\n")
     return report
 
@@ -320,17 +334,18 @@ def main() -> int:
         modes.add_argument("--shadow-quote-v2", action="store_true")
         modes.add_argument("--shadow-projection", action="store_true")
         modes.add_argument("--shadow-single-target", action="store_true")
+        modes.add_argument("--experience", action="store_true")
         parser.add_argument("--admission-file", type=Path, required=True)
         parser.add_argument("--evidence-dir", type=Path, required=True)
         args = parser.parse_args()
-        window = RunWindow(shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target)
+        window = RunWindow(shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target, experience=args.experience)
         keys = ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_EVENT_NAME",
                 "GITHUB_REPOSITORY", "GITHUB_REF", "GITHUB_WORKFLOW_SHA", "GITHUB_WORKFLOW_REF")
         metadata = {name: os.environ.get(name, "") for name in keys}
         with args.admission_file.open("rb") as admission_file:
             admission = decode(admission_file.read(MAX_BYTES + 1))
         source_sha = check_admission(admission, metadata, window.effective_wall(),
-                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target)
+                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target, experience=args.experience)
         window.restrict_quote_deadline(admission["quote_deadline_monotonic_ns"])
         # Verify checked-out files, not merely a supplied environment string.
         git_environment = {"PATH": os.defpath, "GIT_CONFIG_NOSYSTEM": "1",
@@ -343,6 +358,13 @@ def main() -> int:
                                capture_output=True, check=True).stdout
         if checkout != source_sha or dirty:
             raise GateError("checkout_changed")
+        if args.experience:
+            from scripts.companion_ai_validation import experience_candidate as candidate
+            actual = {name: subprocess.run(
+                ["git", "rev-parse", f"HEAD:{name}"], cwd=ROOT, env=git_environment,
+                capture_output=True, check=True).stdout.decode().strip()
+                for name in candidate.OBJECTS}
+            candidate.validate_objects(actual)
         # Read the raw commit: HEAD^ and pretty-format parents can disappear in
         # Actions' shallow checkout. The immutable commit still names its parent.
         commit = subprocess.run(["git", "cat-file", "-p", "HEAD"], cwd=ROOT,
@@ -357,17 +379,19 @@ def main() -> int:
         # Checkout/provenance checks may stall. They never extend admission age
         # or the fixed quote, and predecessor bytes must still verify here.
         check_admission(admission, metadata, window.effective_wall(),
-                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target)
+                                     shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target, experience=args.experience)
         # The final lineage verification can also stall. No further file or
         # metadata I/O may sit between this anchored check and secret access.
         check_admission_time(admission, window.effective_wall(),
-                             shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target)
+                             shadow_review=args.shadow_review, shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target, experience=args.experience)
         # Read the one explicitly authorized environment secret only after all gates.
         key = os.environ.pop(KEY_NAME, "")
         clean_environment()
         transport = HTTPSUpstream(key, window=window)
         key = ""
-        if args.shadow_single_target:
+        if args.experience:
+            report = execute(transport, source_sha, args.evidence_dir, window=window, experience=True)
+        elif args.shadow_single_target:
             report = execute(transport, source_sha, args.evidence_dir, window=window, shadow_single_target=True)
         elif args.shadow_projection:
             report = execute(transport, source_sha, args.evidence_dir, window=window, shadow_projection=True)

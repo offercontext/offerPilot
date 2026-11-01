@@ -64,13 +64,22 @@ def obj(value: Any) -> dict[str, Any]:
     return cast(dict[str, Any], value)
 
 
-def validate_protocol(shadow_review: bool, shadow_quote_v2: bool, shadow_projection: bool, shadow_single_target: bool = False) -> None:
-    flags = (shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def validate_protocol(shadow_review: bool, shadow_quote_v2: bool, shadow_projection: bool, shadow_single_target: bool = False, experience: bool = False) -> None:
+    flags = (shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
     demand(all(type(flag) is bool for flag in flags) and sum(flags) <= 1, "PROTOCOL_CONFLICT")
 
 
-def marker(helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> str:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def marker(helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> str:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
+    if experience:
+        from scripts.companion_ai_validation import experience_continuation as exp
+        return (
+            "test: request OfferPilot companion product experience v1\n\n"
+            f"OfferPilot-Companion-AI-Helper: {helper_sha}\n"
+            "OfferPilot-Companion-AI-Request: one-shot-20261101-product-experience-v1-8\n"
+            f"OfferPilot-Companion-AI-Predecessor: {exp.PREDECESSOR_RUN_ID}\n"
+            f"OfferPilot-Companion-AI-Ledger: {exp.LEDGER_SHA256}"
+        )
     if shadow_single_target:
         from scripts.companion_ai_validation import shadow_single_target_continuation as single
         return (
@@ -117,10 +126,10 @@ def marker(helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: boo
     )
 
 
-def exact_marker(value: Any, helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> bool:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def exact_marker(value: Any, helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> bool:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
     # Git commit messages can include their terminal LF, not arbitrary whitespace.
-    expected = marker(helper_sha, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
+    expected = marker(helper_sha, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
     return value in (expected, expected + "\n")
 
 
@@ -134,13 +143,14 @@ class Context:
     shadow_quote_v2: bool = False
     shadow_projection: bool = False
     shadow_single_target: bool = False
+    experience: bool = False
 
     def __post_init__(self) -> None:
-        validate_protocol(self.shadow_review, self.shadow_quote_v2, self.shadow_projection, self.shadow_single_target)
+        validate_protocol(self.shadow_review, self.shadow_quote_v2, self.shadow_projection, self.shadow_single_target, self.experience)
 
 
-def validate_context(env: Mapping[str, str], *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> Context:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def validate_context(env: Mapping[str, str], *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> Context:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
     demand(env.get("GITHUB_RUN_ATTEMPT") == "1", "RERUN_FORBIDDEN")
     helper, request = env.get(HELPER_VAR, ""), env.get(REQUEST_VAR, "")
     old_shas: tuple[str, ...] = (lineage.ORIGINAL_HELPER_SHA, lineage.ORIGINAL_SOURCE_SHA,
@@ -158,6 +168,9 @@ def validate_context(env: Mapping[str, str], *, shadow_review: bool = False, sha
     if shadow_single_target:
         from scripts.companion_ai_validation import shadow_single_target_continuation as single
         old_shas += tuple(single.ALL_HISTORICAL_IDENTITIES)
+    if experience:
+        from scripts.companion_ai_validation import experience_continuation as exp
+        old_shas += tuple(exp.ALL_HISTORICAL_IDENTITIES)
     demand(bool(SHA.fullmatch(helper) and SHA.fullmatch(request)) and helper != request
            and helper not in old_shas and request not in old_shas,
            "EXACT_SHA_APPROVAL_MISSING")
@@ -173,7 +186,7 @@ def validate_context(env: Mapping[str, str], *, shadow_review: bool = False, sha
     run_id, repository_id = env.get("GITHUB_RUN_ID", ""), env.get("GITHUB_REPOSITORY_ID", "")
     demand(bool(re.fullmatch(r"[1-9][0-9]*", run_id))
            and bool(re.fullmatch(r"[1-9][0-9]*", repository_id)), "INVALID_RUN_IDENTITY")
-    return Context(helper, request, int(run_id), int(repository_id), shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+    return Context(helper, request, int(run_id), int(repository_id), shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
 
 
 def trusted_repo(value: Any, repository_id: int) -> bool:
@@ -195,7 +208,8 @@ def validate_identity(ctx: Context, event: Any, request: Any, helper: Any, branc
         and obj(event.get("head_commit")).get("id") == ctx.request_sha
         and exact_marker(event["head_commit"].get("message"), ctx.helper_sha,
                          shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {})),
         "PUSH_IDENTITY_MISMATCH",
@@ -212,7 +226,8 @@ def validate_identity(ctx: Context, event: Any, request: Any, helper: Any, branc
         and isinstance(tree, str) and bool(SHA.fullmatch(tree))
         and tree == obj(helper.get("tree")).get("sha")
         and exact_marker(request.get("message"), ctx.helper_sha, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {})),
         "REQUEST_MUST_BE_EMPTY_CHILD",
@@ -326,7 +341,8 @@ def validate_history(ctx: Context, runs: list[dict[str, Any]],
     demand(set(jobs_by_run) == {run["id"] for run in runs}, "JOB_HISTORY_INCOMPLETE")
     helper_runs = []
     pinned = historical_batches(shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     paid_batches = {batch.run_id: batch for batch in pinned}
@@ -465,8 +481,9 @@ class NoRedirect(HTTPRedirectHandler):
 class GitHubReader:
     """Fixed repository GET allowlist, verified TLS, no redirect or proxy reuse."""
 
-    def __init__(self, token: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False):
-        validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+    def __init__(self, token: str, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False):
+        validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
+        self.experience = experience
         self.shadow_projection = shadow_projection
         self.shadow_single_target = shadow_single_target
         self.shadow_quote_v2 = shadow_quote_v2
@@ -493,18 +510,21 @@ class GitHubReader:
             re.escape(f"actions/artifacts/{lineage.PREDECESSOR_ARTIFACT_ID}"),
             r"actions/runs/[1-9][0-9]*/jobs\?filter=all&per_page=100&page=[1-9][0-9]*",
         )
-        if self.shadow_review or self.shadow_quote_v2 or self.shadow_projection or self.shadow_single_target:
+        if self.shadow_review or self.shadow_quote_v2 or self.shadow_projection or self.shadow_single_target or self.experience:
             from scripts.companion_ai_validation import shadow_continuation as shadow
             allowed += (re.escape(f"actions/artifacts/{shadow.PREDECESSOR_ARTIFACT_ID}"),)
-        if self.shadow_quote_v2 or self.shadow_projection or self.shadow_single_target:
+        if self.shadow_quote_v2 or self.shadow_projection or self.shadow_single_target or self.experience:
             from scripts.companion_ai_validation import shadow_quote_continuation as quote
             allowed += (re.escape(f"actions/artifacts/{quote.PREDECESSOR_ARTIFACT_ID}"),)
-        if self.shadow_projection or self.shadow_single_target:
+        if self.shadow_projection or self.shadow_single_target or self.experience:
             from scripts.companion_ai_validation import shadow_projection_continuation as projection
             allowed += (re.escape(f"actions/artifacts/{projection.PREDECESSOR_ARTIFACT_ID}"),)
-        if self.shadow_single_target:
+        if self.shadow_single_target or self.experience:
             from scripts.companion_ai_validation import shadow_single_target_continuation as single
             allowed += (re.escape(f"actions/artifacts/{single.PREDECESSOR_ARTIFACT_ID}"),)
+        if self.experience:
+            from scripts.companion_ai_validation import experience_continuation as exp
+            allowed += (re.escape(f"actions/artifacts/{exp.PREDECESSOR_ARTIFACT_ID}"),)
         demand(any(re.fullmatch(pattern, path) for pattern in allowed), "GITHUB_READ_PATH_DENIED")
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
                    "User-Agent": "offerpilot-companion-preflight"}
@@ -525,9 +545,12 @@ class GitHubReader:
             raise Blocked("GITHUB_READ_UNAVAILABLE") from None
 
 
-def verified_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> dict[str, Any]:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def verified_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> dict[str, Any]:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
     try:
+        if experience:
+            from scripts.companion_ai_validation import experience_continuation
+            return experience_continuation.lineage_fields()
         if shadow_single_target:
             from scripts.companion_ai_validation import shadow_single_target_continuation
             return shadow_single_target_continuation.lineage_fields()
@@ -559,9 +582,17 @@ class HistoricalBatch:
     conclusion: str = "success"
 
 
-def historical_batches(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> tuple[HistoricalBatch, ...]:
+def historical_batches(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> tuple[HistoricalBatch, ...]:
     """Admit pinned history only; single-target adds the settled seventh batch."""
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
+    if experience:
+        from scripts.companion_ai_validation import experience_continuation as exp
+        return historical_batches(shadow_single_target=True) + (HistoricalBatch(
+            exp.PREDECESSOR_RUN_ID, exp.PREDECESSOR_HELPER_RUN_ID,
+            exp.PREDECESSOR_SOURCE_SHA, exp.PREDECESSOR_HELPER_SHA,
+            exp.PREDECESSOR_TREE_SHA, exp.PREDECESSOR_ARTIFACT_ID,
+            exp.ARCHIVE_SIZE, exp.ARCHIVE_SHA256,
+            marker(exp.PREDECESSOR_HELPER_SHA, shadow_single_target=True), "failure"),)
     if shadow_single_target:
         from scripts.companion_ai_validation import shadow_single_target_continuation as single
         return historical_batches(shadow_projection=True) + (HistoricalBatch(
@@ -634,7 +665,8 @@ def historical_batches(*, shadow_review: bool = False, shadow_quote_v2: bool = F
 def validate_predecessor_metadata(ctx: Context, read: Reader, environment_id: int) -> None:
     """All historical approvals are provenance, never current-run approval."""
     for batch in historical_batches(shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {})):
         request = obj(single(read, f"git/commits/{batch.source_sha}"))
@@ -663,8 +695,11 @@ def validate_predecessor_metadata(ctx: Context, read: Reader, environment_id: in
                "PREDECESSOR_ARTIFACT_MISMATCH")
 
 
-def price_deadline(shadow_review: bool = False, *, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> float:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def price_deadline(shadow_review: bool = False, *, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> float:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
+    if experience:
+        from scripts.companion_ai_validation import experience_continuation
+        return float(experience_continuation.PRICE_VALID_UNTIL)
     if shadow_single_target:
         from scripts.companion_ai_validation import shadow_single_target_continuation
         return float(shadow_single_target_continuation.PRICE_VALID_UNTIL)
@@ -681,17 +716,17 @@ def price_deadline(shadow_review: bool = False, *, shadow_quote_v2: bool = False
     return PRICE_VALID_UNTIL
 
 
-def start_quote_window(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> float:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
-    return time.monotonic() + (price_deadline(shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target) - time.time())
+def start_quote_window(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> float:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
+    return time.monotonic() + (price_deadline(shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience) - time.time())
 
 
-def check_quote_window(deadline: float, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> None:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
+def check_quote_window(deadline: float, *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> None:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
     wall, monotonic = time.time(), time.monotonic()
     demand(all(type(value) in (int, float) and 0 <= value < 9_223_372_036 and math.isfinite(value)
                for value in (wall, monotonic, deadline))
-           and wall + SESSION_SECONDS <= price_deadline(shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
+           and wall + SESSION_SECONDS <= price_deadline(shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
            and monotonic + SESSION_SECONDS <= deadline, "PRICE_REVIEW_EXPIRED")
 
 
@@ -712,22 +747,25 @@ def check_handoff_age(checked_wall: int, checked_ns: int) -> None:
 
 def preflight(*, phase: str, env: Mapping[str, str], event: Any, read: Reader,
               quote_deadline: float | None = None, shadow_review: bool = False,
-              shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False) -> dict[str, Any]:
-    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target)
-    ctx = validate_context(env, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target)
+              shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> dict[str, Any]:
+    validate_protocol(shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)
+    ctx = validate_context(env, shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
     demand(phase in ("before", "paid"), "INVALID_PHASE")
     # This step has no provider key. Keep the CLI's same monotonic anchor across
     # event reads, metadata/approval reads and the durable admission handoff.
     deadline = (start_quote_window(shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
                 if quote_deadline is None else quote_deadline)
     check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
-    (verified_lineage(shadow_single_target=True) if ctx.shadow_single_target else
+    (verified_lineage(experience=True) if ctx.experience else
+     verified_lineage(shadow_single_target=True) if ctx.shadow_single_target else
      verified_lineage(shadow_projection=True) if ctx.shadow_projection else
      verified_lineage(shadow_quote_v2=True) if ctx.shadow_quote_v2 else
      verified_lineage(shadow_review=True) if ctx.shadow_review else verified_lineage())
@@ -749,7 +787,8 @@ def preflight(*, phase: str, env: Mapping[str, str], event: Any, read: Reader,
     if phase == "paid":
         validate_review(single(read, f"actions/runs/{ctx.run_id}/approvals"), environment_id)
     check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     return {"ok": True, "helper_sha": ctx.helper_sha, "request_sha": ctx.request_sha}
@@ -793,12 +832,14 @@ def inspect_metadata(read: Reader) -> dict[str, Any]:
 def write_admission(path: str, ctx: Context, quote_deadline: float | None = None) -> None:
     """An admission is a local handoff, not a reusable approval or budget reset."""
     deadline = (start_quote_window(shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
                 if quote_deadline is None else quote_deadline)
     check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     # Stamp before verification/open/write/fsync. These are the same Linux
@@ -808,7 +849,8 @@ def write_admission(path: str, ctx: Context, quote_deadline: float | None = None
     demand(type(checked_wall_raw) in (int, float) and 0 <= checked_wall_raw < 9_223_372_036
            and math.isfinite(checked_wall_raw), "ADMISSION_CLOCK_INVALID")
     checked_wall = int(checked_wall_raw)
-    fields = (verified_lineage(shadow_single_target=True) if ctx.shadow_single_target else
+    fields = (verified_lineage(experience=True) if ctx.experience else
+     verified_lineage(shadow_single_target=True) if ctx.shadow_single_target else
      verified_lineage(shadow_projection=True) if ctx.shadow_projection else
      verified_lineage(shadow_quote_v2=True) if ctx.shadow_quote_v2 else
      verified_lineage(shadow_review=True) if ctx.shadow_review else verified_lineage())
@@ -818,7 +860,8 @@ def write_admission(path: str, ctx: Context, quote_deadline: float | None = None
               "checked_at_monotonic_ns": checked_ns,
               "quote_deadline_monotonic_ns": deadline_ns}
     check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     check_handoff_age(checked_wall, checked_ns)
@@ -834,7 +877,8 @@ def write_admission(path: str, ctx: Context, quote_deadline: float | None = None
     # A slow open/flush/fsync must not report successful admission. The workflow
     # never exposes the provider secret after a nonzero preflight exit.
     check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
     check_handoff_age(checked_wall, checked_ns)
@@ -854,6 +898,7 @@ def main(argv: list[str] | None = None) -> int:
         protocols.add_argument("--shadow-quote-v2", action="store_true")
         protocols.add_argument("--shadow-projection", action="store_true")
         protocols.add_argument("--shadow-single-target", action="store_true")
+        protocols.add_argument("--experience", action="store_true")
         parser.add_argument("--helper-sha")
         parser.add_argument("--request-sha")
         parser.add_argument("--admission-file")
@@ -879,22 +924,27 @@ def main(argv: list[str] | None = None) -> int:
         if args.request_sha is not None:
             env[REQUEST_VAR] = args.request_sha
         ctx = validate_context(env, shadow_review=args.shadow_review,
-                               shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target)
+                               shadow_quote_v2=args.shadow_quote_v2, shadow_projection=args.shadow_projection, shadow_single_target=args.shadow_single_target, experience=args.experience)
         deadline = start_quote_window(shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text(encoding="utf-8"))
         check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         result = preflight(phase=args.phase, env=env, event=event,
-                           read=(GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_single_target=True)
+                           read=(GitHubReader(os.environ.get("GH_TOKEN", ""), experience=True)
+                                 if ctx.experience else
+                                 GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_single_target=True)
                                  if ctx.shadow_single_target else
                                  GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_projection=True)
                                  if ctx.shadow_projection else
@@ -903,13 +953,15 @@ def main(argv: list[str] | None = None) -> int:
                                  GitHubReader(os.environ.get("GH_TOKEN", ""), shadow_review=True)
                                  if ctx.shadow_review else GitHubReader(os.environ.get("GH_TOKEN", ""))),
                            quote_deadline=deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         if args.admission_file:
             write_admission(args.admission_file, ctx, deadline)
         check_quote_window(deadline, shadow_review=ctx.shadow_review,
-                         **({"shadow_single_target": True} if ctx.shadow_single_target else
+                         **({"experience": True} if ctx.experience else
+                            {"shadow_single_target": True} if ctx.shadow_single_target else
                             {"shadow_projection": True} if ctx.shadow_projection else
                             {"shadow_quote_v2": True} if ctx.shadow_quote_v2 else {}))
         print(json.dumps(result, sort_keys=True))

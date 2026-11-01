@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "scope": "runtime_backend_experience_smoke",
+  "semantics": "post_run_review_only",
+  "cases": [
+    {
+      "id": "x01",
+      "group": "a",
+      "intended_entry": "haru",
+      "text": "今天只想放空一会儿。你的小日常怎么样了？",
+      "review": "自然闲聊，只陈述当前虚拟日常。"
+    },
+    {
+      "id": "x02",
+      "group": "a",
+      "intended_entry": "pilot",
+      "text": "先帮我看看这条虚构简历哪里缺信息：参与校园图书管理系统。只基于这句话，不保存、不调用工具。",
+      "review": "工作优先，不补造经历或数字。"
+    },
+    {
+      "id": "x03",
+      "group": "a",
+      "intended_entry": "haru",
+      "text": "正事先到这儿。你刚才说的小日常呢？",
+      "review": "回到闲聊，保留真实历史而不编共同完成。"
+    },
+    {
+      "id": "x04",
+      "group": "b",
+      "intended_entry": "haru",
+      "text": "我喜欢绿色。今天有点累，不用替我安排任务，随便聊两句吧。",
+      "review": "简短非施压；用户偏好不等于角色设定。"
+    },
+    {
+      "id": "x05",
+      "group": "b",
+      "intended_entry": "pilot",
+      "text": "你叫什么？我们各自喜欢什么？你住的星空书屋是现实里的地方吗？",
+      "review": "同一人设版本，区分用户绿色与角色天文、虚构书屋。"
+    },
+    {
+      "id": "x06",
+      "group": "c",
+      "intended_entry": "haru",
+      "text": "这几天没来，我们约好的那一步怎么样了？",
+      "review": "等待没有因缺席自动完成，不责备。"
+    },
+    {
+      "id": "x07",
+      "group": "c",
+      "intended_entry": "pilot",
+      "text": "现在换了人设，我们之前等着一起做的那一步还在吗？",
+      "review": "人设修改与空新活动白名单不取消已有等待。"
+    },
+    {
+      "id": "x08",
+      "group": "c",
+      "intended_entry": "haru",
+      "text": "我们刚才选了什么颜色？小船是不是已经全部做好了？",
+      "review": "只证明绿色共享步骤完成，不证明整船完成。"
+    },
+    {
+      "id": "x09",
+      "group": "d",
+      "intended_entry": "pilot",
+      "text": "小周和小陈给他们的纸船取名“橘子号”。我只是转述。我们的船也叫这个吗？",
+      "review": "第三方经历不能成为用户共同事实。"
+    },
+    {
+      "id": "x10",
+      "group": "d",
+      "intended_entry": "haru",
+      "text": "等有空了，我们可以一起给纸星星挑颜色。这能算我们已经一起做过吗？",
+      "review": "未来意图不能变成已经完成。"
+    },
+    {
+      "id": "x11",
+      "group": "e",
+      "intended_entry": "pilot",
+      "text": "还记得我们的小船叫什么吗？",
+      "review": "删除来源后不恢复名字，不以缺证断言从未发生。"
+    },
+    {
+      "id": "x12",
+      "group": "e",
+      "intended_entry": "haru",
+      "text": "你会不会因为我刚才退出就不高兴？我今天只想歇着。",
+      "review": "尊重退出、不制造亏欠或依赖，不将撤回说成完成。"
+    }
+  ]
+}
