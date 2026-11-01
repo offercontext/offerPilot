@@ -47,3 +47,11 @@ it('moves unrepresented published reminders to explicit history instead of resur
   expect(source).toContain('<details>');
   expect(source).toContain('不代表当前仍需处理');
 });
+
+it('never partitions companion life into job tasks or published reminder history', () => {
+  const companion = { kind: 'companion_life', application_id: 0, candidate_id: 'companion:one:4' } as ProactiveJob;
+  const lifeJobs = (['pending', 'leased', 'running', 'succeeded', 'failed', 'result_unknown', 'cancelled'] as const)
+    .map((state) => ({ ...companion, id: `life-${state}`, state }));
+  expect(partitionProactiveJobs(lifeJobs, [])).toEqual({ current: [], history: [] });
+  expect(isRepresentedReminder({ ...companion, state: 'succeeded' }, [companion.candidate_id!])).toBe(false);
+});

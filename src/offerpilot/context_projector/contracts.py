@@ -15,6 +15,7 @@ ContributorStatus = Literal["ready", "not_applicable", "disabled", "unavailable"
 
 CONTRIBUTOR_ORDER = (
     "static_policy",
+    "persona_profile",
     "current_scope",
     "active_control",
     "request_page_context",

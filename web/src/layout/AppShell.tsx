@@ -1,3 +1,4 @@
+import { CompanionLifeSignals } from '@/features/companionLife/useCompanionLife';
 import { liveText } from '@/i18n/liveText';
 import { t, useLocale, getLocale } from '@/i18n';
 import { getJobMailPendingCount, JOB_MAIL_COUNT_KEY } from '@/services/jobMail';
@@ -2770,6 +2771,7 @@ function AppShellContent() {
         />
       ) : null}
 
+      <CompanionLifeSignals mockInterview={Boolean(interviewStudioContext)} presentationAvailable={view !== 'pilot' && !interviewStudioContext && !coreTaskSurfaceState.active && pilotMascotVisible && pilotMascotActivity === 'idle' && !assistantSurface.completionNotice} />
       {interviewStudioContext ? (
         <InterviewStudio
           context={interviewStudioContext}

@@ -10,6 +10,8 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 
+vi.mock('@/services/companion', () => ({ getCompanion: vi.fn().mockReturnValue(new Promise(() => {})), sendCompanionCommand: vi.fn(), reportCompanionPresence: vi.fn(), claimCompanionBid: vi.fn() }));
+
 vi.mock('@/services/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/chat')>(),
   getPilotExecution: vi.fn().mockResolvedValue(null),

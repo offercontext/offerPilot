@@ -45,7 +45,8 @@ function buttons(text: string) { return [...document.querySelectorAll<HTMLButton
 async function click(text: string) { const b = buttons(text).find((b) => !b.disabled); if (!b) throw new Error(`No button: ${text}\n${document.body.textContent}`); await act(async () => b.click()); await flush(); }
 function fill(selector: string, value: string) { const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector); if (!el) throw new Error(`Missing field ${selector}`); act(() => { Object.getOwnPropertyDescriptor(el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); }); }
 async function switchLocale(locale: 'zh-CN' | 'en-US') { await act(async () => setLocale(locale)); await flush(); }
-function writes() { return state.api.requests.filter((r: any) => r.method !== 'GET'); }
+// Content-free session liveness is not a domain/model mutation. Keep all other writes guarded.
+function writes() { return state.api.requests.filter((r: any) => r.method !== 'GET' && !(r.method === 'POST' && r.path === '/api/companion/presence')); }
 function chineseUi() { const text = document.body.textContent ?? ''; return text.replaceAll('简体中文', '').replaceAll('用户原文保持不变 / user content stays unchanged', '').match(/[\u3400-\u9fff]+/g) ?? []; }
 
 beforeEach(() => {
@@ -95,6 +96,30 @@ describe('real AppShell localization with strict synthetic API fixtures', () => 
     await switchLocale('zh-CN'); expect(document.body.textContent).toContain('设置'); expect(writes()).toHaveLength(count);
   });
 
+
+  it('keeps one grouped companion setting without a second job inbox, and retains it through AI settings', async () => {
+    await mount('settings');
+    const lifeSettings = await waitForUi('companion settings', () => document.querySelector<HTMLElement>('section[aria-labelledby="companion-life-settings-title"]') ?? undefined);
+    expect(document.querySelectorAll('section[aria-labelledby="companion-life-settings-title"]')).toHaveLength(1);
+    expect(lifeSettings.querySelector('[aria-label="开启虚拟日常"]')?.getAttribute('aria-checked')).toBe('false');
+    expect(document.querySelector('[data-companion-life]')).toBeNull();
+    expect(document.querySelector('section[aria-labelledby="proactive-settings-title"]')).not.toBeNull();
+    expect(state.api.requests.filter((request: any) => request.path === '/api/proactive/jobs')).toEqual([]);
+    expect(document.getElementById('settings-ai-privacy')!.compareDocumentPosition(lifeSettings) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lifeSettings.compareDocumentPosition(document.getElementById('settings-connections')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await click('配置 AI');
+    await waitForUi('AI settings return action', () => buttons('返回设置')[0]);
+    expect(document.querySelector('section[aria-labelledby="companion-life-settings-title"]')).toBe(lifeSettings);
+    expect(lifeSettings.closest('section[aria-hidden="true"]')).not.toBeNull();
+    await switchLocale('en-US');
+    await click('Back to settings');
+    expect(document.querySelector('section[aria-labelledby="companion-life-settings-title"]')).toBe(lifeSettings);
+    expect(lifeSettings.closest('section[aria-hidden="true"]')).toBeNull();
+    expect(chineseUi()).toEqual([]);
+    expect(document.querySelector('[aria-label="Enable proactive tasks"]')).not.toBeNull();
+    expect(writes()).toHaveLength(0);
+    expect(state.api.unexpected).toEqual([]);
+  });
 
   it('does not translate retained user and AI message bodies when the shared Pilot UI switches language', async () => {
     state.api = createFixtureApi({ retainedConversation: true }); await mount('pilot');

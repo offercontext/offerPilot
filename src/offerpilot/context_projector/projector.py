@@ -125,7 +125,13 @@ class ModelSurfaceProjector:
             history = history[len(covered):]
         shares, shared_pool = optional_shares(remainder - optional_used)
 
-        scope_messages = self._messages_for(contributors, "current_scope") + self._messages_for(
+        # Editable expression must never displace the facts it qualifies. With
+        # a persona, retain the entire current-scope envelope as mandatory (or
+        # fail closed), not as individual items competing for optional budget.
+        # Calls without persona retain the existing optional scope policy.
+        required_scope = (self._messages_for(contributors, "current_scope")
+                          if self._messages_for(contributors, "persona_profile") else ())
+        scope_messages = (() if required_scope else self._messages_for(contributors, "current_scope")) + self._messages_for(
             contributors, "request_page_context"
         )
         attachment_messages = self._messages_for(contributors, "request_attachments")
@@ -184,6 +190,7 @@ class ModelSurfaceProjector:
             if name in optional_names:
                 assembled.extend(message for message in self._messages_for(contributors, name) if message in selected_optional)
             elif name == "current_scope":
+                assembled.extend(required_scope)
                 assembled.extend(selected_scope)
             elif name == "request_page_context":
                 continue
@@ -288,6 +295,11 @@ class ModelSurfaceProjector:
     ) -> tuple[FrozenMessage, ...]:
         return (
             *self._messages_for(contributors, "static_policy"),
+            # Persona is one bounded data envelope: never truncate it or let a
+            # scope budget eviction silently change the admitted expression.
+            *self._messages_for(contributors, "persona_profile"),
+            *(self._messages_for(contributors, "current_scope")
+              if self._messages_for(contributors, "persona_profile") else ()),
             *self._messages_for(contributors, "active_control"),
             *self._messages_for(contributors, "current_request"),
         )

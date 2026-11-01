@@ -1141,7 +1141,7 @@ class _LoopServices:
                 for message in messages[:request_index]
                 if message.surface_contributor == name
             )
-            for name in ("current_scope", "request_page_context", "request_attachments")
+            for name in ("persona_profile", "current_scope", "request_page_context", "request_attachments")
         }
         optional = current_optional_sources(current.content)
         optional_by_name = {item.name: item for item in optional.contributors}
@@ -1198,7 +1198,7 @@ class _LoopServices:
             )
         )
         sources: list[FrozenSource] = []
-        for name in ("current_scope", "request_page_context", "request_attachments"):
+        for name in ("persona_profile", "current_scope", "request_page_context", "request_attachments"):
             routed_messages = routed[name]
             if not routed_messages:
                 continue

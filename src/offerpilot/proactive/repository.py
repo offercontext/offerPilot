@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 from typing import Any
+from time import time
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -15,6 +16,12 @@ from offerpilot.models import Application, ApplicationEvent, Conversation
 from .candidates import DAY, list_display_candidates, reminder_source, source_candidate, subject
 from .contracts import ProactivePolicy, ProactivePolicyUpdate
 from .models import ProactiveJob, ProactiveSettings
+from offerpilot.companion.repository import (
+    companion_client_active, companion_policy,
+    companion_publish_guard, companion_source, mark_companion_published,
+)
+
+COMPANION_KIND = "companion_life"
 
 ACTIVE = ("pending", "leased", "running")
 MAX_QUEUE = 100
@@ -45,14 +52,26 @@ def _allowed(policy: ProactivePolicy, kind: str, application_id: int) -> bool:
 
 
 def _source(session: Session, application_id: int, event_id: int | None, kind: str) -> tuple[str, dict[str, Any]] | None:
+    if kind == COMPANION_KIND:
+        return companion_source(session)
     _, policy = _policy(session)
     return reminder_source(session, application_id, event_id, kind, draft_timezone=policy.timezone)
 
 
+def _job_allowed(session: Session, policy: ProactivePolicy, row: ProactiveJob) -> bool:
+    if row.kind == COMPANION_KIND:
+        _, settings = companion_policy(session)
+        return bool(settings.enabled and settings.proactivity != "off")
+    return _allowed(policy, row.kind, row.application_id)
+
+
 def _view(row: ProactiveJob) -> dict[str, Any]:
-    return {**{key: getattr(row, key) for key in ("id", "kind", "application_id", "event_id", "state", "reason",
-        "due_at", "created_at", "published_at", "result_text", "turn_id", "execution_generation", "error_code")},
-        **subject(row.application_id, row.event_id, row.kind), "source_revision": row.source_digest}
+    value = {key: getattr(row, key) for key in ("id", "kind", "application_id", "event_id", "state", "reason",
+        "due_at", "created_at", "published_at", "result_text", "turn_id", "execution_generation", "error_code")}
+    # The companion's application_id=0 is an isolation sentinel, not a reminder subject.
+    if row.kind != COMPANION_KIND:
+        value.update(subject(row.application_id, row.event_id, row.kind), source_revision=row.source_digest)
+    return value
 
 
 class ProactiveRepository:
@@ -86,7 +105,7 @@ class ProactiveRepository:
                 session.add(row)
             row.revision, row.settings_json = revision + 1, command.settings.model_dump_json()
             for job in session.scalars(select(ProactiveJob).where(ProactiveJob.state.in_(ACTIVE))).all():
-                if not _allowed(command.settings, job.kind, job.application_id):
+                if job.kind != COMPANION_KIND and not _allowed(command.settings, job.kind, job.application_id):
                     job.state, job.error_code = "cancelled", "scope_disabled"
                     job.result_text = ""
             session.commit()
@@ -95,7 +114,7 @@ class ProactiveRepository:
     def list_jobs(self) -> list[dict[str, Any]]:
         with self.sessions() as session:
             # A removed source must also disappear from stored draft display.
-            rows = session.scalars(select(ProactiveJob).order_by(ProactiveJob.created_at.desc()).limit(100)).all()
+            rows = session.scalars(select(ProactiveJob).where(ProactiveJob.kind != COMPANION_KIND).order_by(ProactiveJob.created_at.desc()).limit(100)).all()
             values = []
             for row in rows:
                 value = _view(row)
@@ -192,7 +211,7 @@ class ProactiveRepository:
             session.commit()
             return added
 
-    def claim(self, owner: str, now: float) -> str | None:
+    def claim(self, owner: str, now: float, *, companion_only: bool = False) -> str | None:
         with self.sessions() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             _, policy = _policy(session)
@@ -205,14 +224,15 @@ class ProactiveRepository:
                 else:
                     row.state, row.next_attempt_at = "pending", now + 30
             rows = session.scalars(select(ProactiveJob).where(ProactiveJob.state == "pending", ProactiveJob.due_at <= now,
-                ProactiveJob.next_attempt_at <= now).order_by(ProactiveJob.due_at).limit(MAX_QUEUE)).all()
+                ProactiveJob.next_attempt_at <= now,
+                ProactiveJob.kind == COMPANION_KIND if companion_only else ProactiveJob.kind != COMPANION_KIND).order_by(ProactiveJob.due_at).limit(MAX_QUEUE)).all()
             selected = None
             for row in rows:
                 source = _source(session, row.application_id, row.event_id, row.kind)
-                if not _allowed(policy, row.kind, row.application_id) or now >= row.expires_at or source is None or source[0] != row.source_digest:
+                if not _job_allowed(session, policy, row) or now >= row.expires_at or source is None or source[0] != row.source_digest:
                     row.state, row.error_code = "cancelled", "source_or_scope_changed"
                     continue
-                if quiet(policy, now):
+                if quiet(policy, now) or (row.kind == COMPANION_KIND and not companion_publish_guard(session, now)):
                     continue
                 if selected is None:
                     row.state, row.owner, row.lease_until = "leased", owner, now + 120
@@ -231,14 +251,23 @@ class ProactiveRepository:
             if row is None or row.state != "leased" or row.owner != owner or row.lease_until <= now:
                 return None
             source = _source(session, row.application_id, row.event_id, row.kind)
-            if not _allowed(policy, row.kind, row.application_id) or source is None or source[0] != row.source_digest or now >= row.expires_at:
+            if not _job_allowed(session, policy, row) or source is None or source[0] != row.source_digest or now >= row.expires_at:
                 row.state, row.error_code = "cancelled", "source_or_scope_changed"
                 session.commit()
                 return None
+            if row.kind == COMPANION_KIND:
+                if quiet(policy, now) or not companion_publish_guard(session, now):
+                    row.state, row.next_attempt_at = "pending", now + 30
+                    session.commit()
+                    return None
+                row.state = "running"
+                result = {**_view(row), "source": source[1], "lease_until": row.lease_until}
+                session.commit()
+                return result
             draft = row.kind == "interview_draft"
             charged = ProactiveJob.model_started_at if draft else ProactiveJob.published_at
             recent = session.scalar(select(func.count()).select_from(ProactiveJob).where(charged > now - DAY,
-                ProactiveJob.kind == "interview_draft" if draft else ProactiveJob.kind != "interview_draft")) or 0
+                ProactiveJob.kind == "interview_draft" if draft else ProactiveJob.kind.not_in(("interview_draft", COMPANION_KIND)))) or 0
             if recent >= (policy.max_drafts_per_day if draft else policy.max_reminders_per_day) or quiet(policy, now):
                 row.state, row.next_attempt_at = "pending", now + 3600
                 session.commit()
@@ -266,7 +295,7 @@ class ProactiveRepository:
             session.commit()
             return result
 
-    def publish(self, job_id: str, owner: str, turn_id: str, generation: int, content: str, now: float) -> bool:
+    def publish(self, job_id: str, owner: str, turn_id: str, generation: int, content: str, now: float, *, delivery_client_id: str | None = None) -> bool:
         # 模型完成后仍需核对本代所有权、租约、范围、来源、期限和静默时段。
         # 这里发布队列结果文本，不向外部发送，也不创建正式面试成果。
         with self.sessions() as session:
@@ -276,7 +305,7 @@ class ProactiveRepository:
                 return False
             _, policy = _policy(session)
             source = _source(session, row.application_id, row.event_id, row.kind)
-            if not _allowed(policy, row.kind, row.application_id) or source is None or source[0] != row.source_digest or now >= row.expires_at:
+            if not _job_allowed(session, policy, row) or source is None or source[0] != row.source_digest or now >= row.expires_at:
                 row.state, row.error_code = "cancelled", "source_or_scope_changed"
                 session.commit()
                 return False
@@ -284,9 +313,23 @@ class ProactiveRepository:
                 row.state, row.error_code = "cancelled", "quiet_hours_started"
                 session.commit()
                 return False
-            if row.kind != "interview_draft":
+            if row.kind == COMPANION_KIND:
+                if (delivery_client_id is None
+                        or not companion_client_active(session, delivery_client_id, now)
+                        or not companion_publish_guard(session, now)):
+                    row.state, row.error_code = "cancelled", "companion_delivery_suppressed"
+                    session.commit()
+                    return False
+                # Only the deterministic persisted event may be delivered, never
+                # model free text. Budget/session state is committed with delivery.
+                content = source[1]["text"]
+                if not mark_companion_published(session, now, source[1]["event_id"]):
+                    row.state, row.error_code = "cancelled", "companion_session_unavailable"
+                    session.commit()
+                    return False
+            elif row.kind != "interview_draft":
                 published = session.scalar(select(func.count()).select_from(ProactiveJob).where(
-                    ProactiveJob.published_at > now - DAY, ProactiveJob.kind != "interview_draft")) or 0
+                    ProactiveJob.published_at > now - DAY, ProactiveJob.kind.not_in(("interview_draft", COMPANION_KIND)))) or 0
                 if published >= policy.max_reminders_per_day:
                     row.state, row.error_code = "cancelled", "daily_reminder_budget"
                     session.commit()
@@ -307,7 +350,7 @@ class ProactiveRepository:
                 return False
             _, policy = _policy(session)
             source = _source(session, row.application_id, row.event_id, row.kind)
-            valid = _allowed(policy, row.kind, row.application_id) and source is not None and source[0] == row.source_digest and now < row.expires_at and not quiet(policy, now)
+            valid = _job_allowed(session, policy, row) and source is not None and source[0] == row.source_digest and now < row.expires_at and not quiet(policy, now)
             if not valid:
                 row.state, row.error_code = "cancelled", "source_or_scope_changed"
                 session.commit()
@@ -321,3 +364,83 @@ class ProactiveRepository:
                 row.state = "result_unknown" if unknown else "failed"
                 row.error_code = "runtime_result_requires_reconciliation" if unknown else "generation_failed"
             session.commit()
+
+    def discover_companion(self, now: float) -> int:
+        """Queue one current event, independently of life state advancement.
+
+        Companion jobs share the durable queue and publication fences but are
+        only dispatched on a visible client's request, never by the scheduler.
+        application_id=0 denotes the isolated workspace companion, not a job.
+        """
+        with self.sessions() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            source = companion_source(session)
+            if source is None or not companion_publish_guard(session, now):
+                return 0
+            digest, value = source
+            _, policy = _policy(session)
+            if quiet(policy, now) or now >= value["expires_at"]:
+                return 0
+            # Keep the existing bounded retention policy even when work-related
+            # proactivity is disabled; publication accounting needs only 24 hours.
+            session.execute(delete(ProactiveJob).where(
+                ProactiveJob.kind == COMPANION_KIND,
+                ProactiveJob.state.in_(("succeeded", "failed", "cancelled")),
+                ProactiveJob.created_at < now - 7 * DAY,
+            ))
+            # Clean stale candidates without changing the independent life state.
+            for row in session.scalars(select(ProactiveJob).where(
+                ProactiveJob.kind == COMPANION_KIND, ProactiveJob.state.in_(ACTIVE),
+            )):
+                if row.source_digest != digest or row.expires_at <= now:
+                    row.state, row.error_code = "cancelled", "source_changed"
+            count = session.scalar(select(func.count()).select_from(ProactiveJob).where(
+                ProactiveJob.state.in_(ACTIVE))) or 0
+            retained = session.scalar(select(func.count()).select_from(ProactiveJob)) or 0
+            identity = sha256(f"companion:{value['identity']}:{value['event_id']}:{digest}".encode()).hexdigest()
+            exists = session.scalar(select(ProactiveJob.id).where(ProactiveJob.idempotency_key == identity))
+            if exists or count >= MAX_QUEUE or retained >= MAX_RETAINED_JOBS:
+                session.commit()
+                return 0
+            session.add(ProactiveJob(
+                id=str(uuid4()), idempotency_key=identity, kind=COMPANION_KIND,
+                application_id=0, event_id=None, source_digest=digest,
+                reason="虚拟日常", due_at=now, expires_at=value["expires_at"], created_at=now,
+            ))
+            session.commit()
+            return 1
+
+    def take_companion_bid(self, identity: str, revision: int, client_id: str, now: float | None = None) -> dict[str, Any] | None:
+        """At-most-once visible-client delivery through the normal queue sink.
+
+        Lost responses are not replayed; silence is preferable to duplicate bids.
+        Each stage rechecks state, quiet hours, presence and publication budgets.
+        """
+        def clock() -> float:
+            return now if now is not None else time()
+
+        stamp = clock()
+        with self.sessions() as session:
+            source = companion_source(session)
+            if source is None or source[1]["identity"] != identity or source[1]["revision"] != revision:
+                return None
+            if not companion_client_active(session, client_id, stamp):
+                return None
+        self.discover_companion(clock())
+        owner = str(uuid4())
+        job_id = self.claim(owner, clock(), companion_only=True)
+        if job_id is None:
+            return None
+        job = self.begin(job_id, owner, clock())
+        if job is None:
+            return None
+        source_value = job["source"]
+        # A concurrent transition must not deliver a newer event to an older UI.
+        if source_value["identity"] != identity or source_value["revision"] != revision:
+            self.cancel(job_id)
+            return None
+        if not self.publish(job_id, owner, job["turn_id"], job["execution_generation"], source_value["text"], clock(), delivery_client_id=client_id):
+            return None
+        return {**job, "source": None, "state": "succeeded", "published_at": clock(),
+                "result_text": source_value["text"], "source_revision": revision,
+                "source_identity": identity, "source_event_type": source_value["event_type"]}

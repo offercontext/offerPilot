@@ -2,11 +2,14 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { companionLifeExpression } from '@/features/companionLife/copy';
+import type { CompanionActivity } from '@/features/companionLife/contracts';
 import DesktopHaruWindow from './DesktopHaruWindow';
-import { initializeLocale, type Locale } from '@/i18n';
+import { initializeLocale, t, type Locale } from '@/i18n';
 import { DESKTOP_HARU_SEND_FAILURE, type DesktopHaruState } from './desktopHaru';
 import { live2dPilotMascotRuntime } from '@/features/pilotMascot/live2dRuntime';
 import { ContextSystem } from '@pixi/core';
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/pilotMascot/live2dRuntime', () => ({ live2dPilotMascotRuntime: { mount: vi.fn() } }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root; let host: HTMLDivElement; let update: (value: DesktopHaruState) => void;
@@ -440,5 +443,44 @@ it('keeps close, Escape and the character context menu behavior after switching 
   await act(async () => host.querySelector('.desktop-haru-avatar')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })));
   expect(windowAction).toHaveBeenLastCalledWith('context-menu');
   expect(dragWindow).not.toHaveBeenCalled();
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('renders the existing sanitized owner detail unchanged instead of reconstructing a start/progress/completion story', async () => {
+  const activity: CompanionActivity = {
+    id: 'stable-boat', template_id: 'paper_boat', title: '折一只纸小船', status: 'active',
+    step_index: 1, step_count: 3, step_title: '折好船身', started_at: 1, updated_at: 2,
+    promise: null, participants: ['companion'],
+  };
+  await mount();
+  for (const locale of ['zh-CN', 'en-US'] as const) {
+    await act(async () => localeChanged(locale));
+    for (const status of ['active', 'paused', 'waiting_shared', 'completed'] as const) {
+      const current = { ...activity, status, step_index: status === 'completed' ? 2 : 1, promise: status === 'waiting_shared' ? '等你一起选颜色' : null };
+      const wish = status === 'active' ? { id: 'wish', activity_id: current.id, text: '一起给纸小船起个名字' } : null;
+      const detail = companionLifeExpression(current, t, wish);
+      const companionLife = { virtual: true as const, title: current.title, detail, status, invitation: 'activity_completed' as const };
+      await act(async () => update({ ...state, snapshot: { ...state.snapshot!, companionLife } }));
+      expect(host.querySelector('.desktop-haru-life > span')?.textContent).toBe(detail);
+      expect(host.querySelector('.desktop-haru-life')?.textContent).toContain(t('虚拟日常'));
+      await act(async () => update({ ...state, snapshot: { ...state.snapshot!, companionLife: { ...companionLife, invitation: undefined } } }));
+      expect(host.querySelector('.desktop-haru-life > span')?.textContent).toBe(detail);
+    }
+  }
+  expect(request).not.toHaveBeenCalled();
+});
+
+it('keeps desktop life details suppressed during work, pending confirmation, failure and typing', async () => {
+  const companionLife = { virtual: true as const, title: '折一只纸小船', detail: 'A committed imaginary step', status: 'active' as const };
+  state = { ...state, snapshot: { ...state.snapshot!, companionLife } };
+  await mount();
+  expect(host.querySelector('.desktop-haru-life > span')?.textContent).toBe(companionLife.detail);
+  for (const changed of [{ loading: true }, { hasPending: true }, { taskState: 'running' as const }, { taskState: 'failed' as const }]) {
+    await act(async () => update({ ...state, snapshot: { ...state.snapshot!, ...changed } }));
+    expect(host.querySelector('.desktop-haru-life')).toBeNull();
+  }
+  await act(async () => update(state));
+  type('a work draft');
+  expect(host.querySelector('.desktop-haru-life')).toBeNull();
   expect(request).not.toHaveBeenCalled();
 });

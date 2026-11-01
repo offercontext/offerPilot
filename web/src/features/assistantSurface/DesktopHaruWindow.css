@@ -260,3 +260,7 @@ html.desktop-haru-root,
   .desktop-haru.expanded .desktop-haru-speech { max-width: 116px; font-size: 11px; }
   .desktop-haru-chat { padding-inline: 9px; }
 }
+
+.desktop-haru-life { position: relative; z-index: 2; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; margin: 0 12px; padding: 6px 10px; border-radius: 14px; background: var(--op-surface); color: var(--op-ink); font-size: 11px; }
+.desktop-haru-life small { color: var(--op-muted-strong); }
+.desktop-haru-life button { color: inherit; font-size: inherit; border: 0; background: transparent; cursor: pointer; }

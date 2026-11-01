@@ -25,6 +25,8 @@ from secrets import compare_digest
 from typing import Any, Protocol, TypeVar, cast
 from uuid import UUID, uuid4
 
+from offerpilot.companion.chat import CompanionChatService
+from offerpilot.companion.repository import CompanionConflict
 from offerpilot.ai.agent_contracts import PendingAction
 from offerpilot.pilot_control import claim_confirmation_execution, TurnControlConflict
 from offerpilot.ai.deterministic_actions import (
@@ -176,6 +178,7 @@ class DeterministicDependencies:
     applications: object
     application_jd_versions: object
     application_outcomes: object
+    companion_chat: CompanionChatService | None = None
     write_operations: object | None = None
     write_coordinator: object | None = None
     legacy_request_owner_lease_factory: RuntimeRequestOwnerLeaseFactory | None = field(
@@ -961,9 +964,19 @@ class DeterministicPilotAdapter:
                     ),
                 )
 
+    def _companion_matches(self, request: StartTurnRequest, conversation: object) -> bool:
+        service = self.dependencies.companion_chat
+        message_id = getattr(self.dependencies.persistence, "admitted_user_message_id", None)
+        return (type(service) is CompanionChatService and type(message_id) is int and request.pilot_action is None
+                and service.matches(message_id, request.message, self._conversation_id(conversation)))
+
     def matches(self, request: StartTurnRequest, conversation: object) -> bool:
+        # An attached image must reach the multimodal route, even when its text
+        # also resembles a companion command. Never silently consume only text.
         if request.image_attachment_ids:
             return False
+        if self._companion_matches(request, conversation):
+            return True
         if request.pilot_action is not None:
             self._action_from_request(request)
             return True
@@ -1161,6 +1174,12 @@ class DeterministicPilotAdapter:
                 pending_replay=True,
             )
             return self._with_transport_initial(execution, transport)
+
+        if self._companion_matches(request, conversation):
+            if existing is not None:
+                return DeterministicExecution(_error(
+                    RuntimeFailureCode.PENDING_CONFIRMATION_REQUIRED, "请先处理当前待确认操作", 409))
+            return self._persist_companion(request, conversation_id, on_user_message_persisted)
 
         application = self._application(conversation)
         current_jd = self._current_jd(application)
@@ -1821,6 +1840,30 @@ class DeterministicPilotAdapter:
             if getter is not None
             else None
         )
+
+    def _persist_companion(
+        self, request: StartTurnRequest, conversation_id: int,
+        on_user_message_persisted: Callable[[int], object] | None,
+    ) -> DeterministicExecution:
+        result = self.dependencies.persistence.persist_initial_user_message(conversation_id, request.message)
+        if not _result_ok(result):
+            return DeterministicExecution(self._persistence_error(result))
+        message_id = _result_message_id(result)
+        if message_id is None or self.dependencies.companion_chat is None:
+            return DeterministicExecution(self._persistence_error(result))
+        if on_user_message_persisted is not None:
+            on_user_message_persisted(message_id)
+        try:
+            message = self.dependencies.companion_chat.execute(message_id, request.message, conversation_id)
+        except CompanionConflict:
+            message = "这件小事的状态刚刚变了，我没有改动它。我们先看看现在停在哪一步，再决定好吗？"
+        saved = self.dependencies.persistence.persist_assistant_message(conversation_id, message)
+        if not _result_ok(saved):
+            return DeterministicExecution(self._persistence_error(saved))
+        return DeterministicExecution(MessageOutcome(message, conversation_id=conversation_id), events=(
+            MetaEvent(supports_delta=False, supports_tool_events=False), UserMessageSavedEvent(),
+            AssistantMessageEvent(message=message),
+        ), input_message_id=message_id)
 
     def _persist_pending(
         self,

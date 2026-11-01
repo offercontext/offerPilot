@@ -275,6 +275,15 @@ def test_unchanged_confirmation_does_not_claim_user_changed_values(tmp_path, edi
         assert response.status_code == 200
         assert len(model.calls) == 2
         assert not any("用户主动修改并批准" in m.content for m in model.calls[1][0])
+        # Neutral general expression must not survive as a forced chat mode in
+        # the existing approved continuation. Approval/source ownership is the
+        # same, while the real confirmation request retains its work protocol.
+        first_policy = model.calls[0][0][0].content
+        confirmed_policy = model.calls[1][0][0].content
+        assert "## 下一步" not in first_policy
+        assert "## 下一步" in confirmed_policy
+        assert all("用户当前请求与求职工作优先" in policy
+                   for policy in (first_policy, confirmed_policy))
 
 
 def test_equivalent_numeric_edit_keeps_the_existing_provider_continuation(tmp_path):

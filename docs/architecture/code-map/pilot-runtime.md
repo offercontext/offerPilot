@@ -40,6 +40,10 @@
 
 `ChatImageStore.upload` 先完整保存规范化文件，再发布数据库附件；`resolve_in_session` 校验作用域/内容，`bind_in_session` 将附件绑定消息并冻结引用；历史模型读取还检查尺寸/哈希及当前授权。已绑定图片跟随会话归属，未绑定草稿受创建范围限制。
 
+2026-11-01 陪伴整合边界：`companion/chat.py::freeze_chat_command` 只冻结闭合纯文本生活命令，携图请求不能因文字匹配而取得该指令来源；`DeterministicPilotAdapter.matches` 也先排图片。人设通过接纳 Turn 的 `source_versions_json` 绑定不可变 revision，`_ContextAdapter.assemble` 同时保留当前图片策略和该人设表达，不把历史人设当作权限策略。交叉回归见 [图片与人设](../../../tests/test_companion_image_integration.py)、[人设冻结与恢复](../../../tests/test_persona_runtime.py)。
+
+`companion/context.py` 的直接角色活动回指与纸船简称只选择只读来源；工作请求仍优先，无关请求不注入。来源不足既不证明发生也不证明未发生，不授权补写共同记忆或查证过程。删除/撤回/来源绑定与固定预算回归见 [事实边界](../../../tests/test_companion_fact_boundaries.py)。
+
 图片 Provider 能力测试与真实会话调用分开；设置通过不代表历史消息完整性或授权通过。会话来源删除和暂时不可读也应分开调查，不能把临时锁错误解释成真实删除。
 
 ## 5. 症状和回归入口

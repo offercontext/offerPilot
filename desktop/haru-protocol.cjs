@@ -25,6 +25,9 @@ function sanitizeSnapshot(value) {
     error: text(value.error, 1200),
     ...(value.errorKey === 'desktop_send_failed' ? { errorKey: value.errorKey } : {}),
     stopMessage: text(value.stopMessage, 500),
+    ...(value.companionLife?.virtual === true && ['idle', 'active', 'paused', 'waiting_shared', 'completed', 'abandoned'].includes(value.companionLife.status)
+      ? { companionLife: { virtual: true, title: text(value.companionLife.title, 100), detail: text(value.companionLife.detail, 160), status: value.companionLife.status,
+        ...(['activity_started', 'activity_progressed', 'activity_completed'].includes(value.companionLife.invitation) ? { invitation: value.companionLife.invitation } : {}) } } : {}),
   };
 }
 function validateRequest(value) {

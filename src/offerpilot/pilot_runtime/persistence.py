@@ -630,6 +630,11 @@ class ChatPersistenceCoordinator:
             message_id=created_id,
         )
 
+    @property
+    def admitted_user_message_id(self) -> int | None:
+        """Trusted admission identity for bounded user-command adapters."""
+        return self._admitted_user_message_id
+
     def persist_initial_user_message(
         self,
         conversation_id: int,

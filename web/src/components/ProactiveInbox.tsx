@@ -8,11 +8,12 @@ import {
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Empty, Skeleton, Tag, Typography } from 'antd';
-import { useId, useMemo, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { listApplications } from '@/services/applications';
 import { cancelProactiveJob, getProactiveSettings, listProactiveJobs } from '@/services/proactive';
 import type { Application } from '@/types/application';
 import {
+  isApplicationProactiveJob,
   isProactiveJobActive,
   PROACTIVE_KIND_LABELS,
   PROACTIVE_STATE_LABELS,
@@ -135,15 +136,16 @@ function JobCard({
 }
 
 export function isRepresentedReminder(job: ProactiveJob, candidateIds: readonly string[]): boolean {
-  return job.state === 'succeeded' && job.kind !== 'interview_draft'
+  return isApplicationProactiveJob(job) && job.state === 'succeeded' && job.kind !== 'interview_draft'
     && Boolean(job.candidate_id && candidateIds.includes(job.candidate_id));
 }
 
 export function partitionProactiveJobs(allJobs: readonly ProactiveJob[], candidateIds: readonly string[]) {
+  const applicationJobs = allJobs.filter(isApplicationProactiveJob);
   const isPublishedReminder = (job: ProactiveJob) => job.state === 'succeeded' && job.kind !== 'interview_draft';
   return {
-    current: allJobs.filter((job) => !isPublishedReminder(job)),
-    history: allJobs.filter((job) => isPublishedReminder(job) && !isRepresentedReminder(job, candidateIds)),
+    current: applicationJobs.filter((job) => !isPublishedReminder(job)),
+    history: applicationJobs.filter((job) => isPublishedReminder(job) && !isRepresentedReminder(job, candidateIds)),
   };
 }
 
@@ -165,6 +167,7 @@ export default function ProactiveInbox({ representedCandidateIds = [] }: { repre
     queryFn: getProactiveSettings,
   });
   const [cancellingId, setCancellingId] = useState<string>();
+  const cancellationPending = useRef(false);
   const [error, setError] = useState('');
 
   const applicationsById = useMemo(
@@ -173,7 +176,8 @@ export default function ProactiveInbox({ representedCandidateIds = [] }: { repre
   );
 
   async function cancel(job: ProactiveJob) {
-    if (cancellingId) return;
+    if (cancellationPending.current) return;
+    cancellationPending.current = true;
     setCancellingId(job.id);
     setError('');
     try {
@@ -182,6 +186,7 @@ export default function ProactiveInbox({ representedCandidateIds = [] }: { repre
     } catch {
       setError("任务取消失败，请确认本地服务仍在运行后重试。");
     } finally {
+      cancellationPending.current = false;
       setCancellingId(undefined);
     }
   }
@@ -208,7 +213,7 @@ export default function ProactiveInbox({ representedCandidateIds = [] }: { repre
     );
   }
 
-  const allJobs = jobsQuery.data ?? [];
+  const allJobs = (jobsQuery.data ?? []).filter(isApplicationProactiveJob);
   const { current: jobs, history } = partitionProactiveJobs(allJobs, representedCandidateIds);
 
   return (

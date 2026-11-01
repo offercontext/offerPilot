@@ -1,3 +1,4 @@
+import { useCompanionName } from '@/features/companionPersona/useCompanionName';
 import { liveText } from '@/i18n/liveText';
 import { t, useLocale } from '@/i18n';
 import { displayPilotUiMessage } from './model';
@@ -288,6 +289,7 @@ function ChatPanelView({
   onConversationRequestConsumed,
 }: Props) {
   useLocale();
+  const companionName = useCompanionName();
   const queryClient = useQueryClient();
   const { message: toast } = AntApp.useApp();
   const {
@@ -1592,7 +1594,7 @@ function ChatPanelView({
             <RobotOutlined />
           </div>
           <div style={{ minWidth: 0 }}>
-            <div className={`${styles.headTitle} op-gradient-text`}>{t("OfferPilot 领航员")}</div>
+            <div className={`${styles.headTitle} op-gradient-text`}>{companionName} · {t("OfferPilot 领航员")}</div>
             <div className={styles.headSub}>{t("基于投递、日程、复盘与 Offer 实时作答")}</div>
           </div>
           <span className={styles.modeBadge}>{isNego ? t("谈薪教练") : t("通用助手")}</span>

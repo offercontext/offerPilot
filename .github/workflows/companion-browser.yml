@@ -1,0 +1,65 @@
+name: Companion synthetic Chromium acceptance
+on:
+  push:
+    branches: [feat/20261021-companion-life-v1, feat/20261101-companion-integrated-candidate]
+    paths:
+      - 'web/src/features/companionLife/**'
+      - 'web/src/features/assistantSurface/**'
+      - 'web/src/layout/**'
+      - 'web/src/components/ProactiveInbox*'
+      - 'web/src/components/SettingsView*'
+      - 'web/src/features/dashboard/TodayInboxSummary*'
+      - 'web/src/types/proactive.ts'
+      - 'web/src/services/companion.ts'
+      - 'web/src/i18n/**'
+      - 'web/tests/companion/**'
+      - 'web/tests/simplification/**'
+      - 'web/tests/localization/fixture-api.mjs'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - '.github/workflows/companion-browser.yml'
+# Only the original companion branch and this integration candidate may trigger this synthetic gate.
+permissions:
+  contents: read
+concurrency:
+  group: companion-browser-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  synthetic-companion-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - name: Verify strict fixture and fail-closed guards offline
+        run: |
+          node --test web/tests/companion/fixture-contract.mjs
+          node web/tests/simplification/fixture-contract.mjs
+      - name: Build actual production UI
+        run: npm run build --prefix web
+      - name: Install Chromium and its system dependencies
+        working-directory: web
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Exercise production UI with synthetic local responses only
+        run: node web/tests/companion/run.mjs artifacts/companion-browser
+      - name: Preserve simplified work entry and retained-owner behavior
+        env:
+          SIMPLIFICATION_EVIDENCE_DIR: artifacts/simplification-browser
+        run: node web/tests/simplification/run.mjs
+      - name: Keep report, requests, errors, DOM, accessibility and screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: companion-browser-${{ github.sha }}
+          path: |
+            artifacts/companion-browser
+            artifacts/simplification-browser
+          if-no-files-found: warn
+          retention-days: 14

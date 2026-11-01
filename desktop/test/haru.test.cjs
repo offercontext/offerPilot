@@ -533,3 +533,10 @@ test('tray and context labels update with locale and preserve pin, collapse and 
   h.locale.setLocale('zh-CN'); assert.equal(h.tray.menu.items[1].label, '显示 Haru');
   h.tray.menu.items[4].click(); assert.equal(h.quitCalls(), 1);
 });
+
+test('virtual-life mirror only forwards bounded authored presentation without widening commands', () => {
+  const value = sanitizeSnapshot({ ...view, companionLife: { virtual: true, title: 'x'.repeat(200), detail: 'y'.repeat(300), status: 'waiting_shared', identity: 'secret', revision: 7, command: 'approve' } });
+  assert.deepEqual(value.companionLife, { virtual: true, title: 'x'.repeat(100), detail: 'y'.repeat(160), status: 'waiting_shared' });
+  assert(!('companionLife' in sanitizeSnapshot({ ...view, companionLife: { virtual: false, status: 'active' } })));
+  assert.equal(validateRequest({ version: 1, action: 'join', activity_id: 'one' }), null);
+});

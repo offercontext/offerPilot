@@ -2,15 +2,16 @@ import { useQuery } from '@tanstack/react-query';
 import { Alert, Button } from 'antd';
 import { t, useLocale } from '@/i18n';
 import { listProactiveJobs } from '@/services/proactive';
-import { isProactiveJobActive, type ProactiveJob } from '@/types/proactive';
+import { isApplicationProactiveJob, isProactiveJobActive, type ProactiveJob } from '@/types/proactive';
 import JobMailPendingSummary from '@/features/jobMail/JobMailPendingSummary';
 import styles from './dashboard.module.css';
 
 export function summarizeTodayJobs(jobs: readonly ProactiveJob[]) {
+  const applicationJobs = jobs.filter(isApplicationProactiveJob);
   return {
-    active: jobs.filter((job) => isProactiveJobActive(job.state)).length,
-    attention: jobs.filter((job) => job.state === 'failed' || job.state === 'result_unknown').length,
-    drafts: jobs.filter((job) => job.kind === 'interview_draft' && job.state === 'succeeded' && job.result_text.trim()).length,
+    active: applicationJobs.filter((job) => isProactiveJobActive(job.state)).length,
+    attention: applicationJobs.filter((job) => job.state === 'failed' || job.state === 'result_unknown').length,
+    drafts: applicationJobs.filter((job) => job.kind === 'interview_draft' && job.state === 'succeeded' && job.result_text.trim()).length,
   };
 }
 

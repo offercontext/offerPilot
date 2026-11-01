@@ -1,6 +1,9 @@
+import type { CompanionMirror } from '@/features/companionLife/contracts';
 export const DESKTOP_HARU_SEND_FAILURE = '发送失败，请在 Pilot 中核对对话后重试。';
 export interface DesktopHaruSnapshot {
   version: number;
+  /** Read-only virtual-life projection; never a second action owner. */
+  companionLife?: CompanionMirror;
   theme?: 'light' | 'dark';
   conversationId: number | null;
   taskState: 'idle' | 'running' | 'waiting_confirmation' | 'completed' | 'failed';

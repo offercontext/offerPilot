@@ -1,3 +1,4 @@
+import { useCompanionName } from '@/features/companionPersona/useCompanionName';
 import { t, useLocale } from '@/i18n';
 import { useCallback, useEffect, useRef } from 'react';
 import ChatPanel, { type Props as ChatPanelProps } from '@/components/ChatPanel';
@@ -19,6 +20,7 @@ export default function PilotWorkspace({
   ...props
 }: Props) {
   useLocale();
+  const companionName = useCompanionName();
   const surface = useAssistantSurface();
   const controller = usePilotConversationController();
   const lifecycleForegroundRef = useRef(open || surface.surface === 'haru_chat');
@@ -33,7 +35,7 @@ export default function PilotWorkspace({
     if (pageActive) surface.openPilot();
   }, [pageActive, surface.openPilot]);
   return (
-    <div className={`${pageActive ? styles.pilotWorkspace : styles.pilotControllerSurface} ${
+    <div aria-label={t('{name} · Pilot 工作区', { name: companionName })} className={`${pageActive ? styles.pilotWorkspace : styles.pilotControllerSurface} ${
       pageActive && controller.contextChangeNotice ? styles.pilotWorkspaceWithContext : ''
     }`}>
       {pageActive && controller.contextChangeNotice ? (
