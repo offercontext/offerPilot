@@ -1,7 +1,7 @@
 name: Windows desktop validation (unsigned)
 
 # Experimental validation only. Packaging never implies release readiness.
-# PR merge candidates always run the complete gate. Historical
+# Stable candidates and high-risk/unknown changes run the complete gate. Historical
 # package-only routing is retained only for the original validation branch.
 on:
   push:
@@ -10,7 +10,7 @@ on:
   pull_request:
     branches: [master]
     types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
-    # No paths filter: every PR currently receives the complete validation status.
+    # No paths filter: every PR receives explicit feedback and release-readiness status.
   workflow_dispatch:
 
 permissions:
@@ -40,7 +40,82 @@ defaults:
     shell: pwsh
 
 jobs:
+  pr-feedback:
+    name: Draft selected feedback / native full routing
+    runs-on: windows-2022
+    timeout-minutes: 30
+    outputs:
+      mode: ${{ steps.route.outputs.mode }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+      - uses: actions/setup-node@v4
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install frozen draft planning dependencies
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+        timeout-minutes: 5
+        run: |
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen selector dependencies failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend selector dependencies failed" }
+          npm.cmd ci --prefix desktop/installed-ui --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Layout helper dependencies failed" }
+      - name: Explain existing selector plan or require native full validation
+        id: route
+        env:
+          IS_DRAFT_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.draft == true }}
+        run: |
+          if ($env:IS_DRAFT_PR -eq 'true') {
+            uv run --frozen python scripts/windows-pr-feedback.py
+          } else {
+            python scripts/windows-pr-feedback.py
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Routing or owned planner cleanup failed" }
+      - name: Early Node and rendered viewport contracts for selected frontend
+        if: ${{ steps.route.outputs.mode == 'selected' && steps.route.outputs.frontend == 'true' }}
+        env:
+          LAYOUT_EVIDENCE_DIR: artifacts/test-plans/layout
+        run: |
+          node --test desktop/browser-cleanup-diagnostic/test-routing.mjs desktop/haru-ui-preview/fixture-api.test.cjs desktop/haru-ui-preview/visual.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Selected fixture contracts failed" }
+          node web/node_modules/typescript/bin/tsc --project web/tests/desktop-layout/tsconfig.json
+          if ($LASTEXITCODE -ne 0) { throw "Selected layout fixture types failed" }
+          node web/tests/desktop-layout/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Selected rendered layout regression failed" }
+      - name: Execute the unchanged selected plan in the same environment
+        if: ${{ steps.route.outputs.mode == 'selected' }}
+        env:
+          SELECTED_PLAN: ${{ steps.route.outputs.plan }}
+        run: |
+          uv run --frozen python scripts/select_tests.py execute --plan "$env:SELECTED_PLAN"
+          if ($LASTEXITCODE -ne 0) { throw "Selected verification failed or incomplete; no success fallback" }
+      - name: Preserve planning diagnostics and selected evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-selected-feedback-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            artifacts/test-plans/
+            desktop/ci-evidence/layout/
+          if-no-files-found: warn
+          retention-days: 7
+
   validation-package:
+    needs: pr-feedback
+    if: ${{ needs.pr-feedback.outputs.mode != 'selected' }}
     name: Experimental installer and desktop smoke
     runs-on: windows-2022
     timeout-minutes: 60
@@ -237,7 +312,8 @@ jobs:
 
   simplification-helper-safety:
     name: Linux simplification helper safety (required for release)
-    if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    needs: pr-feedback
     runs-on: ubuntu-latest
     timeout-minutes: 20
     defaults:
@@ -272,7 +348,8 @@ jobs:
 
   pytest-manifest:
     name: Collect complete pytest manifest
-    if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    needs: pr-feedback
     runs-on: windows-2022
     timeout-minutes: 20
     steps:
@@ -333,8 +410,8 @@ jobs:
   # and at most two pytest shards run concurrently.
   pytest-shards:
     name: Complete pytest shard ${{ matrix.shard }} of 20
-    if: "${{ !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
-    needs: pytest-manifest
+    if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    needs: [pr-feedback, pytest-manifest]
     runs-on: windows-2022
     timeout-minutes: 120
     strategy:
@@ -395,8 +472,8 @@ jobs:
 
   full-regression:
     name: Full release regression (required for release)
-    if: "${{ always() && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
-    needs: [pytest-manifest, pytest-shards, simplification-helper-safety]
+    if: "${{ needs.pr-feedback.outputs.mode != 'selected' && always() && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
+    needs: [pr-feedback, pytest-manifest, pytest-shards, simplification-helper-safety]
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
@@ -493,14 +570,16 @@ jobs:
             pytest-evidence/
 
   validation-status:
-    name: Validation results (both jobs must pass)
+    name: ${{ needs.pr-feedback.outputs.mode == 'selected' && 'Full gate NOT RUN - draft feedback only' || 'Validation results (both jobs must pass)' }}
     if: ${{ always() }}
-    needs: [validation-package, full-regression]
+    needs: [pr-feedback, validation-package, full-regression]
     runs-on: windows-2022
     timeout-minutes: 5
     steps:
       - name: Report actual results without promoting the artifact to a release
         env:
+          FEEDBACK_MODE: ${{ needs.pr-feedback.outputs.mode }}
+          FEEDBACK_RESULT: ${{ needs.pr-feedback.result }}
           PACKAGE_RESULT: ${{ needs.validation-package.result }}
           REGRESSION_RESULT: ${{ needs.full-regression.result }}
         run: |
@@ -508,11 +587,15 @@ jobs:
           if ($env:WINDOWS_PACKAGE_ONLY -eq 'true') {
             $regressionScope = "Full regression: NOT RUN (EXPERIMENTAL PACKAGE-ONLY). NOT RELEASE READY."
           }
+          if ($env:FEEDBACK_MODE -eq 'selected') {
+            $regressionScope = "DRAFT FEEDBACK ONLY: full gate NOT RUN / NOT READY. A successful selected check is not a failed test; this release check is intentionally non-success."
+          }
           $report = @(
             "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT A PRODUCTION RELEASE.",
             "Commit: $env:GITHUB_SHA",
             "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
             "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Feedback route: $env:FEEDBACK_MODE; selected/routing job: $env:FEEDBACK_RESULT",
             "Validation package job: $env:PACKAGE_RESULT",
             "Required full regression job: $env:REGRESSION_RESULT",
             $regressionScope,
@@ -521,7 +604,7 @@ jobs:
           )
           $report | Tee-Object -FilePath WINDOWS-VALIDATION-STATUS.txt
           $report | Add-Content $env:GITHUB_STEP_SUMMARY
-          if ($env:PACKAGE_RESULT -ne 'success' -or $env:REGRESSION_RESULT -ne 'success') {
+          if ($env:FEEDBACK_RESULT -ne 'success' -or $env:PACKAGE_RESULT -ne 'success' -or $env:REGRESSION_RESULT -ne 'success') {
             throw "Validation is incomplete: both jobs must pass; failure, cancellation and skipped jobs are not success."
           }
       - name: Preserve actual workflow status

@@ -91,8 +91,19 @@ checks. They are reordered, not removed or duplicated. Existing evidence uploads
 remain; cancellation preserves existing logs/artifacts but cannot guarantee a
 partially executed upload finishes.
 
-Draft code changes still run the complete gate until the existing Harness test
-selector has been safely adapted to the current repository. Test grouping is not
-impact analysis. No branch-protection settings are changed by this workflow:
-maintainers must verify the exact candidate's complete evidence before merging.
-A skipped job is not that evidence, even if GitHub treats its status as passing.
+Draft PRs may run the existing snapshot-bound selector only for verified,
+non-risky frontend changes or audited documentation-only checks. Backend,
+unknown, missing metadata, risk expansion or unavailable Harness requirements
+fall back to the existing native full gate. This fallback does not certify the
+unported Harness evaluations. Ready-for-review, subsequent non-draft updates and
+manual dispatch always request native full validation. See
+[test selection](docs/architecture/test-selection.md) for the inherited semantics.
+
+The selected feedback check reports its real result. When full validation was
+not requested, the separate `Full gate NOT RUN - draft feedback only` check is
+intentionally **non-success / NOT READY**, so a successful draft's overall run
+can appear red: this is not a failed selected test, and is not release evidence.
+Selected failures remain failures; they are never hidden by a successful fallback.
+No branch-protection settings are changed: maintainers must verify the exact
+candidate's complete evidence before merging. A skipped job is not that evidence,
+even if GitHub treats its status as passing.

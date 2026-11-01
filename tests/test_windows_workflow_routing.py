@@ -63,6 +63,7 @@ def _regression_enabled(job: str, event_name: str, payload: dict) -> bool:
     if job == "full-regression":
         # Aggregation still runs after failed/skipped dependencies in full mode.
         expected = f"always() && {expected}"
+    expected = "needs.pr-feedback.outputs.mode != 'selected' && " + expected
     assert match.group(1) == expected
     return not _package_only(event_name, payload)
 
@@ -113,9 +114,9 @@ def test_package_only_marker_never_bypasses_other_branches(ref):
 def test_default_workflow_and_regression_dependency_contract_remain_full():
     assert "  workflow_dispatch:\n\npermissions:" in WORKFLOW
     assert "      - feat/20261005-windows-desktop-validation\n" in WORKFLOW
-    assert "    needs: pytest-manifest\n" in _job("pytest-shards")
+    assert "    needs: [pr-feedback, pytest-manifest]\n" in _job("pytest-shards")
     full = _job("full-regression")
-    assert "    needs: [pytest-manifest, pytest-shards, simplification-helper-safety]\n" in full
+    assert "    needs: [pr-feedback, pytest-manifest, pytest-shards, simplification-helper-safety]\n" in full
     assert "HELPER_SAFETY_RESULT: ${{ needs.simplification-helper-safety.result }}" in full
     assert "if ($env:HELPER_SAFETY_RESULT -ne 'success')" in full
     assert "$env:SHARD_RESULT -ne 'success' -or $env:MANIFEST_RESULT -ne 'success'" in full
@@ -171,7 +172,9 @@ def test_regression_jobs_restore_and_verify_history_before_expensive_work(job):
 
 def test_package_checks_remain_independent_and_mandatory():
     package = _job("validation-package")
-    assert not re.search(r"^    (if|needs|continue-on-error):", package, re.M)
+    assert "    needs: pr-feedback\n" in package
+    assert "    if: ${{ needs.pr-feedback.outputs.mode != 'selected' }}" in package
+    assert re.findall(r'^    needs: (.+)$', package, re.M) == ['pr-feedback']
     assert "continue-on-error:" not in WORKFLOW
     # The only conditional step preserves evidence, including after failures.
     assert re.findall(r"^        if: (.+)$", package, re.M) == ["${{ always() }}"]
@@ -224,25 +227,26 @@ def test_package_only_is_disclosed_in_scope_installer_and_final_report():
 
 
 @pytest.mark.parametrize(
-    ("package_result", "regression_result"),
-    tuple(itertools.product(("success", "failure", "cancelled", "skipped", ""), repeat=2)),
+    ("feedback_result", "package_result", "regression_result"),
+    tuple(itertools.product(("success", "failure", "cancelled", "skipped", ""), repeat=3)),
 )
-def test_final_status_requires_both_jobs_success(package_result, regression_result):
+def test_final_status_requires_both_jobs_success(feedback_result, package_result, regression_result):
     status = _job("validation-status")
     assert "    if: ${{ always() }}\n" in status
-    assert "    needs: [validation-package, full-regression]\n" in status
+    assert "    needs: [pr-feedback, validation-package, full-regression]\n" in status
     assert "PACKAGE_RESULT: ${{ needs.validation-package.result }}" in status
     assert "REGRESSION_RESULT: ${{ needs.full-regression.result }}" in status
     # Check and evaluate the actual final failure guard; no skipped-as-success branch.
     guards = re.findall(
-        r"if \(\$env:(\w+) -ne '([^']+)' -or \$env:(\w+) -ne '([^']+)'\) \{\n"
+        r"if \(\$env:FEEDBACK_RESULT -ne 'success' -or \$env:(\w+) -ne '([^']+)' -or \$env:(\w+) -ne '([^']+)'\) \{\n"
         r'\s+throw "Validation is incomplete:[^\n]+\n\s+\}',
         status,
     )
     assert guards == [("PACKAGE_RESULT", "success", "REGRESSION_RESULT", "success")]
     _, package_success, _, regression_success = guards[0]
-    rejects = package_result != package_success or regression_result != regression_success
-    assert not rejects if (package_result, regression_result) == ("success", "success") else rejects
+    rejects = (feedback_result != "success" or package_result != package_success
+               or regression_result != regression_success)
+    assert not rejects if (feedback_result, package_result, regression_result) == ("success",) * 3 else rejects
     assert status.count("throw ") == 1
     assert not re.search(r"\b(exit|return|continue-on-error)\b", status)
     assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in status
@@ -405,5 +409,172 @@ def test_fixture_checks_move_early_without_duplication_or_gate_removal():
     assert package.count('node web/tests/desktop-layout/run.mjs') == 1
     assert 'desktop/ci-evidence/00-fixture-contracts.log' in package
     assert 'finally {\n            Stop-Transcript' in package
-    # Until conservative selector migration is validated, even draft code stays full.
-    assert 'github.event.pull_request.draft' not in WORKFLOW
+    # Only the verified adapter may select reduced validation; package remains full.
+    assert "needs.pr-feedback.outputs.mode != 'selected'" in package
+
+
+def _feedback_adapter():
+    import runpy
+    return runpy.run_path(str(Path(__file__).parents[1] / 'scripts/windows-pr-feedback.py'))
+
+
+def _frontend_plan():
+    return {
+        'schema_version': 1, 'profile': 'dev', 'release_eligible': False,
+        'needs_full': False, 'unsupported_checks': [], 'selection_level': 'incremental',
+        'risk_expansion': [], 'fallbacks': [], 'deleted_tests': [], 'unclassified': [],
+        'required_checks': ['content_diff', 'frontend_build'],
+        'selected_tests': [{'id': 'web/src/example.test.ts', 'surface': 'frontend', 'requires': []}],
+        'selection_status': 'ready', 'content_basis': None,
+    }
+
+
+@pytest.mark.parametrize(('event', 'draft', 'action', 'expected'), [
+    ('pull_request', True, 'opened', True),
+    ('pull_request', True, 'synchronize', True),
+    ('pull_request', True, 'reopened', True),
+    ('pull_request', True, 'converted_to_draft', True),
+    ('pull_request', True, 'ready_for_review', False),
+    ('pull_request', False, 'synchronize', False),
+    ('pull_request', 'true', 'synchronize', False),
+    ('pull_request', True, 'edited', False),
+    ('workflow_dispatch', True, 'synchronize', False),
+    ('push', True, 'synchronize', False),
+])
+def test_feedback_event_identity_is_narrow(event, draft, action, expected):
+    assert _feedback_adapter()['draft_event'](
+        event, {'action': action, 'pull_request': {'draft': draft}}) is expected
+
+
+def test_feedback_accepts_existing_frontend_or_audited_checks_only_not_release():
+    decide = _feedback_adapter()['decision']
+    value = _frontend_plan()
+    assert decide(value)[0] == 'selected'
+    value.update(selection_status='checks_only', selected_tests=[],
+                 required_checks=['content_diff', 'documentation_links'],
+                 content_basis='audited_non_runtime_documentation_paths')
+    assert decide(value)[0] == 'selected'
+    value['content_basis'] = None
+    assert decide(value)[0] == 'full'
+
+
+@pytest.mark.parametrize(('field', 'value'), [
+    ('schema_version', 2), ('profile', 'merge'), ('release_eligible', True),
+    ('needs_full', True), ('unsupported_checks', ['harness_p0']),
+    ('selection_level', 'full'), ('selection_level', 'surface_full'),
+    ('risk_expansion', [{'id': 'auth'}]), ('fallbacks', [{'surface': 'all'}]),
+    ('deleted_tests', ['tests/test_auth.py']), ('unclassified', [{'id': 'unknown'}]),
+    ('selection_status', 'blocked'), ('selection_status', 'no_changes'),
+    ('selected_tests', []), ('selected_tests', [{'surface': 'backend', 'requires': []}]),
+    ('selected_tests', [{'surface': 'frontend', 'requires': ['real_model']}]),
+    ('required_checks', ['content_diff', 'harness_p0']),
+    ('required_checks', ['content_diff']), ('required_checks', 'frontend_build'),
+])
+def test_feedback_uncertain_or_broad_plan_requires_native_full(field, value):
+    plan = _frontend_plan()
+    plan[field] = value
+    assert _feedback_adapter()['decision'](plan)[0] == 'full'
+
+
+@pytest.mark.parametrize('missing', [
+    'needs_full', 'unsupported_checks', 'risk_expansion', 'fallbacks', 'unclassified',
+    'deleted_tests', 'selected_tests', 'required_checks',
+])
+def test_feedback_missing_mandatory_plan_field_never_reduces_validation(missing):
+    plan = _frontend_plan()
+    del plan[missing]
+    assert _feedback_adapter()['decision'](plan)[0] == 'full'
+
+
+def test_feedback_non_draft_never_invokes_selector(tmp_path, monkeypatch):
+    def forbidden(*args, **kwargs):
+        pytest.fail('stable/manual candidate must not invoke incremental planning')
+    monkeypatch.setattr(subprocess, 'run', forbidden)
+    result = _feedback_adapter()['route'](tmp_path, 'workflow_dispatch', {}, '', tmp_path / 'output')
+    assert result['mode'] == 'full' and result['release_eligible'] is False
+
+
+def test_feedback_plan_error_falls_back_but_never_invokes_execution(tmp_path, monkeypatch):
+    head, base = 'a' * 40, 'b' * 40
+    monkeypatch.setattr(subprocess, 'check_output', lambda *a, **kw: head + '\n')
+    commands = []
+    adapter = _feedback_adapter()
+    def failed_plan(root, argv, log):
+        commands.append(argv)
+        log.write_text('missing metadata')
+        return 2
+    monkeypatch.setitem(adapter['route'].__globals__, 'run_planner', failed_plan)
+    event = {'action': 'synchronize', 'pull_request': {'draft': True, 'base': {'sha': base}}}
+    result = adapter['route'](tmp_path, 'pull_request', event, head, tmp_path / 'plan')
+    assert result['mode'] == 'full' and 'planning unavailable' in result['reason']
+    assert len(commands) == 1 and commands[0][2] == 'plan'
+    assert 'execute' not in commands[0]
+    assert (tmp_path / 'planning.log').read_text() == 'missing metadata'
+
+
+def test_feedback_planning_timeout_stops_real_descendants(tmp_path):
+    import sys
+    import time
+    root = Path(__file__).parents[1]
+    heartbeat = tmp_path / 'grandchild-heartbeat'
+    child = ("import pathlib,time; p=pathlib.Path(" + repr(str(heartbeat)) + "); "
+             "exec('while True:\\n p.write_text(str(time.time_ns()))\\n time.sleep(.02)')")
+    parent = ("import subprocess,sys,time; subprocess.Popen([sys.executable,'-c',"
+              + repr(child) + "]); time.sleep(60)")
+    with pytest.raises((subprocess.TimeoutExpired, TimeoutError)):
+        _feedback_adapter()['run_planner'](
+            root, [sys.executable, '-c', parent], tmp_path / 'planner.log', timeout=2)
+    assert heartbeat.exists(), 'the real grandchild must have started before timeout'
+    stopped = heartbeat.read_bytes()
+    time.sleep(.2)
+    assert heartbeat.read_bytes() == stopped, 'grandchild kept running after planner timeout'
+
+
+def test_feedback_unproven_planner_cleanup_does_not_start_full_fallback(tmp_path, monkeypatch):
+    adapter = _feedback_adapter()
+    head = 'a' * 40
+    monkeypatch.setattr(subprocess, 'check_output', lambda *a, **kw: head + '\n')
+    def unproven(*args, **kwargs):
+        raise RuntimeError('planner cleanup unproven; full fallback blocked')
+    monkeypatch.setitem(adapter['route'].__globals__, 'run_planner', unproven)
+    event = {'action': 'synchronize', 'pull_request': {'draft': True, 'base': {'sha': 'b' * 40}}}
+    with pytest.raises(RuntimeError, match='cleanup unproven'):
+        adapter['route'](tmp_path, 'pull_request', event, head, tmp_path / 'plan')
+
+
+def test_selector_output_namespace_is_ignored_without_weakening_snapshot():
+    from scripts.test_selection.core import SelectionError, safe_output
+    root = Path(__file__).parents[1]
+    allowed = root / 'artifacts/test-plans/native-contract-probe'
+    assert safe_output(root, allowed) == allowed.resolve()
+    with pytest.raises(SelectionError):
+        safe_output(root, root / 'artifacts/unreviewed-output')
+    with pytest.raises(SelectionError):
+        safe_output(root, root / 'web/node_modules/hidden-plan')
+
+
+def test_selected_workflow_uses_same_environment_and_keeps_full_not_ready():
+    feedback = _job('pr-feedback')
+    assert feedback.index('uv sync --frozen') < feedback.index('python scripts/windows-pr-feedback.py')
+    assert feedback.index('npm.cmd ci --prefix web') < feedback.index('python scripts/windows-pr-feedback.py')
+    assert 'uv run --frozen python scripts/select_tests.py execute --plan "$env:SELECTED_PLAN"' in feedback
+    assert 'Selected verification failed or incomplete; no success fallback' in feedback
+    assert 'LAYOUT_EVIDENCE_DIR: artifacts/test-plans/layout' in feedback
+    assert 'artifacts/test-plans/' in feedback
+    assert 'continue-on-error' not in WORKFLOW and 'checks: write' not in WORKFLOW
+    status = _job('validation-status')
+    assert "'Full gate NOT RUN - draft feedback only'" in status
+    assert 'full gate NOT RUN / NOT READY' in status
+    assert "$env:PACKAGE_RESULT -ne 'success' -or $env:REGRESSION_RESULT -ne 'success'" in status
+    assert "if: ${{ always() }}" in status
+
+
+def test_real_unknown_source_probe_shape_cannot_masquerade_as_fast():
+    # Matches the real source-only dry plan: needs_full=false is insufficient.
+    value = _frontend_plan()
+    value.update(selection_level='surface_full', needs_full=False, unsupported_checks=[],
+                 fallbacks=[{'kind': 'fallback', 'path': 'src/offerpilot/selection_unknown_probe.py',
+                             'surface': 'backend'}],
+                 selected_tests=[{'id': 'tests/test_unknown.py::test_one',
+                                  'surface': 'backend', 'requires': []}])
+    assert _feedback_adapter()['decision'](value)[0] == 'full'

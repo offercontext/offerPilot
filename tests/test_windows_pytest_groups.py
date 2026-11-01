@@ -284,3 +284,36 @@ Write-Output 'native group routing passed'
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'native group routing passed' in result.stdout
+
+
+def test_selector_group_catalog_imports_complete_pure_function_dependency_set():
+    source = (ROOT / 'scripts/test_selection/check_groups.ps1').read_text(encoding='utf-8')
+    assert "@('Get-TestFiles','Get-OrdinalDuplicates','Get-Groups')" in source
+    assert '$ast.FindAll' in source
+    assert '. ([scriptblock]::Create($function[0].Extent.Text.Replace(' in source
+    assert 'powershell -File' not in source and 'Invoke-Expression' not in source
+
+
+def test_selector_actual_ast_import_closure_supports_agent_groups(tmp_path: Path) -> None:
+    """Use exactly the import function and invocation from the selector script."""
+    source = (ROOT / 'scripts/test_selection/check_groups.ps1').read_text(encoding='utf-8')
+    importer = 'function Import-Functions' + source.split('function Import-Functions', 1)[1].split(
+        '$catalogRows =', 1)[0]
+    invocation = next(line for line in source.splitlines()
+                      if line.startswith('Import-Functions ') and 'windows-pytest-groups.ps1' in line)
+    escaped = str(ROOT).replace("'", "''")
+    script = tmp_path / 'selector-group-import.ps1'
+    script.write_text("$ErrorActionPreference = 'Stop'\n" + f"$repoRoot = '{escaped}'\n"
+                      + importer + invocation + '\n' + r'''
+$groups = Get-Groups @(Get-TestFiles)
+foreach ($path in @('tests\agent_loop\test_confirmation.py','tests\agent_loop\test_runner.py')) {
+  if ($groups.agent -cnotcontains $path) { throw "missing agent loop: $path" }
+}
+$all = @($groups.Values | ForEach-Object { $_ })
+if (@(Get-OrdinalDuplicates $all).Count) { throw 'duplicate import/group results' }
+Write-Output 'selector AST dependency closure passed'
+''', encoding='utf-8')
+    result = subprocess.run([_powershell(), '-NoProfile', '-File', str(script)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'selector AST dependency closure passed' in result.stdout
