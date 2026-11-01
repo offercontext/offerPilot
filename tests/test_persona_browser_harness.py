@@ -121,7 +121,8 @@ def test_workflow_is_feature_only_readonly_and_has_no_provider_secrets():
     from scripts.persona_browser_server import ROOT
 
     workflow = (ROOT / ".github/workflows/persona-browser.yml").read_text()
-    assert "branches: [feat/20261031-custom-companion-persona]" in workflow
+    assert ("branches: [feat/20261031-custom-companion-persona, "
+            "feat/20261101-companion-integrated-candidate]") in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "persist-credentials: false" in workflow
     assert "workflow_dispatch:" not in workflow

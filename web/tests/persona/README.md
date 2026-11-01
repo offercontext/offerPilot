@@ -6,7 +6,8 @@ fake chat/title model. It is not a real-provider quality assessment, a user-data
 migration test, or installed-desktop acceptance.
 
 The dedicated workflow `.github/workflows/persona-browser.yml` runs only for
-`feat/20261031-custom-companion-persona`. It has read-only repository permission,
+`feat/20261031-custom-companion-persona` and
+`feat/20261101-companion-integrated-candidate`. It has read-only repository permission,
 does not persist checkout credentials, and uses no provider secret, paid
 workflow, deployment, dispatch, or publication step. Dependency and Chromium
 installation precede application execution.

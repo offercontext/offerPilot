@@ -2,7 +2,7 @@ name: Custom persona synthetic HTTP Chromium acceptance
 on:
   push:
     branches: [feat/20261031-custom-companion-persona, feat/20261101-companion-integrated-candidate]
-# This dedicated feature branch is the complete trigger boundary. No paid job,
+# These two exact feature branches are the complete trigger boundary. No paid job,
 # dispatch, deployment environment, provider secret or write token is used.
 permissions:
   contents: read

@@ -18,6 +18,7 @@ on:
       - 'web/package.json'
       - 'web/package-lock.json'
       - '.github/workflows/companion-browser.yml'
+# Only the original companion branch and this integration candidate may trigger this synthetic gate.
 permissions:
   contents: read
 concurrency:
