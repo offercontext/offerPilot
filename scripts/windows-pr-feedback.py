@@ -17,6 +17,15 @@ from typing import Any
 from uuid import uuid4
 
 
+# Audited presentation-only roles, not a claim that all web/src is low risk.
+# Services, contracts, ChatPanel, AppShell and other controllers remain full.
+PRESENTATION_PATHS = frozenset({
+    "web/src/theme/tokens.css",
+    "web/src/layout/Sidebar.module.css",
+    "web/src/layout/TopBar.module.css",
+})
+
+
 def draft_event(event_name: str, event: dict[str, Any]) -> bool:
     pr = event.get("pull_request")
     return (event_name == "pull_request" and isinstance(pr, dict)
@@ -41,18 +50,29 @@ def decision(plan: dict[str, Any]) -> tuple[str, str]:
     if (not isinstance(checks, list) or not all(isinstance(c, str) for c in checks)
             or not isinstance(tests, list)):
         return "full", "invalid selector plan"
+    changes = plan.get("changes")
+    if (not isinstance(changes, list) or not changes
+            or any(not isinstance(c, dict) or not isinstance(c.get("paths"), list)
+                   or not c["paths"] or not all(isinstance(p, str) for p in c["paths"])
+                   for c in changes)):
+        return "full", "missing changed-path evidence"
+    paths = {p for change in changes for p in change["paths"]}
+    from scripts.test_selection.core import content_only
     if plan.get("selection_status") == "checks_only":
         if (tests == [] and plan.get("content_basis") == "audited_non_runtime_documentation_paths"
+                and all(content_only(p) for p in paths)
                 and "content_diff" in checks
                 and set(checks) <= {"content_diff", "documentation_links"}):
             return "selected", "audited documentation checks only; no release validation"
         return "full", "unverified checks-only scope"
     if (plan.get("selection_status") == "ready" and tests
+            and paths <= PRESENTATION_PATHS | {p for p in paths if content_only(p)}
+            and bool(paths & PRESENTATION_PATHS)
             and all(isinstance(t, dict) and t.get("surface") == "frontend"
                     and t.get("requires") == [] for t in tests)
             and {"content_diff", "frontend_build"} <= set(checks)
             and set(checks) <= {"content_diff", "documentation_links", "frontend_build"}):
-        return "selected", "existing dev frontend selection; no release validation"
+        return "selected", "audited presentation paths with existing dev selection; no release validation"
     return "full", "backend, broad or incomplete selection requires full validation"
 
 

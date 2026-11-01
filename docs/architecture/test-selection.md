@@ -42,7 +42,7 @@ python scripts/select_tests.py execute --plan artifacts/test-plans/<unique-run>/
 
 成功生成 blocked 计划时 `plan` 退出 0；`execute` 在任何测试或命令启动前做整个计划的能力检查，返回 3。外层可在**计划阶段**回现有 master 完整 release gate，但该 gate 只验其原有范围，不等于来源额外 Harness 验收。已经执行失败不能用成功 fallback 洗掉。
 
-初期 Draft 接线只允许经审查的纯 frontend 范围，且无 risk expansion / fallback / deleted tests / unclassified / unsupported；其他范围和计划错误明确回现有 full。不得另行放宽 selector 的 content-only allowlist，尤其 prompt、template 和 runtime Markdown。
+初期 Draft 接线只允许三个已核验样式角色：`web/src/theme/tokens.css`、`web/src/layout/Sidebar.module.css`、`web/src/layout/TopBar.module.css`，且仍需原 dev 计划为纯 frontend、无 risk expansion / fallback / deleted tests / unclassified / unsupported。这是按 AGENTS §7 的展示范围缩减，不是把所有前端视为低风险；`services/chat.ts`、`services/pilotRuntime.ts`、认证/http、共享 types、确认/恢复 controller 以及装配多业务写入与草稿的 AppShell 均回 full。多文件和重命名两端取并集，出现一个未允许路径就回 full。依据见 [Pilot 地图](code-map/pilot-runtime.md) 与 [设置/桌面地图](code-map/settings-desktop.md)。其他范围和计划错误明确回现有 full。不得另行放宽 selector 的 content-only allowlist，尤其 prompt、template 和 runtime Markdown。
 
 ## 平台限制
 

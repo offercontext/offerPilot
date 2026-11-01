@@ -426,6 +426,8 @@ def _frontend_plan():
         'required_checks': ['content_diff', 'frontend_build'],
         'selected_tests': [{'id': 'web/src/example.test.ts', 'surface': 'frontend', 'requires': []}],
         'selection_status': 'ready', 'content_basis': None,
+        'changes': [{'source': 'committed', 'status': 'M',
+                     'paths': ['web/src/theme/tokens.css']}],
     }
 
 
@@ -452,7 +454,8 @@ def test_feedback_accepts_existing_frontend_or_audited_checks_only_not_release()
     assert decide(value)[0] == 'selected'
     value.update(selection_status='checks_only', selected_tests=[],
                  required_checks=['content_diff', 'documentation_links'],
-                 content_basis='audited_non_runtime_documentation_paths')
+                 content_basis='audited_non_runtime_documentation_paths',
+                 changes=[{'source': 'committed', 'status': 'M', 'paths': ['README.md']}])
     assert decide(value)[0] == 'selected'
     value['content_basis'] = None
     assert decide(value)[0] == 'full'
@@ -478,7 +481,7 @@ def test_feedback_uncertain_or_broad_plan_requires_native_full(field, value):
 
 @pytest.mark.parametrize('missing', [
     'needs_full', 'unsupported_checks', 'risk_expansion', 'fallbacks', 'unclassified',
-    'deleted_tests', 'selected_tests', 'required_checks',
+    'deleted_tests', 'selected_tests', 'required_checks', 'changes',
 ])
 def test_feedback_missing_mandatory_plan_field_never_reduces_validation(missing):
     plan = _frontend_plan()
@@ -577,4 +580,43 @@ def test_real_unknown_source_probe_shape_cannot_masquerade_as_fast():
                              'surface': 'backend'}],
                  selected_tests=[{'id': 'tests/test_unknown.py::test_one',
                                   'surface': 'backend', 'requires': []}])
+    assert _feedback_adapter()['decision'](value)[0] == 'full'
+
+
+@pytest.mark.parametrize('path', [
+    'web/src/services/chat.ts', 'web/src/services/auth.ts', 'web/src/services/http.ts',
+    'web/src/services/pilotRuntime.ts', 'web/src/types/chat.ts',
+    'web/src/components/ChatPanel/index.tsx', 'web/src/components/ui/ConfirmationPanel.tsx',
+    'web/src/features/desktopUpdates/installSafety.ts',
+    'web/src/features/actionPresentation/timeline.ts', 'web/src/layout/AppShell.tsx',
+    'web/src/new-unclassified-presentation.tsx',
+])
+def test_frontend_surface_does_not_authorize_cross_boundary_or_unknown_changes(path):
+    if path != 'web/src/new-unclassified-presentation.tsx':
+        assert (Path(__file__).parents[1] / path).is_file()
+    value = _frontend_plan()
+    value['changes'] = [{'source': 'committed', 'status': 'M', 'paths': [path]}]
+    assert _feedback_adapter()['decision'](value)[0] == 'full'
+
+
+@pytest.mark.parametrize('paths', [
+    ['web/src/layout/Sidebar.module.css'],
+    ['web/src/layout/TopBar.module.css', 'README.md'],
+    ['web/src/theme/tokens.css', 'web/src/layout/Sidebar.module.css'],
+])
+def test_explicit_presentation_paths_and_documentation_union_can_use_dev(paths):
+    value = _frontend_plan()
+    value['changes'] = [{'source': 'committed', 'status': 'M', 'paths': paths}]
+    assert _feedback_adapter()['decision'](value)[0] == 'selected'
+
+
+def test_renaming_or_mixing_a_risky_frontend_path_never_hides_its_old_identity():
+    value = _frontend_plan()
+    value['changes'] = [{'source': 'committed', 'status': 'R100',
+                         'paths': ['web/src/services/chat.ts', 'web/src/theme/tokens.css']}]
+    assert _feedback_adapter()['decision'](value)[0] == 'full'
+    value['changes'] = [
+        {'source': 'committed', 'status': 'M', 'paths': ['web/src/theme/tokens.css']},
+        {'source': 'worktree', 'status': 'M', 'paths': ['web/src/services/auth.ts']},
+    ]
     assert _feedback_adapter()['decision'](value)[0] == 'full'

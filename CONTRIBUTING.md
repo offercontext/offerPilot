@@ -92,7 +92,10 @@ remain; cancellation preserves existing logs/artifacts but cannot guarantee a
 partially executed upload finishes.
 
 Draft PRs may run the existing snapshot-bound selector only for verified,
-non-risky frontend changes or audited documentation-only checks. Backend,
+three audited style files (`web/src/theme/tokens.css`, `web/src/layout/Sidebar.module.css`,
+`web/src/layout/TopBar.module.css`) or audited documentation-only checks.
+The frontend surface alone is not a low-risk classification: services, auth,
+confirmation/recovery controllers, shared types and AppShell still require full validation. Backend,
 unknown, missing metadata, risk expansion or unavailable Harness requirements
 fall back to the existing native full gate. This fallback does not certify the
 unported Harness evaluations. Ready-for-review, subsequent non-draft updates and
