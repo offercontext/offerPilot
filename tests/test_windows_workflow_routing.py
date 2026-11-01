@@ -620,3 +620,238 @@ def test_renaming_or_mixing_a_risky_frontend_path_never_hides_its_old_identity()
         {'source': 'worktree', 'status': 'M', 'paths': ['web/src/services/auth.ts']},
     ]
     assert _feedback_adapter()['decision'](value)[0] == 'full'
+
+
+def _command_plan(selected, catalog=None):
+    def rows(names):
+        return [{'id': name, 'file': name, 'surface': 'frontend'} for name in names]
+    return {'selected_tests': rows(selected), 'catalog': rows(selected if catalog is None else catalog)}
+
+
+def test_frontend_command_omits_only_exact_complete_catalog_filters(tmp_path):
+    from scripts.test_selection.execution import frontend_command, WINDOWS_NPM_COMMAND_BUDGET
+    names = [f'web/src/components/long_component_name_{n:03d}.test.tsx' for n in range(298)]
+    value = _command_plan(names, list(reversed(names)))
+    report = tmp_path / '报告 space.json'
+    argv = frontend_command(value, report, windows=True)
+    assert argv[:3] == ['npm.cmd', 'test', '--']
+    assert len(argv) == 8 and argv[-1] == '--outputFile=' + str(report.resolve())
+    assert '--maxWorkers=1' in argv and '--minWorkers=1' in argv and '--reporter=json' in argv
+    assert len(subprocess.list2cmdline(argv).encode('utf-16-le')) // 2 < WINDOWS_NPM_COMMAND_BUDGET
+    assert len(subprocess.list2cmdline(argv + [p.removeprefix('web/') for p in names])) > 8191
+    subset = frontend_command(_command_plan(names[:2], names), report, windows=True)
+    assert subset[8:] == [name.removeprefix('web/') for name in names[:2]]
+
+
+@pytest.mark.parametrize('damage', ['empty', 'selected_duplicate', 'catalog_duplicate', 'different',
+                                    'missing_catalog', 'noncanonical', 'backend_identity', 'wrong_file', 'option_name'])
+def test_frontend_command_refuses_ambiguous_catalog_or_identity(tmp_path, damage):
+    from scripts.test_selection.core import SelectionError
+    from scripts.test_selection.execution import frontend_command
+    value = _command_plan(['web/src/a.test.ts'])
+    if damage == 'empty':
+        value['selected_tests'] = []
+    elif damage == 'selected_duplicate':
+        value['selected_tests'] *= 2
+    elif damage == 'catalog_duplicate':
+        value['catalog'] *= 2
+    elif damage == 'different':
+        value['catalog'] = _command_plan(['web/src/b.test.ts'])['catalog']
+    elif damage == 'missing_catalog':
+        del value['catalog']
+    elif damage == 'noncanonical':
+        value = _command_plan(['web/src/../a.test.ts'])
+    elif damage == 'backend_identity':
+        value = _command_plan(['tests/test_backend.py'])
+    elif damage == 'option_name':
+        value = _command_plan(['web/--config=fixture.test.ts'])
+    else:
+        value['selected_tests'][0]['file'] = 'web/src/other.test.ts'
+    with pytest.raises(SelectionError):
+        frontend_command(value, tmp_path / 'report.json', windows=True)
+
+
+@pytest.mark.parametrize('metachar', list('&|<>^%!()') + ['\r', '\n', '"'])
+def test_frontend_windows_arguments_refuse_shell_metacharacters(tmp_path, metachar):
+    from scripts.test_selection.core import SelectionError
+    from scripts.test_selection.execution import frontend_command
+    unsafe = f'web/src/unsafe{metachar}name.test.ts'
+    with pytest.raises(SelectionError, match='unsafe Windows'):
+        frontend_command(_command_plan([unsafe], [unsafe, 'web/src/other.test.ts']),
+                         tmp_path / 'report.json', windows=True)
+    with pytest.raises(SelectionError, match='unsafe Windows'):
+        frontend_command(_command_plan(['web/src/a.test.ts']),
+                         tmp_path / f'unsafe{metachar}report.json', windows=True)
+
+
+def test_frontend_windows_budget_checks_quoted_whole_command_and_full_catalog(tmp_path):
+    from scripts.test_selection.core import SelectionError
+    from scripts.test_selection.execution import frontend_command
+    selected = [f'web/src/long name {n:03d}_' + 'x' * 100 + '.test.ts' for n in range(70)]
+    with pytest.raises(SelectionError, match='safe budget'):
+        frontend_command(_command_plan(selected, selected + ['web/src/other.test.ts']),
+                         tmp_path / 'report.json', windows=True)
+    # Even a full-catalog command must reject an overlong output argument.
+    with pytest.raises(SelectionError, match='safe budget'):
+        frontend_command(_command_plan(['web/src/a.test.ts']),
+                         tmp_path / ('report' + 'x' * 6100 + '.json'), windows=True)
+    argv = frontend_command(_command_plan(['web/src/报告 space.test.ts'],
+                                         ['web/src/报告 space.test.ts', 'web/src/other.test.ts']),
+                            tmp_path / '报告 space.json', windows=True)
+    assert argv[-1] == 'src/报告 space.test.ts'
+    assert '"src/报告 space.test.ts"' in subprocess.list2cmdline(argv)
+
+
+def test_frontend_command_budget_never_requires_filesystem_resolution(tmp_path):
+    from scripts.test_selection.core import SelectionError
+    from scripts.test_selection.execution import frontend_command
+    class UnresolvablePath(type(tmp_path)):
+        def resolve(self, *args, **kwargs):
+            raise OSError(206, 'Windows filename too long')
+    value = _command_plan(['web/src/a.test.ts'])
+    report = UnresolvablePath(tmp_path / 'report.json')
+    assert frontend_command(value, report, windows=True)[-1] == '--outputFile=' + str(report)
+    with pytest.raises(SelectionError, match='safe budget'):
+        frontend_command(value, UnresolvablePath(tmp_path / ('x' * 6100)), windows=True)
+
+
+def test_frontend_unsafe_command_blocks_before_backend_or_any_check(tmp_path, monkeypatch):
+    import json
+    from scripts.test_selection import execution
+    from scripts.test_selection.core import SelectionError
+    value = _command_plan(['web/src/a.test.ts'])
+    value.update(plan_id='unsafe-command', selection_status='ready', required_checks=['content_diff'])
+    value['selected_tests'].insert(0, {'id': 'tests/test_one.py::test_one', 'surface': 'backend'})
+    path = tmp_path / 'selection-plan.json'
+    path.write_text(json.dumps(value), encoding='utf-8')
+    monkeypatch.setattr(execution, 'check_plan', lambda *args: None)
+    def refuse(*args, **kwargs):
+        raise SelectionError('Windows npm command exceeds safe budget')
+    def never_start(*args, **kwargs):
+        raise AssertionError('preflight must reject before any process starts')
+    monkeypatch.setattr(execution, 'frontend_command', refuse)
+    monkeypatch.setattr(execution, 'ProcessTree', never_start)
+    result = execution.execute(tmp_path, path)
+    assert result['exit_code'] == 3 and result['needs_full'] is True
+    assert result['release_eligible'] is False
+    assert result['checks'] == [{'check': 'frontend_command', 'status': 'blocked', 'code': 3,
+                                 'reason': 'Windows npm command exceeds safe budget'}]
+    assert not (tmp_path / 'execution/backend-ids.json').exists()
+
+
+def _run_frontend_contract(argv, cwd, log):
+    from scripts.evaluation_subject.process_tree import ProcessTree
+    with log.open('wb') as stream:
+        tree = ProcessTree(argv, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT)
+        try:
+            try:
+                return tree.wait(60)
+            except (subprocess.TimeoutExpired, TimeoutError):
+                tree.kill()
+                tree.wait(10)
+                raise
+        finally:
+            tree.close()
+
+
+def _save_frontend_contract_evidence(name, mode, *, argv, code, report, hooks, log):
+    import json
+    destination = os.environ.get('SELECTED_FRONTEND_CONTRACT_EVIDENCE')
+    if not destination:
+        return
+    output = Path(destination) / f'{name}-{mode}'
+    output.mkdir(parents=True, exist_ok=True)
+    for source in (report, hooks, log):
+        shutil.copyfile(source, output / source.name)
+    (output / 'summary.json').write_text(json.dumps({
+        'argv': argv, 'returncode': code, 'mode': mode, 'platform': os.name,
+        'scope': 'tiny contract fixture, not the product frontend suite',
+        'release_eligible': False,
+    }, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+
+@pytest.mark.parametrize('mode', ['all', 'subset', 'failure'])
+def test_real_frontend_npm_contract(tmp_path, mode):
+    import json
+    from scripts.test_selection.execution import frontend_command
+    if not shutil.which('npm.cmd' if os.name == 'nt' else 'npm'):
+        pytest.skip('native npm unavailable')
+    root = tmp_path / 'fixture 空 格'
+    web = root / 'web'
+    web.mkdir(parents=True)
+    scripts = {'pretest': 'node lifecycle.cjs pre', 'test': 'node lifecycle.cjs test',
+               'posttest': 'node lifecycle.cjs post'}
+    (web / 'package.json').write_text(json.dumps({'name': 'selection-command-contract',
+                                                'version': '1.0.0', 'scripts': scripts}), encoding='utf-8')
+    (web / 'lifecycle.cjs').write_text('''const fs = require('node:fs');
+const phase = process.argv[2];
+fs.appendFileSync('lifecycle.jsonl', JSON.stringify({phase, args:process.argv.slice(3), cwd:process.cwd()})+'\\n');
+if (phase === 'test') {
+ const report = process.argv.find(arg => arg.startsWith('--outputFile='));
+ fs.writeFileSync(report.slice('--outputFile='.length), JSON.stringify({args:process.argv.slice(3)}));
+ if (fs.existsSync('fail-test')) process.exit(7);
+}
+''', encoding='utf-8')
+    if mode == 'failure':
+        (web / 'fail-test').touch()
+    all_files = ['web/src/报告 space.test.js', 'web/src/b.test.js']
+    selected = all_files[:1] if mode == 'subset' else all_files
+    report = root / 'report 空格.json'
+    argv = frontend_command(_command_plan(selected, all_files), report)
+    code = _run_frontend_contract(argv, web, root / 'npm.log')
+    assert code == (7 if mode == 'failure' else 0), (root / 'npm.log').read_text(errors='replace')
+    phases = [json.loads(line) for line in (web / 'lifecycle.jsonl').read_text().splitlines()]
+    assert [entry['phase'] for entry in phases] == (['pre', 'test'] if mode == 'failure' else ['pre', 'test', 'post'])
+    actual = json.loads(report.read_text())['args']
+    assert actual == argv[3:]
+    assert Path(phases[1]['cwd']).resolve() == web.resolve()
+    assert len(argv) == (9 if mode == 'subset' else 8)
+    _save_frontend_contract_evidence('npm', mode, argv=argv, code=code, report=report,
+                                     hooks=web / 'lifecycle.jsonl', log=root / 'npm.log')
+
+
+@pytest.mark.parametrize('mode', ['all', 'subset', 'skip', 'failure'])
+def test_real_frontend_vitest_contract(tmp_path, mode):
+    import json
+    from scripts.test_selection.execution import frontend_command, reconcile_frontend
+    vitest = Path(__file__).parents[1] / 'web/node_modules/vitest/vitest.mjs'
+    available = vitest.is_file() and shutil.which('npm.cmd' if os.name == 'nt' else 'npm')
+    if os.environ.get('REQUIRE_SELECTED_VITEST_CONTRACT') == '1':
+        assert available, 'required native selected Vitest contract dependencies are missing'
+    elif not available:
+        pytest.skip('locked Vitest unavailable; installer runs this contract with dependencies required')
+    root = tmp_path / 'vitest 空 格'
+    web = root / 'web'
+    (web / 'src').mkdir(parents=True)
+    package = {'name': 'selected-vitest-contract', 'version': '1.0.0', 'type': 'module',
+               'scripts': {'pretest': 'node lifecycle.cjs pre',
+                           'test': 'node "' + vitest.resolve().as_posix() + '" run',
+                           'posttest': 'node lifecycle.cjs post'}}
+    (web / 'package.json').write_text(json.dumps(package), encoding='utf-8')
+    (web / 'lifecycle.cjs').write_text(
+        "require('node:fs').appendFileSync('lifecycle.txt', process.argv[2]+'\\n');\n", encoding='utf-8')
+    (web / 'vitest.config.mjs').write_text(
+        "export default {test:{globals:true,include:['src/*.test.js']}};\n", encoding='utf-8')
+    first = "test.skip('one', () => expect(1).toBe(1));" if mode == 'skip' else (
+        "test('one', () => expect(1).toBe(2));" if mode == 'failure' else
+        "test('one', () => expect(1).toBe(1));")
+    (web / 'src/one.test.js').write_text(first, encoding='utf-8')
+    (web / 'src/two.test.js').write_text("test('two', () => expect(2).toBe(2));", encoding='utf-8')
+    catalog = ['web/src/one.test.js', 'web/src/two.test.js']
+    selected = catalog[:1] if mode == 'subset' else catalog
+    report = root / 'report 空格.json'
+    argv = frontend_command(_command_plan(selected, catalog), report)
+    code = _run_frontend_contract(argv, web, root / 'vitest.log')
+    assert code == (1 if mode == 'failure' else 0), (root / 'vitest.log').read_text(errors='replace')
+    data = json.loads(report.read_text(encoding='utf-8'))
+    result, details = reconcile_frontend(data, selected, root)
+    assert result == (1 if mode == 'failure' else 2 if mode == 'skip' else 0)
+    assert details['missing'] == [] and details['extra'] == []
+    assert details['executed'] == len(selected)
+    assert (web / 'lifecycle.txt').read_text().splitlines() == (
+        ['pre'] if mode == 'failure' else ['pre', 'post'])
+    _save_frontend_contract_evidence('vitest', mode, argv=argv, code=code, report=report,
+                                     hooks=web / 'lifecycle.txt', log=root / 'vitest.log')
+    if mode == 'all':
+        data['testResults'].pop()
+        assert reconcile_frontend(data, selected, root)[0] == 2

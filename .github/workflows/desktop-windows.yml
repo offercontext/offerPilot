@@ -185,11 +185,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Offline safety helper install failed" }
           Stop-Transcript
       - name: Required early Node and preview fixture contracts
+        env:
+          REQUIRE_SELECTED_VITEST_CONTRACT: "1"
+          SELECTED_FRONTEND_CONTRACT_EVIDENCE: desktop/ci-evidence/selected-frontend-contract
         run: |
           Start-Transcript -Path desktop/ci-evidence/00-fixture-contracts.log
           try {
             node --test desktop/browser-cleanup-diagnostic/test-routing.mjs desktop/haru-ui-preview/fixture-api.test.cjs desktop/haru-ui-preview/visual.test.mjs
             if ($LASTEXITCODE -ne 0) { throw "Historical routing and preview fixture regression failed" }
+            uv run --frozen pytest -q tests/test_windows_workflow_routing.py -k "real_frontend_npm_contract or real_frontend_vitest_contract" --junitxml=desktop/ci-evidence/selected-frontend-contract.xml
+            if ($LASTEXITCODE -ne 0) { throw "Native selected npm/Vitest command contracts failed" }
           } finally {
             Stop-Transcript
           }

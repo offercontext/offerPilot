@@ -4,7 +4,7 @@ from collections import Counter
 import json
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 from typing import Any
@@ -62,6 +62,56 @@ def reconcile_frontend(report: dict[str, Any], selected: list[str], root: Path) 
         "passed": len(ids) - len(failed) - len(skipped), "skipped_count": len(skipped)}
 
 
+# cmd.exe has an 8191-character batch limit. Reserve space for npm.cmd/node
+# expansion rather than treating that hard ceiling as usable argument capacity.
+WINDOWS_NPM_COMMAND_BUDGET = 6000
+
+
+def frontend_command(value: dict[str, Any], report_path: Path, *,
+                     windows: bool | None = None) -> list[str]:
+    """Keep npm lifecycle semantics; omit filters only for the exact full catalog."""
+    def ids(rows: Any) -> list[str]:
+        if not isinstance(rows, list):
+            raise SelectionError("invalid frontend catalog")
+        result = []
+        for row in rows:
+            if not isinstance(row, dict):
+                raise SelectionError("invalid frontend identity")
+            if row.get("surface") != "frontend":
+                continue
+            name = row.get("id")
+            if (not isinstance(name, str) or row.get("file") != name
+                    or not name.startswith("web/") or name[4:].startswith("-")
+                    or "\\" in name or "\0" in name
+                    or PurePosixPath(name).as_posix() != name
+                    or any(part in {"", ".", ".."} for part in name.split("/"))):
+                raise SelectionError("noncanonical frontend identity")
+            result.append(name)
+        if not result or len(result) != len(set(result)):
+            raise SelectionError("empty or duplicate frontend identities")
+        return result
+
+    selected, catalog = ids(value.get("selected_tests")), ids(value.get("catalog"))
+    if not set(selected) <= set(catalog):
+        raise SelectionError("selected frontend identities absent from frozen catalog")
+    is_windows = os.name == "nt" if windows is None else windows
+    # The plan output parent is already validated by safe_output. Do not call
+    # filesystem resolution before checking an overlong Windows argument.
+    argv = ["npm.cmd" if is_windows else "npm", "test", "--", "--reporter=json",
+            "--pool=forks", "--maxWorkers=1", "--minWorkers=1",
+            "--outputFile=" + str(report_path.absolute())]
+    # With no file filters Vitest uses the same locked config as catalog collection.
+    # Reconciliation still refuses missing/extra/duplicate/skipped executions.
+    if set(selected) != set(catalog):
+        argv.extend(str(PurePosixPath(name).relative_to("web")) for name in selected)
+    if is_windows:
+        if any(any(c in arg for c in '&|<>^%!()\r\n"') for arg in argv):
+            raise SelectionError("unsafe Windows npm command argument")
+        if len(subprocess.list2cmdline(argv).encode("utf-16-le")) // 2 > WINDOWS_NPM_COMMAND_BUDGET:
+            raise SelectionError("Windows npm command exceeds safe budget")
+    return argv
+
+
 def documentation_links(root: Path, paths: list[str]) -> list[str]:
     broken = []
     for name in paths:
@@ -95,6 +145,18 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                    "needs_full": True}
         (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
         return summary
+    frontend = [t["id"] for t in value["selected_tests"] if t.get("surface") == "frontend"]
+    frontend_argv = None
+    if frontend:
+        try:
+            frontend_argv = frontend_command(value, output / "frontend-report.json")
+        except SelectionError as exc:
+            summary = {"plan_id": value["plan_id"], "planned": len(value["selected_tests"]),
+                       "checks": [{"check": "frontend_command", "status": "blocked", "code": 3,
+                                   "reason": str(exc)}], "exit_code": 3, "release_eligible": False,
+                       "selection_status": "blocked", "needs_full": True}
+            (output / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+            return summary
     if value["selection_status"] == "blocked":
         rows.append({"check": "deleted_test_coverage", "status": "blocked", "code": 3})
 
@@ -174,10 +236,8 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
         frontend = [t["id"] for t in selected if t["surface"] == "frontend"]
         if frontend:
             report_path = output / "frontend-report.json"
-            argv = ["npm.cmd" if os.name == "nt" else "npm", "test", "--", "--reporter=json",
-                    "--pool=forks", "--maxWorkers=1", "--minWorkers=1",
-                    "--outputFile=" + str(report_path.resolve()), *[Path(p).relative_to("web").as_posix() for p in frontend]]
-            command("frontend", argv, root / "web")
+            assert frontend_argv is not None
+            command("frontend", frontend_argv, root / "web")
             reconcile("frontend", report_path, frontend)
     for check in value["required_checks"]:
         if check == "content_diff":

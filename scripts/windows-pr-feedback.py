@@ -129,9 +129,11 @@ def route(root: Path, event_name: str, event: dict[str, Any], head: str,
         value = json.loads(plan_path.read_text(encoding="utf-8"))
         # Import only after the existing CLI generated the plan successfully.
         sys.path.insert(0, str(root))
-        from scripts.test_selection.execution import check_plan
+        from scripts.test_selection.execution import check_plan, frontend_command
         check_plan(root, value)
         mode, reason = decision(value)
+        if mode == "selected" and value["selected_tests"]:
+            frontend_command(value, output / "execution/frontend-report.json")
         result.update(mode=mode, reason=reason, plan=str(plan_path),
                       frontend=mode == "selected" and bool(value["selected_tests"]))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, ImportError,

@@ -44,6 +44,12 @@ python scripts/select_tests.py execute --plan artifacts/test-plans/<unique-run>/
 
 初期 Draft 接线只允许三个已核验样式角色：`web/src/theme/tokens.css`、`web/src/layout/Sidebar.module.css`、`web/src/layout/TopBar.module.css`，且仍需原 dev 计划为纯 frontend、无 risk expansion / fallback / deleted tests / unclassified / unsupported。这是按 AGENTS §7 的展示范围缩减，不是把所有前端视为低风险；`services/chat.ts`、`services/pilotRuntime.ts`、认证/http、共享 types、确认/恢复 controller 以及装配多业务写入与草稿的 AppShell 均回 full。多文件和重命名两端取并集，出现一个未允许路径就回 full。依据见 [Pilot 地图](code-map/pilot-runtime.md) 与 [设置/桌面地图](code-map/settings-desktop.md)。其他范围和计划错误明确回现有 full。不得另行放宽 selector 的 content-only allowlist，尤其 prompt、template 和 runtime Markdown。
 
+## Windows 前端命令边界
+
+Windows 的 `npm.cmd` 经批处理入口受命令长度限制，298 个文件过滤参数实测达 14,831 字符，不能用 Linux 成功冒充 Windows 已验证。执行器仅在非空、无重复、规范化的 selected frontend 身份与冻结 catalog **完整集合相同**时省去冗余文件过滤参数；仍运行原 `npm test`，保留 pre/post 生命周期、配置、report、worker 参数及严格执行对账。真正子集仍携带原文件过滤参数。
+
+Windows 命令先检查引用后的 UTF-16 长度（保守 6,000 上限，为 npm/cmd 展开留余量）和批处理元字符。无法安全表达时，规划阶段回 full；执行阶段则在任何选测/后端命令启动前 blocked，不截断、不分批、不在执行失败后 fallback 洗绿。完整 Windows 候选的早期契约另以两个极小 Vitest 文件验证真实 npm/ProcessTree、全集合/子集和失败传播，不另给每个 pytest shard 安装前端依赖；其证据只是这条薄链，不等于完整 selected 或 release 验收。
+
 ## 平台限制
 
 保留来源 ProcessTree 子进程所有权与清理行为；唯一平台适配是以 `sys.platform` 判别 Windows，使 mypy 能分别检查平台代码，不屏蔽 Windows API 类型错误。Linux cleanup 回归和平台静态检查不替代真正 Windows ProcessTree / PowerShell 分组验证；未取得 native 证据前不能声称 Windows 完整门禁通过。
