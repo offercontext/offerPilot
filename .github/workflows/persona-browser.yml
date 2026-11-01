@@ -38,7 +38,7 @@ jobs:
       - name: Verify isolated server and strict request guards offline
         run: |
           uv run pytest -q tests/test_persona_browser_harness.py
-          node --test web/tests/persona/network-guard.test.mjs
+          node --test web/tests/persona/network-guard-contract.mjs
           node --test web/tests/companion/fixture-contract.mjs
           node web/tests/simplification/fixture-contract.mjs
       - name: Build actual production UI

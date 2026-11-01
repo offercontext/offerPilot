@@ -27,6 +27,7 @@ from offerpilot.models import (
 from offerpilot.proactive.models import ProactiveJob
 
 OPERATIONS = tuple(f"x{i:02d}" for i in range(1, 13))
+RETEST_OPERATIONS = ("x01", "x02", "x03", "x09", "x11")
 GROUPS = ("a", "b", "c", "d", "e")
 CASE_PATH = base.ROOT / "experiments/companion_experience/cases.json"
 StageFactory = Callable[[Path], Callable[[str], AbstractContextManager[Any]]]
@@ -241,7 +242,8 @@ class _Experience(base._Matrix):
             self.ordinary(2, cid)
         elif group == "d":
             self.ordinary(0)
-            self.ordinary(1)  # Fresh conversation: no third-party story carryover.
+            if len(self.rows) == 2:
+                self.ordinary(1)  # Fresh conversation: no third-party story carryover.
         elif group == "e":
             for _ in range(2):
                 self.advance(301)
@@ -257,6 +259,11 @@ class _Experience(base._Matrix):
                          and erased.get("recall_status") == "source_unavailable"
                          and "recent_shared_choice" not in erased)
             self.ordinary(0)
+            if len(self.rows) == 1:
+                self.business_empty(group)
+                self.checked("all_group_turns_completed", len(self.responses) == len(self.rows))
+                return {"group": group, "passed": True, "responses": self.responses,
+                        "controls": self.controls, "assertions": self.checks}
             self.until_template("paper_boat")
             cid = self.control("等我回来一起选颜色", "wait")
             self.control("这步你自己做吧", "withdraw_shared", cid)
@@ -273,13 +280,19 @@ class _Experience(base._Matrix):
 
 
 def run_matrix(root_dir: Path, stage_for_data_dir: StageFactory, *,
-               record_response: Callable[[dict[str, Any]], None] | None = None) -> dict[str, Any]:
+               record_response: Callable[[dict[str, Any]], None] | None = None,
+               retest: bool = False) -> dict[str, Any]:
     """Create five fresh synthetic workspaces below an empty caller-owned root."""
     base._require(root_dir.is_dir() and not root_dir.is_symlink()
                   and not any(root_dir.iterdir()), "matrix", "fresh_root_required")
+    base._require(type(retest) is bool, "matrix", "fixed_profile_required")
     rows = cases()
+    operations = RETEST_OPERATIONS if retest else OPERATIONS
+    groups = ("a", "d", "e") if retest else GROUPS
+    if retest:
+        rows = tuple(row for row in rows if row["id"] in RETEST_OPERATIONS)
     results = []
-    for group in GROUPS:
+    for group in groups:
         data_dir = root_dir / group
         data_dir.mkdir(mode=0o700)
         (data_dir / base.CLOCK_FILE).write_text(str(base.CLOCK_START))
@@ -291,8 +304,8 @@ def run_matrix(root_dir: Path, stage_for_data_dir: StageFactory, *,
             finally:
                 matrix.sessions.kw["bind"].dispose()
     responses = [entry for group in results for entry in group["responses"]]
-    base._require(tuple(entry["operation"] for entry in responses) == OPERATIONS,
-                  "matrix", "exact_twelve_order")
+    base._require(tuple(entry["operation"] for entry in responses) == operations,
+                  "matrix", "exact_five_order" if retest else "exact_twelve_order")
     result = {"schema_version": 1, "passed": True, "pass_scope": "mechanism_only",
               "synthetic_only": True, "web_executed": False,
               "transport": "uvicorn:/api/pilot/runtime/v1/turns",

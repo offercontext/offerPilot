@@ -51,10 +51,13 @@ class GateError(RuntimeError):
     """Safe error codes only: never stringify upstream errors."""
 
 
-def profile_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> ModuleType:
-    if (any(type(mode) is not bool for mode in (shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience))
-            or sum((shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)) > 1):
+def profile_lineage(*, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False, experience_retest: bool = False) -> ModuleType:
+    if (any(type(mode) is not bool for mode in (shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience, experience_retest))
+            or sum((shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience, experience_retest)) > 1):
         raise GateError("experiment_mode")
+    if experience_retest:
+        from scripts.companion_ai_validation import experience_retest_continuation
+        return experience_retest_continuation
     if experience:
         from scripts.companion_ai_validation import experience_continuation
         return experience_continuation
@@ -81,6 +84,7 @@ class RunWindow:
     shadow_projection: bool = False
     shadow_single_target: bool = False
     experience: bool = False
+    experience_retest: bool = False
     price_valid_until: float = field(init=False)
     started_monotonic: float = field(init=False)
     started_wall: float = field(init=False)
@@ -89,8 +93,8 @@ class RunWindow:
     _last_monotonic: float = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        lineage = profile_lineage(shadow_review=self.shadow_review, shadow_quote_v2=self.shadow_quote_v2, shadow_projection=self.shadow_projection, shadow_single_target=self.shadow_single_target, experience=self.experience)
-        quote = lineage.PRICE_VALID_UNTIL if (self.shadow_review or self.shadow_quote_v2 or self.shadow_projection or self.shadow_single_target or self.experience) else PRICE_VALID_UNTIL
+        lineage = profile_lineage(shadow_review=self.shadow_review, shadow_quote_v2=self.shadow_quote_v2, shadow_projection=self.shadow_projection, shadow_single_target=self.shadow_single_target, experience=self.experience, experience_retest=self.experience_retest)
+        quote = lineage.PRICE_VALID_UNTIL if (self.shadow_review or self.shadow_quote_v2 or self.shadow_projection or self.shadow_single_target or self.experience or self.experience_retest) else PRICE_VALID_UNTIL
         object.__setattr__(self, "price_valid_until", quote)
         monotonic, wall = time.monotonic(), time.time()
         if not math.isfinite(monotonic) or not math.isfinite(wall):
@@ -162,8 +166,8 @@ def _integer(value: Any, maximum: int) -> int:
     return value
 
 
-def usage_cost(response: dict[str, Any], *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False) -> tuple[int, int, int]:
-    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
+def usage_cost(response: dict[str, Any], *, shadow_review: bool = False, shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False, experience_retest: bool = False) -> tuple[int, int, int]:
+    profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience, experience_retest=experience_retest)
     usage = response.get("usage")
     if not isinstance(usage, dict):
         raise GateError("missing_usage")
@@ -303,9 +307,9 @@ class HTTPSUpstream:
 class Broker:
     def __init__(self, journal_path: Path, send: Callable[[bytes], tuple[int, bytes]],
                  source_sha: str, *, window: RunWindow | None = None, shadow_review: bool = False,
-                 shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False):
+                 shadow_quote_v2: bool = False, shadow_projection: bool = False, shadow_single_target: bool = False, experience: bool = False, experience_retest: bool = False):
         require_linux()
-        window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
+        window = window if window is not None else RunWindow(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience, experience_retest=experience_retest)
         if len(source_sha) != 40 or any(c not in "0123456789abcdef" for c in source_sha):
             raise GateError("source_sha")
         self._shadow_review = shadow_review
@@ -313,12 +317,13 @@ class Broker:
         self._shadow_projection = shadow_projection
         self._shadow_single_target = shadow_single_target
         self._experience = experience
-        if ((window.shadow_review, window.shadow_quote_v2, window.shadow_projection, window.shadow_single_target, window.experience)
-                != (shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience)):
+        self._experience_retest = experience_retest
+        if ((window.shadow_review, window.shadow_quote_v2, window.shadow_projection, window.shadow_single_target, window.experience, window.experience_retest)
+                != (shadow_review, shadow_quote_v2, shadow_projection, shadow_single_target, experience, experience_retest)):
             raise GateError("continuation_contract_mismatch")
-        lineage_module = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience)
+        lineage_module = profile_lineage(shadow_review=shadow_review, shadow_quote_v2=shadow_quote_v2, shadow_projection=shadow_projection, shadow_single_target=shadow_single_target, experience=experience, experience_retest=experience_retest)
         self._operations = lineage_module.OPERATIONS
-        self._max_requests = 6 if (shadow_review or shadow_quote_v2 or shadow_projection or shadow_single_target) else MAX_REQUESTS
+        self._max_requests = 5 if experience_retest else 6 if (shadow_review or shadow_quote_v2 or shadow_projection or shadow_single_target) else MAX_REQUESTS
         # There is no caller-, CLI- or environment-supplied opening balance. The
         # only continuation inherits the exact fully replayed original ledger.
         try:
@@ -528,7 +533,7 @@ class Broker:
             if status != 200:
                 raise GateError("upstream_status")
             response = decode(response_raw)
-            cost, prompt, completion = usage_cost(response, shadow_review=self._shadow_review, shadow_quote_v2=self._shadow_quote_v2, shadow_projection=self._shadow_projection, shadow_single_target=self._shadow_single_target, experience=self._experience)
+            cost, prompt, completion = usage_cost(response, shadow_review=self._shadow_review, shadow_quote_v2=self._shadow_quote_v2, shadow_projection=self._shadow_projection, shadow_single_target=self._shadow_single_target, experience=self._experience, experience_retest=self._experience_retest)
             response_content(response)
             pending_state = dict(self._state)
             self._state["settled_micro_cny"] += cost

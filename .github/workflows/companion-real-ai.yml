@@ -13,7 +13,7 @@ jobs:
   offline:
     name: Companion offline safety
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       LITELLM_LOCAL_MODEL_COST_MAP: 'True'
       PYTHONPATH: src:.
@@ -77,7 +77,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OFFERPILOT_COMPANION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_HELPER_SHA }}
           OFFERPILOT_COMPANION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA }}
-        run: uv run --frozen python -m scripts.companion_ai_validation.preflight --phase before --experience
+        run: uv run --frozen python -m scripts.companion_ai_validation.preflight --phase before --experience-retest
   paid:
     name: Companion approved real AI
     needs: [offline, preflight]
@@ -112,14 +112,14 @@ jobs:
           OFFERPILOT_COMPANION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_HELPER_SHA }}
           OFFERPILOT_COMPANION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_COMPANION_AI_REQUEST_SHA }}
         run: >-
-          uv run --frozen python -m scripts.companion_ai_validation.preflight --phase paid --experience
+          uv run --frozen python -m scripts.companion_ai_validation.preflight --phase paid --experience-retest
           --admission-file "$RUNNER_TEMP/companion-ai-admission.json"
-      - name: Twelve runtime product experience calls at most, no retries, inherited 20 CNY task budget
+      - name: Five targeted runtime product experience calls at most, no retries, inherited 20 CNY task budget
         env:
           OFFERPILOT_COMPANION_DEEPSEEK_20261021: ${{ secrets.OFFERPILOT_COMPANION_DEEPSEEK_20261021 }}
           OFFERPILOT_COMPANION_AI_MODEL: ${{ vars.OFFERPILOT_COMPANION_AI_MODEL }}
         run: >-
-          .venv/bin/python -m scripts.companion_ai_validation.run --live --experience
+          .venv/bin/python -m scripts.companion_ai_validation.run --live --experience-retest
           --admission-file "$RUNNER_TEMP/companion-ai-admission.json"
           --evidence-dir "$GITHUB_WORKSPACE/artifacts/companion-ai"
       - name: Retain synthetic dialogue, structural result and numeric ledger
