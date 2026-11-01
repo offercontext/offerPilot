@@ -228,11 +228,13 @@ def test_collection_failure_removes_stale_manifest(tiny_repo):
 
 def test_workflow_keeps_complete_gate_and_bounded_non_cancelling_shards():
     workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
-    assert "max-parallel: 2" in workflow
+    assert "      max-parallel: 2" in workflow.splitlines()
     assert "fail-fast: false" in workflow
-    assert "cancel-in-progress:" not in workflow
+    shards = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
+    assert "cancel-in-progress:" not in shards
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
     assert "timeout-minutes: 90" in workflow
-    assert "needs: [pytest-manifest, pytest-shards, simplification-helper-safety]" in workflow
+    assert "needs: [pr-feedback, pytest-manifest, pytest-shards, simplification-helper-safety]" in workflow
     assert "-Install -PytestEvidence pytest-evidence" in workflow
     assert "  pull_request:\n    branches: [master]" in workflow
     assert "paths-ignore:" not in workflow
@@ -324,6 +326,12 @@ def test_node_split_source_change_requires_a_new_isolation_review():
     # methods. The provider exits via Future.result before timeout recovery;
     # the busy SQLite writer is closed after finally rolling back its lock.
     # Include the shared helper, since its state is part of chat node isolation.
+    # Independently re-reviewed selector registration: without selection options,
+    # the plugin adds priority markers and appends per-process observation reports,
+    # but never filters/reorders nodes or changes fixture lifetimes. Each shard
+    # owns its worker; exact-node and static/dynamic scope guards remain active.
+    # A real plugin-loaded two-shard probe passed all four nodes; an injected
+    # autouse session fixture still refused splitting. Bind the plugin source too.
     # Normalize only checkout CRLF so the same reviewed source works on Windows.
     reviewed = {
         "tests/test_chat_api.py":
@@ -331,7 +339,9 @@ def test_node_split_source_change_requires_a_new_isolation_review():
         "tests/_agent_timeout.py":
             "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735",
         "tests/conftest.py":
-            "3e37887773fd017242ddc6ecc514218c381da2bbb66f2379e97c3f2153e8c675",
+            "68f662a1cf68d40c9389c91d00f3c44b05936ea927de545c34aa38a0680e6e1f",
+        "scripts/test_selection/pytest_plugin.py":
+            "bdf8a6bcb52a6b77c8ab586a842266789f40ba3c56aaff36cfc4391a23e8fdef",
     }
     for name, expected in reviewed.items():
         source = (ROOT / name).read_bytes().replace(b"\r\n", b"\n")
@@ -639,7 +649,7 @@ def test_workflow_preserves_120_minute_shard_budget():
     workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
     shard_job = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
     assert "timeout-minutes: 120" in shard_job
-    assert "max-parallel: 2" in shard_job
+    assert "      max-parallel: 2" in shard_job.splitlines()
     assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]" in shard_job
 
 
