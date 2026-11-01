@@ -5372,9 +5372,7 @@ def create_app(
         durable = pilot_controls.get_runtime_execution(turn_id, generation)
         if durable is None or not _runtime_execution_readable(durable):
             return None
-        target_generation = generation
-        if durable is not None:
-            target_generation = int(durable["execution_generation"])
+        target_generation = int(durable["execution_generation"])
         manager_status: dict[str, Any] | None = None
         try:
             manager_status = cast(
@@ -5382,7 +5380,15 @@ def create_app(
             )
         except (RuntimeTurnNotFound, RuntimeManagerError):
             manager_status = None
-        if durable is None and manager_status is None:
+        # Watchdog/control can commit a terminal state between the first
+        # durable read and the manager read. Re-read that exact generation
+        # afterward so a stale running row cannot mask its durable terminal.
+        # Sources may also have been withdrawn during the manager read.
+        durable = pilot_controls.get_runtime_execution(turn_id, target_generation)
+        if durable is None or not _runtime_execution_readable(durable):
+            return None
+        if (manager_status is not None
+                and int(manager_status["execution_generation"]) != target_generation):
             return None
         if manager_status is not None:
             status = dict(manager_status)
