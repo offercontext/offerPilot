@@ -191,6 +191,9 @@ def test_skip():
     for index in range(2):
         ran = invoke(tiny_repo, "run", "--index", str(index))
         assert ran.returncode == 0, ran.stdout + ran.stderr
+        assert '"event": "pytest-progress"' in ran.stderr
+        assert '"phase": "start"' in ran.stderr
+        assert '"phase": "finish"' in ran.stderr
         evidence = json.loads((tiny_repo / f"evidence/shard-{index}.json").read_text())
         for phases in evidence["reports"].values():
             for phase in phases:
@@ -356,6 +359,9 @@ def test_isolated(tmp_path, value):
     for index in range(2):
         ran = invoke(tiny_repo, "run", "--index", str(index))
         assert ran.returncode == 0, ran.stdout + ran.stderr
+        assert '"event": "pytest-progress"' in ran.stderr
+        assert '"phase": "start"' in ran.stderr
+        assert '"phase": "finish"' in ran.stderr
     summary = invoke(tiny_repo, "aggregate")
     assert summary.returncode == 0, summary.stderr
     assert json.loads(summary.stdout)["passed"] == 4
@@ -765,3 +771,27 @@ def test_refreshed_history_partition_keeps_exact_nodes_and_module_lifecycles():
     gate.validate_manifest(manifest)
     assert manifest["allowed_skips"] is None
     assert gate.digest(manifest) == gate.digest({**manifest, "shards": gate.partition(nodes[::-1], 20)})
+
+
+def test_progress_survives_capture_without_parameter_content(monkeypatch):
+    import io
+    sink = io.StringIO()
+    monkeypatch.setattr(sys, "__stderr__", sink)
+    node = "tests/test_case.py::test_case[private-parameter]"
+    gate.emit_progress(node, "start")
+    record = json.loads(sink.getvalue())
+    assert record["phase"] == "start"
+    assert record["test"] == "tests/test_case.py::test_case"
+    assert record["node_sha256"] == hashlib.sha256(node.encode()).hexdigest()
+    assert "private-parameter" not in sink.getvalue()
+    if sys.platform == "win32":
+        assert record["rss_bytes"] > 0
+        assert record["peak_rss_bytes"] >= record["rss_bytes"]
+
+
+def test_progress_output_failure_does_not_change_gate_outcome(monkeypatch):
+    class BrokenStream:
+        def write(self, value):
+            raise OSError("closed runner stream")
+    monkeypatch.setattr(sys, "__stderr__", BrokenStream())
+    gate.emit_progress("tests/test_case.py::test_case", "finish")

@@ -15,6 +15,7 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import time
 
 # Reviewed after Windows shard 0 exceeded 90 minutes: 390 chat cases have
 # function-local state and no shared custom fixtures. All shards already import
@@ -258,6 +259,44 @@ def aggregate(manifest, directory):
             "manifest": digest(manifest)}
 
 
+def emit_progress(node, phase):
+    """Best-effort diagnostics only; never used as test result evidence.
+
+    Bypass pytest capture so the hosted log receives the last started test even
+    when the runner disappears before the final shard JSON can be uploaded.
+    Parameter bodies are omitted; a digest disambiguates parametrized cases.
+    """
+    record = {"event": "pytest-progress", "phase": phase,
+              "test": node.split("[", 1)[0][:200],
+              "node_sha256": hashlib.sha256(node.encode()).hexdigest(),
+              "pid": os.getpid(), "time": time.time()}
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            class Counters(ctypes.Structure):
+                _fields_ = [("cb", wintypes.DWORD), ("faults", wintypes.DWORD)] + [
+                    (name, ctypes.c_size_t) for name in (
+                        "peak_rss", "rss", "peak_paged", "paged", "peak_nonpaged",
+                        "nonpaged", "pagefile", "peak_pagefile")]
+
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.GetCurrentProcess.restype = wintypes.HANDLE
+            query = ctypes.WinDLL("psapi", use_last_error=True).GetProcessMemoryInfo
+            query.argtypes = [wintypes.HANDLE, ctypes.POINTER(Counters), wintypes.DWORD]
+            query.restype = wintypes.BOOL
+            counters = Counters()
+            counters.cb = ctypes.sizeof(counters)
+            if query(kernel.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+                record.update(rss_bytes=counters.rss, peak_rss_bytes=counters.peak_rss,
+                              pagefile_bytes=counters.pagefile)
+        print(json.dumps(record), file=sys.__stderr__, flush=True)
+    except (OSError, ValueError, AttributeError):
+        # Diagnostics cannot turn a passing test into a failure or hide one.
+        pass
+
+
 def worker(args):
     import pytest
 
@@ -269,6 +308,12 @@ def worker(args):
     nodes, selected, reports, collection_skips = [], [], {}, []
 
     class Evidence:
+        def pytest_runtest_logstart(self, nodeid, location):
+            emit_progress(nodeid, "start")
+
+        def pytest_runtest_logfinish(self, nodeid, location):
+            emit_progress(nodeid, "finish")
+
         def pytest_fixture_setup(self, fixturedef, request):
             # getfixturevalue() can acquire fixtures absent from static closure.
             # Runtime effective scope also covers indirect parametrization.
