@@ -21,6 +21,8 @@ from fastapi.testclient import TestClient
 
 from offerpilot.api import create_app
 
+pytest_plugins = ["scripts.test_selection.pytest_plugin"]
+
 
 def symlink_or_skip(link: Path, target: Path, *, target_is_directory: bool = False) -> None:
     """Create a symlink, skipping only when the host lacks symlink capability."""

@@ -70,7 +70,7 @@ describe('projectInterviewEventCard', () => {
   it.each([
     { scheduled_at_state: 'absent' }, { scheduled_at: '', scheduled_at_state: 'present' }, { duration_minutes: 0 },
     { event_status: 'mystery' },
-  ])('returns unavailable for contract failures', (overrides) => {
+  ])('returns unavailable for contract failures (case %#)', (overrides) => {
     expect(project(overrides)).toMatchObject({ bucket: 'unavailable', primaryAction: 'none', secondaryAction: 'retry' });
   });
 

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { message } from 'antd';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -122,11 +123,17 @@ beforeEach(() => {
   root = createRoot(container);
 });
 
-afterEach(() => {
-  act(() => root?.unmount());
-  container?.remove();
-  vi.useRealTimers();
-  vi.restoreAllMocks();
+afterEach(async () => {
+  try {
+    // Static messages own a separate root: unmounting the drawer does not
+    // cancel their expiry timers before Vitest destroys this jsdom window.
+    await act(async () => { message.destroy(); root?.unmount(); });
+    expect(document.querySelector('.ant-message')).toBeNull();
+  } finally {
+    container?.remove();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  }
 });
 
 describe('InterviewStoryDrawer', () => {
