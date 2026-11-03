@@ -68,7 +68,7 @@ def test_server_app_uses_fresh_config_fake_models_and_real_routes(tmp_path, stat
         assert client.get("/").status_code == 200
         assert client.get("/__persona_browser__/health").json() == {
             "synthetic": True, "fake_model": True, "isolated_data": True, "outbound_blocked": True}
-        assert client.get("/api/companion").json()["settings"]["enabled"] is False
+        assert client.get("/api/companion").json()["settings"]["enabled"] is True
         assert client.get("/api/companion").json()["settings"]["proactivity"] == "off"
         original = client.get("/api/companion/persona").json()
         payload = {"profile_id": original["profile_id"], "expected_revision": original["revision"],

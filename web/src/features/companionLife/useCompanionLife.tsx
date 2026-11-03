@@ -1,3 +1,4 @@
+import { publishCompanionSnapshot, setCompanionDisabledPending } from '@/features/companionPersona/useCompanionName';
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { getCompanion, sendCompanionCommand, reportCompanionPresence, claimCompanionBid } from '@/services/companion';
 import type { PilotConversationController } from '@/features/assistantSurface/usePilotConversationController';
@@ -39,13 +40,16 @@ export function useCompanionLifeController(controller: PilotConversationControll
   const signalRef = useRef(signals); signalRef.current = signals;
   const apply = useCallback((next: CompanionSnapshot) => {
     if (!mounted.current) return;
+    const initialSnapshot = !current.current;
     const accepted = acceptCompanionSnapshot(current.current, next);
-    if (current.current && accepted.identity !== current.current.identity) {
+    const identityChanged = current.current && accepted.identity !== current.current.identity;
+    if (identityChanged) {
       epoch.current += 1; setBid(null); setOptimisticQuiet(false);
       if (unresolved.current) setError('日常状态已变化，请核对后再操作。');
       unresolved.current = null; setUncertain(false);
     }
-    current.current = accepted; setSnapshot(accepted);
+    current.current = accepted; setSnapshot(accepted); publishCompanionSnapshot(accepted);
+    if (initialSnapshot || identityChanged) setCompanionDisabledPending(false);
   }, []);
   const refresh = useCallback(async () => {
     const readEpoch = epoch.current;
@@ -61,6 +65,7 @@ export function useCompanionLifeController(controller: PilotConversationControll
       if (!mounted.current) return;
       presenceSequence.current += 1;
       apply(next);
+      if (command.kind === 'settings') setCompanionDisabledPending(false);
       if (command.kind === 'event' && (command.body.event === 'quiet_session' || command.body.event === 'resume_session')) setOptimisticQuiet(false);
       unresolved.current = null; setUncertain(false); setNetworkFailure(false);
     } catch (cause) {
@@ -71,6 +76,7 @@ export function useCompanionLifeController(controller: PilotConversationControll
       }
       const status = (cause as { response?: { status?: number } }).response?.status;
       if (status === 409 || status === 422 || status === 400) {
+        if (command.kind === 'settings') setCompanionDisabledPending(false);
         if (command.kind === 'event' && (command.body.event === 'quiet_session' || command.body.event === 'resume_session')) setOptimisticQuiet(false);
         unresolved.current = null; setUncertain(false);
         if (reportConflict) setError('日常状态已变化，请核对后再操作。');
@@ -100,7 +106,8 @@ export function useCompanionLifeController(controller: PilotConversationControll
   }, [event]);
   const updateSettings = useCallback((settings: CompanionSettings) => {
     const state = current.current;
-    if (!state || unresolved.current) return;
+    if (!state || locked.current || unresolved.current) return;
+    if (!settings.enabled) setCompanionDisabledPending(true);
     setBid(null);
     return execute({ kind: 'settings', body: { identity: state.identity, expected_revision: state.revision, command_id: crypto.randomUUID(), settings } });
   }, [execute]);

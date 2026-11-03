@@ -38,6 +38,8 @@
 
 ## 4. 图片与上下文
 
+2026-11-03 陪伴总开关：接纳同时冻结 `companion_enabled_v1` 与原人设身份；`_bind_persona_source`、两个 admitted loader 门控当前表达，关闭返回普通 Pilot 而不改历史/绑定。`_ContextAdapter` 选择普通安全策略；`_AgentDriver` 的表达检查经 `_LoopServices._before_provider_attempt` 覆盖每次模型候选与确认续跑，不能因关闭取消 provider-free 已授权写入。回归见 [总开关](../../../tests/test_companion_master_switch.py) 与 [物理调用撤回](../../../tests/test_companion_provider_gate.py)。
+
 `ChatImageStore.upload` 先完整保存规范化文件，再发布数据库附件；`resolve_in_session` 校验作用域/内容，`bind_in_session` 将附件绑定消息并冻结引用；历史模型读取还检查尺寸/哈希及当前授权。已绑定图片跟随会话归属，未绑定草稿受创建范围限制。
 
 2026-11-01 陪伴整合边界：`companion/chat.py::freeze_chat_command` 只冻结闭合纯文本生活命令，携图请求不能因文字匹配而取得该指令来源；`DeterministicPilotAdapter.matches` 也先排图片。人设通过接纳 Turn 的 `source_versions_json` 绑定不可变 revision，`_ContextAdapter.assemble` 同时保留当前图片策略和该人设表达，不把历史人设当作权限策略。交叉回归见 [图片与人设](../../../tests/test_companion_image_integration.py)、[人设冻结与恢复](../../../tests/test_persona_runtime.py)。

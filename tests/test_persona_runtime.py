@@ -14,6 +14,8 @@ from offerpilot.api import (
 from offerpilot.companion.persona import companion_persona_policy, persona_profile_message
 from offerpilot.companion.persona_contracts import PersonaSpec, PersonaUpdateCommand
 from offerpilot.companion.persona_repository import PersonaRepository, capture_persona_binding
+from offerpilot.companion.repository import CompanionRepository
+from tests._companion import enable_companion
 from offerpilot.db import init_database, session_factory_for_data_dir
 from offerpilot.models import ChatMessage, PilotTurnRecord
 from tests.test_companion_context import companion as companion
@@ -54,6 +56,7 @@ def test_compiler_is_separate_bounded_data_without_authority_or_binding_ids():
 
 def test_active_change_does_not_change_admitted_source_and_legacy_is_official(tmp_path):
     sessions = init_database(tmp_path / 'binding.db')
+    enable_companion(CompanionRepository(sessions))
     repo = PersonaRepository(sessions)
     update(repo, '旧名字')
     source = _FrozenChatSourceMessages((), None, (), conversation_id=9,
@@ -86,6 +89,7 @@ def test_acceptance_freezes_before_execution_and_next_turn_changes(tmp_path, mon
     model = CountingModel()
     app = create_app(data_dir=tmp_path, chat_model=model)
     sessions = session_factory_for_data_dir(tmp_path)
+    enable_companion(CompanionRepository(sessions))
     repo = PersonaRepository(sessions)
     original = update(repo, old_name)
     old_with_ports = PilotRuntime.with_start_ports
@@ -161,6 +165,7 @@ def test_durable_binding_survives_restart_confirmation_and_replay(tmp_path, lega
 
     model = ResumingModel()
     sessions = session_factory_for_data_dir(tmp_path)
+    enable_companion(CompanionRepository(sessions))
     repo = PersonaRepository(sessions)
     original = update(repo, '确认前名字')
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:

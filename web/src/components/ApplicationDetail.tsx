@@ -1493,7 +1493,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
   };
 
   const moreActionItems = [
-    ...(onAskPilot ? [{ key: 'haru', label: t("让 Haru 帮我"), onClick: () => onAskPilot(application, { type: 'application_jd_save' }) }] : []),
+    ...(onAskPilot ? [{ key: 'haru', label: t("让 Pilot 帮我"), onClick: () => onAskPilot(application, { type: 'application_jd_save' }) }] : []),
     { key: 'jd', label: applicationJdQuery.data?.current ? t("编辑岗位资料") : t("添加岗位资料"), onClick: startJdEditor },
     { key: 'schedule', label: t("安排日程"), onClick: () => openScheduleForm(getScheduleTrigger('more'), 'more') },
   ];
@@ -1947,7 +1947,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
                 type="warning"
                 showIcon
                 message={t("有一项助手操作正在等待处理")}
-                description={t("请先在 Haru / Pilot 中完成确认；当前投递任务不会替换或暴露其他操作的身份。")}
+                description={t("请先在 Pilot 中完成确认；当前投递任务不会替换或暴露其他操作的身份。")}
               />
           ) : null}
           <div className={styles.preparationGrid}>

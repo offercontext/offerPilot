@@ -117,7 +117,7 @@ def build_app(data_dir: Path, evidence_dir: Path, static_dir: Path) -> Any:
     current = life.read()
     life.update_settings(CompanionSettingsCommand(
         identity=current["identity"], expected_revision=current["revision"], command_id=uuid4(),
-        settings=CompanionPolicy(enabled=False, proactivity="off"),
+        settings=CompanionPolicy(enabled=True, proactivity="off"),
     ))
     app.state.persona_qa_evidence = counts
 

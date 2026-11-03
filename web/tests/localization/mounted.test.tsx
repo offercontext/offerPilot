@@ -101,7 +101,7 @@ describe('real AppShell localization with strict synthetic API fixtures', () => 
     await mount('settings');
     const lifeSettings = await waitForUi('companion settings', () => document.querySelector<HTMLElement>('section[aria-labelledby="companion-life-settings-title"]') ?? undefined);
     expect(document.querySelectorAll('section[aria-labelledby="companion-life-settings-title"]')).toHaveLength(1);
-    expect(lifeSettings.querySelector('[aria-label="开启虚拟日常"]')?.getAttribute('aria-checked')).toBe('false');
+    expect(lifeSettings.querySelector('[aria-label="开启陪伴功能"]')?.getAttribute('aria-checked')).toBe('false');
     expect(document.querySelector('[data-companion-life]')).toBeNull();
     expect(document.querySelector('section[aria-labelledby="proactive-settings-title"]')).not.toBeNull();
     expect(state.api.requests.filter((request: any) => request.path === '/api/proactive/jobs')).toEqual([]);

@@ -811,6 +811,7 @@ class _LoopServices:
         records: list[ToolExecutionRecord[Any, Any]] | None = None,
         failures: list[ToolFailure] | None = None,
         delivery_fence: Callable[[], bool] | None | object = _NO_OVERRIDE,
+        before_provider_attempt: Callable[[AgentLoopInvocation], None] | None = None,
     ) -> None:
         model = invocation.model
         self.model = (
@@ -842,6 +843,7 @@ class _LoopServices:
         self.records = [] if records is None else records
         self.failures = [] if failures is None else failures
         self.runner_invocation = invocation
+        self.before_provider_attempt = before_provider_attempt
         self._prepare_identities: dict[int, NewTurnPrepareCallIdentity] = {}
         self._provider_invocations: dict[int, ProviderInvocationIdentity] = {}
         self._pending_claims: dict[int, PendingAuthorityClaim] = {}
@@ -1092,6 +1094,8 @@ class _LoopServices:
         """
 
         self.require_active()
+        if self.before_provider_attempt is not None:
+            self.before_provider_attempt(self.runner_invocation)
         reserve_model_call = getattr(self.runtime_budget, "reserve_model_call", None)
         if callable(reserve_model_call):
             reserve_model_call(purpose="agent")
@@ -1627,6 +1631,7 @@ class AgentLoopRunner:
         *,
         run_recorder: RunRecorder | None = None,
         event_sink: AgentEventSink | None | object = _NO_OVERRIDE,
+        before_provider_attempt: Callable[[AgentLoopInvocation], None] | None = None,
     ) -> AgentTurnResult:
         if type(invocation) is not AgentLoopInvocation:
             raise TypeError("AgentLoopRunner requires exact AgentLoopInvocation")
@@ -1647,6 +1652,7 @@ class AgentLoopRunner:
                     invocation,
                     run_recorder=run_recorder,
                     event_sink=event_sink,
+                    before_provider_attempt=before_provider_attempt,
                 ),
                 owned_leases,
             )
@@ -1919,6 +1925,7 @@ class AgentLoopRunner:
             records=records,
             failures=failures,
             delivery_fence=services.delivery_fence,
+            before_provider_attempt=services.before_provider_attempt,
         )
         active_services.raise_if_cancelled()
         active_seed = active_invocation.seed

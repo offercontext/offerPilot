@@ -10,6 +10,11 @@ import CompanionLifeStatus from './CompanionLifeStatus';
 import CompanionLifeSettings from './CompanionLifeSettings';
 import { CompanionLifeContext, type CompanionLifeController } from './useCompanionLife';
 import type { CompanionSnapshot } from './contracts';
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
 vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/i18n/modal', () => ({ localizedModal: vi.fn() }));
 let root: Root, host: HTMLDivElement, life: CompanionLifeController;

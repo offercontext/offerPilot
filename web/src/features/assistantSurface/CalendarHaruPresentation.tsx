@@ -1,3 +1,4 @@
+import { companionText, useCompanionName } from '@/features/companionPersona/useCompanionName';
 import { t, useLocale } from '@/i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { Dropdown } from 'antd';
@@ -25,6 +26,7 @@ const ACTIVITY_LABELS: Record<PilotMascotActivity, string> = {
 export default function CalendarHaruPresentation({ activity, panelOpen, onToggle, triggerRef, onAnchorRectChange, animationLevel = 'minimal' }: Props) {
   const pageVisible = useMascotVisibility();
   useLocale();
+  const companionName = useCompanionName();
   const [mode, setMode] = useState(readHaruPresentation);
   const [viewport, setViewport] = useState(() => ({ width: typeof window === 'undefined' ? 1440 : window.innerWidth, height: typeof window === 'undefined' ? 900 : window.innerHeight }));
   const [menuOwner, setMenuOwner] = useState<'context' | 'more' | null>(null);
@@ -73,13 +75,13 @@ export default function CalendarHaruPresentation({ activity, panelOpen, onToggle
   const items = (['compact', 'character'] as const).map((value) => ({ key: value, role: 'menuitemradio', 'aria-checked': mode === value, icon: mode === value ? <CheckOutlined /> : <span className={styles.blankCheck} />, label: t(value === 'compact' ? '小窗展示' : '人物展示'), onClick: () => choose(value) }));
   return (
     <div className={styles.presentation} data-haru-mode={effective} data-haru-preference={mode} data-haru-status={activity}>
-      <Dropdown trigger={['contextMenu']} open={menuOwner === 'context'} onOpenChange={(open) => setMenuOwner((owner) => open ? 'context' : owner === 'context' ? null : owner)} autoFocus autoAdjustOverflow menu={{ items, 'aria-label': t('Haru 展示') }}>
-        <button ref={triggerRef} className={styles.launcher} aria-label={t('Haru · {status} · {action}', { status, action: t(panelOpen ? '收起对话' : '打开对话') })} aria-expanded={panelOpen} aria-controls="haru-chat-window" onClick={onToggle} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); setMenuOwner('context'); } }}>
+      <Dropdown trigger={['contextMenu']} open={menuOwner === 'context'} onOpenChange={(open) => setMenuOwner((owner) => open ? 'context' : owner === 'context' ? null : owner)} autoFocus autoAdjustOverflow menu={{ items, 'aria-label': companionText(t('Haru 展示'), companionName) }}>
+        <button ref={triggerRef} className={styles.launcher} aria-label={companionText(t('Haru · {status} · {action}', { status, action: t(panelOpen ? '收起对话' : '打开对话') }), companionName)} aria-expanded={panelOpen} aria-controls="haru-chat-window" onClick={onToggle} onKeyDown={(event) => { if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) { event.preventDefault(); setMenuOwner('context'); } }}>
           <span className={styles.portrait} aria-hidden="true"><span className={styles.modelFrame}><canvas ref={canvas} /></span>{failed && <span className={styles.fallback}><MessageOutlined /></span>}</span>
-          <span className={styles.caption}><span className={styles.dot} />Haru{activity !== 'idle' && <small>{status}</small>}</span>
+          <span className={styles.caption}><span className={styles.dot} />{companionName}{activity !== 'idle' && <small>{status}</small>}</span>
         </button>
       </Dropdown>
-      <Dropdown trigger={['click']} open={menuOwner === 'more'} onOpenChange={(open) => setMenuOwner((owner) => open ? 'more' : owner === 'more' ? null : owner)} autoFocus menu={{ items, 'aria-label': t('Haru 展示') }} autoAdjustOverflow><button className={styles.more} aria-label={t("Haru 展示方式")}><EllipsisOutlined /></button></Dropdown>
+      <Dropdown trigger={['click']} open={menuOwner === 'more'} onOpenChange={(open) => setMenuOwner((owner) => open ? 'more' : owner === 'more' ? null : owner)} autoFocus menu={{ items, 'aria-label': companionText(t('Haru 展示'), companionName) }} autoAdjustOverflow><button className={styles.more} aria-label={companionText(t("Haru 展示方式"), companionName)}><EllipsisOutlined /></button></Dropdown>
     </div>
   );
 }

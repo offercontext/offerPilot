@@ -9,6 +9,11 @@ import CompanionPersonaSettings from './CompanionPersonaSettings';
 import { companionText, publishPersona, useCompanionName } from './useCompanionName';
 import { retainPendingPersonaMutation } from './pendingPersonaMutation';
 import { personaDifferences, validPersona } from './personaModel';
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
 vi.mock('@/services/persona', () => ({ ACTIVITY_TEMPLATES: ['paper_boat', 'cloud_catalog', 'paper_stars'], getPersona: vi.fn(), getPersonaRevisions: vi.fn(), mutatePersona: vi.fn() }));
 let host: HTMLDivElement, root: Root;
 const spec: PersonaSpec = { display_name: 'Haru', traits: ['gentle'], speaking_style: '', verbosity: 'balanced', interests_text: '', fictional_background: '', additional_style_notes: '', enabled_activity_templates: ['paper_boat', 'cloud_catalog', 'paper_stars'] };

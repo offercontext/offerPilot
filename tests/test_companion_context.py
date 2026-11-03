@@ -21,7 +21,7 @@ from offerpilot.companion.contracts import (
     CompanionEventCommand, CompanionPolicy, CompanionResetCommand, CompanionSettingsCommand,
 )
 from offerpilot.companion.models import CompanionState
-from offerpilot.companion.persona import PERSONA_VERSION, companion_persona_policy
+from offerpilot.companion.persona import PERSONA_VERSION, plain_pilot_safety_policy
 from offerpilot.companion.repository import CompanionRepository
 from offerpilot.context_projector.budget import ProviderBudget
 from offerpilot.context_projector.contracts import (
@@ -142,7 +142,7 @@ def test_promised_participation_is_not_completion_and_virtual_flags_are_not_evid
     assert completed["virtual_activity"]["status"] != "completed"
 
 
-def test_disabled_life_is_omitted_without_disabling_shared_persona(companion):
+def test_disabled_life_is_omitted_and_plain_pilot_keeps_safety(companion):
     _, repository, loader = companion
     first = event(repository, "app_open")
     repository.update_settings(CompanionSettingsCommand(
@@ -151,8 +151,8 @@ def test_disabled_life_is_omitted_without_disabling_shared_persona(companion):
     ), now=1001)
     assert context_data(loader) is None
     assert companion_context_message(None) is None
-    policy = companion_persona_policy()
-    assert PERSONA_VERSION in policy
+    policy = plain_pilot_safety_policy()
+    assert PERSONA_VERSION not in policy
     assert "用户当前请求与求职工作优先" in policy
     assert "不因用户离开、拒绝、暂停或不回复" in policy
     assert "没有已保存来源或系统执行回执时，不得声称已修改活动" in policy
@@ -302,8 +302,9 @@ def test_shared_chat_runtime_keeps_life_before_request_and_out_of_work_and_memor
         })
         assert response.status_code == 200, response.text
         assert not any("以下是带来源的角色日常参考数据" in message.content for message in requests[-1][0])
-        assert any(PERSONA_VERSION in message.content for message in requests[-1][0]
-                   if message.role == "system")
+        assert not any(PERSONA_VERSION in message.content for message in requests[-1][0]
+                       if message.role == "system")
+        assert any("当前使用普通 Pilot" in message.content for message in requests[-1][0])
     with sqlite3.connect(tmp_path / "data.db") as connection:
         assert connection.execute("SELECT count(*) FROM confirmed_memories").fetchone()[0] == 0
         # Only the authored app-open event exists. Model dialogue never advances life.

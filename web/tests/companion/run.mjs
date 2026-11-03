@@ -31,7 +31,7 @@ const names = {
   complete: /^(约好的一步完成了|The agreed step is complete)$/,
   view: /^(查看日常活动|View daily life activity)$/,
   hide: /^(隐藏日常状态|Hide daily life status)$/,
-  enabled: /^(开启虚拟日常|Enable virtual daily life)$/,
+  enabled: /^(开启陪伴功能|Enable companion features)$/,
 };
 const status = page => page.getByRole('button', { name: names.status });
 const details = page => page.locator(`section[aria-label="Haru 的虚拟日常"], section[aria-label="Haru's virtual daily life"]`);
