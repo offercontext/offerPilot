@@ -9295,6 +9295,19 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_current_goal_migration.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
     }
   },
   "safety_baseline": "tests/selection-safety-integrated-v1.json"

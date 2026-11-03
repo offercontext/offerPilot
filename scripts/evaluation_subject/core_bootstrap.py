@@ -80,6 +80,11 @@ class ScriptModel:
                 if item != "E08.runtime_deadline":
                     time.sleep(3)
         if item.startswith("E09."):
+            if self.channel.config.get("fixture_id") == "synthetic-e09-current-goal-v1":
+                fixture = json.loads(
+                    (ROOT / "evals/fixtures/synthetic-e09-current-goal-v1.json").read_bytes()
+                )
+                return Assistant(content=fixture["scripted_answer"])
             return Assistant(content="已按本次要求调整。\n只保留两个短句。")
         if item.startswith("E10."):
             text = "\n".join(texts)
@@ -409,7 +414,10 @@ def serve(channel: Channel) -> None:
         from offerpilot.config import Config, AIProviderProfile, save_config
 
         if config["epoch"] == 1:
-            aliases = prepare(data, ROOT, action_id, config["trial_key"]["execution_item_id"])
+            aliases = prepare(
+                data, ROOT, action_id, config["trial_key"]["execution_item_id"],
+                fixture_id=config.get("fixture_id", "synthetic-core-v1"),
+            )
             save_config(
                 data,
                 Config(

@@ -41,6 +41,14 @@ def load_core_suite(path: Path) -> tuple[SuiteV2, dict[str, CaseSpecV2]]:
     return suite, cases
 
 
+def fixture_hash(fixture_id: str) -> str:
+    if fixture_id == "synthetic-core-v1":
+        return file_hash(ROOT / "evals/fixtures/synthetic-core-v1.json")
+    names = ["synthetic-interviews-v1.json", "synthetic-core-v1.json"]
+    names.append(f"{fixture_id}.json")
+    return digest({name: file_hash(ROOT / "evals/fixtures" / name) for name in names})
+
+
 def create_plan(
     suite_path: Path,
     variants_path: Path,
@@ -106,20 +114,9 @@ def create_plan(
             case_id=spec.case_id,
             case_version=spec.case_version,
             spec_hash=digest(spec.model_dump(mode="json")),
-            fixture_hash=file_hash(ROOT / "evals/fixtures/synthetic-core-v1.json")
-            if spec.fixture_id == "synthetic-core-v1"
-            else digest(
-                {
-                    name: file_hash(ROOT / "evals/fixtures" / name)
-                    for name in (
-                        "synthetic-interviews-v1.json",
-                        "synthetic-core-v1.json",
-                        "synthetic-core-extension-v1.json",
-                    )
-                }
-            ),
+            fixture_hash=fixture_hash(spec.fixture_id),
             coverage_kind=spec.coverage_kind,
-            required_rules=required_rules(item, mode),
+            required_rules=required_rules(item, mode, spec.case_version),
         )
         for n in range(1, repeat + 1)
         for item, spec in cases.items()

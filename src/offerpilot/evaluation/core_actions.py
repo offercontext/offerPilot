@@ -549,6 +549,8 @@ def drive(
     private: Path,
     e: dict[str, Any],
     restart: Callable[[], tuple[Any, CoreHTTPDriver]],
+    *,
+    fixture_id: str = "synthetic-core-v1",
 ) -> tuple[Any, CoreHTTPDriver]:
     f = e["facts"]
     aliases = f["aliases"]
@@ -567,6 +569,13 @@ def drive(
         message = "把云岚数据测试开发2026年10月的一场面试改到15点（UTC+08:00）。请先澄清是哪一场。"
     if item.startswith("E09."):
         message = "只读回答：" + core["current_format"] + "给出面试准备建议，不做任何写入。"
+        if fixture_id == "synthetic-e09-current-goal-v1":
+            current = json.loads(
+                (Path(__file__).resolve().parents[3] /
+                 "evals/fixtures/synthetic-e09-current-goal-v1.json").read_bytes()
+            )
+            message = current["current_request"]
+            f["current_goal_fixture"] = fixture_id
     if item.startswith("E10."):
         message = core["question"]
     body = {

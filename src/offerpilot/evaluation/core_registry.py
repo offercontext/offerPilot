@@ -148,6 +148,8 @@ TIMEZONE_CASE_VERSIONS = {
 def suite_items(suite_id: str) -> set[str]:
     return {
         "harness-core-v1": set(ITEMS),
+        "harness-core-business-v1": set(ITEMS),
+        "harness-e09-current-goal-preflight-v1": {"E09.memory_override"},
         "harness-core-preflight-v1": {"E01.runtime_read"},
         "harness-core-stream-preflight-v1": {"E07.runtime_reattach"},
         "harness-extension-v1": set(EXTENSION_ITEMS),
@@ -157,19 +159,51 @@ def suite_items(suite_id: str) -> set[str]:
 ALL_RULES = (
     set(BASE_RULES)
     | {r for v in ITEMS.values() for r in v["rules"]}
-    | {"quality.supported"}
+    | {
+        "quality.supported", "quality.current_goal", "diagnostic.scripted_current_goal",
+        "source.current_goal_selected", "source.current_goal_final_input",
+    }
     | {r for v in EXTENSION_ITEMS.values() for r in v["rules"]}
 )
 
 
-def required_rules(item: str, mode: str = "deterministic") -> list[str]:
+def suite_case_version(suite_id: str, item: str) -> int:
+    if suite_id in {
+        "harness-core-business-v1", "harness-e09-current-goal-preflight-v1"
+    } and item == "E09.memory_override":
+        return 3
+    return int(case_definition(item)["case_version"])
+
+
+def required_rules(
+    item: str, mode: str = "deterministic", case_version: int | None = None
+) -> list[str]:
+    if item == "E09.memory_override" and case_version == 3:
+        return [
+            *BASE_RULES, "source.current_goal_selected", "source.current_goal_final_input",
+            "quality.current_goal" if mode == "real" else "diagnostic.scripted_current_goal",
+        ]
     value = [*BASE_RULES, *REGISTERED_ITEMS[item]["rules"]]
     if mode == "real" and REGISTERED_ITEMS[item].get("profile") == "context_sources.v1":
         value.append("quality.supported")
     return value
 
 
-def case_definition(item: str) -> dict[str, Any]:
+def case_definition(item: str, case_version: int | None = None) -> dict[str, Any]:
+    if case_version is not None:
+        default = case_definition(item)
+        if case_version == default["case_version"]:
+            return default
+        if item == "E09.memory_override" and case_version == 3:
+            return {
+                **default,
+                "case_version": 3,
+                "fixture_id": "synthetic-e09-current-goal-v1",
+                "model_id": "core-current-goal-script-v1",
+                "grader_id": "core-current-goal-v1",
+                "required_rules": required_rules(item, case_version=3),
+            }
+        raise ValueError("unregistered case version")
     data = REGISTERED_ITEMS[item]
     case = item.split(".")[0]
     return dict(

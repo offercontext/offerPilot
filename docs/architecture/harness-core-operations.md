@@ -16,6 +16,12 @@ E09.memory_withdraw 与两项 E10 已更新为 case v3，核心分母保持不�
 
 ## 2 计划与运行
 
+核心评估器从源码 checkout 使用 `scripts/evaluation_subject`，该目录不属于安装的
+`offerpilot` 包。使用虚拟环境的 `oc` console 入口前，须将评估器 checkout 根目录及
+`src` 放入本次进程的 `PYTHONPATH`；不能假定当前工作目录自动进入 console 的导入路径。
+PowerShell 可在本次 shell 中设置 `$env:PYTHONPATH = "$($PWD.Path);$($PWD.Path)/src"`；
+不修改全局环境。缺少源码桥接目录时，安装包本身不能替代评估器 checkout。
+
 variants 为结构化 JSON 数组，每项提供 `variant_id`（candidate 或 baseline）、独立 checkout、interpreter 和已注册 fault（正式为 none）。两版本必须使用不同 checkout，实际导入文件、Git/diff、锁文件和运行时会再次校验。
 
 ```text
@@ -27,6 +33,14 @@ oc eval run --plan <目录/run-plan.json> --grant <grant.json>
 ```
 
 plan 不启动产品或发模型请求。目录不可覆盖，建议使用 ignored `artifacts/harness/`；私有合成请求、回答、数据库和证据留在本地，不进 Git。
+
+新增的 [business suite](../../evals/suites/harness-core-business-v1.json) 保留 19 D / 13 R
+分母，仅将 E09.memory_override 更新为 v3。[专用 fixture](../../evals/fixtures/synthetic-e09-current-goal-v1.json)
+让旧前端视觉偏好与当前接口测试、故障定位目标冲突；新规则逐调用核对记忆 ID、版本、
+偏好内容、实际用户请求及封存传输输入。D 的固定答案只证明脚本数据流，R 的
+`quality.current_goal` 保持待审。独立的 [E09 preflight](../../evals/suites/harness-e09-current-goal-preflight-v1.json)
+只包含这一项，不代表完整核心验收。旧 suite、共享 fixture、撤回和 E10 保留原版本。
+新 suite 的任务质量决策和发布政策仍需版本化接入，不能传入旧 schema 2 policy 获得放行。
 
 real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入字节/输出 token/尝试数/超时、禁用 fallback、CNY 峰值价格及出处时间。grant 精确绑定 profile/suite hash、variants、repeat、期限、最大请求和金额及已有人工授权引用。每次 HTTP send 前按实际请求字节和最大输出预留费用并 fsync；请求额度、费用或期限用尽会在 send ACK 前阻断。usage 缺失保留全部预留，不退款。grant 在 OS 当前账号的 `.codex/evaluation/grant-claims` 独占认领：Windows 从 [Known Folder Profile](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid)读取，POSIX 从 UID 账号库读取；改变 CODEX_HOME/HOME/USERPROFILE 不产生另一份额度。复制文件不能重用。这是同一 OS 用户的本地防重复消费，不是对该用户主动修改代码或删除授权收据的身份认证系统。
 

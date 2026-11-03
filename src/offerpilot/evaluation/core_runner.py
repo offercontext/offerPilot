@@ -144,7 +144,7 @@ def run_trial(
         or manifest.provider_profile.model != "eval-core"
     ):
         raise ValueError("offline simulation requires a deterministic child and dummy profile")
-    spec = CaseSpecV2.model_validate(case_definition(plan.execution_item_id))
+    spec = CaseSpecV2.model_validate(case_definition(plan.execution_item_id, plan.case_version))
     variant = CoreVariant.model_validate(
         {
             k: v
@@ -195,6 +195,7 @@ def run_trial(
         "limits": spec.evaluator_limits.model_dump(),
         "fault": variant.fault,
         "action_id": spec.action_id,
+        "fixture_id": spec.fixture_id,
         "fault_profile": spec.fault_profile,
         "coverage_profile": spec.coverage_profile,
         "required_capabilities": spec.required_capabilities,
@@ -283,7 +284,9 @@ def run_trial(
             f.update(terminal_state=terminal["state"], diagnostic_only=True,
                      answer=terminal.get("terminal", {}).get("response", {}).get("message", ""))
         else:
-            subject, driver = drive(spec.action_id, driver, subject, private, e, restart)
+            subject, driver = drive(
+                spec.action_id, driver, subject, private, e, restart, fixture_id=spec.fixture_id
+            )
         observer.marker(private / "data.db", "driver_finished", {"terminal_received": True})
     except Exception as exc:
         f["driver_failure_observation"] = dict(

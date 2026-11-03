@@ -8,7 +8,9 @@ from offerpilot.evaluation.core_contracts import TrialResultV2
 from offerpilot.evaluation.graders.p0 import instant
 
 
-def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, str]:
+def grade_rule(
+    rule: str, item: str, e: dict[str, Any], *, private_directory: str | None = None
+) -> tuple[bool | None, str]:
     from offerpilot.evaluation.core_registry import REGISTERED_ITEMS
 
     item = REGISTERED_ITEMS[item].get("action", item)
@@ -17,6 +19,10 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
     deltas = obs.get("deltas", [])
     calls = e.get("calls", [])
     mil = e.get("milestones", {})
+    if rule in {"source.current_goal_selected", "source.current_goal_final_input"}:
+        from offerpilot.evaluation.core_current_goal import input_provenance
+
+        return input_provenance(rule, e, private_directory)
     if rule == "evidence.required_complete":
         if e.get("trial_key", {}).get("mode") == "real":
             sends = [
@@ -520,7 +526,21 @@ def grade_rule(rule: str, item: str, e: dict[str, Any]) -> tuple[bool | None, st
             if any(value is None for value in values):
                 return None, "assistant_proposal_observation_incomplete"
             return True, "complete_assistant_proposal_observation"
-    if rule == "quality.supported":
+    if rule == "diagnostic.scripted_current_goal":
+        # A fixed response witnesses only the deterministic transport/observer path.
+        # Real goal following is a separate human-reviewed rule, never a line count.
+        from pathlib import Path
+
+        fixture = json.loads(
+            (Path(__file__).resolve().parents[3] /
+             "evals/fixtures/synthetic-e09-current-goal-v1.json").read_bytes()
+        )
+        if e.get("trial_key", {}).get("mode") != "deterministic":
+            return None, "scripted_diagnostic_not_real_model_capability"
+        if f.get("terminal_state") != "completed":
+            return None, "scripted_output_not_completed"
+        return f.get("answer") == fixture["scripted_answer"], "fixed_script_transport_only"
+    if rule in {"quality.supported", "quality.current_goal"}:
         return None, "required_human_rubric_pending"
     raise ValueError("unregistered rule")
 
@@ -535,7 +555,12 @@ def grade(
     rules = []
     for name in plan.required_rules:
         try:
-            passed, reason = grade_rule(name, plan.execution_item_id, evidence)
+            if name in {"source.current_goal_selected", "source.current_goal_final_input"}:
+                passed, reason = grade_rule(
+                    name, plan.execution_item_id, evidence, private_directory=private_directory
+                )
+            else:
+                passed, reason = grade_rule(name, plan.execution_item_id, evidence)
             status = "pass" if passed is True else "fail" if passed is False else "unknown"
         except Exception:
             status, reason = "unknown", "independent_rule_evidence_error"

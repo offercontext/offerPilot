@@ -9,7 +9,10 @@ from typing import Any
 from uuid import uuid4
 
 
-def prepare(data: Path, root: Path, item: str, execution_item: str | None = None) -> dict[str, Any]:
+def prepare(
+    data: Path, root: Path, item: str, execution_item: str | None = None,
+    *, fixture_id: str = "synthetic-core-v1",
+) -> dict[str, Any]:
     from offerpilot.db import init_database
     from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
     from offerpilot.repositories.application_events import (
@@ -39,6 +42,10 @@ def prepare(data: Path, root: Path, item: str, execution_item: str | None = None
         )
         aliases[row["alias"]] = event.id
     core = json.loads((root / "evals/fixtures/synthetic-core-v1.json").read_text(encoding="utf-8"))
+    if fixture_id == "synthetic-e09-current-goal-v1":
+        core.update(json.loads(
+            (root / "evals/fixtures/synthetic-e09-current-goal-v1.json").read_bytes()
+        ))
     if item.startswith(("E09.", "E10.")):
         from offerpilot.context_sources.models import ContextContributorSettings
         from offerpilot.context_sources.contracts import ContextPolicies, ContributorPolicy

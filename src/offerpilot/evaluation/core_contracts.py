@@ -23,6 +23,7 @@ from offerpilot.evaluation.core_registry import (
     suite_items,
     case_definition,
     required_rules,
+    suite_case_version,
 )
 
 
@@ -53,10 +54,12 @@ class CaseSpecV2(Contract):
     case_id: str
     case_version: Positive
     execution_item_id: str
-    fixture_id: Literal["synthetic-core-v1", "synthetic-core-extension-v1"]
+    fixture_id: Literal[
+        "synthetic-core-v1", "synthetic-core-extension-v1", "synthetic-e09-current-goal-v1"
+    ]
     action_id: str
-    model_id: Literal["core-script-v1", "core-stream-burst-v1"]
-    grader_id: Literal["core-v1"]
+    model_id: Literal["core-script-v1", "core-stream-burst-v1", "core-current-goal-script-v1"]
+    grader_id: Literal["core-v1", "core-current-goal-v1"]
     supported_modes: list[Mode]
     required_capabilities: list[str]
     coverage_kind: CoverageKind
@@ -76,7 +79,7 @@ class CaseSpecV2(Contract):
     def registered(self) -> CaseSpecV2:
         if self.execution_item_id not in REGISTERED_ITEMS or self.model_dump(
             mode="json", exclude_none=True
-        ) != case_definition(self.execution_item_id):
+        ) != case_definition(self.execution_item_id, self.case_version):
             raise ValueError("case differs from versioned registered contract")
         return self
 
@@ -88,12 +91,15 @@ class SuiteItemV2(Contract):
 
     @model_validator(mode="after")
     def registered(self) -> SuiteItemV2:
+        prefix = f"cases/{self.execution_item_id}.v"
+        version = self.spec_path.removeprefix(prefix).removesuffix(".json")
         if (
             self.execution_item_id not in REGISTERED_ITEMS
-            or self.spec_path
-            != f"cases/{self.execution_item_id}.v{case_definition(self.execution_item_id)['case_version']}.json"
+            or not version.isdecimal()
+            or self.spec_path != f"{prefix}{int(version)}.json"
         ):
             raise ValueError("unregistered item or spec path")
+        case_definition(self.execution_item_id, int(version))
         return self
 
 
@@ -101,6 +107,8 @@ class SuiteV2(Contract):
     schema_version: Literal[2] = 2
     suite_id: Literal[
         "harness-core-v1",
+        "harness-core-business-v1",
+        "harness-e09-current-goal-preflight-v1",
         "harness-core-preflight-v1",
         "harness-core-stream-preflight-v1",
         "harness-extension-v1",
@@ -113,6 +121,12 @@ class SuiteV2(Contract):
         expected = suite_items(self.suite_id)
         if len(ids) != len(set(ids)) or set(ids) != expected:
             raise ValueError("suite denominator differs from registered set")
+        if any(
+            i.spec_path != f"cases/{i.execution_item_id}.v"
+            f"{suite_case_version(self.suite_id, i.execution_item_id)}.json"
+            for i in self.execution_items
+        ):
+            raise ValueError("suite case version differs from registered contract")
         return self
 
 
@@ -229,7 +243,10 @@ class RunManifestV2(Contract):
         if actual != expected or any(
             p.run_id != self.run_id
             or p.mode != self.mode
-            or p.required_rules != required_rules(p.execution_item_id, self.mode)
+            or p.case_version != suite_case_version(self.suite_id, p.execution_item_id)
+            or p.required_rules != required_rules(
+                p.execution_item_id, self.mode, p.case_version
+            )
             for p in self.planned_trials
         ):
             raise ValueError("frozen denominator or required rules disagree")
