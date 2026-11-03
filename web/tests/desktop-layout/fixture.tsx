@@ -53,7 +53,9 @@ function Fixture() {
     const check = () => {
       const table = document.querySelector('.ant-table-content');
       const mascot = document.querySelector<HTMLElement>('aside[aria-label="Haru 助手"]');
-      if ((!globalHeader && !table) || (mode === 'failure' && (mascot?.dataset.loadFailed !== 'true' || !mascot.parentElement?.hasAttribute(globalHeader ? 'data-pilot-mascot-global-dock' : 'data-pilot-mascot-fallback-dock')))) {
+      // Named layout scenarios opt in through synthetic reads. Wait for that
+      // confirmed name as well as geometry, including a normal Live2D mount.
+      if ((!globalHeader && !table) || (mode !== 'hidden' && !mascot) || (mode === 'failure' && (mascot?.dataset.loadFailed !== 'true' || !mascot.parentElement?.hasAttribute(globalHeader ? 'data-pilot-mascot-global-dock' : 'data-pilot-mascot-fallback-dock')))) {
         frame = requestAnimationFrame(check); return;
       }
       const errors: string[] = [];

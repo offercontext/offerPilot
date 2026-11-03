@@ -8375,6 +8375,20 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/tests/desktop-layout/mascot-fixture.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/tests/localization/mounted.test.tsx": {
       "modules": [
         "frontend"
