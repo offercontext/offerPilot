@@ -59,3 +59,30 @@ def test_real_is_never_enabled_by_grant_omission(tmp_path):
 
     with pytest.raises(ValueError, match="explicit user grant"):
         planning.validate_grant(SimpleNamespace(mode="real"), None)
+
+
+def test_api_reply_policy_changes_the_prompt_surface_fingerprint(tmp_path, monkeypatch):
+    """The API module owns the reply policy used by legacy and Runtime requests."""
+    monkeypatch.setattr(planning, "snapshot", lambda _: dict(
+        commit="a"*40, diff_hash="b"*64, lock_hash="c"*64, files_hash="d"*64,
+    ))
+    monkeypatch.setattr(planning, "target_environment", lambda _: dict(
+        python="synthetic", sqlite="synthetic", dependencies={},
+    ))
+    checkout=tmp_path/"candidate"
+    api=checkout/"src/offerpilot/api.py"
+    api.parent.mkdir(parents=True)
+    api.write_text("# synthetic reply policy before",encoding="utf-8")
+    variants=tmp_path/"variants.json"
+    variants.write_text(json.dumps([
+        dict(variant_id="candidate",checkout=str(checkout),interpreter="unused")
+    ]),encoding="utf-8")
+    before=planning.create_plan(
+        ROOT/"evals/suites/harness-core-v1.json",variants,tmp_path/"before",repeat=1
+    )
+    api.write_text("# synthetic reply policy after",encoding="utf-8")
+    after=planning.create_plan(
+        ROOT/"evals/suites/harness-core-v1.json",variants,tmp_path/"after",repeat=1
+    )
+    assert before.variants["candidate"]["prompt_or_tool_surface"] != after.variants["candidate"]["prompt_or_tool_surface"]
+    assert before.variants["candidate"]["context_policy"] == after.variants["candidate"]["context_policy"]

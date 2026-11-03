@@ -87,6 +87,7 @@ def create_plan(
                 {
                     str(p.relative_to(Path(v.checkout))): file_hash(p)
                     for pattern in (
+                        "src/offerpilot/api.py",
                         "src/offerpilot/ai/*.py",
                         "src/offerpilot/ai/tool_specs/*.py",
                         "src/offerpilot/pilot_runtime/composition.py",

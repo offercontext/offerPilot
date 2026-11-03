@@ -1,6 +1,6 @@
 # Harness 核心执行、比较与审核
 
-日期：2026-10-14。实现说明；具体运行是否通过以冻结报告及独立审查为准。承接 [P1 方案](harness-evaluation-p1-implementation.md)和 [P2/P3/S5 方案](harness-evaluation-p2-p3-implementation.md)。P0 schema 1 入口保留。
+初版日期：2026-10-14；2026-11-04 补充 business 决策与人工工作流。具体运行是否通过以冻结报告及独立审查为准。承接 [P1 方案](harness-evaluation-p1-implementation.md)和 [P2/P3/S5 方案](harness-evaluation-p2-p3-implementation.md)。P0 schema 1 入口保留。
 
 ## 1 核心与扩展
 
@@ -105,6 +105,10 @@ oc eval task-scenario-import --request <scenario-request.json> --submission <明
 可明确接受普通质量失败，但必须逐项承认失败 ID，原 fail 和成功率不改为通过；
 未评审、abstain、关键违规、缺输出及必需硬证据缺口不能被场景接受洗掉。
 记录是本地声明及完整性绑定，不认证身份，也不自动成为独立 Judge 校准样本。
+
+产品短句策略已独立精简：保留完整任务、明确数量及事实/确认边界，不按一句是否含多个
+可独立成果强制删减。计划指纹保守覆盖 `api.py` 与原 AI/tool 源文件；该变量变化不单独证明因果。
+提示词变化后的实际模型质量仍需新样本和新复核，旧回复结论不迁移；离线 stub 测试只证明输入与原答传输。
 
 新 Gate 的 absolute、raw/reviewed relative、promotion 和 release receipt 均消费同一版本；
 派生 trial 中的场景处置不作为新增逐输出标签统计。真实模式仍缺兼容基线时保持明确缺口。

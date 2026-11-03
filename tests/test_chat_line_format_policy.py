@@ -1,4 +1,4 @@
-"""The public chat paths deliver line-format policy without repairing raw replies."""
+"""Request/context transport and raw replies, not a real-model quality verdict."""
 
 from collections.abc import Callable
 import json
@@ -13,6 +13,7 @@ from offerpilot.ai.types import Assistant, Message
 from offerpilot.api import create_app
 from offerpilot.confirmed_memory.repository import ConfirmedMemoryRepository, MemoryMutation
 from offerpilot.db import session_factory_for_data_dir
+from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
 
 
 class RecordingModel:
@@ -64,23 +65,7 @@ def test_line_quota_policy_reaches_model_without_rewriting_answer(
         assert response.status_code == 200
         assert len(model.calls) == 1
         messages = model.calls[0]
-        policy = "".join(
-            message.content or ""
-            for message in messages
-            if message.role == "system"
-        )
-        assert "你是 OfferPilot" in policy
-        assert "用户限定最终回复行数时" in policy
-        assert "行间不插空行" in policy
-        assert "每行使用简短句子" in policy
-        assert "每个短句只保留一个核心意思" in policy
-        assert "用取舍删减来缩短" in policy
-        assert "附带说明必须明确指向这个成果本身" in policy
-        assert "仍围绕同一份清单" in policy
-        assert "形成两项可独立使用的成果" in policy
-        assert "不限制用户明确要求展开的详细回答" in policy
-        assert "用户明确要求的任务应先分配到可用行数" in policy
-        assert "不假设用户做过相关项目" in policy
+        assert any(message.role == "system" and message.content for message in messages)
         user_messages = [message.content for message in messages if message.role == "user"]
         assert any(old_preference in (text or "") for text in user_messages)
         assert user_messages[-1] == user_request
@@ -106,3 +91,58 @@ def test_line_quota_policy_reaches_model_without_rewriting_answer(
                            if kind == "assistant_delta") == raw_answer
             assert [frame["data"]["response"]["message"] for kind, frame in frames
                     if kind == "completed"] == [raw_answer]
+
+
+@pytest.mark.parametrize("endpoint", [
+    "/api/chat", "/api/chat/stream", "/api/pilot/runtime/v1/turns",
+])
+def test_role_only_scope_and_current_request_reach_model_without_reply_repair(
+    tmp_path: Path, endpoint: str
+) -> None:
+    from tests.test_managed_runtime_api import _wait_for_status
+
+    # A stub witnesses the transport contract. It cannot certify model advice quality.
+    answer = (
+        "按测试开发常见方向，选择公开 API 练习正常、边界和异常输入，并说明断言依据。\n"
+        "用自造的失败例子练习分层排查，列出每层需要的日志与验证步骤。"
+    )
+    model = RecordingModel(answer)
+    app = create_app(data_dir=tmp_path, chat_model=model)
+    application = ApplicationsRepository(session_factory_for_data_dir(tmp_path)).create(
+        ApplicationCreate(company_name="合成公司 C02", position_name="测试开发")
+    )
+    user_request = "只读回答：给我两条实际可用的面试准备建议。"
+    with TestClient(app) as client:
+        response = client.post(endpoint, json=dict(
+            request_id=str(uuid4()), conversation_id=0, message=user_request,
+            context_type="application", context_ref=str(application.id),
+        ))
+        if endpoint.endswith("/turns"):
+            assert response.status_code == 202, response.text
+            terminal = _wait_for_status(
+                client, response.json()["turn_id"], terminal={"completed", "failed"}
+            )
+            assert terminal["state"] == "completed"
+            assert terminal["terminal"]["response"]["message"] == answer
+            conversation = terminal["conversation_id"]
+        else:
+            assert response.status_code == 200, response.text
+            if endpoint == "/api/chat":
+                assert response.json()["message"] == answer
+            else:
+                frames = [
+                    json.loads(line[5:]) for line in response.text.splitlines()
+                    if line.startswith("data:")
+                ]
+                assert [
+                    frame["data"]["response"]["message"] for frame in frames
+                    if isinstance(frame.get("data", {}).get("response"), dict)
+                ] == [answer]
+            conversation = client.get("/api/chat/conversations").json()[0]["id"]
+        assert len(model.calls) == 1
+        visible = "\n".join(m.content or "" for m in model.calls[0])
+        assert "合成公司 C02" in visible and "测试开发" in visible
+        users = [m.content for m in model.calls[0] if m.role == "user"]
+        assert users[-1] == user_request
+        stored = client.get(f"/api/chat/conversations/{conversation}").json()
+        assert [m["content"] for m in stored if m["role"] == "assistant"] == [answer]
