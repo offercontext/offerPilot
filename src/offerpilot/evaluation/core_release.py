@@ -15,8 +15,8 @@ from uuid import UUID
 from offerpilot.evaluation.core_contracts import CoreVariant, ProviderRunProfile
 from offerpilot.evaluation.core_governance import (
     ExperimentSpec,
-    GatePolicyV2,
-    ReviewBundle,
+    load_gate_policy,
+    load_review_bundle,
     gate_core,
     product_hash,
 )
@@ -73,8 +73,8 @@ def preflight(
     if output.exists():
         raise ValueError("release output must be new")
     loaded, _ = load_core_suite(suite)
-    policy = GatePolicyV2.model_validate_json(policy_path.read_bytes())
-    review = ReviewBundle.model_validate_json(review_path.read_bytes())
+    policy = load_gate_policy(json.loads(policy_path.read_bytes()))
+    review = load_review_bundle(json.loads(review_path.read_bytes()))
     ExperimentSpec.model_validate_json(experiment_path.read_bytes())
     variants = [CoreVariant.model_validate(v) for v in json.loads(variants_path.read_bytes())]
     candidate = next((v for v in variants if v.variant_id == "candidate"), None)
@@ -290,8 +290,8 @@ def execute(path: Path) -> dict[str, Any]:
     reads.inputs(path)
     value = _read_header(path)
     inputs = value["inputs"]
-    policy = GatePolicyV2.model_validate_json(Path(inputs["policy"]["path"]).read_bytes())
-    review = ReviewBundle.model_validate_json(Path(inputs["review"]["path"]).read_bytes())
+    policy = load_gate_policy(json.loads(Path(inputs["policy"]["path"]).read_bytes()))
+    review = load_review_bundle(json.loads(Path(inputs["review"]["path"]).read_bytes()))
     experiment = ExperimentSpec.model_validate_json(Path(inputs["experiment"]["path"]).read_bytes())
     readonly = all(run["reuse"] for run in value["runs"])
     if readonly:
@@ -413,8 +413,8 @@ def verify_receipt(path: Path) -> dict[str, Any]:
     receipt, receipt_hash = reads.receipt(path.parent / "release-evaluation.json")
     saved = receipt["evaluation_gate"]
     inputs = value["inputs"]
-    policy = GatePolicyV2.model_validate_json(Path(inputs["policy"]["path"]).read_bytes())
-    review = ReviewBundle.model_validate_json(Path(inputs["review"]["path"]).read_bytes())
+    policy = load_gate_policy(json.loads(Path(inputs["policy"]["path"]).read_bytes()))
+    review = load_review_bundle(json.loads(Path(inputs["review"]["path"]).read_bytes()))
     experiment = ExperimentSpec.model_validate_json(Path(inputs["experiment"]["path"]).read_bytes())
     if (
         saved["frozen_policy"] != policy.model_dump(mode="json")

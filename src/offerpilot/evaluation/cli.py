@@ -25,6 +25,54 @@ def save(path: Path | None, report: dict[str, Any]) -> None:
         atomic_json(path, report)
 
 
+@app.command("task-review-pack")
+def task_review_pack(
+    run: list[Path] = typer.Option(..., "--run"),
+    policy: Path = typer.Option(..., "--policy"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    """Export new per-output schema3 task/critical/expression review materials."""
+    from offerpilot.evaluation.core_task_review import export_pack
+
+    try:
+        result = export_pack(run, policy, output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(result, ensure_ascii=False))
+
+
+@app.command("task-review-import")
+def task_review_import(
+    pack: Path = typer.Option(..., "--pack"),
+    submission: Path = typer.Option(..., "--submission"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    """Import explicitly confirmed output labels; create pending scenario requests."""
+    from offerpilot.evaluation.core_task_review import import_labels
+
+    try:
+        result = import_labels(pack, submission, output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(result, ensure_ascii=False))
+
+
+@app.command("task-scenario-import")
+def task_scenario_import(
+    request: Path = typer.Option(..., "--request"),
+    submission: Path = typer.Option(..., "--submission"),
+    output: Path = typer.Option(..., "--output"),
+) -> None:
+    """Append explicit scenario risk decisions; never confirms pending output labels."""
+    from offerpilot.evaluation.core_task_review import import_acceptances
+
+    try:
+        result = import_acceptances(request, submission, output)
+    except (ValueError, OSError, KeyError, TypeError) as exc:
+        configuration_error(exc)
+    typer.echo(json.dumps(result, ensure_ascii=False))
+
+
 @app.command("import-external")
 def import_external(
     receipt: Path = typer.Option(..., "--receipt"), output: Path = typer.Option(..., "--output")
@@ -355,7 +403,7 @@ def compare_command(
             from offerpilot.evaluation.core_runner import read_run as read_core_run
             from offerpilot.evaluation.core_governance import (
                 ExperimentSpec,
-                GatePolicyV2,
+                load_gate_policy,
                 compare_core,
                 variable_values,
             )
@@ -363,7 +411,12 @@ def compare_command(
             ma2, ra2 = read_core_run(baseline)
             mb2, rb2 = read_core_run(candidate)
             if policy != "core-observe-v1":
-                GatePolicyV2.model_validate_json(Path(policy).read_bytes())
+                selected_policy = load_gate_policy(json.loads(Path(policy).read_bytes()))
+                if selected_policy.schema_version == 3 and any(
+                    m.suite_id != selected_policy.suite_id or m.suite_hash != selected_policy.suite_hash
+                    for m in (ma2, mb2)
+                ):
+                    raise ValueError("comparison policy and suite differ")
                 if not experiment:
                     raise ValueError("strict comparison requires explicit experiment")
             spec = (
@@ -384,7 +437,13 @@ def compare_command(
                     )
                 )
             )
-            report = compare_core(ma2, ra2, mb2, rb2, spec)
+            from offerpilot.evaluation.core_task_quality import TASK_RULES
+
+            report = compare_core(
+                ma2, ra2, mb2, rb2, spec,
+                task_quality_rules=TASK_RULES
+                if ma2.suite_id == "harness-core-business-v1" else frozenset(),
+            )
         save(output, report)
     except (ValueError, OSError, KeyError, TypeError) as exc:
         configuration_error(exc)
@@ -408,8 +467,8 @@ def gate(
     from offerpilot.evaluation.core_runner import read_run
     from offerpilot.evaluation.core_governance import (
         ExperimentSpec,
-        GatePolicyV2,
-        ReviewBundle,
+        load_gate_policy,
+        load_review_bundle,
         gate_core,
     )
     from offerpilot.evaluation.core_refresh import resolve_baseline
@@ -425,9 +484,9 @@ def gate(
             baseline_paths = [Path(s["directory"]) for s in record["sources"]]
             records = {m.mode: record for m, _ in [read_run(p) for p in baseline_paths]}
         old_pairs = [read_run(p) for p in baseline_paths]
-        policy_value = GatePolicyV2.model_validate_json(policy.read_bytes())
-        review_value = (
-            ReviewBundle.model_validate_json(review.read_bytes()) if review else ReviewBundle()
+        policy_value = load_gate_policy(json.loads(policy.read_bytes()))
+        review_value = load_review_bundle(
+            json.loads(review.read_bytes()) if review else {"schema_version": policy_value.schema_version}
         )
         experiment_value = (
             ExperimentSpec.model_validate_json(experiment.read_bytes()) if experiment else None

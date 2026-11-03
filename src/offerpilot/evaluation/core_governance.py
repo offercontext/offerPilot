@@ -9,17 +9,20 @@ import importlib
 import os
 from pathlib import Path
 import re
-from typing import Any, Iterator, Literal
+from typing import Any, Iterator, Literal, TYPE_CHECKING
 from uuid import uuid4
 
 from pydantic import Field, model_validator
 
 from offerpilot.evaluation.contracts import Contract, Hash, Positive
 from offerpilot.evaluation.core_contracts import RunManifestV2, TrialResultV2
-from offerpilot.evaluation.core_registry import ITEMS, required_rules
+from offerpilot.evaluation.core_registry import ITEMS, required_rules, suite_case_version
 from offerpilot.evaluation.core_runner import aggregate, read_run
 from offerpilot.evaluation.registry import digest, file_hash
 from offerpilot.evaluation.reporting import atomic_json
+
+if TYPE_CHECKING:
+    from offerpilot.evaluation.core_task_quality import GatePolicyV3, TaskReviewBundle
 
 Variable = Literal[
     "product_snapshot",
@@ -62,12 +65,12 @@ class RequiredItem(Contract):
 
         if self.execution_item_id not in ITEMS:
             raise ValueError("unregistered item")
-        spec = case_definition(self.execution_item_id)
+        spec = case_definition(self.execution_item_id, self.case_version)
         if (
             self.case_version != spec["case_version"]
             or self.coverage_kind != spec["coverage_kind"]
             or self.mode not in spec["supported_modes"]
-            or self.rules != required_rules(self.execution_item_id, self.mode)
+            or self.rules != required_rules(self.execution_item_id, self.mode, self.case_version)
         ):
             raise ValueError("policy cannot weaken registered case contract")
         return self
@@ -113,6 +116,9 @@ class GatePolicyV2(Contract):
         keys = [(r.execution_item_id, r.mode) for r in self.absolute]
         if len(keys) != len(set(keys)):
             raise ValueError("duplicate required policy item")
+        if any(r.case_version != suite_case_version(self.suite_id, r.execution_item_id)
+               for r in self.absolute):
+            raise ValueError("legacy policy cannot use migrated case versions")
         for mode in {r.mode for r in self.absolute}:
             expected = {i for i, v in ITEMS.items() if mode == "deterministic" or v["real"]}
             if {i for i, m in keys if m == mode} != expected:
@@ -198,6 +204,22 @@ class ReviewBundle(Contract):
     exceptions: list[QualityException] = Field(default_factory=list)
 
 
+def load_gate_policy(value: dict[str, Any]) -> GatePolicyV2 | GatePolicyV3:
+    if value.get("schema_version") == 3:
+        from offerpilot.evaluation.core_task_quality import GatePolicyV3
+
+        return GatePolicyV3.model_validate(value)
+    return GatePolicyV2.model_validate(value)
+
+
+def load_review_bundle(value: dict[str, Any]) -> ReviewBundle | TaskReviewBundle:
+    if value.get("schema_version") == 3:
+        from offerpilot.evaluation.core_task_quality import TaskReviewBundle
+
+        return TaskReviewBundle.model_validate(value)
+    return ReviewBundle.model_validate(value)
+
+
 def verified_reference(path: str, expected: str) -> bool:
     p = Path(path)
     return p.is_file() and not p.is_symlink() and p.stat().st_size > 0 and file_hash(p) == expected
@@ -239,7 +261,10 @@ def compare_core(
     experiment: ExperimentSpec,
     *,
     baseline_variant: Literal["baseline", "candidate"] | None = None,
+    task_quality_rules: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
+    if not task_quality_rules <= {"quality.supported", "quality.current_goal"}:
+        raise ValueError("comparison cannot reclassify a hard rule")
     if baseline_variant is None and a.run_id == b.run_id and set(a.variants) != {"baseline", "candidate"}:
         raise ValueError("candidate-only run cannot compare with itself")
     av = baseline_variant or ("baseline" if a.run_id == b.run_id else "candidate")
@@ -301,7 +326,25 @@ def compare_core(
             )
             if not xa or not ya or xa != ya and "provider_model" not in declarations:
                 local.append("actual_model_identity_unknown_or_changed")
-        vx, vy = (x or {}).get("verdict", "incomplete"), (y or {}).get("verdict", "incomplete")
+        def decision(row: dict[str, Any] | None) -> str:
+            if not row or not task_quality_rules:
+                return str((row or {}).get("verdict", "incomplete"))
+            hard = [
+                r for r in row["rules"]
+                if r["rule_id"] not in task_quality_rules
+                or r.get("reason_code") in {
+                    "critical_business_floor_failure", "scenario_risk_rejected"
+                }
+            ]
+            if any(r["status"] == "fail" for r in hard):
+                return "fail"
+            if row["execution_status"] != "completed" or any(
+                r["status"] != "pass" for r in row["rules"]
+            ):
+                return "incomplete"
+            return "pass"
+
+        vx, vy = decision(x), decision(y)
         category = (
             "incomparable"
             if local
@@ -343,8 +386,8 @@ def compare_core(
                 else next(iter(values)),
             )
         )
-    return dict(
-        schema_version=2,
+    report: dict[str, Any] = dict(
+        schema_version=3 if task_quality_rules else 2,
         baseline_run_id=str(a.run_id),
         baseline_variant=av,
         candidate_run_id=str(b.run_id),
@@ -363,13 +406,20 @@ def compare_core(
         if any(r["classification"] == "incomplete" for r in groups)
         else 0,
     )
+    if task_quality_rules:
+        report["task_quality_scope"] = {
+            "rules": sorted(task_quality_rules),
+            "raw_labels_preserved": True,
+            "pending_or_failed_task_labels_require_explicit_scenario_review": True,
+        }
+    return report
 
 
 def gate_core(
     manifests: list[RunManifestV2],
     results: list[list[TrialResultV2]],
-    policy: GatePolicyV2,
-    review: ReviewBundle,
+    policy: GatePolicyV2 | GatePolicyV3,
+    review: ReviewBundle | TaskReviewBundle,
     purpose: str,
     mode: str,
     baseline: list[tuple[RunManifestV2, list[TrialResultV2]]] | None = None,
@@ -379,6 +429,10 @@ def gate_core(
     candidate_variant: Literal["candidate", "baseline"] = "candidate",
     review_at: datetime | None = None,
 ) -> dict[str, Any]:
+    from offerpilot.evaluation.core_task_quality import GatePolicyV3, TaskReviewBundle, TASK_RULES, quality_views
+
+    if policy.schema_version != review.schema_version:
+        raise ValueError("policy/review decision version mismatch")
     if candidate_variant not in {"candidate", "baseline"} or (
         purpose == "release" and candidate_variant != "candidate"
     ):
@@ -407,6 +461,7 @@ def gate_core(
     failures, errors, incomplete = [], [], []
     snapshot_hash = product_hash(manifests[0], candidate_variant)
     selected: dict[tuple[str, str, int], TrialResultV2] = {}
+    task_quality = []
     for manifest, rows in zip(manifests, results, strict=True):
         if manifest.suite_id != policy.suite_id or manifest.suite_hash != policy.suite_hash:
             errors.append("policy_suite_mismatch")
@@ -416,10 +471,14 @@ def gate_core(
         ):
             errors.append("candidate_snapshot_or_diagnostic_fault")
         aggregate(manifest, rows)
+        effective_rows = rows
+        if isinstance(policy, GatePolicyV3) and isinstance(review, TaskReviewBundle):
+            effective_rows, reports = quality_views(manifest, rows, policy, review)
+            task_quality.extend(reports)
         selected.update(
             {
                 (r.execution_item_id, r.mode, r.repeat_index): r
-                for r in rows
+                for r in effective_rows
                 if r.variant_id == candidate_variant
             }
         )
@@ -445,7 +504,10 @@ def gate_core(
                 incomplete.append(f"{key}:actual_model_identity_unknown")
             for rule in row.rules:
                 status = rule.status
-                if rule.rule_id == "quality.supported":
+                if (
+                    rule.rule_id == "quality.supported"
+                    and isinstance(policy, GatePolicyV2) and isinstance(review, ReviewBundle)
+                ):
                     matching = [
                         r
                         for r in review.adjudications
@@ -555,7 +617,8 @@ def gate_core(
                 if arm not in {"baseline", "candidate"}:
                     raise ValueError("approved baseline arm invalid")
                 comparison = compare_core(
-                    *old, candidate_manifest, candidate_rows, experiment, baseline_variant=arm
+                    *old, candidate_manifest, candidate_rows, experiment, baseline_variant=arm,
+                    task_quality_rules=TASK_RULES if isinstance(policy, GatePolicyV3) else frozenset(),
                 )
                 if record and record.get("gate_path"):
                     old_gate_path = Path(record["gate_path"])
@@ -563,8 +626,8 @@ def gate_core(
                     if digest(old_gate) != record["gate_hash"]:
                         errors.append("approved_baseline_gate_changed")
                     else:
-                        old_policy = GatePolicyV2.model_validate(old_gate["frozen_policy"])
-                        old_review = ReviewBundle.model_validate(old_gate["frozen_review"])
+                        old_policy = load_gate_policy(old_gate["frozen_policy"])
+                        old_review = load_review_bundle(old_gate["frozen_review"])
                         derived = compare_core(
                             old[0],
                             reviewed_trials(old[0], old[1], old_policy, old_review),
@@ -572,6 +635,7 @@ def gate_core(
                             reviewed_trials(candidate_manifest, candidate_rows, policy, review),
                             experiment,
                             baseline_variant=arm,
+                            task_quality_rules=TASK_RULES if isinstance(policy, GatePolicyV3) else frozenset(),
                         )
                         comparison["derived_review_comparison"] = derived
                         comparison["raw_exit_code"] = comparison["exit_code"]
@@ -586,8 +650,8 @@ def gate_core(
         elif baseline:
             errors.append("experiment_missing")
     exit_code = 1 if failures else 2 if errors else 3 if incomplete else 0
-    return dict(
-        schema_version=2,
+    report = dict(
+        schema_version=policy.schema_version,
         gate_id=str(uuid4()),
         created_at=datetime.now(timezone.utc).isoformat(),
         policy_hash=digest(policy.model_dump(mode="json")),
@@ -627,12 +691,22 @@ def gate_core(
         release_eligible=False,
         exit_code=exit_code,
     )
+    if isinstance(policy, GatePolicyV3):
+        report["task_quality"] = task_quality
+    return report
 
 
 def reviewed_trials(
-    manifest: RunManifestV2, rows: list[TrialResultV2], policy: GatePolicyV2, review: ReviewBundle
+    manifest: RunManifestV2, rows: list[TrialResultV2],
+    policy: GatePolicyV2 | GatePolicyV3, review: ReviewBundle | TaskReviewBundle,
 ) -> list[TrialResultV2]:
     """Separate derived views; original TrialResult and comparison rows stay intact."""
+    from offerpilot.evaluation.core_task_quality import GatePolicyV3, TaskReviewBundle, quality_views
+
+    if isinstance(policy, GatePolicyV3) and isinstance(review, TaskReviewBundle):
+        return quality_views(manifest, rows, policy, review)[0]
+    if not isinstance(policy, GatePolicyV2) or not isinstance(review, ReviewBundle):
+        raise ValueError("review comparison decision version mismatch")
     derived = []
     for row in rows:
         rules = []
@@ -865,8 +939,8 @@ def _promote_baseline(
         raise ValueError("promotion approval or gate binding invalid")
     if gate.get("purpose") != ("initial_baseline" if expected_current is None else "release"):
         raise ValueError("promotion purpose differs from baseline lifecycle")
-    policy = GatePolicyV2.model_validate(gate["frozen_policy"])
-    review = ReviewBundle.model_validate(gate["frozen_review"])
+    policy = load_gate_policy(gate["frozen_policy"])
+    review = load_review_bundle(gate["frozen_review"])
     if digest(policy.model_dump(mode="json")) != gate["policy_hash"]:
         raise ValueError("frozen policy mismatch")
     run_pairs = []
@@ -911,13 +985,16 @@ def _promote_baseline(
         p.variant_id == "candidate" for p in manifest.planned_trials
     ):
         raise ValueError("baseline candidate denominator incomplete")
+    promotion_rows = rows
+    if policy.schema_version == 3:
+        promotion_rows = reviewed_trials(manifest, rows, policy, review)
     if any(
         r.execution_status != "completed"
         or any(
             v.status == "fail" or v.status == "unknown" and v.rule_id != "quality.supported"
             for v in r.rules
         )
-        for r in rows
+        for r in promotion_rows
         if r.variant_id == "candidate"
     ):
         raise ValueError("baseline private evidence incomplete or failing")

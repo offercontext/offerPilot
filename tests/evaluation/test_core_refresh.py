@@ -112,8 +112,16 @@ def write(path, value):
 
 
 @pytest.fixture
-def refresh_case(manifest, tmp_path, monkeypatch):
+def refresh_case(manifest, tmp_path, monkeypatch, request):
     """Synthetic component test: historical native audit and source exporter are separate seams."""
+    business_policy = getattr(request, "param", None) == "business"
+    if business_policy:
+        from offerpilot.evaluation.core_planning import create_plan
+
+        manifest = create_plan(
+            ROOT / "evals/suites/harness-core-business-v1.json",
+            tmp_path / "variants.json", tmp_path / "business-refresh-plan", repeat=3,
+        )
     from offerpilot.evaluation import core_refresh as refresh
     from offerpilot.evaluation.core_refresh_contracts import (
         RefreshApproval,
@@ -202,7 +210,7 @@ def refresh_case(manifest, tmp_path, monkeypatch):
     review_path = write(
         tmp_path / "review.json",
         dict(
-            schema_version=2,
+            schema_version=3 if business_policy else 2,
             independent_reviews=[
                 dict(
                     reviewer=record["reviewer"],
@@ -240,7 +248,10 @@ def refresh_case(manifest, tmp_path, monkeypatch):
             "original",
             generation,
             run,
-            ROOT / "evals/policies/core-initial-baseline-v6.json",
+            ROOT / "evals/policies" / (
+                "core-business-initial-baseline-v1.json" if business_policy
+                else "core-initial-baseline-v6.json"
+            ),
             review_path,
             experiment,
             history,

@@ -129,6 +129,8 @@ def blinded_pack(directories: list[Path], output: Path, audit_output: Path) -> d
     seen = set()
     for directory in directories:
         manifest, rows = read_run(directory)
+        if manifest.suite_id == "harness-core-business-v1":
+            raise ValueError("business suite requires task-review-pack with its versioned policy")
         runs.append(
             {
                 "directory": str(directory.resolve()),

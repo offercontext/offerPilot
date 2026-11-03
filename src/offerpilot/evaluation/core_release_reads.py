@@ -383,9 +383,20 @@ class DependencyClosure:
                 self._bound(ref)
 
     def review(self, bundle: dict[str, Any]) -> None:
-        for field in ("independent_reviews", "adjudications", "exceptions"):
+        version = bundle.get("schema_version", 2)
+        if version == 2:
+            fields = ("independent_reviews", "adjudications", "exceptions")
+        elif version == 3:
+            fields = ("independent_reviews", "quality_reviews", "scenario_acceptances")
+        else:
+            raise ValueError("unsupported review dependency schema")
+        for field in fields:
             for item in bundle.get(field, []):
                 self._authority(item)
+                if field == "quality_reviews":
+                    self._bound(dict(path=item["review_pack_ref"], sha256=item["review_pack_hash"]))
+                if field in {"quality_reviews", "scenario_acceptances"} and item.get("confirmation_source"):
+                    self._bound(item["confirmation_source"])
 
     def _gate(self, path: Path) -> None:
         self.review(self.obj(path).get("frozen_review", {}))

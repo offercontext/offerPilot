@@ -31,6 +31,7 @@ from offerpilot.evaluation.core_refresh_store import REFRESH, REVOKE, generation
 from offerpilot.evaluation.core_refresh_sources import source_origins
 from offerpilot.evaluation.core_runner import read_run
 from offerpilot.evaluation.core_targeted_account import safe_path
+from offerpilot.evaluation.core_task_quality import TaskReviewBundle
 from offerpilot.evaluation.registry import digest
 from offerpilot.evaluation.reporting import atomic_json
 from offerpilot.evaluation.runner import ROOT, evaluator_hash
@@ -135,12 +136,15 @@ def fresh_run(
 
 
 def independent_reviews(
-    bundle: gov.ReviewBundle, manifest: RunManifestV2, fingerprint: str, at: datetime
+    bundle: gov.ReviewBundle | TaskReviewBundle,
+    manifest: RunManifestV2, fingerprint: str, at: datetime,
 ) -> bool:
-    require(
-        not bundle.adjudications and not bundle.exceptions,
-        "refresh cannot migrate human labels or exceptions",
-    )
+    if isinstance(bundle, gov.ReviewBundle):
+        require(not bundle.adjudications and not bundle.exceptions,
+                "refresh cannot migrate human labels or exceptions")
+    else:
+        require(not bundle.quality_reviews and not bundle.scenario_acceptances,
+                "refresh cannot migrate quality labels or scenario acceptances")
     accepted = False
     for review in bundle.independent_reviews:
         record = RefreshIndependentRecord.model_validate(
@@ -191,12 +195,17 @@ def _qualification(
 ) -> dict[str, Any]:
     manifest, rows = (fresh_run(directory, original) if _origin is None else
         fresh_run(directory, original, _origin=_origin))
-    policy = gov.GatePolicyV2.model_validate(read(policy_path))
-    canonical = gov.GatePolicyV2.model_validate(
-        read(ROOT / "evals/policies/core-initial-baseline-v6.json")
-    )
-    require(policy == canonical, "refresh requires the unchanged formal initial-baseline-v6 policy")
-    bundle = gov.ReviewBundle.model_validate(read(review_path))
+    policy = gov.load_gate_policy(read(policy_path))
+    canonical_names = {
+        ("harness-core-v1", 2): "core-initial-baseline-v6.json",
+        ("harness-core-business-v1", 3): "core-business-initial-baseline-v1.json",
+    }
+    canonical_name = canonical_names.get((manifest.suite_id, policy.schema_version))
+    require(canonical_name is not None, "refresh suite/policy generation is not registered")
+    canonical = gov.load_gate_policy(read(ROOT / "evals/policies" / str(canonical_name)))
+    require(policy == canonical, "refresh requires the unchanged formal initial-baseline policy")
+    bundle = gov.load_review_bundle(read(review_path))
+    require(bundle.schema_version == policy.schema_version, "refresh policy/review version mismatch")
     fingerprint = evidence_fingerprint(manifest, rows)
     reviewed = independent_reviews(bundle, manifest, fingerprint, at)
     experiment = gov.ExperimentSpec.model_validate(read(experiment_path))
@@ -532,7 +541,7 @@ def activate_refresh(request_path: Path, approval_path: Path) -> dict[str, Any]:
         frozen_inputs()
         before_record = datetime.now(timezone.utc)
         maintainer_record(approval, before_record)
-        review_bundle = gov.ReviewBundle.model_validate(read(bound_file(request["review"])))
+        review_bundle = gov.load_review_bundle(read(bound_file(request["review"])))
         require(
             independent_reviews(review_bundle, manifest, measured["fingerprint"], before_record),
             "review expired before record write",
@@ -572,7 +581,7 @@ def activate_refresh(request_path: Path, approval_path: Path) -> dict[str, Any]:
         maintainer_record(approval, committed_at)
         require(
             independent_reviews(
-                gov.ReviewBundle.model_validate(read(bound_file(request["review"]))),
+                gov.load_review_bundle(read(bound_file(request["review"]))),
                 manifest,
                 measured["fingerprint"],
                 committed_at,

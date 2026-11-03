@@ -40,7 +40,11 @@ plan 不启动产品或发模型请求。目录不可覆盖，建议使用 ignor
 偏好内容、实际用户请求及封存传输输入。D 的固定答案只证明脚本数据流，R 的
 `quality.current_goal` 保持待审。独立的 [E09 preflight](../../evals/suites/harness-e09-current-goal-preflight-v1.json)
 只包含这一项，不代表完整核心验收。旧 suite、共享 fixture、撤回和 E10 保留原版本。
-新 suite 的任务质量决策和发布政策仍需版本化接入，不能传入旧 schema 2 policy 获得放行。
+新 suite 使用 schema 3 决策政策，不能传入旧 schema 2 policy 获得放行。D-only 的
+[初始基线政策](../../evals/policies/core-business-initial-baseline-v1.json)和
+[发布贡献政策](../../evals/policies/core-business-release-v1.json)仍要求 19 项 × 3 次。
+[真实覆盖政策](../../evals/policies/core-business-real-v1.json)另列 13 项 × 3 次；四项来源场景采用逐输出审核与逐场景人工接受。
+政策文件不是费用授权，真实基线缺失、未审或必需证据不足均不能据此放行。
 
 real profile 冻结 endpoint/model、temperature=0、thinking=disabled、输入字节/输出 token/尝试数/超时、禁用 fallback、CNY 峰值价格及出处时间。grant 精确绑定 profile/suite hash、variants、repeat、期限、最大请求和金额及已有人工授权引用。每次 HTTP send 前按实际请求字节和最大输出预留费用并 fsync；请求额度、费用或期限用尽会在 send ACK 前阻断。usage 缺失保留全部预留，不退款。grant 在 OS 当前账号的 `.codex/evaluation/grant-claims` 独占认领：Windows 从 [Known Folder Profile](https://learn.microsoft.com/en-us/windows/win32/shell/knownfolderid)读取，POSIX 从 UID 账号库读取；改变 CODEX_HOME/HOME/USERPROFILE 不产生另一份额度。复制文件不能重用。这是同一 OS 用户的本地防重复消费，不是对该用户主动修改代码或删除授权收据的身份认证系统。
 
@@ -83,6 +87,30 @@ exit 优先级为已知阻断失败 1、配置或不可比 2、不完整或待�
 执行子进程由 ProcessTree 管理。超时关闭后代且非零，不退款。回执要求 enforce/release、完整保存报告 hash、两个 release_eligible=false，并回读原私有证据重评分核对完整语义；observe、initial、缺报告、伪 exit 0、统计篡改都不能通过。只在所有原检查及评估验收满足后，完整脚本可报告本地 gate passed；这不授权部署。
 
 ## 5 人工评审与条件裁判
+
+新 business suite 使用独立入口，原 `review-pack`、`acceptance-summary` 和 Judge
+资格入口保留历史契约，不把旧标签迁入新决策。新 `task-review-pack` 每份请求输出分别
+保留 sample ID、request/call、答案 hash、实际输入、来源 case/fixture 和模型配置；R04 两答分别导出。
+rubric 区分任务质量、关键业务底线和表达反馈。统计保留计划、实际执行观测及未知数、
+已观测/可绑定/可判定输出、原始分子分母及失败原句；同题重复不当作独立校准题。
+
+```text
+oc eval task-review-pack --run <冻结真实run> --policy evals/policies/core-business-real-v1.json --output <新评审目录>
+oc eval task-review-import --pack <review-pack.json> --submission <逐条确认文件> --output <新标签目录>
+oc eval task-scenario-import --request <scenario-request.json> --submission <明确场景决定> --output <新决定目录>
+```
+
+导出生成 pending 模板，不代表 AI 初评或人工确认已完成。第二步仅接收显式 confirmed 的
+逐输出标签，保留 pass/fail/abstain；第三步才接收维护者对具体冻结场景的接受或拒绝。
+可明确接受普通质量失败，但必须逐项承认失败 ID，原 fail 和成功率不改为通过；
+未评审、abstain、关键违规、缺输出及必需硬证据缺口不能被场景接受洗掉。
+记录是本地声明及完整性绑定，不认证身份，也不自动成为独立 Judge 校准样本。
+
+新 Gate 的 absolute、raw/reviewed relative、promotion 和 release receipt 均消费同一版本；
+派生 trial 中的场景处置不作为新增逐输出标签统计。真实模式仍缺兼容基线时保持明确缺口。
+确定性 `baseline refresh-prepare` 按 suite/政策代际精确分派：旧 core/v6 保留，business
+只接受上述新初始基线政策及 schema 3 独立审查，不迁移质量标签或场景接受；仍需单独批准冻结请求，
+`refresh-prepare` 不激活基线。
 
 外部提供的合成评估集单列为人工参考材料，先核对原包、提交文件 hash、唯一 sample_id、rubric 和四维评分，再保留原始私有副本。回答质量 rubric 与功能目标 rubric 不合并通过率；功能判定不能被高回答评分覆盖。AI 辅助标注及非独立盲审身份如实保留。没有实际 trial/evidence 绑定的合成题设不能制造运行记录、Adjudication 或裁判校准资格，也不改变冻结核心计划的分母。
 
