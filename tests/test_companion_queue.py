@@ -9,6 +9,7 @@ from sqlalchemy import select
 from offerpilot.companion.contracts import CompanionEventCommand, CompanionPresenceCommand
 from offerpilot.companion.repository import CompanionRepository
 from offerpilot.companion.models import CompanionPresence
+from tests._companion import enable_companion
 from offerpilot.db import init_database
 from offerpilot.proactive.models import ProactiveJob
 from offerpilot.proactive.repository import ProactiveRepository
@@ -38,6 +39,7 @@ def presence(repo, client, now=NOW, **flags):
 def life(tmp_path):
     sessions = init_database(tmp_path / 'life.db')
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     client = str(uuid4())
     view = event(repo, 'app_open')
     presence(repo, client)

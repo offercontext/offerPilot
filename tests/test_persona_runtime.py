@@ -398,6 +398,8 @@ def test_actual_default_runtime_context_and_budget_match_base(tmp_path):
 
     app = create_app(data_dir=tmp_path, chat_model=RecordingModel())
     with TestClient(app) as client:
+        from tests._companion import enable_companion
+        enable_companion(app.state.companion_repository)
         event(app.state.companion_repository, 'app_open')
         response = client.post('/api/chat', json={'message': '你的小日常怎么样了？'})
         assert response.status_code == 200, response.text

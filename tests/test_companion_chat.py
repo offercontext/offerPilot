@@ -13,6 +13,7 @@ from offerpilot.companion.chat import CompanionChatService, freeze_chat_command,
 from offerpilot.companion.contracts import CompanionEventCommand, CompanionPolicy, CompanionResetCommand, CompanionSettingsCommand
 from offerpilot.companion.models import CompanionChatEvidence, CompanionEvent, CompanionParticipation
 from offerpilot.companion.repository import CompanionConflict, CompanionRepository
+from tests._companion import enable_companion
 from offerpilot.db import init_database
 from offerpilot.models import ChatMessage
 from offerpilot.pilot_control import PilotControlRepository, TurnExecutionFenced
@@ -55,6 +56,7 @@ def test_ambiguous_negated_quoted_conditional_or_mixed_work_never_writes(message
 def life(tmp_path):
     sessions = init_database(tmp_path / 'life.db')
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     snapshot = repo.read()
     repo.apply_event(CompanionEventCommand(identity=snapshot['identity'], expected_revision=snapshot['revision'],
                     command_id=uuid4(), event='app_open'))
@@ -179,6 +181,7 @@ def test_delete_source_conversation_erases_derived_choice_and_wait(life):
 def test_real_transport_routes_to_same_command_without_model(tmp_path, endpoint):
     model = CountingModel()
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        enable_companion(client.app.state.companion_repository)
         snapshot = client.get('/api/companion').json()
         started = client.post('/api/companion/events', json={'identity': snapshot['identity'],
             'expected_revision': snapshot['revision'], 'command_id': str(uuid4()), 'event': 'app_open'})
@@ -239,6 +242,7 @@ def test_detached_runtime_uses_same_bound_command(tmp_path):
     model = CountingModel()
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
         repo = client.app.state.companion_repository
+        enable_companion(repo)
         snapshot = repo.read()
         repo.apply_event(CompanionEventCommand(identity=snapshot['identity'], expected_revision=snapshot['revision'],
                         command_id=uuid4(), event='app_open'))
@@ -347,6 +351,7 @@ def test_life_commands_leave_existing_work_hitl_and_pending_owner_intact(tmp_pat
         application = client.post('/api/applications', json={'company_name': 'Keep approval',
             'position_name': 'Engineer', 'status': 'applied'}).json()
         repo = client.app.state.companion_repository
+        enable_companion(repo)
         view = repo.read()
         repo.apply_event(CompanionEventCommand(identity=view['identity'], expected_revision=view['revision'],
                                              command_id=uuid4(), event='app_open'))

@@ -10,6 +10,7 @@ from offerpilot.companion.contracts import CompanionEventCommand
 from offerpilot.companion.models import CompanionEvent, CompanionState
 from offerpilot.companion.persona import PERSONA_VERSION
 from offerpilot.companion.repository import CompanionConflict, CompanionRepository, MIN_STEP_SECONDS
+from tests._companion import enable_companion
 from offerpilot.db import init_database
 from offerpilot.models import Application
 
@@ -33,6 +34,7 @@ def test_old_database_upgrade_is_additive_and_restart_preserves_identity(tmp_pat
         connection.execute("DELETE FROM schema_migrations WHERE version='0034_companion_life'")
     upgraded = init_database(path)
     first = CompanionRepository(upgraded).read()
+    assert first['settings']['enabled'] is False
     with upgraded() as session:
         row = session.scalar(select(Application))
         assert row.company_name == 'Keep company'
@@ -50,6 +52,7 @@ def test_v11_adds_user_chat_provenance_without_replacing_v1_state(tmp_path):
     path = tmp_path / 'old-v1.db'
     sessions = init_database(path)
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     first = repo.read()
     started = repo.apply_event(CompanionEventCommand(identity=first['identity'], expected_revision=first['revision'],
                                                    command_id=uuid4(), event='app_open'))
@@ -77,6 +80,7 @@ def test_old_activity_wish_backfill_is_conservative_preserves_pending_and_fences
 ):
     sessions = init_database(tmp_path / 'old-wishes.db')
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     initial = repo.read(1000)
     started = repo.apply_event(CompanionEventCommand(identity=initial['identity'],
         expected_revision=initial['revision'], command_id=uuid4(), event='app_open'), 1000)
@@ -119,6 +123,7 @@ def test_v13_binding_upgrade_only_backfills_authoritative_current_entity(tmp_pat
     path = tmp_path / 'old-v12.db'
     sessions = init_database(path)
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     first = repo.read(1000)
     started = repo.apply_event(CompanionEventCommand(identity=first['identity'],
         expected_revision=first['revision'], command_id=uuid4(), event='app_open'), 1000)
@@ -156,6 +161,7 @@ def test_v13_binding_upgrade_only_backfills_authoritative_current_entity(tmp_pat
 def test_current_binding_backfill_does_not_overwrite_conflicting_existing_metadata(tmp_path):
     sessions = init_database(tmp_path / 'conflicting-binding.db')
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     initial = repo.read(1000)
     repo.apply_event(CompanionEventCommand(identity=initial['identity'], expected_revision=initial['revision'],
         command_id=uuid4(), event='app_open'), 1000)
@@ -175,6 +181,7 @@ def test_expression_upgrade_preserves_waiting_life_and_fences_old_window_once(
 ):
     sessions = init_database(tmp_path / 'persona-upgrade.db')
     repo = CompanionRepository(sessions)
+    enable_companion(repo)
     for action in ('app_open', 'join'):
         before = repo.read(1000)
         repo.apply_event(CompanionEventCommand(identity=before['identity'],

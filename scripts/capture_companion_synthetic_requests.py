@@ -260,6 +260,7 @@ def _holdout_matrix(data_dir: Path, fake: SyntheticUpstream) -> dict[str, Any]:
     with driver._api(data_dir) as client:
         matrix = driver._Matrix(data_dir, client, fake.stage)
         try:
+            matrix.settings(enabled=True)
             matrix.event("app_open")
             for operation, text, previous in HOLDOUTS:
                 before = matrix.view()

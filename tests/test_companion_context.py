@@ -30,6 +30,7 @@ from offerpilot.context_projector.contracts import (
 from offerpilot.context_projector.loader import ContextSourceLoader
 from offerpilot.context_projector.projector import ModelSurfaceProjector, ProjectionRequest
 from offerpilot.context_projector.selector import ToolSelectionSignals, select_tools
+from tests._companion import enable_companion
 from offerpilot.db import init_database
 from offerpilot.pilot_runtime.compensation import prepare_compensation_handler_components
 
@@ -39,6 +40,7 @@ def companion(tmp_path):
     path = tmp_path / "companion.db"
     sessions = init_database(path)
     repository = CompanionRepository(sessions)
+    enable_companion(repository)
     loader = ContextSourceLoader(path)
     yield sessions, repository, loader
     loader._pool.close()
@@ -162,7 +164,7 @@ def test_proactive_off_does_not_hide_explicitly_requested_state(companion):
     first = event(repository, "app_open")
     repository.update_settings(CompanionSettingsCommand(
         identity=first["identity"], expected_revision=first["revision"], command_id=uuid4(),
-        settings=CompanionPolicy(proactivity="off"),
+        settings=CompanionPolicy(enabled=True, proactivity="off"),
     ), now=1001)
     assert context_data(loader)["virtual_activity"] is not None
 
@@ -269,6 +271,7 @@ def test_shared_chat_runtime_keeps_life_before_request_and_out_of_work_and_memor
     app = create_app(data_dir=tmp_path, chat_model=RecordingModel())
     with TestClient(app) as client:
         repository = app.state.companion_repository
+        enable_companion(repository)
         started = event(repository, "app_open")
         cases = [
             ("你的小日常怎么样了？", True),

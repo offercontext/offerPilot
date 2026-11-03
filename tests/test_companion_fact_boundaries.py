@@ -1,4 +1,6 @@
 """Real-batch fact boundaries: bounded read selection, not model-quality proof."""
+from tests._companion import enable_companion
+
 import pytest
 
 from offerpilot.companion.context import (
@@ -127,6 +129,7 @@ def test_original_failure_queries_reach_runtime_with_current_source_boundaries(t
 
     with TestClient(create_app(data_dir=tmp_path, chat_model=RecordingModel())) as client:
         repo = client.app.state.companion_repository
+        enable_companion(repo)
         event(repo, 'app_open')
 
         def submit(payload):

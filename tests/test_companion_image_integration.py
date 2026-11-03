@@ -11,6 +11,7 @@ from offerpilot.api import create_app
 from offerpilot.companion.contracts import CompanionEventCommand
 from offerpilot.companion.persona_repository import PersonaRepository
 from offerpilot.companion.repository import CompanionRepository
+from tests._companion import enable_companion
 from offerpilot.db import session_factory_for_data_dir
 from offerpilot.models import PilotTurnRecord
 from offerpilot.pilot_runtime.service import PilotRuntime
@@ -32,6 +33,7 @@ def test_custom_persona_image_turn_keeps_policy_binding_and_never_executes_life_
     persona = PersonaRepository(sessions)
     original = update(persona, '旧名字')
     life = CompanionRepository(sessions)
+    enable_companion(life)
     initial = life.read()
     life.apply_event(CompanionEventCommand(identity=initial['identity'], expected_revision=initial['revision'],
         command_id=uuid4(), event='app_open'))

@@ -24,6 +24,7 @@ from offerpilot.companion.repository import (
     companion_client_active, companion_policy, companion_presence, companion_publish_guard,
     companion_source, mark_companion_published,
 )
+from tests._companion import enable_companion
 from offerpilot.db import init_database
 from offerpilot.models import Application, Conversation, MockInterviewAttempt, PilotExecution, PilotTurnRecord
 from offerpilot.pilot_control import PilotControlRepository
@@ -37,7 +38,9 @@ NOW = datetime(2026, 10, 21, 4, tzinfo=timezone.utc).timestamp()
 @pytest.fixture
 def life(tmp_path):
     sessions = init_database(tmp_path / "companion.db")
-    return sessions, CompanionRepository(sessions)
+    repo = CompanionRepository(sessions)
+    enable_companion(repo)
+    return sessions, repo
 
 
 def fence(repo):
@@ -54,7 +57,7 @@ def activity_event(repo, kind, now=NOW, **kwargs):
 
 
 def settings(repo, now=NOW, **kwargs):
-    return repo.update_settings(CompanionSettingsCommand(**fence(repo), settings=CompanionPolicy(**kwargs)), now)
+    return repo.update_settings(CompanionSettingsCommand(**fence(repo), settings=CompanionPolicy(**{"enabled": True, **kwargs})), now)
 
 
 def present(repo, now=NOW, client_id=None, sequence=0, **flags):

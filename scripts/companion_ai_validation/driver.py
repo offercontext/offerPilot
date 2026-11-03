@@ -360,6 +360,8 @@ class _Matrix:
         self.checks[name] = True
 
     def run(self) -> dict[str, Any]:
+        # This matrix exercises an explicitly opted-in companion, not startup defaults.
+        self.settings(enabled=True)
         first = self.event("app_open")
         boat_id = first["state"]["activity"]["id"]
         self.checked("independent_start_no_wish", first["state"]["wish"] is None

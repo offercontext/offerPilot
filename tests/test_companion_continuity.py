@@ -3,6 +3,8 @@ from copy import deepcopy
 import json
 from uuid import uuid4
 
+from tests._companion import enable_companion
+
 import pytest
 from sqlalchemy import select
 
@@ -168,6 +170,7 @@ def test_real_source_loader_recalls_without_consuming_a_vague_color_answer(tmp_p
     model = RecordingModel()
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
         repo = client.app.state.companion_repository
+        enable_companion(repo)
         snapshot = repo.read()
         repo.apply_event(CompanionEventCommand(identity=snapshot['identity'], expected_revision=snapshot['revision'],
             command_id=uuid4(), event='app_open'))

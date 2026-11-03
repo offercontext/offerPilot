@@ -3,6 +3,8 @@ import json
 from types import SimpleNamespace
 from uuid import uuid4
 
+from tests._companion import enable_companion
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -298,7 +300,7 @@ def test_proactivity_off_still_allows_explicit_withdrawal_without_proactive_sour
     repo = life[1]
     before = repo.read()
     repo.update_settings(CompanionSettingsCommand(identity=before['identity'], expected_revision=before['revision'],
-        command_id=uuid4(), settings=CompanionPolicy(proactivity='off')))
+        command_id=uuid4(), settings=CompanionPolicy(enabled=True, proactivity='off')))
     with run(life, '这步你自己做吧', first.conversation_id) as (_, execute):
         execute()
     assert repo.read()['settings']['proactivity'] == 'off'
@@ -310,6 +312,7 @@ def test_withdrawal_uses_real_chat_transport_and_preserves_mixed_work_message(tm
     model = CountingModel()
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
         repo = client.app.state.companion_repository
+        enable_companion(repo)
         repo.apply_event(command_for_start(repo))
         joined = client.post('/api/chat', json={'request_id': str(uuid4()), 'message': '等我回来一起选颜色'}).json()
         conversation_id = joined['conversation_id']
