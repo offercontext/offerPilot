@@ -8,6 +8,13 @@ import path from 'node:path';
 import os from 'node:os';
 import { createMockScreenshots } from '../mock-screenshots.mjs';
 import { fixtureFor } from '../mock-fixtures.cjs';
+// Named-surface fixtures explicitly opt in through synthetic reads only.
+// Keep the real naming hook and guard; no backend or write endpoint is used.
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => enabledCompanionSnapshot };
+});
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/pilotMascot/live2dRuntime', () => ({ live2dPilotMascotRuntime: { mount: vi.fn() } }));
 import DesktopHaruWindow from '../../../web/src/features/assistantSurface/DesktopHaruWindow';
 

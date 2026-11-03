@@ -8,6 +8,12 @@ import { runInNewContext } from 'node:vm';
 declare const __PLAYWRIGHT_BUNDLE__: string;
 const mocks = vi.hoisted(() => ({ interviews: vi.fn(), resumePreview: vi.fn(), resumeConfirm: vi.fn(),
   preparation: vi.fn(), history: vi.fn(), advisory: vi.fn(), offerCreate: vi.fn(), offerPreview: vi.fn() }));
+// Exercise the named surface without falling through to real HTTP reads.
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => enabledCompanionSnapshot };
+});
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/pilotMascot/live2dRuntime', () => ({ live2dPilotMascotRuntime: { mount: async () => ({ setActivity() {}, dispose() {} }) } }));
 vi.mock('@/services/interviews', () => ({ listInterviews: mocks.interviews }));
 vi.mock('@/services/applicationJdVersions', () => ({ getCurrentApplicationJd: async () => ({ current: { id: 5, jd_text: 'synthetic JD' } }) }));
@@ -142,6 +148,7 @@ it('Haru real visible Stop has the exact name and forwards the current stop requ
   window.offerpilotDesktop = { role: 'haru', getState: async () => state, onState: fn => { listener = fn; return () => {}; },
     request, windowAction: async () => true } as any;
   await act(async () => root.render(<DesktopHaruWindow />)); await flush();
+  one(role('main', 'Haru 桌面小窗'));
   const stop = one(role('button', '停止')) as HTMLButtonElement;
   expect(stop.disabled).toBe(false); await click(stop);
   expect(request).toHaveBeenCalledWith({ action: 'stop', version: 3, generation: 1 });
