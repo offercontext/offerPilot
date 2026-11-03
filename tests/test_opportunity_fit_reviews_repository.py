@@ -675,8 +675,32 @@ def test_v2_expired_contract_error_does_not_delete_stale_stage(tmp_path, monkeyp
         assert stage.provider_call_token
 
 
-def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_path) -> None:
+def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_path, monkeypatch) -> None:
     factory, application, resume = _ready(tmp_path)
+    from offerpilot.repositories.lease_heartbeat import LeaseHeartbeat
+
+    # A real thread still owns renewal/stop. Only lease time is controlled: a
+    # slow runner must not consume the new 0.8s lease between provider return
+    # and the final fenced commit, which is not what this test exercises.
+    now = datetime(2026, 11, 2, 0, 0, 0, 123456, tzinfo=timezone.utc)
+
+    class LeaseClock(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return now.astimezone(tz) if tz is not None else now.replace(tzinfo=None)
+
+    monkeypatch.setattr("offerpilot.repositories.opportunity_fit_reviews.datetime", LeaseClock)
+    monkeypatch.setattr("offerpilot.repositories.lease_heartbeat.datetime", LeaseClock)
+    heartbeats: list[LeaseHeartbeat] = []
+
+    def tracked_heartbeat(*args, **kwargs):  # type: ignore[no-untyped-def]
+        heartbeat = LeaseHeartbeat(*args, **kwargs)
+        heartbeats.append(heartbeat)
+        return heartbeat
+
+    monkeypatch.setattr(
+        "offerpilot.repositories.opportunity_fit_reviews.LeaseHeartbeat", tracked_heartbeat
+    )
     repository = OpportunityFitReviewsRepository(
         factory,
         confirmation_secret="test-secret",
@@ -697,7 +721,25 @@ def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_p
             model,
         )
 
-    time.sleep(1.2)
+    assert len(heartbeats) == 1
+    assert not heartbeats[0].is_alive
+    with factory() as session:
+        failed = session.scalar(select(OpportunityFitReviewStage))
+        assert failed is not None
+        assert failed.status == "provider_unknown"
+        generation = failed.stage_generation
+        expiry = failed.lease_expires_at.replace(tzinfo=timezone.utc)
+        assert expiry == now + timedelta(seconds=0.8)
+
+    before_expiry = repository.create_triage_v2(
+        application.id, resume.id, "Kubernetes preferred", "copy", [], key, model
+    )
+    assert before_expiry[1].status == "provider_unknown"
+    assert before_expiry[1].stage_generation == generation
+    assert model.calls == 1
+    assert len(heartbeats) == 1
+
+    now = expiry
     replay = repository.create_triage_v2(
         application.id,
         resume.id,
@@ -709,7 +751,10 @@ def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_p
     )
 
     assert replay[1].status == "ready"
+    assert replay[1].stage_generation == generation + 1
     assert model.calls == 2
+    assert len(heartbeats) == 2
+    assert not heartbeats[1].is_alive
 
 
 def test_v2_stopped_heartbeat_allows_takeover_but_fences_late_result(tmp_path, monkeypatch) -> None:

@@ -250,3 +250,70 @@ def test_pytest_group_aggregate_rejects_case_only_union_mismatch(tmp_path: Path)
 
     assert result.returncode != 0
     assert "coverage differs" in (result.stdout + result.stderr).lower()
+
+
+def test_agent_loop_grouping_and_exactly_once_with_native_functions(tmp_path: Path) -> None:
+    """Execute the production functions, not a second Python grouping algorithm."""
+    source = (ROOT / 'scripts/windows-pytest-groups.ps1').read_text(encoding='utf-8')
+    duplicate_function = source.split('function Get-OrdinalDuplicates', 1)[1].split(
+        'function Test-OrdinalSetEqual', 1)[0]
+    group_function = source.split('function Get-Groups', 1)[1].split(
+        'function Get-AllowedSkips', 1)[0]
+    script = tmp_path / 'group-routing.ps1'
+    script.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        + 'function Get-OrdinalDuplicates' + duplicate_function
+        + 'function Get-Groups' + group_function
+        + r'''
+$files = @('tests\agent_loop\test_confirmation.py', 'tests\agent_loop\test_runner.py',
+           'tests\test_applications.py', 'tests\test_unknown_new_module.py')
+$groups = Get-Groups $files
+if ($groups.agent.Count -ne 2) { throw 'agent loop missing or duplicated' }
+if ($groups.domain.Count -ne 1 -or $groups.misc.Count -ne 1) { throw 'other groups changed' }
+$all = @($groups.Values | ForEach-Object { $_ })
+if ($all.Count -ne 4 -or @(Get-OrdinalDuplicates $all).Count -ne 0) { throw 'not exactly once' }
+try {
+  $null = Get-Groups @('tests\agent_loop\test_applications.py')
+  throw 'overlap was silently accepted'
+} catch {
+  if ($_.Exception.Message -notlike 'multiply assigned test files:*') { throw }
+}
+Write-Output 'native group routing passed'
+''', encoding='utf-8')
+    result = subprocess.run([_powershell(), '-NoProfile', '-File', str(script)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'native group routing passed' in result.stdout
+
+
+def test_selector_group_catalog_imports_complete_pure_function_dependency_set():
+    source = (ROOT / 'scripts/test_selection/check_groups.ps1').read_text(encoding='utf-8')
+    assert "@('Get-TestFiles','Get-OrdinalDuplicates','Get-Groups')" in source
+    assert '$ast.FindAll' in source
+    assert '. ([scriptblock]::Create($function[0].Extent.Text.Replace(' in source
+    assert 'powershell -File' not in source and 'Invoke-Expression' not in source
+
+
+def test_selector_actual_ast_import_closure_supports_agent_groups(tmp_path: Path) -> None:
+    """Use exactly the import function and invocation from the selector script."""
+    source = (ROOT / 'scripts/test_selection/check_groups.ps1').read_text(encoding='utf-8')
+    importer = 'function Import-Functions' + source.split('function Import-Functions', 1)[1].split(
+        '$catalogRows =', 1)[0]
+    invocation = next(line for line in source.splitlines()
+                      if line.startswith('Import-Functions ') and 'windows-pytest-groups.ps1' in line)
+    escaped = str(ROOT).replace("'", "''")
+    script = tmp_path / 'selector-group-import.ps1'
+    script.write_text("$ErrorActionPreference = 'Stop'\n" + f"$repoRoot = '{escaped}'\n"
+                      + importer + invocation + '\n' + r'''
+$groups = Get-Groups @(Get-TestFiles)
+foreach ($path in @('tests\agent_loop\test_confirmation.py','tests\agent_loop\test_runner.py')) {
+  if ($groups.agent -cnotcontains $path) { throw "missing agent loop: $path" }
+}
+$all = @($groups.Values | ForEach-Object { $_ })
+if (@(Get-OrdinalDuplicates $all).Count) { throw 'duplicate import/group results' }
+Write-Output 'selector AST dependency closure passed'
+''', encoding='utf-8')
+    result = subprocess.run([_powershell(), '-NoProfile', '-File', str(script)],
+                            capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert 'selector AST dependency closure passed' in result.stdout
