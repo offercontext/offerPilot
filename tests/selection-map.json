@@ -337,6 +337,47 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/evaluation/test_async_transport.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "provider_admission",
+        "task_isolation",
+        "transport_closure"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_budget_denial_attribution.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_cleanup_failures.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/evaluation/test_cli.py": {
       "modules": [
         "evaluation"
@@ -376,7 +417,355 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/evaluation/test_context_observer.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/evaluation/test_contracts.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_control_exit_drain.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_acceptance.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_adjudication.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_baselines.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_contracts.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_extensions.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_governance.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_integrity.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_origin_reads.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_planning.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_planning_targets.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_history.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_parallel.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_paths.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_sources.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release_capture.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release_reads.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_review.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_review_evidence.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_external_reports.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "estimated_seconds": null,
+      "level": "test"
+    },
+    "tests/evaluation/test_failure_observations.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_final_input.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_legacy_http_deadline.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_local_http_cancellation.py": {
       "modules": [
         "evaluation"
       ],
@@ -403,6 +792,58 @@
       "estimated_seconds": null
     },
     "tests/evaluation/test_p0_cases.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_pretrial_failure_diagnostics.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_process_signals.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_product_budget_probe.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_provider_network.py": {
       "modules": [
         "evaluation"
       ],
@@ -454,7 +895,137 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/evaluation/test_run_budget.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/evaluation/test_runner.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_snapshot_workers.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_source_functional_goals.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_stream_consumption.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_subject_shutdown.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_subject_source_loading.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_targeted_authorized.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_targeted_offline.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_targeted_paths.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_unknown_cleanup_boundary.py": {
       "modules": [
         "evaluation"
       ],
@@ -896,6 +1467,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_analysis_entrypoint_contracts.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_api_contract.py": {
       "modules": [
         "backend_misc"
@@ -910,6 +1494,19 @@
       "estimated_seconds": null
     },
     "tests/test_application_creation.py": {
+      "modules": [
+        "applications"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_application_event_update_presence.py": {
       "modules": [
         "applications"
       ],
@@ -1157,6 +1754,45 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_chat_image_schema_concurrency.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_chat_images.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_chat_line_format_policy.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_chat_repository.py": {
       "modules": [
         "backend_misc"
@@ -1170,7 +1806,33 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_ci_history.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_cli.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_complete_pytest_shards.py": {
       "modules": [
         "backend_misc"
       ],
@@ -1404,6 +2066,58 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_desktop.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_desktop_integration_ci.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_desktop_job_mail_integration.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_desktop_mail_localization_integration.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_deterministic_pilot_actions.py": {
       "modules": [
         "backend_misc"
@@ -1482,6 +2196,84 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_external_agent_acceptance_script.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_external_agent_business.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_external_agent_business_migration.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_external_agent_business_stdio.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_external_agents.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_external_agents_stdio.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_frontend_vitest_groups.py": {
       "modules": [
         "backend_misc"
@@ -1535,6 +2327,32 @@
       "estimated_seconds": null
     },
     "tests/test_health.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_image_vision_acceptance.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_image_vision_admission.py": {
       "modules": [
         "backend_misc"
       ],
@@ -1898,6 +2716,175 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_job_mail_api.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_ci_scope.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_master_port_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_diagnostics.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_extraction.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_fixture.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_master_upgrade.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_process_lock.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_review.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_scheduler.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_scheduler_fixture.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_secure_setup.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_sync.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_job_mail_transport.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_journal_active_work_budget_gate.py": {
       "modules": [
         "backend_misc"
@@ -2223,6 +3210,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_knowledge_lease_boundaries.py": {
+      "modules": [
+        "knowledge"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_knowledge_reset.py": {
       "modules": [
         "knowledge"
@@ -2250,6 +3250,19 @@
       "estimated_seconds": null
     },
     "tests/test_knowledge_tokenizer.py": {
+      "modules": [
+        "knowledge"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_knowledge_tokenizer_offline.py": {
       "modules": [
         "knowledge"
       ],
@@ -2356,6 +3369,19 @@
     "tests/test_material_revision_proposals_repository.py": {
       "modules": [
         "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_mock_execution_contracts.py": {
+      "modules": [
+        "interview"
       ],
       "priority": "p0",
       "surface": "backend",
@@ -2600,7 +3626,46 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_offline_network_guard.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_offline_socketpair_guard.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_onboarding_api.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_opportunity_fit_lease_boundaries.py": {
       "modules": [
         "backend_misc"
       ],
@@ -2769,6 +3834,32 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_provider_sdk_loading.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_provider_stream_cancellation.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_questions_api.py": {
       "modules": [
         "backend_misc"
@@ -2796,6 +3887,19 @@
       "estimated_seconds": null
     },
     "tests/test_recovery_policy.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_reminder_candidates.py": {
       "modules": [
         "backend_misc"
       ],
@@ -2964,6 +4068,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_runtime_source_unavailable.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_schema_compatibility.py": {
       "modules": [
         "backend_misc"
@@ -3005,6 +4122,19 @@
       "estimated_seconds": null
     },
     "tests/test_settings_api.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_simplification_ai_platform.py": {
       "modules": [
         "backend_misc"
       ],
@@ -3109,6 +4239,19 @@
       "estimated_seconds": null
     },
     "tests/test_windows_pytest_groups.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_windows_workflow_routing.py": {
       "modules": [
         "backend_misc"
       ],
@@ -3433,6 +4576,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/tool_authority/test_scope_trigger_transactions.py": {
+      "modules": [
+        "authority"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/tool_authority/test_scoped_reads.py": {
       "modules": [
         "authority"
@@ -3655,6 +4811,19 @@
       "estimated_seconds": null
     },
     "tests/tool_metadata/test_golden_assets.py": {
+      "modules": [
+        "tool_pipeline"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/tool_metadata/test_integrity_work.py": {
       "modules": [
         "tool_pipeline"
       ],
@@ -4110,6 +5279,175 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/verification_control/test_account_archive.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_bounded_ledger.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_channel_transport.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_cli_isolation.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_final_dispatch.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_protocol_journal.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_review_regressions.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_runtime_context.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_sdk_wire.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_utf8.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_wire.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/AISettingsDrawer.interaction.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/AISettingsDrawer.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/components/AdaptiveInterviewPracticeWorkspace.test.tsx": {
       "modules": [
         "frontend"
@@ -4162,19 +5500,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/AISettingsDrawer.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/ApplicationCommunicationDraftPanel.test.tsx": {
       "modules": [
         "frontend"
@@ -4189,6 +5514,19 @@
       "estimated_seconds": null
     },
     "web/src/components/ApplicationDetail.deterministicPilot.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ApplicationDetail.interviewHydration.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4292,46 +5630,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/applicationPilotEntry.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/applicationWorkspaceModel.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/AuthGate/model.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/calendarPresentation.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -4370,19 +5669,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/ChatPanel/capabilities.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/ChatPanel/Composer.test.tsx": {
       "modules": [
         "frontend"
@@ -4397,32 +5683,6 @@
       "estimated_seconds": null
     },
     "web/src/components/ChatPanel/ContextAttachmentRail.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/ChatPanel/conversationList.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/ChatPanel/deterministicPilotConfirmation.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4461,33 +5721,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/ChatPanel/layout.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/ChatPanel/MessageBubble.render.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/ChatPanel/model.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -4539,19 +5773,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/ChatPanel/proposalDraft.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/ChatPanel/VoiceCoachingPilotEntry.test.tsx": {
       "modules": [
         "frontend"
@@ -4565,7 +5786,111 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/components/ChatPanel/capabilities.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ChatPanel/conversationList.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ChatPanel/deterministicPilotConfirmation.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ChatPanel/layout.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ChatPanel/localization.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ChatPanel/model.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ChatPanel/proposalDraft.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/components/ConversationReadinessControl.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/DesktopUpdatesCard.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4604,6 +5929,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/components/InterviewFormsLocalization.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/components/InterviewKnowledgeCaptureDrawer.interaction.test.tsx": {
       "modules": [
         "frontend"
@@ -4618,6 +5956,19 @@
       "estimated_seconds": null
     },
     "web/src/components/InterviewKnowledgeCaptureDrawer.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/InterviewPracticeHome.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4773,6 +6124,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/components/KanbanBoard/PilotContextDropTarget.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/components/KanbanBoard/applicationLifecycle.test.ts": {
       "modules": [
         "frontend"
@@ -4799,7 +6163,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/KanbanBoard/PilotContextDropTarget.test.tsx": {
+    "web/src/components/KnowledgeNoteManager.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4851,19 +6215,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/materialFlowCopy.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/MaterialKitDrawer.evidenceBundles.test.tsx": {
       "modules": [
         "frontend"
@@ -4877,7 +6228,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/materialKitStatus.test.ts": {
+    "web/src/components/MaterialLocalization.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4904,19 +6255,6 @@
       "estimated_seconds": null
     },
     "web/src/components/NextStepSuggestions.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/offer-negotiation/OfferNegotiationPresentation.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -4981,19 +6319,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/components/offerComparisonModel.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/components/OfferNegotiationDrawer.responsive.test.ts": {
       "modules": [
         "frontend"
@@ -5021,32 +6346,6 @@
       "estimated_seconds": null
     },
     "web/src/components/OfferPilotNegotiation.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/offerWorkspaceModel.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/opportunityFitCopy.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -5358,6 +6657,149 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/components/VoiceCoachingGrowthView.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/VoiceCoachingSnapshotSaveCard.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/applicationPilotEntry.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/applicationWorkspaceModel.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/calendarPresentation.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/materialFlowCopy.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/materialKitStatus.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/offer-negotiation/OfferNegotiationPresentation.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/offerComparisonModel.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/offerWorkspaceModel.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/opportunityFitCopy.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/components/systemCopyRegression.test.ts": {
       "modules": [
         "frontend"
@@ -5385,32 +6827,6 @@
       "estimated_seconds": null
     },
     "web/src/components/ui/SourceStateTag.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/VoiceCoachingGrowthView.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/VoiceCoachingSnapshotSaveCard.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -5501,6 +6917,97 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/assistantSurface/AssistantSurfaceProvider.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/CalendarHaruPresentation.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/ConversationControlsLocalization.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/DesktopHaruWindow.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/HaruChatWindow.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/HaruComposer.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/PilotWorkspace.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/assistantSurface/assistantPresentation.test.ts": {
       "modules": [
         "frontend"
@@ -5540,46 +7047,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/assistantSurface/AssistantSurfaceProvider.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/features/assistantSurface/assistantSurfaceReducer.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/CalendarHaruPresentation.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/HaruChatWindow.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -5618,7 +7086,20 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/assistantSurface/PilotWorkspace.test.tsx": {
+    "web/src/features/assistantSurface/useChatImageDrafts.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/assistantSurface/useDesktopHaruOwner.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -5644,6 +7125,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/assistantSurface/usePilotConversationRecovery.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/assistantSurface/usePilotExecution.test.tsx": {
       "modules": [
         "frontend"
@@ -5657,7 +7151,33 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/assistantSurface/usePilotRecoveredStream.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/coreTaskSurface/AppShellCoreTaskHost.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/coreTaskSurface/CoreTaskSurfaceHost.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -5709,19 +7229,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/coreTaskSurface/CoreTaskSurfaceHost.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/features/coreTaskSurface/coreTaskSurfaceNegativeFixtures.test.ts": {
       "modules": [
         "frontend"
@@ -5736,6 +7243,19 @@
       "estimated_seconds": null
     },
     "web/src/features/coreTaskSurface/registry.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/coreTaskSurface/retainedOwners.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -5774,6 +7294,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/dashboard/TodayInboxSummary.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/dashboard/todayWorkspace.test.ts": {
       "modules": [
         "frontend"
@@ -5788,6 +7321,58 @@
       "estimated_seconds": null
     },
     "web/src/features/dashboard/widgets/WeeklyMissionPanel.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/desktopUpdates/backgroundSafety.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/desktopUpdates/installSafety.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/desktopUpdates/retainedWorkSafety.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/desktopUpdates/useDesktopUpdateSafety.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -5878,19 +7463,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/interviewStudio/evidenceLocator.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/features/interviewStudio/InterviewStudio.layout.test.ts": {
       "modules": [
         "frontend"
@@ -5917,7 +7489,98 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/interviewStudio/evidenceLocator.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/interviewStudio/interviewStudioController.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/jobMail/JobMailFlows.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/jobMail/JobMailSecureSetup.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/jobMail/jobMailModel.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/jobMail/jobMailProxy.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/jobMail/jobMailWarningLocalization.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/jobMail/secureSetupModel.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -5995,6 +7658,45 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/mockInterviewVoice/OfflineWhisperModelCard.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/mockInterviewVoice/VoiceAnswerComposer.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/mockInterviewVoice/VoiceDeliverySummaryCard.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/mockInterviewVoice/audioDecoder.test.ts": {
       "modules": [
         "frontend"
@@ -6022,6 +7724,19 @@
       "estimated_seconds": null
     },
     "web/src/features/mockInterviewVoice/offlineModelStore.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/mockInterviewVoice/offlineWhisperAssets.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -6073,7 +7788,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/mockInterviewVoice/OfflineWhisperModelCard.test.tsx": {
+    "web/src/features/mockInterviewVoice/offlineWhisperPipeline.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -6112,19 +7827,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/mockInterviewVoice/VoiceAnswerComposer.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/features/mockInterviewVoice/voiceCaptureRuntime.test.ts": {
       "modules": [
         "frontend"
@@ -6139,19 +7841,6 @@
       "estimated_seconds": null
     },
     "web/src/features/mockInterviewVoice/voiceDeliverySummary.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/mockInterviewVoice/VoiceDeliverySummaryCard.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -6216,6 +7905,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/onboarding/OnboardingChecklist.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/onboarding/actionRouting.test.ts": {
       "modules": [
         "frontend"
@@ -6229,7 +7931,33 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/onboarding/OnboardingChecklist.test.tsx": {
+    "web/src/features/pilot/PilotAttachmentContext.render.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/pilot/PilotAttachmentContext.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/pilot/PilotOpportunityFitV2Card.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -6281,32 +8009,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/pilot/PilotAttachmentContext.render.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/pilot/PilotAttachmentContext.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/features/pilot/pilotOpportunityFitLifecycle.test.ts": {
       "modules": [
         "frontend"
@@ -6320,7 +8022,7 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/pilot/PilotOpportunityFitV2Card.test.tsx": {
+    "web/src/features/pilotMascot/PilotMascot.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -6346,6 +8048,32 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/pilotMascot/live2dCsp.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/pilotMascot/live2dModuleOrder.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/pilotMascot/live2dRuntime.test.ts": {
       "modules": [
         "frontend"
@@ -6359,7 +8087,20 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/features/pilotMascot/PilotMascot.test.tsx": {
+    "web/src/features/pilotMascot/live2dUrlDependencies.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/pilotMascot/mascotFailure.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -6424,6 +8165,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/reminders/RemindersView.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/reviewReadiness/ProductActionConfirmation.test.tsx": {
       "modules": [
         "frontend"
@@ -6450,6 +8204,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/features/reviewReadiness/ReviewReadinessNextStep.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/features/reviewReadiness/reviewReadinessGate.test.ts": {
       "modules": [
         "frontend"
@@ -6464,19 +8231,6 @@
       "estimated_seconds": null
     },
     "web/src/features/reviewReadiness/reviewReadinessNegativeFixtures.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/reviewReadiness/ReviewReadinessNextStep.test.tsx": {
       "modules": [
         "frontend"
       ],
@@ -6555,6 +8309,97 @@
       "estimated_seconds": null
     },
     "web/src/features/workspaceExperience/workspaceExperienceGolden.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/catalogs.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/controlCaching.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/desktopLocale.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/i18n.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/liveText.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/modal.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/i18n/nativePreference.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -6697,19 +8542,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "web/src/layout/calendarWorkspace.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/src/layout/CommandPalette.accessibility.test.tsx": {
       "modules": [
         "frontend"
@@ -6724,19 +8556,6 @@
       "estimated_seconds": null
     },
     "web/src/layout/CommandPalette.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/layout/navigation.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -6780,6 +8599,32 @@
         "frontend"
       ],
       "priority": "p1",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/layout/calendarWorkspace.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/layout/navigation.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
       "surface": "frontend",
       "requires": [],
       "risk_tags": [
@@ -7048,6 +8893,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/lib/useReminderCandidates.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/services/adaptiveInterviewPractice.test.ts": {
       "modules": [
         "frontend"
@@ -7178,6 +9036,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/services/http.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/services/interviewKnowledgeCapture.test.ts": {
       "modules": [
         "frontend"
@@ -7218,6 +9089,32 @@
       "estimated_seconds": null
     },
     "web/src/services/interviewStories.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/services/jobMail.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/services/jobMailSecureSetup.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -7282,6 +9179,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/services/onboarding.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/services/opportunityFitReviews.test.ts": {
       "modules": [
         "frontend"
@@ -7309,6 +9219,19 @@
       "estimated_seconds": null
     },
     "web/src/services/proactive.test.ts": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/services/reminders.test.ts": {
       "modules": [
         "frontend"
       ],
@@ -7360,1901 +9283,6 @@
       "level": "test",
       "estimated_seconds": null
     },
-    "tests/evaluation/test_core_contracts.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_context_observer.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_run_budget.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_planning.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_integrity.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_source_functional_goals.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_final_input.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_governance.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_baselines.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_adjudication.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_product_budget_probe.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_release.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_extensions.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_review.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "evaluation_safety"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_external_reports.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "estimated_seconds": null,
-      "level": "test"
-    },
-    "tests/evaluation/test_budget_denial_attribution.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_cleanup_failures.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_control_exit_drain.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_acceptance.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_origin_reads.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_planning_targets.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_refresh.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_refresh_history.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_refresh_parallel.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_refresh_paths.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_refresh_sources.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_release_capture.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_release_reads.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_core_review_evidence.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_failure_observations.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_legacy_http_deadline.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_local_http_cancellation.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_pretrial_failure_diagnostics.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_process_signals.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_provider_network.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_snapshot_workers.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_stream_consumption.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_subject_shutdown.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_subject_source_loading.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_targeted_authorized.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_targeted_offline.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_targeted_paths.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/evaluation/test_unknown_cleanup_boundary.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_analysis_entrypoint_contracts.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_application_event_update_presence.py": {
-      "modules": [
-        "applications"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_chat_image_schema_concurrency.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_chat_images.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_chat_line_format_policy.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_ci_history.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_complete_pytest_shards.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_desktop.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_desktop_integration_ci.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_desktop_job_mail_integration.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_desktop_mail_localization_integration.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_external_agent_acceptance_script.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_external_agent_business.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_external_agent_business_migration.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_external_agent_business_stdio.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_external_agents.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_external_agents_stdio.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_image_vision_acceptance.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_image_vision_admission.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_api.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_diagnostics.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_extraction.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_fixture.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_master_upgrade.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_process_lock.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_review.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_scheduler.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_scheduler_fixture.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_secure_setup.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_sync.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_job_mail_transport.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_knowledge_lease_boundaries.py": {
-      "modules": [
-        "knowledge"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_knowledge_tokenizer_offline.py": {
-      "modules": [
-        "knowledge"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_mock_execution_contracts.py": {
-      "modules": [
-        "interview"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_offline_network_guard.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_offline_socketpair_guard.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_opportunity_fit_lease_boundaries.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_provider_sdk_loading.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_provider_stream_cancellation.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_reminder_candidates.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_runtime_source_unavailable.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_simplification_ai_platform.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/test_windows_workflow_routing.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/tool_authority/test_scope_trigger_transactions.py": {
-      "modules": [
-        "authority"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/tool_metadata/test_integrity_work.py": {
-      "modules": [
-        "tool_pipeline"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_account_archive.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_bounded_ledger.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_channel_transport.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_cli_isolation.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_final_dispatch.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_protocol_journal.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_review_regressions.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_runtime_context.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_sdk_wire.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_utf8.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "tests/verification_control/test_wire.py": {
-      "modules": [
-        "backend_misc"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/AISettingsDrawer.interaction.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/ApplicationDetail.interviewHydration.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/ChatPanel/localization.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/DesktopUpdatesCard.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/InterviewFormsLocalization.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/InterviewPracticeHome.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/KnowledgeNoteManager.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/components/MaterialLocalization.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/ConversationControlsLocalization.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/DesktopHaruWindow.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/HaruComposer.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/useChatImageDrafts.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/useDesktopHaruOwner.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/usePilotConversationRecovery.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/assistantSurface/usePilotRecoveredStream.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/coreTaskSurface/retainedOwners.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/dashboard/TodayInboxSummary.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/desktopUpdates/backgroundSafety.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/desktopUpdates/installSafety.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/desktopUpdates/retainedWorkSafety.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/desktopUpdates/useDesktopUpdateSafety.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/jobMail/JobMailFlows.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/jobMail/JobMailSecureSetup.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/jobMail/jobMailModel.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/jobMail/jobMailProxy.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/jobMail/jobMailWarningLocalization.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/jobMail/secureSetupModel.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/mockInterviewVoice/offlineWhisperAssets.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/mockInterviewVoice/offlineWhisperPipeline.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/pilotMascot/live2dCsp.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/pilotMascot/live2dModuleOrder.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/pilotMascot/live2dUrlDependencies.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/pilotMascot/mascotFailure.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/features/reminders/RemindersView.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/catalogs.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/controlCaching.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/desktopLocale.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/i18n.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/liveText.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/modal.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/i18n/nativePreference.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/lib/useReminderCandidates.test.tsx": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/services/http.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/services/jobMail.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/services/jobMailSecureSetup.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/services/onboarding.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
-    "web/src/services/reminders.test.ts": {
-      "modules": [
-        "frontend"
-      ],
-      "priority": "p0",
-      "surface": "frontend",
-      "requires": [],
-      "risk_tags": [
-        "conservative_initial_baseline"
-      ],
-      "level": "test",
-      "estimated_seconds": null
-    },
     "web/tests/localization/mounted.test.tsx": {
       "modules": [
         "frontend"
@@ -9267,22 +9295,7 @@
       ],
       "level": "test",
       "estimated_seconds": null
-    },
-    "tests/evaluation/test_async_transport.py": {
-      "modules": [
-        "evaluation"
-      ],
-      "priority": "p0",
-      "surface": "backend",
-      "requires": [],
-      "risk_tags": [
-        "provider_admission",
-        "task_isolation",
-        "transport_closure"
-      ],
-      "level": "test",
-      "estimated_seconds": null
     }
   },
-  "safety_baseline": "tests/selection-safety-v2.json"
+  "safety_baseline": "tests/selection-safety-integrated-v1.json"
 }

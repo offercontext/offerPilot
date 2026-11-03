@@ -20,6 +20,26 @@ class SelectionError(ValueError):
 
 
 SAFETY_BASELINE_HASH = "75038332adbe43c7abb9514ba84f2e6f49a5e1e79635ad56bdf391c9be32106d"
+MASTER_SAFETY_BASELINE_HASH = "f46d029ddc3bd7fdc44568de6715cdb9d6c3e5ab6eb092f02f48e117a0c1a6dc"
+MASTER_SAFETY_BASELINE = "tests/selection-safety-master-v1.json"
+
+
+INTEGRATED_SAFETY_BASELINE = "tests/selection-safety-integrated-v1.json"
+INTEGRATED_SAFETY_BASELINE_HASH = "ef8e6f96fd18430396a462b20131467cee31a41fe3a86443080ad1ad8d07aa77"
+HARNESS_P0_FILES = (
+    "src/offerpilot/cli.py", "src/offerpilot/evaluation/cli.py",
+    "src/offerpilot/evaluation/runner.py", "src/offerpilot/evaluation/contracts.py",
+    "scripts/evaluation_subject/bootstrap.py", "evals/suites/harness-p0-v1.json",
+)
+
+
+def unsupported_checks(checks: list[str], *, root: Path) -> list[str]:
+    # Presence is only a capability preflight. Actual six-trial execution and
+    # source/receipt reconciliation remain mandatory before reporting a pass.
+    available = all((root / name).is_file() for name in HARNESS_P0_FILES)
+    return ["harness_p0"] if "harness_p0" in checks and not available else []
+
+
 SAFETY_BASELINE_V2_HASH = "56f49d9e0ef11d8abb5c00041761fa57f5b3452e35ae2cd838a81e133a956e06"
 
 
@@ -87,7 +107,7 @@ def load_mapping(root: Path) -> dict[str, Any]:
         raise SelectionError("invalid selection mapping schema")
     if version == 1 and (root / "src/offerpilot").is_dir():
         raise SelectionError("OfferPilot mapping requires the fixed safety baseline")
-    if version == 2 and mapping["safety_baseline"] != "tests/selection-safety-v2.json":
+    if version == 2 and mapping["safety_baseline"] != INTEGRATED_SAFETY_BASELINE:
         raise SelectionError("unregistered safety baseline")
     modules = mapping["modules"]
     if not isinstance(modules, list) or not isinstance(mapping["test_metadata"], dict) or not isinstance(mapping["risk_rules"], list):
@@ -148,6 +168,8 @@ def validate_safety(root: Path, mapping: dict[str, Any], catalog: list[dict[str,
     if mapping["schema_version"] == 1:
         return None
     registrations = {
+        INTEGRATED_SAFETY_BASELINE: ("selection-safety-integrated-v1", INTEGRATED_SAFETY_BASELINE_HASH),
+        MASTER_SAFETY_BASELINE: ("selection-safety-master-v1", MASTER_SAFETY_BASELINE_HASH),
         "tests/selection-safety-v1.json": ("selection-safety-v1", SAFETY_BASELINE_HASH),
         "tests/selection-safety-v2.json": ("selection-safety-v2", SAFETY_BASELINE_V2_HASH),
     }
@@ -335,7 +357,9 @@ def plan(root: Path, base: str, profile: str, output: Path,
     risks = [r for r in risk_rules if any(fnmatchcase(p, pattern) for p in paths for pattern in r["paths"])]
     selection_controls = {"tests/selection-map.json", "tests/conftest.py", "scripts/select_tests.py",
                           "scripts/windows-pytest-groups.ps1", "scripts/windows-vitest-groups.ps1",
-                          "tests/selection-safety-v1.json", "tests/selection-safety-v2.json"}
+                          "tests/selection-safety-v1.json", "tests/selection-safety-v2.json", MASTER_SAFETY_BASELINE,
+                          "tests/selection-master-migration.json", INTEGRATED_SAFETY_BASELINE,
+                           "tests/selection-integration-migration.json"}
     force_full = any(r["expand"] == "full" for r in risks) or any(
         p in selection_controls or p.startswith("scripts/test_selection/") for p in paths)
     if force_full:
@@ -392,6 +416,11 @@ def plan(root: Path, base: str, profile: str, output: Path,
                  "no_changes" if simple and not paths else "checks_only" if simple else "ready",
              "selection_level": "full" if profile == "full" or force_full else "surface_full" if any(
                  r["kind"] == "fallback" for r in reasons) else "incremental", "release_eligible": False}
+    value["unsupported_checks"] = unsupported_checks(value["required_checks"], root=root)
+    value["needs_full"] = bool(value["unsupported_checks"])
+    if value["needs_full"]:
+        value["selection_status"] = "blocked"
+        value["capability_reason"] = "required Harness P0 stack files unavailable; the whole plan remains blocked"
     value["content_basis"] = "audited_non_runtime_documentation_paths" if simple and paths else None
     value["plan_hash"] = digest(value)
     output.mkdir(parents=True, exist_ok=False)

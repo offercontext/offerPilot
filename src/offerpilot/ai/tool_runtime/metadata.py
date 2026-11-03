@@ -1261,18 +1261,11 @@ _BundleView: TypeAlias = (
 
 def _bundle_view_integrity_snapshot(value: object) -> object:
     if type(value) is ProviderToolContract:
-        snapshot = (
+        return (
             ProviderToolContract,
             id(value),
-            value.name,
-            value.description,
-            id(object.__getattribute__(value, "_payload_snapshot")),
-            id(object.__getattribute__(value, "_parameters_snapshot")),
+            *value._checked_identity_snapshot(),
         )
-        # Keep the complete recursive seal check last so drift during the
-        # preceding field reads is rejected without property revalidation.
-        value._ensure_provider_integrity()
-        return snapshot
     if type(value) is BundleInstanceToken:
         return (BundleInstanceToken, id(value))
     if is_dataclass(value) and not isinstance(value, type):
@@ -1346,17 +1339,7 @@ def _bundle_view_matches_integrity_snapshot(value: object, expected: object) -> 
     if kind is ProviderToolContract:
         if type(value) is not ProviderToolContract or len(snapshot) != 6:
             return False
-        matches = (
-            id(value) == snapshot[1]
-            and object.__getattribute__(value, "name") == snapshot[2]
-            and object.__getattribute__(value, "description") == snapshot[3]
-            # Read the exact roots, then validate both complete trees last.
-            # Public properties would each repeat the same recursive check.
-            and id(object.__getattribute__(value, "_payload_snapshot")) == snapshot[4]
-            and id(object.__getattribute__(value, "_parameters_snapshot")) == snapshot[5]
-        )
-        value._ensure_provider_integrity()
-        return matches
+        return id(value) == snapshot[1] and value._checked_identity_snapshot() == snapshot[2:]
     if kind is BundleInstanceToken:
         return (
             type(value) is BundleInstanceToken and len(snapshot) == 2 and id(value) == snapshot[1]
@@ -2970,10 +2953,16 @@ class ToolOperationMetadataPort(TransientToolRuntimeValue):
 
     def _ensure_integrity(self) -> None:
         try:
+            # Check the whole Bundle once for this operation. Reading these
+            # sealed fields through their public getters would repeat that scan.
+            self._bundle_instance_token._ensure_integrity()
             if (
-                self._operation_view.bundle_instance_token is not self._bundle_instance_token
-                or self._legacy_boundary.bundle_instance_token is not self._bundle_instance_token
-                or self._compensation_view.bundle_instance_token is not self._bundle_instance_token
+                object.__getattribute__(self._operation_view, "bundle_instance_token")
+                is not self._bundle_instance_token
+                or object.__getattribute__(self._legacy_boundary, "bundle_instance_token")
+                is not self._bundle_instance_token
+                or object.__getattribute__(self._compensation_view, "bundle_instance_token")
+                is not self._bundle_instance_token
                 or getattr(self._compensation_registry, "bundle_instance_token", None)
                 is not self._bundle_instance_token
                 or getattr(self._compensation_registry, "compensation_view", None)

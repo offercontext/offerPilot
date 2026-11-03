@@ -1,3 +1,4 @@
+"""Developer feedback CLI; capability and baseline contract: docs/architecture/test-selection.md."""
 from __future__ import annotations
 
 import argparse

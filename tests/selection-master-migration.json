@@ -1,0 +1,2159 @@
+{
+  "schema_version": 1,
+  "baseline_id": "selection-safety-master-v1",
+  "source_sha": "9f235b1dc2b249298320466fdc2009dda3e3f8f6",
+  "master_sha": "7fca9101fb78fceca15b4ac169cd52561551100c",
+  "runtime_prerequisite_sha": "682a8d33881d21c841294d17d34ade105567c250",
+  "source_baseline_entries": [
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[application_events]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[applications]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memories]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memory_mutations]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memory_versions]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[context_contributor_settings]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_captured_source_metadata]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_evidence]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_extraction_snapshots]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_note_evidence]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_note_versions]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_notes]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_sources]",
+      "reason": "all-table committed DML",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[application_events]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[applications]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memories]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memory_mutations]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memory_versions]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[context_contributor_settings]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_captured_source_metadata]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_evidence]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_extraction_snapshots]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_note_evidence]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_note_versions]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_notes]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_sources]",
+      "reason": "actual crash and rollback",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_context_observer.py::test_profile_is_closed_and_tampering_is_gap",
+      "reason": "observer integrity",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[bad_receipt]",
+      "reason": "fixture-control scope",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[extra_delta]",
+      "reason": "fixture-control scope",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[other_memory]",
+      "reason": "fixture-control scope",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[wrong_version]",
+      "reason": "fixture-control scope",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_integrity.py::test_missing_is_unknown_keeps_full_denominator",
+      "reason": "incomplete denominator",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_integrity.py::test_raw_socket_to_approved_provider_requires_validated_send_permission",
+      "reason": "provider fence",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[extra_field]",
+      "reason": "release receipt cannot authorize publishing",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[gate_release]",
+      "reason": "release receipt cannot authorize publishing",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[outer_release]",
+      "reason": "release receipt cannot authorize publishing",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[statistics]",
+      "reason": "release receipt cannot authorize publishing",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_final_input.py::test_final_wire_body_links_unicode_memory_units_without_opaque_copy",
+      "reason": "final input source ranges",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_run_budget.py::test_fee_reservation_blocks_before_ack_and_unknown_usage_is_not_refunded",
+      "reason": "spend cap",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_verdicts.py::test_failure_survives_independent_grader_exception",
+      "reason": "known failure precedence",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_verdicts.py::test_frozen_denominator_and_required_rule",
+      "reason": "frozen denominator",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/evaluation/test_verdicts.py::test_required_rule_cannot_be_downgraded",
+      "reason": "required safety rule",
+      "status": "unsupported_evaluation_not_migrated",
+      "collected": false
+    },
+    {
+      "id": "tests/pilot_runtime/test_confirmation.py::test_approve_claims_executes_once_and_delivers_once",
+      "reason": "HITL",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/pilot_runtime/test_confirmation.py::test_real_sqlite_two_connections_have_one_claim_and_one_executor",
+      "reason": "concurrent ownership",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[after_persist]",
+      "reason": "checkpoint and receipt recovery",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[before_persist]",
+      "reason": "checkpoint and receipt recovery",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_auth_api.py::test_auth_enabled_requires_bearer_token_for_api_routes",
+      "reason": "auth",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvent]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvidenceBundle]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationJDVersion]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationMaterialKit]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationOutcome]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationSubmissionSnapshot]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewNote]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewReadinessSignal]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[JDAnalysis]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[MaterialRevisionProposal]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Offer]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewSession]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewStage]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReview]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Question]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ResumeMatch]",
+      "reason": "conditional delete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker build -t offerpilot:smoke .]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-oc --help]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv run oc --help]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv tool install --force .]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker build -t offerpilot:smoke .]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-oc --help]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv run oc --help]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv tool install --force .]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "reason": "Windows native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm run build]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm test]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run mypy src]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc smoke --static-dir web/dist]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc verify --profile local --static-dir web/dist]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run pytest -q]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run ruff check .]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm run build]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm test]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run mypy src]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc smoke --static-dir web/dist]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc verify --profile local --static-dir web/dist]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run pytest -q]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run ruff check .]",
+      "reason": "native failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_knowledge_delete_persistence.py::test_purge_does_not_delete_db_when_quarantine_move_fails",
+      "reason": "delete recovery",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
+      "reason": "source withdrawal during status observation fails closed",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_managed_runtime_api.py::test_runtime_status_rereads_durable_terminal_after_manager_transition",
+      "reason": "same-generation durable terminal wins after manager observation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[cleanup-1]",
+      "reason": "selection failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[corrupt-1]",
+      "reason": "selection failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[missing-1]",
+      "reason": "selection failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[mutate-2]",
+      "reason": "selection failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[timeout-3]",
+      "reason": "selection failure propagation",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_skip_is_not_success",
+      "reason": "skip is incomplete",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[0]",
+      "reason": "actual integration evidence",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[3]",
+      "reason": "actual integration evidence",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/test_write_operations.py::test_locked_modify_executes_effective_args_against_original_proposal",
+      "reason": "effective approved args",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_approval_transaction.py::test_approve_reject_race_has_one_terminal_winner_and_one_executor",
+      "reason": "approval race",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_replay_topology.py::test_final_terminal_replay_has_no_pending_projection",
+      "reason": "idempotent replay",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[applications-update_application_status_scoped-second_id-None-None]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-delete_application_event_scoped-second_event_id-ApplicationEvent-None]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-update_application_event_scoped-second_event_id-ApplicationEvent-notes]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-delete_note_scoped-second_note_id-InterviewNote-None]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-update_note_scoped-second_note_id-InterviewNote-company]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-save_offer_assessment_scoped-second_offer_id-Offer-assessment]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-update_offer_scoped-second_offer_id-Offer-notes]",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    },
+    {
+      "id": "tests/tool_authority/test_scoped_writes.py::test_soft_deleted_current_parent_denies_every_scoped_write_without_side_effect",
+      "reason": "scope",
+      "status": "retained_exact",
+      "collected": true
+    }
+  ],
+  "added_baseline_entries": [
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_partition_preserves_every_node_and_keeps_files_together",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[missing]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[duplicate]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[extra]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[failed]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[teardown]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[boolean_exit]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_backend_setup_skip_is_explicitly_counted_without_becoming_a_pass",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_real_isolated_backend_run_verifies_full_coverage_and_refuses_tampered_report",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_real_backend_failure_stops_remaining_groups_and_never_verifies",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_native_zero_without_backend_execution_report_is_incomplete",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_backend_gate.py::test_full_backend_refuses_inherited_pytest_filters_before_any_execution",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[missing]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[downgraded]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[unclassified]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[duplicate]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[none]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v1]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v2]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_latest_public_safety_baseline_preserves_v1_and_adds_status_races",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_offerpilot_mapping_cannot_downgrade_latest_safety_baseline",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_git_paths_staged_unstaged_untracked_rename_and_unknown_base",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_dependency_closure_cycles_and_p2_direct",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_unknown_surface_and_priority_are_conservative",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_document_no_changes_and_snapshot_invalidation",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_plan_execute_catches_regression",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_deleted_test_blocks_merge_and_stale_mapping",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_frontend_reconciliation_missing_duplicate_and_skip",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[unknown-full]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[backend-none]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_backend_reconciliation_failure_dominates_skip_and_missing",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[True]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[False]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_harness_candidate_cannot_point_away_from_selected_root",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths0]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths1]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths2]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths3]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_runtime_markdown_and_broken_document_links_do_not_pass",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_owned_process_exits_when_controller_crashes",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[p0]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[unknown_priority]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_registered_selector_cli_really_invokes_help",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_new_test_without_metadata_is_not_silently_skipped",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[dev]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[merge]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[full]",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    },
+    {
+      "id": "tests/test_selection/test_selection.py::test_master_safety_registration_preserves_existing_source_identities",
+      "reason": "master port selector fail-closed guard",
+      "collected": true
+    }
+  ],
+  "mapping_removed": [
+    {
+      "file": "tests/evaluation/test_async_transport.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "provider_admission",
+          "task_isolation",
+          "transport_closure"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_budget_denial_attribution.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_cleanup_failures.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_cli.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_commit_observer.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_compare.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_context_observer.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_contracts.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_control_exit_drain.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_acceptance.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_adjudication.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_baselines.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_contracts.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_extensions.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_governance.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_integrity.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_origin_reads.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_planning.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_planning_targets.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_refresh.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_refresh_history.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_refresh_parallel.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_refresh_paths.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_refresh_sources.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_release.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_release_capture.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_release_reads.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_review.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_core_review_evidence.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_external_reports.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "estimated_seconds": null,
+        "level": "test"
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_failure_observations.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_final_input.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_legacy_http_deadline.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_local_http_cancellation.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_observer_crash.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_p0_cases.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_pretrial_failure_diagnostics.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_process_signals.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_product_budget_probe.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_provider_network.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_read_normalization.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_read_run.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_redaction.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_run_budget.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_runner.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_snapshot_workers.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_source_functional_goals.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "evaluation_safety"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_stream_consumption.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_subject_shutdown.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_subject_source_loading.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_targeted_authorized.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_targeted_offline.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_targeted_paths.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_unknown_cleanup_boundary.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/evaluation/test_verdicts.py",
+      "source_metadata": {
+        "modules": [
+          "evaluation"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/test_application_event_update_presence.py",
+      "source_metadata": {
+        "modules": [
+          "applications"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/test_chat_line_format_policy.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/test_knowledge_tokenizer_offline.py",
+      "source_metadata": {
+        "modules": [
+          "knowledge"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/test_provider_sdk_loading.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/tool_metadata/test_integrity_work.py",
+      "source_metadata": {
+        "modules": [
+          "tool_pipeline"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_account_archive.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_bounded_ledger.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_channel_transport.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_cli_isolation.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_final_dispatch.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_protocol_journal.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_review_regressions.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_runtime_context.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_sdk_wire.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_utf8.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    },
+    {
+      "file": "tests/verification_control/test_wire.py",
+      "source_metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_initial_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "source_only_file_absent_from_master"
+    }
+  ],
+  "mapping_added": [
+    {
+      "file": "tests/test_job_mail_ci_scope.py",
+      "metadata": {
+        "modules": [
+          "backend_misc"
+        ],
+        "priority": "p0",
+        "surface": "backend",
+        "requires": [],
+        "risk_tags": [
+          "conservative_master_port_baseline"
+        ],
+        "level": "test",
+        "estimated_seconds": null
+      },
+      "reason": "CI job-mail scope regression; broad backend_misc classification, not a safety-equivalence claim"
+    }
+  ],
+  "catalog": {
+    "backend_nodes": 7983,
+    "backend_files": 325,
+    "frontend_files": 298,
+    "backend_sha256": "595f15ba10cc003e76cbce786a0f739062bdd32138d2d058f3aca911e9d544f9",
+    "frontend_sha256": "10dbb0163fac6e81190d13b934815ca87bf4fb40b8c23f4dbed2fe6eb88236e7"
+  },
+  "capability": {
+    "not_migrated": "source Harness evaluation stack and two-checkout six-trial gate",
+    "unsupported_required_checks": [
+      "harness_p0"
+    ],
+    "source_v1_v2_acceptance": false,
+    "release_eligible": false
+  }
+}

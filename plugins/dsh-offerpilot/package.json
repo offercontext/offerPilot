@@ -1,0 +1,16 @@
+{
+  "name": "dsh-offerpilot",
+  "version": "0.1.0",
+  "description": "Connect DeepSeek Harness to an explicitly authorized local OfferPilot MCP connection.",
+  "type": "module",
+  "main": "index.js",
+  "files": ["index.js", "connection.js", "cordis.patch.yml", "README.md", "LICENSE"],
+  "license": "AGPL-3.0-only",
+  "engines": { "node": ">=22", "dsh": "0.2.1-rc.5" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": "0.2.1-rc.5",
+    "@deepseek-ai/schemastery": "~3.18.5"
+  },
+  "scripts": { "test": "node --test test/*.test.js" }
+}

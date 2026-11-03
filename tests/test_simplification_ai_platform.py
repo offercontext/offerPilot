@@ -122,7 +122,7 @@ def test_both_workflows_require_identical_exact_linux_safety_command():
     assert "secrets." not in helper and "secrets." not in paid_offline
     assert "shell: bash" in helper
     assert "needs: [offline, preflight]" in paid
-    assert "needs: [pytest-manifest, pytest-shards, simplification-helper-safety]" in full
+    assert "needs: [pr-feedback, pytest-manifest, pytest-shards, simplification-helper-safety]" in full
     assert "HELPER_SAFETY_RESULT: ${{ needs.simplification-helper-safety.result }}" in full
     assert "if ($env:HELPER_SAFETY_RESULT -ne 'success')" in full
     assert full.index("if ($env:HELPER_SAFETY_RESULT") < full.index("scripts/release-gate.ps1")

@@ -1,6 +1,6 @@
 # 外部 Agent MCP 接入
 
-范围：读取投递、事件、简历、面试原始笔记和当前 Knowledge；提出投递维护、面试创建/改期、简历维护和笔记维护，独立用户确认后回读。完整授权时共 23 个工具。仅 stdio，不调用 OfferPilot 模型，不需要 DSH 专用原生插件。架构与信任边界见 [ADR-0016](decisions/0016-expose-scoped-external-agent-mcp.md)。
+范围：读取投递、事件、简历、面试原始笔记和当前 Knowledge；提出投递维护、面试创建/改期、简历维护和笔记维护，独立用户确认后回读。完整授权时共 23 个工具。接口为通用 stdio MCP，不调用 OfferPilot 模型；另有可选 DSH 薄连接包。架构与信任边界见 [ADR-0016](decisions/0016-expose-scoped-external-agent-mcp.md)。
 
 ## 1. 安装和明确授权
 
@@ -68,6 +68,32 @@ oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
 ```
 
 生成常见 `mcpServers` 配置。将其中 command/args 合并到客户端实际维护的位置；不同客户端的配置根结构可能不同。
+
+### 可安装的 DSH bundle
+
+另提供 [dsh-offerpilot](../../plugins/dsh-offerpilot/README.md) 薄连接包，使用 `oc mcp config --format mcp` 的既有导出文件。`index.apply` → `loadConnection` 校验绝对路径、固定 server 模块与连接 ID → 官方 `dsh-mcp-client` → 本文同一 stdio 服务。未配置或配置损坏时失败，不创建授权或回退数据目录。包不含 Python 后端，需要已有 OfferPilot 安装；不增加模型提示词或审批能力。
+
+此包的兼容目标为 DSH / MCP client **0.2.1-rc.5**，与上面的历史 overlay rc.2 验证分开。用 `npm pack` 生成预构建 `.tgz`，再用 `dsh plugin --profile <name> add <tgz>` 安装。无需安装时构建脚本。旧 overlay 与插件不能同时启用；停用/卸载不等于撤销连接。
+
+公开分发使用 `dsh-offerpilot-v0.1.0` GitHub Release，市场索引固定入口见[插件安装说明](../../plugins/dsh-offerpilot/README.md#从-dsh-插件市场安装)。索引保存在专用 `chore/20261030-dsh-market` 分支，使用 DSH format 1 的 Git source，锁定 Release 对应的完整提交 SHA 与 `plugins/dsh-offerpilot` 子目录；不用会漂移的分支名代替安装提交。Release 附件 URL 有重定向，因此索引通过 GitHub Raw 的直接 200 地址提供，不能把附件下载 URL 当作索引地址。
+
+Windows 手动执行 Git 子目录安装时，不要通过 npm 的 `dsh.cmd` 包装器传递含 `&path:` 的 spec：PowerShell 外层单引号不保证 CMD 收到双引号，`&` 可能被截为命令分隔符。自动化应使用 `spawn(process.execPath, [cliPath, ...args])`，不拼 shell 字符串；终端可用 `node <DSH安装目录/lib/bin.js> plugin --profile web add '<完整Git安装spec>'`。市场页面通过 `pluginManager.installBundle(spec)` 安装，不经过该 `.cmd` 入口，不需要手动下载 Release 包。不要将命令行包装器错误误报为市场索引或 Git 子目录不兼容，也不要按通用 prepare 提示放开构建脚本权限。
+
+市场直装回归独立于 tarball 验收，必须覆盖实际安装服务，而不只检查搜索结果或另行调用 CLI。先准备一个有效的、已有授权的 MCP 配置（可使用虚构数据配置），执行：
+
+```powershell
+node scripts/dsh-market-install-acceptance.mjs --dsh-cli <DSH安装目录/lib/bin.js> --mcp-config <MCP配置绝对路径> --output <不存在的新目录> --index https://raw.githubusercontent.com/offercontext/offerPilot/chore/20261030-dsh-market/index.json --commit 19aeaeda91f13c6bad13acb53409ce57653b548d
+```
+
+该入口在新 DSH_HOME 中搜索中英文名称、校验固定 SHA 和子目录、使用市场页面同一安装服务进行 Git 安装与启用，然后发现工具并只读查询投递和日程。它不创建授权、不调用模型、不修改业务数据；结束时释放服务，保留报告和脱敏日志。网络错误、安装失败和缺失连接导致的激活失败均不算通过。替换市场版本时同步传入其预期 SHA。
+
+本地集成入口（参数全部使用实际绝对路径，output 必须不存在）：
+
+```powershell
+node scripts/dsh-plugin-acceptance.mjs --package <tgz> --dsh-cli <DSH安装目录/lib/bin.js> --python <含OfferPilot和mcp的python> --output <新验收目录>
+```
+
+脚本创建虚构数据和独立 DSH_HOME，使用真实 CLI 安装包、加载完整 base / web profile、发现并执行受限工具，检查 pending/重试/取消、重启、撤销、只读授权与卸载；第二条真实虚构投递用于验证 `scope_denied`。Web 通过官方启动 token 换取 Cookie 后检查 HTTP 200，不关闭认证，日志脱敏启动 token。探针仅存在于验收 profile，不打入插件包。不使用模型、不批准提案，不能替代用户审批体验、桌面端人工走查或完整发布 gate；失败记录保留。DSH 可继续运行而把被撤销的插件标为失败，验收检查失败 fiber 和工具不可见，不误用宿主退出码。安装中的内置 peer 提示与运行时加载结果分别报告，不能仅凭 `--dump-config` 宣称接入成功。
 
 ## 3. 完整操作链
 

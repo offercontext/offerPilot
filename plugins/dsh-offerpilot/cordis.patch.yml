@@ -1,0 +1,5 @@
+- insert:
+    - id: offerpilot
+      name: dsh-offerpilot
+      config:
+        configFile: ''

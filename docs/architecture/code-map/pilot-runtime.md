@@ -15,6 +15,7 @@
 | 停止、超时、重新连接 | [managed_execution](../../../src/offerpilot/pilot_runtime/managed_execution.py)、[turn_control](../../../src/offerpilot/pilot_runtime/turn_control.py)、[runtime_transport](../../../src/offerpilot/runtime_transport.py) | 观察订阅、执行所有权、Provider 物理调用不是同一状态 |
 | 图片上传、历史识图 | [chatImages](../../../web/src/services/chatImages.ts) → [chat_image_routes](../../../src/offerpilot/chat_image_routes.py) → [ChatImageStore](../../../src/offerpilot/chat_images.py) | 上传附件、绑定消息、历史引用和模型能力分别核对 |
 | DSH / 外部 Agent 查询投递/简历/笔记/Knowledge，提出业务维护，独立用户审阅 | [external_agents](../../../src/offerpilot/external_agents/) 的 `server.build_server` → `ExternalAgentService.call` → `business.prepare/read`；独立 `oc mcp review` → `review_in_terminal` / `decide` | [接入与信任边界](../external-agent-mcp.md)、[ADR-0016](../decisions/0016-expose-scoped-external-agent-mcp.md)；不冒用 Chat Pending / Product Action |
+| DSH 插件安装、配置文件失效、工具未出现 | [bundle](../../../plugins/dsh-offerpilot/cordis.patch.yml) → `index.apply` → [loadConnection](../../../plugins/dsh-offerpilot/connection.js) → 官方 MCP client → `server.build_server` | [安装说明](../../../plugins/dsh-offerpilot/README.md)、[真实 profile 验收](../../../scripts/dsh-plugin-acceptance.mjs)；2026-10-30 增补，复用既有授权与审批，不直接写数据库 |
 
 ## 2. 一次请求的调用链
 

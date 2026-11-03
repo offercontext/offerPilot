@@ -70,8 +70,26 @@ function parse(path: string, source: string): ts.SourceFile {
 }
 
 const forEachAuditChild = ts.forEachChild;
+const auditSourceNodes = new WeakMap<ts.SourceFile, readonly ts.Node[]>();
 
 function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
+  if (ts.isSourceFile(node)) {
+    let nodes = auditSourceNodes.get(node);
+    if (!nodes) {
+      const ordered: ts.Node[] = [];
+      const collect = (current: ts.Node): void => {
+        ordered.push(current);
+        forEachAuditChild(current, collect);
+      };
+      collect(node);
+      nodes = ordered;
+      auditSourceNodes.set(node, nodes);
+    }
+    // Syntax trees are immutable during an audit. Reuse traversal order, never
+    // callback results: fixed-point passes must observe their current state.
+    for (const current of nodes) visit(current);
+    return;
+  }
   visit(node);
   forEachAuditChild(node, (child) => walk(child, visit));
 }
@@ -1580,10 +1598,11 @@ function mutationWrappersForSourceMap(sources: SourceMap): MutationWrapper[] {
     };
     visit(sourceFile, null);
   }
-  const provenance = crossCallableResolver(sources);
   const wrappers = pending.map((wrapper) => ({
     ...wrapper,
-    callable: { isTarget: (expression: ts.Expression) => provenance.isTarget(expression, wrapper.owner) },
+    // An empty wrapper set needs no cross-module callable graph. The resolver
+    // still covers the complete source map when a wrapper is actually queried.
+    callable: { isTarget: (expression: ts.Expression) => crossCallableResolver(sources).isTarget(expression, wrapper.owner) },
   }));
   crossMutationWrapperCache.set(sources, wrappers);
   return wrappers;
@@ -6261,6 +6280,43 @@ function auditProductionOnce(): { violations: string[]; durationMs: number } {
 }
 
 describe('review readiness negative fixture gate', () => {
+  it('retains every node and fresh visitor state across repeated and nested audit walks', () => {
+    const path = 'web/src/repeatedWalk.ts';
+    const first = parse(path, 'function owner() { const token = "secret"; return token; }');
+    const expected: ts.Node[] = [];
+    const reference = (node: ts.Node): void => {
+      expected.push(node);
+      ts.forEachChild(node, reference);
+    };
+    reference(first);
+    const expectedNested: ts.Node[] = [];
+    const referenceNested = (node: ts.Node): void => {
+      expectedNested.push(node);
+      ts.forEachChild(node, referenceNested);
+    };
+    const declaration = first.statements[0] as ts.FunctionDeclaration;
+    referenceNested(declaration.body!);
+    for (const pass of [1, 2]) {
+      const actual: ts.Node[] = [];
+      const nested: ts.Node[] = [];
+      walk(first, (node) => {
+        actual.push(node);
+        if (ts.isFunctionDeclaration(node) && node.body) {
+          walk(node.body, (child) => nested.push(child));
+        }
+      });
+      expect(actual).toEqual(expected);
+      expect(nested).toEqual(expectedNested);
+      const names: string[] = [];
+      walk(first, (node) => { if (ts.isIdentifier(node)) names.push(`${pass}:${node.text}`); });
+      expect(names).toEqual([`${pass}:owner`, `${pass}:token`, `${pass}:token`]);
+    }
+    const changed = parse(path, 'const replacement = localStorage;');
+    const names: string[] = [];
+    walk(changed, (node) => { if (ts.isIdentifier(node)) names.push(node.text); });
+    expect(names).toEqual(['replacement', 'localStorage']);
+  });
+
   it('classifies runtime functions without treating type signatures as executable', () => {
     const sourceFile = parse('web/src/runtimeFunctions.ts', `
       function declaration() {}

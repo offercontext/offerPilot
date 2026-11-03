@@ -16,7 +16,7 @@ class ProcessTree:
         self.kernel: Any = None
         self.watcher: Any = None
         self.watch_fd: int | None = None
-        if os.name != "nt":
+        if sys.platform != "win32":
             self.process = subprocess.Popen(argv, start_new_session=True, **kwargs)
             read_fd, self.watch_fd = os.pipe()
             monitor = ("import os,sys,signal; fd=int(sys.argv[1]); pg=int(sys.argv[2]); "
@@ -78,7 +78,7 @@ class ProcessTree:
             raise
 
     def kill(self) -> None:
-        if self.job:
+        if sys.platform == "win32" and self.job:
             if not self.kernel.TerminateJobObject(self.job, 3):
                 raise OSError(ctypes.get_last_error(), "cannot terminate process job")
         else:
@@ -98,13 +98,13 @@ class ProcessTree:
 
     def wait(self, timeout: float) -> int:
         result = self.process.wait(timeout=timeout)
-        if os.name != "nt":
+        if sys.platform != "win32":
             limit = time.monotonic() + min(timeout, 5)
             while self._posix_group_alive():
                 if time.monotonic() >= limit:
                     raise TimeoutError("owned POSIX descendants did not exit")
                 time.sleep(0.02)
-        if os.name == "nt" and self.job:
+        if sys.platform == "win32" and self.job:
             from ctypes import wintypes as w
             class Accounting(ctypes.Structure):
                 _fields_ = [(n, ctypes.c_int64) for n in ("user", "kernel", "period_user", "period_kernel")] + [

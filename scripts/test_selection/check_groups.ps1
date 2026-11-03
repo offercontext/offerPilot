@@ -18,7 +18,7 @@ function Import-Functions([string]$Path, [string[]]$Names) {
     }
 }
 $catalogRows = Get-Content -LiteralPath $Catalog -Raw -Encoding utf8 | ConvertFrom-Json
-Import-Functions (Join-Path $repoRoot 'scripts/windows-pytest-groups.ps1') @('Get-TestFiles','Get-Groups')
+Import-Functions (Join-Path $repoRoot 'scripts/windows-pytest-groups.ps1') @('Get-TestFiles','Get-OrdinalDuplicates','Get-Groups')
 $files = @(Get-TestFiles)
 $groups = Get-Groups $files
 $assignments = @($groups.Values | ForEach-Object { $_ })

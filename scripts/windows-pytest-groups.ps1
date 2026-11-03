@@ -53,6 +53,8 @@ function Get-Groups([string[]]$TestFiles) {
     $assigned = @($groups.Values | ForEach-Object { $_ })
     $groups.misc = @($TestFiles | Where-Object { $assigned -notcontains $_ })
     $assigned = @($groups.Values | ForEach-Object { $_ })
+    $duplicates = @(Get-OrdinalDuplicates $assigned)
+    if ($duplicates.Count -gt 0) { throw "multiply assigned test files: $($duplicates -join ', ')" }
     $unassigned = @($TestFiles | Where-Object { $assigned -notcontains $_ })
     if ($unassigned.Count -gt 0) { throw "unassigned test files: $($unassigned -join ', ')" }
     $groups

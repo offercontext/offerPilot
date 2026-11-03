@@ -59,9 +59,10 @@ def test_latest_public_safety_baseline_preserves_v1_and_adds_status_races():
         "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
     }
     mapping = load_mapping(ROOT)
-    assert mapping["safety_baseline"] == "tests/selection-safety-v2.json"
-    catalog = [dict(id=entry["id"], priority="p0", modules=["authority"]) for entry in latest["tests"]]
-    assert validate_safety(ROOT, mapping, catalog)["baseline_id"] == "selection-safety-v2"
+    assert mapping["safety_baseline"] == core.INTEGRATED_SAFETY_BASELINE
+    baseline = json.loads((ROOT / core.INTEGRATED_SAFETY_BASELINE).read_bytes())
+    catalog = [dict(id=entry["id"], priority="p0", modules=["selection"]) for entry in baseline["tests"]]
+    assert validate_safety(ROOT, mapping, catalog)["baseline_id"] == "selection-safety-integrated-v1"
 
 
 def test_offerpilot_mapping_cannot_downgrade_latest_safety_baseline(tmp_path):
@@ -258,8 +259,12 @@ def test_real_skip_is_not_success(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("moved_out", [True, False])
-def test_test_rename_out_of_catalog_blocks_merge(tmp_path: Path, moved_out: bool) -> None:
+def test_test_rename_out_of_catalog_blocks_merge(tmp_path: Path, moved_out: bool, monkeypatch) -> None:
     mapping = miniature(tmp_path)
+    # Exercise deletion coverage with an available stack; missing-stack blocking
+    # has separate profile tests and must not hide the rename distinction.
+    from scripts.test_selection import core
+    monkeypatch.setattr(core, "unsupported_checks", lambda checks, *, root: [])
     destination = "docs/widget.txt" if moved_out else "tests/test_renamed.py"
     (tmp_path / destination).parent.mkdir(exist_ok=True)
     (tmp_path / "tests/test_widget.py").rename(tmp_path / destination)
@@ -275,6 +280,7 @@ def test_test_rename_out_of_catalog_blocks_merge(tmp_path: Path, moved_out: bool
     value = plan(tmp_path, "HEAD", "merge", tmp_path / "artifacts/test-plans/rename")
     assert any(c["status"].startswith("R") for c in value["changes"])
     assert (value["selection_status"] == "blocked") is moved_out
+    assert value["unsupported_checks"] == []
     assert ("tests/test_widget.py" in value["deleted_tests"]) is moved_out
 
 
@@ -361,6 +367,12 @@ def test_registered_cli_really_invokes_validate() -> None:
     assert result.returncode == 0 and "3 required deterministic execution items" in result.stdout
 
 
+def test_registered_selector_cli_really_invokes_help() -> None:
+    result = subprocess.run([sys.executable, str(ROOT / "scripts/select_tests.py"), "--help"],
+                            cwd=ROOT, capture_output=True, text=True, timeout=30)
+    assert result.returncode == 0 and "never a release gate" in result.stdout
+
+
 @pytest.mark.parametrize("harness_exit", [0, 3])
 def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path, monkeypatch, harness_exit) -> None:
     root, baseline = tmp_path / "candidate", tmp_path / "baseline"
@@ -368,6 +380,92 @@ def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path,
     baseline.mkdir()
     miniature(root)
     miniature(baseline)
+    ignore = root / ".gitignore"
+    ignore.write_text(ignore.read_text() + "web/dist/\n", encoding="utf-8")
+    git(root, "add", ".gitignore")
+    git(root, "commit", "-m", "test: 忽略静态资源")
+    (root / "web/dist").mkdir(parents=True)
+    (root / "web/dist/index.html").write_text("fixture", encoding="utf-8")
+    config = tmp_path / "variants.json"
+    config.write_text(json.dumps([{"variant_id": name, "checkout": str(path), "interpreter": sys.executable}
+                                  for name, path in (("baseline", baseline), ("candidate", root))]), encoding="utf-8")
+    output = root / "artifacts/test-plans/noop-cli"
+    value = plan(root, "HEAD", "dev", output, config)
+    value["required_checks"] = ["harness_p0", "local_smoke"]
+    from scripts.test_selection.core import digest
+    value["plan_hash"] = digest({k: v for k, v in value.items() if k != "plan_hash"})
+    (output / "selection-plan.json").write_text(json.dumps(value), encoding="utf-8")
+    class NoopProcess:
+        def __init__(self, argv, **kwargs):
+            raise AssertionError("unsupported whole plan must not launch a process")
+        def wait(self, timeout):
+            return harness_exit
+        def close(self):
+            pass
+    monkeypatch.setattr("scripts.test_selection.execution.ProcessTree", NoopProcess)
+    report = execute(root, output / "selection-plan.json")
+    assert report["exit_code"] == 3
+    assert {c.get("reason") for c in report["checks"]} == {"harness_evaluation_unavailable"}
+    assert report["needs_full"] is True
+    assert not (output / "execution/backend-ids.json").exists()
+
+
+def test_new_test_without_metadata_is_not_silently_skipped(tmp_path: Path) -> None:
+    miniature(tmp_path)
+    (tmp_path / "tests/test_new.py").write_text("def test_new():\n    assert True\n")
+    # The globally loaded plugin must not prevent the original full pytest fallback.
+    raw = subprocess.run([sys.executable, "-m", "pytest", "tests", "-q"],
+                         cwd=tmp_path, capture_output=True, text=True, timeout=30)
+    assert raw.returncode == 0 and "2 passed" in raw.stdout, raw.stdout + raw.stderr
+    with pytest.raises(SelectionError, match="new tests require metadata"):
+        plan(tmp_path, "HEAD", "dev", tmp_path / "artifacts/test-plans/new")
+
+
+@pytest.mark.parametrize("profile", ["dev", "merge", "full"])
+def test_master_unsupported_harness_remains_required_and_blocks_whole_plan(tmp_path, monkeypatch, profile):
+    miniature(tmp_path)
+    if profile != "full":
+        # Changing selector metadata triggers the source full-risk semantics.
+        mapping = tmp_path / "tests/selection-map.json"
+        mapping.write_text(mapping.read_text() + "\n")
+    output = tmp_path / "artifacts/test-plans/unsupported"
+    value = plan(tmp_path, "HEAD", profile, output)
+    assert "harness_p0" in value["required_checks"]
+    assert value["unsupported_checks"] == ["harness_p0"]
+    assert value["selection_status"] == "blocked" and value["needs_full"] is True
+    assert value["release_eligible"] is False
+    def forbidden(*args, **kwargs):
+        raise AssertionError("unsupported plan executed a subprocess")
+    monkeypatch.setattr("scripts.test_selection.execution.ProcessTree", forbidden)
+    summary = execute(tmp_path, output / "selection-plan.json")
+    assert summary["exit_code"] == 3 and summary["release_eligible"] is False
+
+
+def test_master_safety_registration_preserves_existing_source_identities():
+    from scripts.test_selection import core
+    source = json.loads((ROOT / "tests/selection-safety-v2.json").read_bytes())
+    master = json.loads((ROOT / core.MASTER_SAFETY_BASELINE).read_bytes())
+    required = {e["id"] for e in master["tests"]}
+    for entry in source["tests"]:
+        if not entry["id"].startswith("tests/evaluation/"):
+            assert entry["id"] in required
+    assert core.digest(master) == core.MASTER_SAFETY_BASELINE_HASH
+
+
+@pytest.mark.parametrize("harness_exit", [0, 3])
+def test_integrated_zero_exit_without_real_harness_receipt_cannot_pass(tmp_path: Path, monkeypatch, harness_exit) -> None:
+    root, baseline = tmp_path / "candidate", tmp_path / "baseline"
+    root.mkdir()
+    baseline.mkdir()
+    miniature(root)
+    miniature(baseline)
+    # Isolate receipt checking behind an available-capability premise. Real
+    # stack presence is covered separately without weakening schema1 guards.
+    from scripts.test_selection import core, execution
+    def supported(checks, *, root):
+        return []
+    monkeypatch.setattr(core, "unsupported_checks", supported)
+    monkeypatch.setattr(execution, "unsupported_checks", supported)
     ignore = root / ".gitignore"
     ignore.write_text(ignore.read_text() + "web/dist/\n", encoding="utf-8")
     git(root, "add", ".gitignore")
@@ -394,3 +492,28 @@ def test_zero_exit_without_smoke_or_harness_evidence_cannot_pass(tmp_path: Path,
     report = execute(root, output / "selection-plan.json")
     assert report["exit_code"] == 3
     assert {c.get("reason") for c in report["checks"]} >= {"missing_harness_report", "smoke_completion_missing"}
+
+
+def test_integrated_safety_preserves_both_frozen_baselines():
+    from scripts.test_selection import core
+    integrated = json.loads((ROOT / core.INTEGRATED_SAFETY_BASELINE).read_bytes())
+    source = json.loads((ROOT / "tests/selection-safety-v2.json").read_bytes())
+    master = json.loads((ROOT / core.MASTER_SAFETY_BASELINE).read_bytes())
+    expected = {r["id"] for r in source["tests"] + master["tests"]}
+    actual = [r["id"] for r in integrated["tests"]]
+    assert len(actual) == len(set(actual)) == 159
+    assert set(actual) == expected
+    assert core.digest(integrated) == core.INTEGRATED_SAFETY_BASELINE_HASH
+
+
+def test_integrated_harness_capability_requires_stack_but_not_only_presence(tmp_path):
+    from scripts.test_selection.core import HARNESS_P0_FILES, unsupported_checks
+    assert unsupported_checks(["harness_p0"], root=ROOT) == []
+    assert unsupported_checks(["harness_p0"], root=tmp_path) == ["harness_p0"]
+    for name in HARNESS_P0_FILES:
+        target = tmp_path / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("{}" if target.suffix == ".json" else "", encoding="utf-8")
+    assert unsupported_checks(["harness_p0"], root=tmp_path) == []
+    (tmp_path / HARNESS_P0_FILES[0]).unlink()
+    assert unsupported_checks(["harness_p0"], root=tmp_path) == ["harness_p0"]

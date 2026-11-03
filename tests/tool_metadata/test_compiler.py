@@ -22,7 +22,7 @@ from offerpilot.ai.tool_runtime.catalog import (
     compile_tool_metadata_manifest,
 )
 from offerpilot.ai.tool_runtime.context import ToolExecutionContext
-from offerpilot.ai.tool_runtime.contracts import ToolSpec, ToolSuccess
+from offerpilot.ai.tool_runtime.contracts import ProviderToolContract, ToolSpec, ToolSuccess
 from offerpilot.ai.tool_runtime.metadata import (
     ToolMetadataBundleV1,
     WriteOperationMetadataV1,
@@ -627,6 +627,97 @@ def test_provider_queries_are_distinct_recursively_immutable_nodes() -> None:
     for query in (payload, parameters):
         with pytest.raises(TypeError, match="Provider|provider|immutable|snapshot"):
             materialize_json(cast(Any, query))
+
+
+@pytest.mark.parametrize("mutation", ("mapping_storage", "sequence_storage", "deep_node", "scalar_type"))
+def test_provider_rechecks_deep_seals_after_success(mutation: str) -> None:
+    parameters = {"type": "object", "properties": {"value": {"enum": [True, 2]}}}
+    payload = {
+        "type": "function",
+        "function": {"name": "probe", "description": "probe", "parameters": parameters},
+    }
+    contract = ProviderToolContract(payload, "probe", "probe", parameters)
+    # A successful check must not authorize subsequent accesses after drift.
+    assert contract._checked_identity_snapshot()[:2] == ("probe", "probe")
+    properties = contract.parameters["properties"]
+    node = properties["value"]
+    sequence = node["enum"]
+    if mutation == "mapping_storage":
+        entries = object.__getattribute__(node, "_entries")
+        object.__setattr__(node, "_entries", tuple(list(entries)))
+    elif mutation == "sequence_storage":
+        values = object.__getattribute__(sequence, "_values")
+        object.__setattr__(sequence, "_values", tuple(list(values)))
+    elif mutation == "deep_node":
+        replacement = ProviderToolContract(payload, "probe", "probe", parameters)
+        other = replacement.parameters["properties"]["value"]
+        object.__setattr__(properties, "_entries", (("value", other),))
+    else:
+        object.__setattr__(sequence, "_values", (1, 2))
+    with pytest.raises(ValueError, match="integrity"):
+        contract._checked_identity_snapshot()
+    with pytest.raises(ValueError, match="integrity"):
+        _ = contract.payload
+
+
+@pytest.mark.parametrize("part", ("payload", "parameters"))
+@pytest.mark.parametrize("seal", ("content", "identity"))
+@pytest.mark.parametrize("replacement", ({}, (), None, "extra_item", "indexed_mapping"))
+def test_malformed_provider_seal_fails_closed(part: str, seal: str, replacement: object) -> None:
+    contract = synthetic_tool_spec("malformed_seal").contract
+    field = f"_{part}_{seal}_seal"
+    original = object.__getattribute__(contract, field)
+    if replacement == "extra_item":
+        replacement = (*original, "unexpected")
+    elif replacement == "indexed_mapping":
+        replacement = dict(enumerate(original))
+    object.__setattr__(contract, field, replacement)
+    with pytest.raises(ValueError, match="integrity"):
+        contract._checked_identity_snapshot()
+
+
+def test_bundle_provider_check_walks_each_contract_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    from offerpilot.ai.tool_runtime import metadata as module
+
+    contract = synthetic_tool_spec("single_walk").contract
+    snapshot = module._bundle_view_integrity_snapshot(contract)
+    original = ProviderToolContract._ensure_provider_integrity
+    calls = 0
+
+    def counted(self: ProviderToolContract) -> None:
+        nonlocal calls
+        calls += 1
+        original(self)
+
+    monkeypatch.setattr(ProviderToolContract, "_ensure_provider_integrity", counted)
+    assert module._bundle_view_matches_integrity_snapshot(contract, snapshot)
+    assert calls == 1
+    assert module._bundle_view_matches_integrity_snapshot(contract, snapshot)
+    assert calls == 2
+
+
+@pytest.mark.parametrize("part", ("payload", "parameters"))
+@pytest.mark.parametrize("seal", ("content", "identity"))
+def test_provider_rejects_malformed_nested_seal_tuples(part: str, seal: str) -> None:
+    contract = synthetic_tool_spec("nested_seal").contract
+    field = f"_{part}_{seal}_seal"
+    original = object.__getattribute__(contract, field)
+
+    def mutations(value: object):
+        if type(value) is not tuple:
+            return
+        yield (*value, "unexpected")
+        yield dict(enumerate(value))
+        for index, child in enumerate(value):
+            for changed in mutations(child):
+                yield (*value[:index], changed, *value[index + 1:])
+
+    for changed in mutations(original):
+        object.__setattr__(contract, field, changed)
+        with pytest.raises(ValueError, match="integrity"):
+            contract._checked_identity_snapshot()
+    object.__setattr__(contract, field, original)
+    contract._checked_identity_snapshot()
 
 
 def test_sole_provider_materializer_is_fresh_detached_and_catalog_delegates() -> None:

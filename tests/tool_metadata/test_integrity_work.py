@@ -120,22 +120,27 @@ def test_target_view_drift_during_other_view_scan_is_still_rejected(monkeypatch)
 def test_provider_drift_during_snapshot_field_reads_is_still_rejected(
     monkeypatch, operation,
 ):
+    import sys
+    from offerpilot.ai.tool_runtime import contracts as contract_module
+
     contract = synthetic_provider_contract()
     expected = module._bundle_view_integrity_snapshot(contract)
     payload = contract.payload
     paused, resume = threading.Event(), threading.Event()
+    reader_code = type(contract)._checked_identity_snapshot.__code__
 
     class ReadProbe:
         @staticmethod
         def __getattribute__(value, name):
-            if value is contract and name == "_parameters_snapshot":
+            if (value is contract and name == "_parameters_snapshot"
+                    and sys._getframe(1).f_code is reader_code):
                 paused.set()
                 assert resume.wait(3)
             return object.__getattribute__(value, name)
 
-    # Only the metadata reader is instrumented. The Provider seal implementation
-    # keeps its real object access and complete recursive content/identity checks.
-    monkeypatch.setattr(module, "object", ReadProbe, raising=False)
+    # Pause only the actual scalar/root snapshot reader after integration moved
+    # it to contracts. Seal reads still run unmodified through the real object.
+    monkeypatch.setattr(contract_module, "object", ReadProbe, raising=False)
 
     def read():
         try:

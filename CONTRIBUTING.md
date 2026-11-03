@@ -76,3 +76,37 @@ do not infer full-gate success from targeted tests or a reviewer's assessment.
 
 If a check cannot run in your environment, include the command, failure reason,
 and residual risk in the pull request or handoff note.
+
+### Product CI feedback
+
+The Windows product workflow runs on PR opening, updates, reopening and draft
+transitions. A newer run supersedes an older run only for the same PR in that
+workflow. Other PRs, manual dispatches, historical validation-branch pushes and
+paid-provider workflows do not share its cancellation group. Manual dispatch
+still requests complete validation; do not use it for every small iteration.
+
+Node routing/preview fixture contracts run immediately after locked dependencies
+are installed, followed by rendered viewport checks, before the slower backend
+checks. They are reordered, not removed or duplicated. Existing evidence uploads
+remain; cancellation preserves existing logs/artifacts but cannot guarantee a
+partially executed upload finishes.
+
+Draft PRs may run the existing snapshot-bound selector only for verified,
+three audited style files (`web/src/theme/tokens.css`, `web/src/layout/Sidebar.module.css`,
+`web/src/layout/TopBar.module.css`) or audited documentation-only checks.
+The frontend surface alone is not a low-risk classification: services, auth,
+confirmation/recovery controllers, shared types and AppShell still require full validation. Backend,
+unknown, missing metadata, risk expansion or unavailable Harness requirements
+fall back to the existing native full gate. This fallback does not certify the
+unported Harness evaluations. Ready-for-review, subsequent non-draft updates and
+manual dispatch always request native full validation. See
+[test selection](docs/architecture/test-selection.md) for the inherited semantics.
+
+The selected feedback check reports its real result. When full validation was
+not requested, the separate `Full gate NOT RUN - draft feedback only` check is
+intentionally **non-success / NOT READY**, so a successful draft's overall run
+can appear red: this is not a failed selected test, and is not release evidence.
+Selected failures remain failures; they are never hidden by a successful fallback.
+No branch-protection settings are changed: maintainers must verify the exact
+candidate's complete evidence before merging. A skipped job is not that evidence,
+even if GitHub treats its status as passing.
