@@ -48,7 +48,7 @@ def bound_http_failure(tmp_path, monkeypatch):
     directory = tmp_path / "targeted-budget"
     directory.mkdir()
     parent = PlannedTrial(run_id=uuid4(), variant_id="candidate", execution_item_id="E06.legacy_saved",
-        mode="real", repeat_index=1, case_id="E06", case_version=3, spec_hash="a" * 64,
+        mode="real", repeat_index=1, case_id="E06", case_version=4, spec_hash="a" * 64,
         fixture_hash="b" * 64, coverage_kind="task", required_rules=["execution.expected_outcome"])
     profile = SimpleNamespace(input_cny_per_million=1, output_cny_per_million=1,
                               max_input_bytes=50000, max_output_tokens=1024)
@@ -249,8 +249,9 @@ def test_run_trial_cleanup_grading_and_aggregate_keep_unknown_and_known_failure(
         subject.events = events
         return subject
 
-    def drive(*args):
-        args[4]["http"].append(dict(method="POST", path="/api/chat", status=502,
+    def drive(action, first_driver, first_subject, folder, evidence, restart, *, fixture_id):
+        assert fixture_id == "synthetic-core-v1"
+        evidence["http"].append(dict(method="POST", path="/api/chat", status=502,
                                     response={"error": "original unit HTTP error"}))
         raise failure
 

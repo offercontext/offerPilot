@@ -306,7 +306,8 @@ def test_runner_separates_failure_before_stop_from_cleanup_evidence(
     if failure_epoch == 2:
         monkeypatch.setattr(core_runner.observer, "next_epoch", lambda path: 2)
 
-        def drive(action, first_driver, first_subject, folder, evidence, restart):
+        def drive(action, first_driver, first_subject, folder, evidence, restart, *, fixture_id):
+            assert fixture_id == "synthetic-core-v1"
             # Assignment in run_trial has not completed when this inner driver raises.
             second_subject, second_driver = restart()
             second_driver.request("POST", "/api/chat?token=QUERY-SECRET", {"message": "BODY-SECRET"})

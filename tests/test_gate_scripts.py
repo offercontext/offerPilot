@@ -377,7 +377,7 @@ def test_release_stops_on_each_native_failure(gate, step):
     _, run, _ = gate
     result, calls = run(fail=step)
     assert result.returncode != 0, result.stdout + result.stderr
-    assert calls[-1] == step
+    assert calls[-1] == step, result.stdout + result.stderr
     assert "Release gate passed" not in result.stdout
 
 
@@ -499,7 +499,7 @@ def test_powershell_install_extra_and_acceptance_are_part_of_parent_gate(gate, f
         pytest.skip("Windows isolated installation orchestration")
     result, calls = run(fail=failure, args=["-Install"])
     assert (result.returncode != 0) == bool(failure), result.stdout
-    assert any(call.startswith("python -c ") for call in calls)
+    assert any(call.startswith("python -c ") for call in calls), result.stdout + result.stderr
     if failure:
         if failure == "python":
             assert "uv tool install --force .[mcp]" not in calls
