@@ -127,7 +127,7 @@ def test_admission_switch_cannot_restore_or_leak_companion_packages(tmp_path, mo
 
     monkeypatch.setattr(PilotRuntime, 'with_start_ports', switch_after_admission)
     with TestClient(app) as client:
-        submit(client, endpoint)
+        submit(client, endpoint, message='跟我聊聊你的小日常吧')
     assert switched
     assert model.calls == 1
     assert_ordinary(model.messages)
@@ -143,16 +143,16 @@ def test_restart_stays_off_and_enabling_restores_original_persona(tmp_path):
     saved, history = persona.read(), persona.revisions()
     enable_companion(companion)
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
-        submit(client, '/api/chat')
+        submit(client, '/api/chat', message='跟我聊聊你的小日常吧')
         assert profile(model.messages)[0]['expression_data']['display_name'] == '重新出现的名字'
         set_enabled(companion, False)
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
         assert companion.read()['settings']['enabled'] is False
-        submit(client, '/api/chat')
+        submit(client, '/api/chat', message='跟我聊聊你的小日常吧')
         assert_ordinary(model.messages)
         assert_binding(sessions, original, False)
         enable_companion(companion)
-        submit(client, '/api/chat')
+        submit(client, '/api/chat', message='跟我聊聊你的小日常吧')
         assert profile(model.messages)[0]['expression_data']['display_name'] == '重新出现的名字'
         assert_binding(sessions, original, True)
     assert persona.read() == saved

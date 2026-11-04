@@ -406,7 +406,7 @@ def test_actual_default_runtime_context_and_budget_match_base(tmp_path):
         from tests._companion import enable_companion
         enable_companion(app.state.companion_repository)
         event(app.state.companion_repository, 'app_open')
-        response = client.post('/api/chat', json={'message': '你的小日常怎么样了？'})
+        response = client.post('/api/chat', json={'message': '跟我聊聊你的小日常吧'})
         assert response.status_code == 200, response.text
     messages, tools = calls[0]
     assert not profile(messages)

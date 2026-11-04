@@ -48,6 +48,16 @@
 
 图片 Provider 能力测试与真实会话调用分开；设置通过不代表历史消息完整性或授权通过。会话来源删除和暂时不可读也应分开调查，不能把临时锁错误解释成真实删除。
 
+2026-11-04 有限陪伴事实读取：`api._admit_pilot_start` 在接纳事务调用
+`companion/fact_read.py::freeze_fact_read` 冻结摘要，`DeterministicPilotAdapter` 经
+`CompanionFactReadService.execute` 同事务验证来源并保存 assistant、PilotTurnMessage 与
+refs-only `CompanionFactReadReceipt`，成功后才发布无 delta 结果。pending/clarification、
+非纯文本或业务上下文不接管，未知语法保留原模型路径；时序指代无结构化锚则澄清。
+生命周期与原聊天历史重放边界见 [ADR 0016](../decisions/0016-bound-companion-life.md)。
+回归：[语法/准入](../../../tests/test_companion_fact_read_parser.py)、
+[真实事务/来源](../../../tests/test_companion_fact_read_atomic.py)、
+[HTTP 三入口](../../../tests/test_companion_fact_read_api.py)。
+
 ## 5. 症状和回归入口
 
 | 症状 | 关键证据 | 测试 |

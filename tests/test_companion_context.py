@@ -272,7 +272,7 @@ def test_shared_chat_runtime_keeps_life_before_request_and_out_of_work_and_memor
         enable_companion(repository)
         started = event(repository, "app_open")
         cases = [
-            ("你的小日常怎么样了？", True),
+            ("跟我聊聊你的小日常吧", True),
             ("先帮我整理简历，你的小日常等会聊", False),
         ]
         for query, expected_life in cases:

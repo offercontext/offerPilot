@@ -111,7 +111,7 @@ def test_new_followups_remain_workspace_only(scope, query):
 
 
 def test_original_failure_queries_reach_runtime_with_current_source_boundaries(tmp_path):
-    """Capture production requests; the stub says nothing about model compliance."""
+    """Finite reads bypass generation; other recall still receives bounded sources."""
     from uuid import uuid4
 
     from fastapi.testclient import TestClient
@@ -158,13 +158,22 @@ def test_original_failure_queries_reach_runtime_with_current_source_boundaries(t
             assert not any('companion' in str(tool) for tool in tools)
             return packet.content, messages
 
-        text, _ = ask('正事先到这儿。你刚才说的小日常呢？')
-        assert '第1步' in text and '挑一张想象中的彩纸' in text
-        assert '到达这一步不等于已经做完这一步' in text
-        text, _ = ask('小周和小陈给他们的纸船取名“橘子号”。我只是转述。我们的船也叫这个吗？')
-        assert '来源不足以确认发生或未发生' in text
-        assert '已执行查证操作' in text
-        assert '橘子号' not in text
+        def fact(query):
+            from sqlalchemy import select
+            from offerpilot.models import ChatMessage, PilotTurnMessage
+            before = len(requests)
+            submitted = submit({'request_id': str(uuid4()), 'message': query})
+            assert len(requests) == before  # This guarantee is at the final fact outlet.
+            with repo.sessions() as session:
+                return session.scalar(select(ChatMessage.content).join(PilotTurnMessage).where(
+                    PilotTurnMessage.turn_id == submitted['turn_id'], ChatMessage.role == 'assistant'))
+
+        text = fact('正事先到这儿。你刚才说的小日常呢？')
+        assert '不能确定' in text and '哪一项' in text
+        assert '第二折' not in text and '第1步' not in text
+        text = fact('小周和小陈给他们的纸船取名“橘子号”。我只是转述。我们的船也叫这个吗？')
+        assert '无法确认' in text
+        assert all(word not in text for word in ('还没', '刚挑', '橘子号'))
 
         joined = submit({
             'request_id': str(uuid4()), 'message': '等我回来一起起个名字',
@@ -174,10 +183,12 @@ def test_original_failure_queries_reach_runtime_with_current_source_boundaries(t
             'request_id': str(uuid4()), 'conversation_id': conversation_id,
             'message': '叫棉花糖号吧',
         })
-        assert '棉花糖号' in ask('还记得我们的小船叫什么吗？')[0]
+        assert '棉花糖号' in fact('还记得我们的小船叫什么吗？')
+        assert '棉花糖号' in ask('能聊聊我们的小船叫什么吗？')[0]
         deleted = client.delete(f'/api/chat/conversations/{conversation_id}')
         assert deleted.status_code == 200, deleted.text
-        text, messages = ask('还记得我们的小船叫什么吗？')
+        assert '无法确认' in fact('还记得我们的小船叫什么吗？')
+        text, messages = ask('能聊聊我们的小船叫什么吗？')
         assert '来源不足以确认发生或未发生' in text
         assert '不能据此声称记得共同经历' in text
         assert all('棉花糖号' not in (message.content or '') for message in messages)
