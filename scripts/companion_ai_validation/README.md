@@ -5,32 +5,45 @@ second agent. The active fixed five-turn retest uses three fresh synthetic
 workspaces and the real loopback `/api/pilot/runtime/v1/turns` backend. It does not
 claim Web-to-provider coverage or load existing user configuration or records.
 
-## Fixed five-turn experience retest (2026-11-01)
+## Current-head retest preparation (2026-11-04)
 
-The active workflow selects `--experience-retest`, independent ordinal 9, pinned
-to the repaired product `e570fd170cc476324d0580bed894cc2c394f63b1`. It sends only
-original x01 → x02 → x03 (with newly generated conversation history), x09, x11;
-original synthetic setup and source deletion remain real runtime operations.
-Controls consume zero model calls. All provider requests count toward the fixed
-five-call ceiling, including unintended retries, titles and tool loops.
+The isolated v2 helper selects `--experience-retest`, ordinal 10, and fixes the
+product to `42a54a48a90e3cc7738d3c6029e11aebe46d276b` (PR60). Its `src`, `web`,
+`pyproject.toml` and `uv.lock` objects must match that commit exactly. The five
+original questions remain x01 → x02 → x03, x09 and x11. The three new synthetic
+workspaces first prove default-off, then explicitly opt in through the ordinary
+settings API. Separate offline comparisons prove disabled companion/persona
+behavior. This backend smoke does not execute the Web UI.
 
-The opening balance strictly replays nine immutable artifacts: **73 calls,
-558124 micro-CNY settled, zero reserved/unknown**. The cumulative maximum is 78
-calls, with the unchanged **20 CNY cap / 3 CNY per-call reservation**. Each request
-uses at most 512 output tokens, thinking disabled, no retry/fallback and no
-external search/fetch/tools. Mechanical/state/budget/truncation anomalies stop
-the batch; semantics are reviewed independently after the run, not auto-graded.
+The owner cancelled expired request run `41290462304`, attempt 1, request
+`ca73a48211c0106daf5ac8d017c7cab7f0e03c35`, paid job `124804486152`, before any
+runner or steps were assigned. Immutable before/after API snapshots are retained
+in `experiments/companion_experience/fixtures/abandoned-retest-v1.json` and hashed
+by `abandoned_retest.py`. Every new admission rechecks complete history and the
+exact cancelled run/jobs, empty approval list and sole original offline artifact.
+Only that exact zero-start record is excepted: other cancellations, reruns,
+missing/unknown fields, steps, runner assignment, extra artifacts or approvals
+remain blocked. Cancellation's API `started_at` is unchanged from waiting and is
+not evidence of execution. The paid job has zero steps and no runner identity.
 
-The deadline is **2026-11-03 00:00 UTC (Beijing 08:00)**. The provider-credential-free
-offline job has 60 minutes (it still uses a read-only GitHub metadata token);
-preflight has 5 minutes and the paid job 25 minutes. The paid session remains
-1200 seconds, each request 90 seconds. Exact H/R, unchanged protected environment,
-fresh SHA readback and the owner's own environment review remain mandatory.
+All nine paid archives and prior failed/semantic results remain unchanged. The
+opening balance remains **73 calls, 558124 micro-CNY settled, zero reserved**;
+there is no new budget. At most five additional calls reach **78 lifetime calls**,
+under the original **20 CNY total cap / 3 CNY per-call reservation**. Each output
+is bounded to 512 tokens, thinking disabled; no retry, fallback, extra title,
+external search/fetch or tool calls are allowed. Unknown costs stay reserved.
 
-The previous `--experience` twelve-turn mode, all original questions, evidence,
-ledger history and semantic findings remain unchanged. None of its unused
-allowance can be resumed. Historical protocols below describe their own batches,
-not the active workflow or a new spending authorization.
+**Not armed:** the old **2026-11-03 00:00 UTC** quote deadline remains expired.
+This preparation cannot admit a live call. A newly approved time window, exact
+helper/request SHA binding, fresh readback and owner environment review are still
+required before live execution. Environment protection and provider secret are
+unchanged. Official peak prices were rechecked on 2026-11-04: input cache miss
+2 CNY / million and output 8 CNY / million; a future admission must recheck them.
+
+The old waiting request pinned product `e570fd17` and cannot validate this new
+product. It is not rerun or silently renewed. Mechanical success of the new batch
+will not imply semantic success: x03 history, x09 third-party boundaries and x11
+source withdrawal require independent answer review before any merge decision.
 
 ## Historical input-only projection batch (2026-10-30)
 

@@ -9,6 +9,11 @@ import { initializeLocale, t, type Locale } from '@/i18n';
 import { DESKTOP_HARU_SEND_FAILURE, type DesktopHaruState } from './desktopHaru';
 import { live2dPilotMascotRuntime } from '@/features/pilotMascot/live2dRuntime';
 import { ContextSystem } from '@pixi/core';
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
 vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/pilotMascot/live2dRuntime', () => ({ live2dPilotMascotRuntime: { mount: vi.fn() } }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

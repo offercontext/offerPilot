@@ -9,6 +9,8 @@ from copy import deepcopy
 import hashlib
 import io
 import json
+import time
+from types import SimpleNamespace
 from pathlib import Path, PurePosixPath
 import zipfile
 
@@ -18,6 +20,9 @@ import yaml
 from scripts.companion_ai_validation import broker as gate
 from scripts.companion_ai_validation import run
 from scripts.companion_ai_validation.tests.test_companion_ai_broker import response
+from scripts.companion_ai_validation.tests.legacy_companion_fixture import (
+    install_legacy_companion_opt_in,
+)
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github/workflows/companion-real-ai.yml"
@@ -105,10 +110,13 @@ def generated_evidence(tmp_path_factory):
         sent.append(raw)
         return 200, gate.encode(response(content="合成打包验收回复，不代表真实人格结果。"))
 
-    # Only the approved test clock and final HTTPS boundary are substituted.
+    # Test-only clock, explicit HTTP opt-in and final HTTPS boundary fixture.
     # Actual run.execute -> broker -> product HTTP driver creates all four files.
     with pytest.MonkeyPatch.context() as patch:
-        patch.setattr(gate.time, "time", lambda: gate.PRICE_VALID_UNTIL - 3600)
+        install_legacy_companion_opt_in(patch)
+        patch.setattr(gate, "time", SimpleNamespace(
+            time=lambda: gate.PRICE_VALID_UNTIL - 3600, monotonic=time.monotonic,
+        ))
         report = run.execute(fake, "b" * 40, workspace / str(EVIDENCE_DIRECTORY))
     assert report["matrix"]["passed"], report
     assert report["budget"]["request_count"] == len(sent) == 12

@@ -1,7 +1,9 @@
 """Fixed five-case retest: real runtime, synthetic data, fake upstream only."""
 import json
 import subprocess
+import time
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
@@ -12,11 +14,20 @@ from scripts.companion_ai_validation import experience_driver as driver
 from scripts.companion_ai_validation.tests.test_experience_runner import reply
 
 
+@pytest.fixture(autouse=True)
+def offline_broker_clock(monkeypatch):
+    # Module-local fake replay only; never change global time or live gate code.
+    # Individual expiry tests can still move this isolated clock forward.
+    monkeypatch.setattr(b, "time", SimpleNamespace(
+        time=lambda: exp.PRICE_VALID_UNTIL - 3600, monotonic=time.monotonic,
+    ))
+
+
 def test_retest_product_pin_is_new_and_exact():
     actual = {name: subprocess.check_output(["git", "rev-parse", f"HEAD:{name}"],
               cwd=r.ROOT, text=True).strip() for name in candidate.OBJECTS}
     candidate.validate_objects(actual)
-    assert candidate.SOURCE_SHA == "e570fd170cc476324d0580bed894cc2c394f63b1"
+    assert candidate.SOURCE_SHA == "42a54a48a90e3cc7738d3c6029e11aebe46d276b"
     for name in candidate.OBJECTS:
         with pytest.raises(b.GateError, match="product_candidate_mismatch"):
             candidate.validate_objects({**candidate.OBJECTS, name: "0" * 40})
@@ -99,6 +110,22 @@ def test_exact_five_requests_closes_all_new_allowance(tmp_path):
         state = broker.summary()
         assert len(upstream.calls) == 5 and state["lifetime_request_count"] == 78
         assert state["lifetime_reserved_micro_cny"] == 0
+    finally:
+        broker.close()
+
+
+def test_expired_quote_still_rejects_before_fake_send(tmp_path, monkeypatch):
+    from scripts.companion_ai_validation.tests.test_companion_ai_broker import Fake, payload
+    upstream = Fake()
+    broker = b.Broker(tmp_path / "ledger", upstream, "d" * 40, experience_retest=True)
+    try:
+        token = broker.begin_stage("x01")
+        monkeypatch.setattr(b.time, "time", lambda: exp.PRICE_VALID_UNTIL)
+        with pytest.raises(b.GateError, match="price_review_expired"):
+            broker.request(token, b.encode(payload("x01")))
+        assert upstream.calls == []
+        assert broker.summary()["halted"]
+        assert broker.summary()["reserved_micro_cny"] == 0
     finally:
         broker.close()
 

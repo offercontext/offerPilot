@@ -8,7 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 class CompanionPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    enabled: StrictBool = True
+    # Virtual life is opt-in; persisted choices are never overwritten at startup.
+    enabled: StrictBool = False
     proactivity: Literal["off", "less", "default"] = "default"
     hide_status: StrictBool = False
 

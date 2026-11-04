@@ -7,6 +7,11 @@ import { setLocale } from '@/i18n';
 import PilotMascot, { type PilotMascotRuntime } from './PilotMascot';
 import type { PilotMascotRuntimeController } from './live2dRuntime';
 
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
 vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 let container: HTMLDivElement;
 let root: Root;

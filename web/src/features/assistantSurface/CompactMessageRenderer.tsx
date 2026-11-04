@@ -1,3 +1,4 @@
+import { useCompanionName } from '@/features/companionPersona/useCompanionName';
 import { t, useLocale } from '@/i18n';
 import type { UITurn } from '@/components/ChatPanel/model';
 import { compactMessageText } from './assistantPresentation';
@@ -10,13 +11,14 @@ export default function CompactMessageRenderer({ turn, onReferenceImage, preview
   previewKeyPrefix?: string; activePreviewKey?: string; onPreviewChange?: (key: string | undefined) => void;
 }) {
   const text = compactMessageText(turn);
+  const companionName = useCompanionName();
   useLocale();
   return (
     <article
       className={`${styles.message} ${turn.role === 'user' ? styles.userMessage : styles.assistantMessage}`}
       data-role={turn.role}
     >
-      <span className={styles.messageAuthor}>{turn.role === 'user' ? t('你') : 'Haru'}</span>
+      <span className={styles.messageAuthor}>{turn.role === 'user' ? t('你') : companionName}</span>
       {turn.image_attachments?.length ? <div className={styles.messageImages} aria-label={t("消息图片")}>
         {turn.image_attachments.map((image, index) => <ChatImagePreview key={image.id} image={image}
           label={t("图片 {index}", { index: index + 1 })} compact onReference={onReferenceImage ? () => onReferenceImage(image) : undefined}

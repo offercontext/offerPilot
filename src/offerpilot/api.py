@@ -228,7 +228,8 @@ from offerpilot.knowledge import (
 )
 from offerpilot.proactive.api import register_proactive_routes
 from offerpilot.companion.api import register_companion_routes
-from offerpilot.companion.persona import companion_persona_policy, persona_profile_message
+from offerpilot.companion.persona import companion_persona_policy, persona_profile_message, plain_pilot_safety_policy
+from offerpilot.companion.repository import companion_policy
 from offerpilot.companion.persona_contracts import PersonaSpec
 from offerpilot.companion.persona_repository import capture_persona_binding, load_persona_spec
 from offerpilot.models import PilotTurnRecord
@@ -1528,13 +1529,21 @@ def create_app(
         with session_factory() as session:
             scope = current_execution_scope()
             binding = None
+            admitted_enabled = None
             if scope is not None and scope.lease is not None:
                 binding = _persona_binding_for_turn(
                     session, scope.lease.turn_id, int(getattr(conversation, "id", 0)),
                 )
+                admitted_enabled = _companion_enabled_for_turn(session, scope.lease.turn_id)
             # Historical/unadmitted executions explicitly use the official
             # default, never today's mutable active pointer.
-            return _bind_persona_source(source, session, binding)
+            return _bind_persona_source(
+                replace(source, companion_enabled=admitted_enabled), session, binding,
+            )
+
+    def _companion_expression_enabled() -> bool:
+        with session_factory() as session:
+            return companion_policy(session)[1].enabled
 
     app.state.pilot_runtime = build_pilot_runtime(
         data_dir=resolved_data_dir,
@@ -1555,6 +1564,10 @@ def create_app(
         write_coordinator=write_coordinator,
         source_loader=_runtime_source_loader,
         system_message=_chat_response_system_message,
+        companion_enabled=_companion_expression_enabled,
+        plain_system_message=lambda general: _chat_response_system_message(
+            general=general, companion_enabled=False,
+        ),
         general_system_message=lambda: _chat_response_system_message(general=True),
         custom_persona_system_message=lambda general: _chat_response_system_message(
             general=general, custom_persona=True,
@@ -5035,6 +5048,7 @@ def create_app(
             return {
                 **freeze_chat_command(session, conversation, request),
                 "companion_persona_v1": json.dumps(source.persona_binding, sort_keys=True),
+                "companion_enabled_v1": json.dumps(source.companion_enabled),
                 "conversation_scope": str(source.scope_revision),
                 "current_scope": (
                     source.context_message.surface_revision or "absent"
@@ -5402,9 +5416,7 @@ def create_app(
         durable = pilot_controls.get_runtime_execution(turn_id, generation)
         if durable is None or not _runtime_execution_readable(durable):
             return None
-        target_generation = generation
-        if durable is not None:
-            target_generation = int(durable["execution_generation"])
+        target_generation = int(durable["execution_generation"])
         manager_status: dict[str, Any] | None = None
         try:
             manager_status = cast(
@@ -5412,7 +5424,15 @@ def create_app(
             )
         except (RuntimeTurnNotFound, RuntimeManagerError):
             manager_status = None
-        if durable is None and manager_status is None:
+        # Watchdog/control can commit a terminal state between the first
+        # durable read and the manager read. Re-read that exact generation
+        # afterward so a stale running row cannot mask its durable terminal.
+        # Sources may also have been withdrawn during the manager read.
+        durable = pilot_controls.get_runtime_execution(turn_id, target_generation)
+        if durable is None or not _runtime_execution_readable(durable):
+            return None
+        if (manager_status is not None
+                and int(manager_status["execution_generation"]) != target_generation):
             return None
         if manager_status is not None:
             status = dict(manager_status)
@@ -5620,6 +5640,7 @@ def create_app(
             return {
                 **freeze_chat_command(session, conversation, request),
                 "companion_persona_v1": json.dumps(source.persona_binding, sort_keys=True),
+                "companion_enabled_v1": json.dumps(source.companion_enabled),
                 "conversation_scope": str(source.scope_revision),
                 "current_scope": (
                     source.context_message.surface_revision or "absent"
@@ -9079,8 +9100,11 @@ def _generate_conversation_title(
         )
 
 
-def _chat_response_system_message(*, general: bool = False, custom_persona: bool = False) -> Message:
-    # Same persona and execution boundaries; only presentation is task-scoped.
+def _chat_response_system_message(
+    *, general: bool = False, custom_persona: bool = False, companion_enabled: bool = True,
+) -> Message:
+    custom_persona = custom_persona and companion_enabled
+    # Same execution boundaries; only expression and presentation are scoped.
     # General expression must not classify real work as leisure. Only explicit
     # task/control contexts receive a fixed report layout; all facts and history
     # remain intact, and a user's requested structure can still be followed.
@@ -9094,15 +9118,17 @@ def _chat_response_system_message(*, general: bool = False, custom_persona: bool
     return Message(
         role="system",
         surface_contributor="static_policy",
+        surface_revision="companion-expression" if companion_enabled else "pilot-plain",
         content=(
             "你是 OfferPilot，一个求职领航助手。始终使用用户的语言回复。"
             "当前对话界面支持助手文本增量流式输出。"
             + ("回答避免无关重复，详略遵循表达资料和用户当前要求。"
                if custom_persona else "回答保持简洁。")
             + presentation
-            + "问候语、澄清问题与日常陪伴（包括等待、暂停、回忆共同选择）直接自然回应，"
-            "不套用工作总结、结论标题或下一步清单。"
-            "如果本地工具依据较少，要明确说明。"
+            + ("问候语、澄清问题与日常陪伴（包括等待、暂停、回忆共同选择）直接自然回应，"
+               "不套用工作总结、结论标题或下一步清单。" if companion_enabled else
+               "问候语和澄清问题直接自然回应，不套用工作总结、结论标题或下一步清单。")
+            + "如果本地工具依据较少，要明确说明。"
             "不要暴露隐藏推理。不要提到 update_application_status、create_application_event "
             "等内部工具或 API 名称；请改用用户能理解的动作描述。"
             "当面试复盘属于某家公司但系统里已有不同岗位投递时，"
@@ -9110,7 +9136,8 @@ def _chat_response_system_message(*, general: bool = False, custom_persona: bool
             "如果写入工具提示必填信息缺失或不明确，只追问一个最关键问题，"
             "不要继续尝试另一个写入。成功写入后，只给一个实用的下一步建议，"
             "例如添加日程、生成改进计划，或继续补充复盘。"
-            + companion_persona_policy(custom=custom_persona)
+            + (companion_persona_policy(custom=custom_persona)
+               if companion_enabled else plain_pilot_safety_policy())
         ),
     )
 
@@ -9404,6 +9431,8 @@ class _FrozenChatSourceMessages:
     scope_revision: int = -1
     persona_binding: Mapping[str, Any] | None = None
     persona_message: Message | None = None
+    # Separate expression admission from immutable persona identity.
+    companion_enabled: bool | None = None
 
 
 def _persona_binding_for_turn(
@@ -9427,11 +9456,36 @@ def _persona_binding_for_turn(
     return binding
 
 
+
+def _companion_enabled_for_turn(session: Session, turn_id: str) -> bool | None:
+    turn = session.get(PilotTurnRecord, turn_id)
+    if turn is None:
+        raise RuntimeError("companion turn binding unavailable")
+    versions = json.loads(turn.source_versions_json)
+    if "companion_enabled_v1" not in versions:
+        return None  # Legacy turn: current opt-in still gates any expression.
+    value = versions["companion_enabled_v1"]
+    if not isinstance(value, str) or value not in ("true", "false"):
+        raise ValueError("companion enabled binding invalid")
+    return value == "true"
+
+
+def _without_companion_expression(source: _FrozenChatSourceMessages) -> _FrozenChatSourceMessages:
+    context = source.context_message
+    if context is not None and (context.surface_revision or "").startswith("companion:"):
+        context = None
+    return replace(source, companion_enabled=False, persona_message=None, context_message=context)
+
 def _bind_persona_source(
     source: _FrozenChatSourceMessages, session: Session, binding: Mapping[str, Any] | None,
 ) -> _FrozenChatSourceMessages:
     spec = PersonaSpec() if binding is None else load_persona_spec(session, dict(binding))
-    return replace(source, persona_binding=binding, persona_message=persona_profile_message(spec, binding))
+    # Never replace the frozen revision with today's active profile. A new opt-in
+    # also cannot add expression to a turn admitted while the switch was off.
+    enabled = source.companion_enabled is not False and companion_policy(session)[1].enabled
+    bound = replace(source, persona_binding=binding, companion_enabled=enabled,
+                    persona_message=persona_profile_message(spec, binding) if enabled else None)
+    return bound if enabled else _without_companion_expression(bound)
 
 
 class _TransactionChatSourceLoader:
@@ -9463,7 +9517,7 @@ class _AdmittedChatSourceLoader:
             raise RuntimeError("Conversation scope changed after admission")
         if self.persona_sessions is not None:
             with self.persona_sessions() as session:
-                _bind_persona_source(self.source, session, self.source.persona_binding)
+                return _bind_persona_source(self.source, session, self.source.persona_binding)
         return self.source
 
 
@@ -9502,16 +9556,20 @@ class _FreshAdmittedChatSourceLoader:
             str(context_revision),
             attachment_revisions,
             getattr(value, "persona_binding", None),
+            getattr(value, "companion_enabled", None),
         )
 
     def load(self, conversation: object, request: object, **kwargs: object) -> object:
         current = self.loader(conversation, request, **kwargs)
-        if self._revision(current) != self._revision(self.source):
+        effective = self.source
+        if getattr(current, "companion_enabled", None) is False:
+            effective = _without_companion_expression(effective)
+        if self._revision(current) != self._revision(effective):
             raise RuntimeError("source changed after admission")
         # Return the frozen pre-user-message source.  The fresh read above is
         # validation only; returning it would feed the admitted user message
-        # into the model a second time.
-        return self.source
+        # into the model a second time. Revoked expression is the only removal.
+        return effective
 
 
 @dataclass(frozen=True, slots=True)

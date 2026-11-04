@@ -13,6 +13,10 @@ from uuid import uuid4
 
 import pytest
 
+from scripts.companion_ai_validation.tests.legacy_companion_fixture import (
+    legacy_companion_opt_in as legacy_companion_opt_in,
+)
+
 from offerpilot.config import AIProviderProfile, Config, save_config
 from scripts.companion_ai_validation import driver
 
@@ -176,6 +180,7 @@ def _failure_metadata(data_dir, fake):
     return metadata
 
 
+@pytest.mark.usefixtures("legacy_companion_opt_in")
 def test_full_matrix_uses_real_http_exactly_twelve_times_and_sources(fake_stage, tmp_path):
     recorded = []
     try:
@@ -246,6 +251,7 @@ def test_full_matrix_uses_real_http_exactly_twelve_times_and_sources(fake_stage,
 
 
 @pytest.mark.parametrize("failure", ["provider_error", "tool_call"])
+@pytest.mark.usefixtures("legacy_companion_opt_in")
 def test_failures_revoke_stage_stop_matrix_and_reap_api(tmp_path, monkeypatch, failure):
     fake = FakeStage(tmp_path, failure=failure)
     processes = []
@@ -321,6 +327,7 @@ def test_api_child_network_guard_blocks_before_nonloopback_connect(tmp_path):
     assert result.returncode != 0 and b"OfflineNetworkDenied" in result.stderr
 
 
+@pytest.mark.usefixtures("legacy_companion_opt_in")
 def test_prior_success_is_recorded_once_when_later_stage_fails(tmp_path):
     fake = FakeStage(tmp_path, failure="provider_error", fail_operation=driver.OPERATIONS[1])
     recorded = []

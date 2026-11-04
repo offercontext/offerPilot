@@ -1,12 +1,26 @@
 """Real runtime + actual one-shot broker, with a strictly fake upstream."""
 import json
+import time
+from types import SimpleNamespace
 from copy import deepcopy
 import pytest
+
+from scripts.companion_ai_validation.tests.legacy_companion_fixture import (
+    legacy_companion_opt_in as legacy_companion_opt_in,
+)
 from scripts.companion_ai_validation import broker as b, run as r
 from scripts.companion_ai_validation import experience_candidate as candidate
 from scripts.companion_ai_validation import experience_continuation as exp
 from scripts.companion_ai_validation.tests import test_experience_preflight as pf
 from scripts.companion_ai_validation.tests import test_companion_ai_preflight as old
+
+
+@pytest.fixture(autouse=True)
+def offline_broker_clock(monkeypatch):
+    # Fake replay only; preserve real clock and quote expiry in production.
+    monkeypatch.setattr(b, "time", SimpleNamespace(
+        time=lambda: exp.PRICE_VALID_UNTIL - 3600, monotonic=time.monotonic,
+    ))
 
 
 def reply(content="合成简短回复，仅验证机制。", finish="stop"):
@@ -51,6 +65,7 @@ def test_new_admission_is_not_old_batch(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("failure", [False, True])
+@pytest.mark.usefixtures("legacy_companion_opt_in")
 def test_product_runtime_through_broker_twelve_or_fail_stop(tmp_path, failure):
     sent = []
     def upstream(body):

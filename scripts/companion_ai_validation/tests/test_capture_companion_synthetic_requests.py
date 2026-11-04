@@ -174,6 +174,39 @@ def test_fake_upstream_retains_full_body_returns_no_tools_and_refuses_retries():
     assert not capture._OWNED_DATA_DIRS
 
 
+@pytest.mark.parametrize("already_enabled", [False, True])
+def test_capture_opt_in_uses_normal_http_and_requires_closed_default(tmp_path, already_enabled):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from offerpilot.companion.api import register_companion_routes
+    from offerpilot.db import session_factory_for_data_dir
+    from scripts.companion_ai_validation import driver
+
+    sessions = session_factory_for_data_dir(tmp_path)
+    app = FastAPI()
+    register_companion_routes(app, sessions)
+    with TestClient(app) as client:
+        matrix = driver._Matrix(tmp_path, client, lambda _: pytest.fail("no provider stage"))
+        try:
+            if already_enabled:
+                matrix.settings(enabled=True)
+            before = matrix.snapshot(matrix.view())
+            if already_enabled:
+                with pytest.raises(RuntimeError, match="synthetic_default_closed_required"):
+                    capture._opt_in_synthetic_companion(matrix)
+                assert matrix.snapshot(matrix.view()) == before
+            else:
+                capture._opt_in_synthetic_companion(matrix)
+                after = matrix.snapshot(matrix.view())
+                assert after["settings"]["enabled"] is True
+                assert after["state"] == before["state"]
+                assert after["shared_participation"] == before["shared_participation"]
+            assert matrix.responses == matrix.controls == []
+        finally:
+            matrix.sessions.kw["bind"].dispose()
+            sessions.kw["bind"].dispose()
+
+
 def test_full_capture_uses_real_product_without_env_credentials_or_tool_execution(tmp_path):
     # The fresh process clears inherited values before product imports. This also
     # tests the standalone CLI rather than monkeypatching away product assembly.

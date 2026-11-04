@@ -1,9 +1,15 @@
 """Admission, environment isolation, and full fake broker/product integration."""
 import json
 import math
+import time
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+
+from scripts.companion_ai_validation.tests.legacy_companion_fixture import (
+    legacy_companion_opt_in as legacy_companion_opt_in,
+)
 
 from scripts.companion_ai_validation import broker as gate
 from scripts.companion_ai_validation import run
@@ -587,9 +593,12 @@ def test_mandatory_linux_aggregate_rejects_incomplete_nodes(damage):
     assert not ledger.report(0)['passed']
 
 
+@pytest.mark.usefixtures("legacy_companion_opt_in")
 def test_actual_product_chat_matrix_through_strict_budget_and_sse_boundary(tmp_path, monkeypatch):
     from scripts.companion_ai_validation.tests.test_companion_ai_broker import response
-    monkeypatch.setattr(gate.time, 'time', lambda: gate.PRICE_VALID_UNTIL - 3600)
+    monkeypatch.setattr(gate, "time", SimpleNamespace(
+        time=lambda: gate.PRICE_VALID_UNTIL - 3600, monotonic=time.monotonic,
+    ))
     calls = []
 
     def fake(raw):

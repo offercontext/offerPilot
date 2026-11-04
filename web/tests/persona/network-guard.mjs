@@ -49,7 +49,8 @@ export function classifyRequest(method, rawUrl, body, dist) {
       return { blocked: 'invalid_persona_command' };
     }
     if (url.pathname === '/api/companion/presence' && keys(body, ['identity', 'client_id', 'sequence', ...signals]) && uuid.test(body.identity) && uuid.test(body.client_id) && integer(body.sequence) && signals.every(key => typeof body[key] === 'boolean')) return { api: true, contentFree: true };
-    if (url.pathname === '/api/companion/events' && keys(body, ['identity', 'expected_revision', 'command_id', 'event']) && envelope(body) && ['app_open', 'chat_end', 'work_completed', 'user_interaction'].includes(body.event)) return { api: true, wake: true };
+    if (url.pathname === '/api/companion/events' && keys(body, ['identity', 'expected_revision', 'command_id', 'event'], ['activity_id', 'wish_id'])
+      && ['activity_id', 'wish_id'].every(key => !Object.hasOwn(body, key) || (typeof body[key] === 'string' && uuid.test(body[key]))) && envelope(body) && ['app_open', 'chat_end', 'work_completed', 'user_interaction'].includes(body.event)) return { api: true, wake: true };
     if (url.pathname === '/api/companion/bid' && keys(body, ['identity', 'expected_revision', 'client_id']) && uuid.test(body.identity) && uuid.test(body.client_id) && integer(body.expected_revision)) return { api: true, contentFree: true };
     return { blocked: 'unapproved_api_write' };
   }

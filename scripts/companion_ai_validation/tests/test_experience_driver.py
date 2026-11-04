@@ -9,6 +9,10 @@ from typing import Any, Iterator
 
 import pytest
 
+from scripts.companion_ai_validation.tests.legacy_companion_fixture import (
+    legacy_companion_opt_in as legacy_companion_opt_in,
+)
+
 from scripts.companion_ai_validation import driver as base
 from scripts.companion_ai_validation import experience_driver as experience
 
@@ -79,6 +83,7 @@ class LoopbackFake:
         self.thread.join(timeout=2)
 
 
+@pytest.mark.usefixtures("legacy_companion_opt_in")
 def test_twelve_real_runtime_turns_and_controls_have_exact_fake_budget(tmp_path: Path) -> None:
     root = tmp_path / "owned"
     root.mkdir()

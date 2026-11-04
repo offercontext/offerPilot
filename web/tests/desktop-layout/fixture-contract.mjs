@@ -1,5 +1,39 @@
 import assert from 'node:assert/strict';
 import { TASK_PANEL_ORIGIN, createTaskPanelFixture } from './task-panel-fixture.mjs';
+import { createMascotFixture, installMascotFixture } from './mascot-fixture.mjs';
+const mascotFixture = createMascotFixture();
+assert.equal(mascotFixture.handle('GET', '/api/companion').data.settings.enabled, true, 'named layout explicitly opts in only its synthetic instance');
+assert.equal(mascotFixture.handle('GET', '/api/companion/persona').data.spec.display_name, 'Haru');
+for (const route of ['/api/companion', '/api/companion/persona']) {
+  assert.deepEqual(mascotFixture.handle('GET', TASK_PANEL_ORIGIN + route), mascotFixture.handle('GET', route));
+  for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'HEAD']) assert.equal(mascotFixture.handle(method, route), undefined);
+  for (const alias of [`${route}/`, `${route}?enabled=true`, `${route}#fragment`, `https://example.invalid${route}`, `http://user:secret@127.0.0.1:5174${route}`]) {
+    assert.equal(mascotFixture.handle('GET', alias), undefined, alias);
+  }
+}
+for (const route of ['/api/companion/settings', '/api/companion/events', '/api/companion/presence', '/api/companion/bid', '/api/companion/persona/mutations', '/api/offers/comparison-dimensions', '/api/chat']) {
+  for (const method of ['GET', 'POST', 'PUT', 'DELETE']) assert.equal(mascotFixture.handle(method, route), undefined);
+}
+const mutableRead = mascotFixture.handle('GET', '/api/companion');
+mutableRead.data.settings.enabled = false;
+assert.equal(mascotFixture.handle('GET', '/api/companion').data.settings.enabled, true, 'read responses must not mutate the fixture');
+assert.equal(createMascotFixture().handle('GET', '/api/companion').data.settings.enabled, true, 'viewports own independent fixtures');
+let intercept;
+const unexpectedMascotRequests = await installMascotFixture({ route: async (pattern, handler) => {
+  assert.equal(pattern, '**/api/**'); intercept = handler;
+} });
+for (const [method, url, expectedStatus] of [
+  ['GET', `${TASK_PANEL_ORIGIN}/api/companion`, 200],
+  ['GET', `${TASK_PANEL_ORIGIN}/api/companion/persona`, 200],
+  ['PUT', `${TASK_PANEL_ORIGIN}/api/companion/settings`, 403],
+  ['POST', `${TASK_PANEL_ORIGIN}/api/companion/presence`, 403],
+  ['GET', `${TASK_PANEL_ORIGIN}/api/provider-secret`, 403],
+]) {
+  let fulfilled;
+  await intercept({ request: () => ({ method: () => method, url: () => url }), fulfill: async response => { fulfilled = response; } });
+  assert.equal(fulfilled.status, expectedStatus, `${method} ${url} must terminate in the synthetic transport`);
+}
+assert.deepEqual(unexpectedMascotRequests, ['PUT /api/companion/settings', 'POST /api/companion/presence', 'GET /api/provider-secret']);
 const taskPanelFixtureResponse = createTaskPanelFixture().handle;
 const persona = taskPanelFixtureResponse('GET', '/api/companion/persona');
 assert.equal(persona?.status, 200, 'default persona must be an explicit synthetic read');

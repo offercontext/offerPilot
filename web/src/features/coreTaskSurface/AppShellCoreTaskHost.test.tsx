@@ -183,7 +183,7 @@ describe('AppShell application task composition', () => {
     const start = applicationDetailSource.indexOf('const moreActionItems');
     const end = applicationDetailSource.indexOf('const linkedOffers', start);
     const source = applicationDetailSource.slice(start, end);
-    expect(source).toContain('让 Haru 帮我');
+    expect(source).toContain('让 Pilot 帮我');
     expect(source).not.toContain('评估岗位匹配');
     expect(source).not.toContain('投递材料');
     expect(source).not.toContain('岗位决策');

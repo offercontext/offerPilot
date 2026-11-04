@@ -23,7 +23,7 @@ from scripts.companion_ai_validation import experience_continuation as old
 ADMISSION_SCHEMA = old.ADMISSION_SCHEMA
 LINEAGE_KEYS = old.LINEAGE_KEYS
 CAMPAIGN_ID = old.CAMPAIGN_ID
-CORRECTION_ORDINAL = 9
+CORRECTION_ORDINAL = 10
 BUDGET = old.BUDGET
 RESERVATION = old.RESERVATION
 PRIOR_SETTLED = 558_124
@@ -52,6 +52,8 @@ EVIDENCE_PATH = (Path(__file__).resolve().parents[2] / "experiments/companion_ex
 ContinuationError = archive.ContinuationError
 ALL_HISTORICAL_IDENTITIES = old.ALL_HISTORICAL_IDENTITIES | frozenset((
     PREDECESSOR_SOURCE_SHA, PREDECESSOR_HELPER_SHA,
+    "ca73a48211c0106daf5ac8d017c7cab7f0e03c35",
+    "d6ed094caaf5d18a74abee5810f9fee0734bb508",
 ))
 _equal = old._equal
 

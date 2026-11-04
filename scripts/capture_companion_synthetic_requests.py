@@ -250,6 +250,36 @@ class SyntheticUpstream:
         self.thread.join(timeout=5)
 
 
+def _opt_in_synthetic_companion(matrix: Any) -> None:
+    """Explicitly opt the fresh fake-only scenario in through normal HTTP."""
+    before = matrix.view()
+    _require(before["settings"]["enabled"] is False
+             and before["state"]["activity"] is None, "synthetic_default_closed_required")
+    matrix.settings(enabled=True)
+    after = matrix.view()
+    _require(after["settings"] == {**before["settings"], "enabled": True}
+             and after["identity"] == before["identity"]
+             and after["revision"] == before["revision"] + 1
+             and after["state"] == before["state"]
+             and after["shared_participation"] == before["shared_participation"],
+             "synthetic_http_opt_in_preserves_life")
+
+
+def _week_matrix(data_dir: Path, fake: SyntheticUpstream) -> dict[str, Any]:
+    from scripts.companion_ai_validation import driver
+
+    data_dir = data_dir.resolve()
+    _require(data_dir.is_dir() and not any(data_dir.iterdir()), "fresh_data_dir")
+    (data_dir / driver.CLOCK_FILE).write_text(str(driver.CLOCK_START))
+    with driver._api(data_dir) as client:
+        matrix = driver._Matrix(data_dir, client, fake.stage)
+        try:
+            _opt_in_synthetic_companion(matrix)
+            return matrix.run()
+        finally:
+            matrix.sessions.kw["bind"].dispose()
+
+
 def _holdout_matrix(data_dir: Path, fake: SyntheticUpstream) -> dict[str, Any]:
     from scripts.companion_ai_validation import driver
     from sqlalchemy import func, select
@@ -260,6 +290,7 @@ def _holdout_matrix(data_dir: Path, fake: SyntheticUpstream) -> dict[str, Any]:
     with driver._api(data_dir) as client:
         matrix = driver._Matrix(data_dir, client, fake.stage)
         try:
+            _opt_in_synthetic_companion(matrix)
             matrix.event("app_open")
             for operation, text, previous in HOLDOUTS:
                 before = matrix.view()
@@ -316,7 +347,7 @@ def run_capture(*, fake_only: bool, label: str) -> Path:
             data_dir = owned[suite]
             fake = SyntheticUpstream(data_dir, operations, fake_only=True)
             try:
-                result = (driver.run_matrix(data_dir, fake.stage) if suite == "synthetic_week"
+                result = (_week_matrix(data_dir, fake) if suite == "synthetic_week"
                           else _holdout_matrix(data_dir, fake))
                 _require(result["passed"] is True and len(fake.requests) == len(operations),
                          "complete_fixed_matrix_required")

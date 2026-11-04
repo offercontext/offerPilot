@@ -22,6 +22,7 @@ from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Requ
 
 from scripts.companion_ai_validation.broker import PRICE_VALID_UNTIL, SESSION_SECONDS
 from scripts.companion_ai_validation import continuation as lineage
+from scripts.companion_ai_validation import abandoned_retest as abandoned
 
 REPOSITORY = "offercontext/offerPilot"
 BRANCH = "feat/20261021-companion-life-v1"
@@ -74,9 +75,9 @@ def marker(helper_sha: str, *, shadow_review: bool = False, shadow_quote_v2: boo
     if experience_retest:
         from scripts.companion_ai_validation import experience_retest_continuation as retest
         return (
-            "test: request OfferPilot companion product experience retest v1\n\n"
+            "test: request OfferPilot companion product experience retest v2\n\n"
             f"OfferPilot-Companion-AI-Helper: {helper_sha}\n"
-            "OfferPilot-Companion-AI-Request: one-shot-20261101-product-experience-retest-v1-9\n"
+            "OfferPilot-Companion-AI-Request: one-shot-20261104-product-experience-retest-v2-10\n"
             f"OfferPilot-Companion-AI-Predecessor: {retest.PREDECESSOR_RUN_ID}\n"
             f"OfferPilot-Companion-AI-Ledger: {retest.LEDGER_SHA256}"
         )
@@ -385,6 +386,9 @@ def validate_history(ctx: Context, runs: list[dict[str, Any]],
         demand(run.get("status") == "completed", "PRIOR_RUN_UNRESOLVED")
         demand(set(jobs) == JOBS and all(job.get("status") == "completed" for job in jobs.values()),
                "JOB_HISTORY_INCOMPLETE")
+        if ctx.experience_retest and run["id"] == abandoned.RUN_ID:
+            abandoned.validate_identity(run, jobs)
+            continue
         if run["id"] in paid_batches:
             batch = paid_batches[run["id"]]
             demand(run["head_sha"] == batch.source_sha
@@ -407,6 +411,10 @@ def validate_history(ctx: Context, runs: list[dict[str, Any]],
                    "HELPER_OFFLINE_SUCCESS_REQUIRED")
             helper_runs.append(run)
     demand(len(helper_runs) == 1, "HELPER_OFFLINE_SUCCESS_REQUIRED")
+    if ctx.experience_retest:
+        demand(helper_runs[0]["run_number"] > abandoned.RUN_NUMBER
+               and current["run_number"] > abandoned.RUN_NUMBER,
+               "ABANDONED_HISTORY_ORDER")
     demand(set(predecessor_runs) == set(paid_batches)
            and set(predecessor_helpers) == set(helper_batches), "PREDECESSOR_HISTORY_REQUIRED")
     chain = [number for batch in pinned for number in (
@@ -544,7 +552,9 @@ class GitHubReader:
             allowed += (re.escape(f"actions/artifacts/{exp.PREDECESSOR_ARTIFACT_ID}"),)
         if self.experience_retest:
             from scripts.companion_ai_validation import experience_retest_continuation as retest
-            allowed += (re.escape(f"actions/artifacts/{retest.PREDECESSOR_ARTIFACT_ID}"),)
+            allowed += (re.escape(f"actions/artifacts/{retest.PREDECESSOR_ARTIFACT_ID}"),
+                        re.escape(f"actions/runs/{abandoned.RUN_ID}/artifacts")
+                        + r"\?per_page=100&page=[1-9][0-9]*")
         demand(any(re.fullmatch(pattern, path) for pattern in allowed), "GITHUB_READ_PATH_DENIED")
         headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28",
                    "User-Agent": "offerpilot-companion-preflight"}
@@ -821,6 +831,8 @@ def preflight(*, phase: str, env: Mapping[str, str], event: Any, read: Reader,
     jobs = {run["id"]: read_pages(read, f"actions/runs/{run['id']}/jobs?filter=all", "jobs")
             for run in runs}
     validate_history(ctx, runs, jobs, current, workflow, phase)
+    if ctx.experience_retest:
+        abandoned.validate_metadata(runs, jobs, read)
     validate_predecessor_metadata(ctx, read, environment_id)
     if phase == "paid":
         validate_review(single(read, f"actions/runs/{ctx.run_id}/approvals"), environment_id)

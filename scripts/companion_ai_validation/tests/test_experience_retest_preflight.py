@@ -9,7 +9,8 @@ from scripts.companion_ai_validation.tests import test_companion_ai_preflight as
 
 @pytest.fixture(autouse=True)
 def clock(monkeypatch):
-    monkeypatch.setattr(p, "WORKFLOW_ID", old.WORKFLOW_ID)
+    monkeypatch.setattr(old, "WORKFLOW_ID", p.abandoned.WORKFLOW_ID)
+    monkeypatch.setattr(p, "WORKFLOW_ID", p.abandoned.WORKFLOW_ID)
     monkeypatch.setattr(p, "ENVIRONMENT_ID", old.ENV_ID)
     monkeypatch.setattr(p, "BRANCH_POLICY_ID", 66)
     monkeypatch.setattr(p.time, "time", lambda: q.PRICE_VALID_UNTIL - 3600)
@@ -48,6 +49,21 @@ def fixture(phase="before"):
         "workflow_run": {"id": q.PREDECESSOR_RUN_ID, "repository_id": old.REPO_ID,
                          "head_repository_id": old.REPO_ID, "head_branch": p.BRANCH,
                          "head_sha": q.PREDECESSOR_SOURCE_SHA}})
+    # Preserve test request ID 20, but place it after the exact cancelled run 32.
+    snapshot = p.abandoned.verified_evidence()["after"]
+    extra = [old.run(n, f"{n:040x}", run_id=1000+n) for n in range(19, 32)]
+    old.add_pages(data, f"actions/runs/{p.abandoned.RUN_ID}/jobs?filter=all", "jobs",
+                  deepcopy(snapshot["jobs"]["jobs"]))
+    data[f"actions/runs/{p.abandoned.RUN_ID}"] = p.Response(deepcopy(snapshot["run"]))
+    data[f"actions/runs/{p.abandoned.RUN_ID}/approvals"] = p.Response([])
+    old.add_pages(data, f"actions/runs/{p.abandoned.RUN_ID}/artifacts", "artifacts",
+                  deepcopy(snapshot["artifacts"]["artifacts"]))
+    for value in extra:
+        old.add_pages(data, f"actions/runs/{value['id']}/jobs?filter=all", "jobs", old.jobs_for(value))
+    runs[-2]["run_number"], runs[-1]["run_number"] = 33, 34
+    runs[:] = runs[:-2] + extra + [deepcopy(snapshot["run"])] + runs[-2:]
+    data["actions/runs/20"] = p.Response(deepcopy(runs[-1]))
+    old.add_pages(data, old.RUNS_PATH, "workflow_runs", runs)
     return env, event, data
 
 def execute(values, phase="before"):
@@ -98,7 +114,7 @@ def test_experience_admission_is_new_lineage(tmp_path):
     q.validate_lineage(record)
     assert record["prior_request_count"] == 73
     assert record["prior_settled_micro_cny"] == 558124
-    assert record["correction_ordinal"] == 9
+    assert record["correction_ordinal"] == 10
     with pytest.raises(p.lineage.ContinuationError):
         single.q.validate_lineage(record)
 
@@ -150,7 +166,7 @@ def test_history_extends_without_rewriting_old_failure():
 
 def test_exact_retest_marker_not_accepted_as_old_mode():
     value = p.marker(old.H, experience_retest=True)
-    assert "one-shot-20261101-product-experience-retest-v1-9" in value
+    assert "one-shot-20261104-product-experience-retest-v2-10" in value
     assert str(q.PREDECESSOR_RUN_ID) in value and q.LEDGER_SHA256 in value
     assert not p.exact_marker(value, old.H, experience=True)
     assert p.exact_marker(value + "\n", old.H, experience_retest=True)

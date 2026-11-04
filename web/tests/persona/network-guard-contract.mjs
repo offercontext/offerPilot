@@ -11,7 +11,17 @@ assert.ok(classify('POST', '/api/companion/persona/mutations?bypass=true', comma
 for (const suffix of ['/api/settings', '/api/settings/providers/test', '/api/chat', '/api/companion/settings', '/api/companion', '/api/not-real']) assert.ok(classify('POST', suffix, {}).blocked, suffix);
 for (const event of ['pause', 'resume', 'abandon', 'complete_shared', 'withdraw_shared', 'quiet_session']) assert.ok(classify('POST', '/api/companion/events', { identity: id, command_id: id, expected_revision: 0, event }).blocked, event);
 assert.equal(classify('POST', '/api/companion/events', { identity: id, command_id: id, expected_revision: 0, event: 'app_open' }).wake, true);
-assert.ok(classify('POST', '/api/companion/events', { identity: id, command_id: id, expected_revision: 0, event: 'app_open', activity_id: id }).blocked);
+const wake = { identity: id, command_id: id, expected_revision: 0, event: 'app_open' };
+for (const refs of [{ activity_id: id }, { wish_id: id }, { activity_id: id, wish_id: id }]) {
+  assert.equal(classify('POST', '/api/companion/events', { ...wake, ...refs }).wake, true);
+  assert.ok(classify('POST', '/api/companion/events', { ...wake, ...refs, event: 'complete_shared' }).blocked);
+}
+for (const key of ['activity_id', 'wish_id']) {
+  for (const invalid of ['', 'x'.repeat(10000), null, 1, [id], {}, 'not-a-uuid']) {
+    assert.ok(classify('POST', '/api/companion/events', { ...wake, [key]: invalid }).blocked);
+  }
+}
+assert.ok(classify('POST', '/api/companion/events', { ...wake, activity_id: id, unexpected: true }).blocked);
 assert.ok(classifyRequest('GET', `http://secret@127.0.0.1:18763/`, null, '/tmp/persona-dist').blocked);
 for (const url of ['https://example.invalid/', 'ws://127.0.0.1:18763/', 'http://localhost:18763/', 'file:///tmp/example']) assert.ok(classifyRequest('GET', url, null, '/tmp/persona-dist').blocked, url);
 assert.ok(classify('GET', '/api/unknown').blocked);

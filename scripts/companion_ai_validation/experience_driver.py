@@ -62,6 +62,27 @@ class _Experience(base._Matrix):
         self.rows = rows
         self.fixture_reference: dict[str, Any] | None = None
 
+    def opt_in_retest(self) -> None:
+        """Opt in only the new retest fixture, through the normal settings API.
+
+        Check the closed default before changing it. No chat, provider stage,
+        persona mutation, or history is introduced by this setup step.
+        """
+        before = self.view()
+        self.checked("fresh_default_closed", before["settings"]["enabled"] is False
+                     and before["state"]["activity"] is None)
+        self.checked("default_closed_context_absent",
+                     self.context("你的小日常怎么样了？", 0) is None)
+        self.settings(enabled=True)
+        after = self.view()
+        self.checked("explicit_http_opt_in", after["settings"] == {
+            **before["settings"], "enabled": True,
+        } and after["identity"] == before["identity"]
+            and after["revision"] == before["revision"] + 1
+            and after["state"] == before["state"]
+            and after["shared_participation"] == before["shared_participation"])
+        self.business_empty("retest_opt_in")
+
     def business_empty(self, operation: str) -> None:
         with self.sessions() as session:
             base._require(all(session.scalar(select(func.count()).select_from(model)) == 0
@@ -300,6 +321,8 @@ def run_matrix(root_dir: Path, stage_for_data_dir: StageFactory, *,
             matrix = _Experience(data_dir, client, stage_for_data_dir(data_dir),
                                  tuple(row for row in rows if row["group"] == group), record_response)
             try:
+                if retest:
+                    matrix.opt_in_retest()
                 results.append(matrix.run_group(group))
             finally:
                 matrix.sessions.kw["bind"].dispose()

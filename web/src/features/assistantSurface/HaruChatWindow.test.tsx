@@ -13,6 +13,11 @@ import { setLocale } from '@/i18n';
 import { publishPersona } from '@/features/companionPersona/useCompanionName';
 import type { PersonaView } from '@/services/persona';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
 vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 import { readChatImage } from '@/services/chatImages';
 vi.mock('@/services/chatImages', async (importOriginal) => ({
