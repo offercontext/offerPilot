@@ -15,6 +15,7 @@ from pathlib import Path
 import platform
 import subprocess
 import sys
+import zlib
 
 # Reviewed after Windows shard 0 exceeded 90 minutes: 390 chat cases have
 # function-local state and no shared custom fixtures. All shards already import
@@ -22,10 +23,15 @@ import sys
 NODE_SPLIT_FILES = frozenset({"tests/test_chat_api.py"})
 MANIFEST_VERSION = 4
 PARTITION_STRATEGY = "duration-lpt-v1"
-DURATION_HISTORY_PATH = Path(__file__).with_name("durations-v2.json")
+DURATION_HISTORY_PATH = Path(__file__).with_name("durations-v3.json.gz")
 # SHA256 of the checked-in history with checkout CRLF normalized to LF.
-DURATION_HISTORY_SHA256 = "8d8ae33673e05619c70e69846c3bdb4014e5fe38e4ed6d774fe4b110744324d9"
-DURATION_HISTORY_VERSION = 2
+DURATION_HISTORY_SHA256 = "15e1b18ae12b3bf219f727666979f994ea47c685618c25d0cea4686131ebff1d"
+DURATION_HISTORY_VERSION = 3
+DURATION_HISTORY_COMPRESSED_SHA256 = "0f27cf1cb6b314864144eae39568ad3a148d637c256de1162e14d4b80b1ee512"
+DURATION_HISTORY_MAX_COMPRESSED_BYTES = 512 * 1024
+DURATION_HISTORY_MAX_RAW_BYTES = 5 * 1024 * 1024
+# gzip: DEFLATE, no flags, mtime=0, XFL=2 (level 9), OS=255 (unknown).
+DURATION_HISTORY_GZIP_HEADER = bytes.fromhex("1f8b08000000000002ff")
 # pytest exports each node plus a phase suffix in PYTEST_CURRENT_TEST. Leave
 # headroom below Windows' 32767 UTF-16-unit environment value limit.
 MAX_NODE_ID_UTF16_UNITS = 32700
@@ -120,9 +126,42 @@ def identity():
     }
 
 
+def _duration_history_bytes():
+    if DURATION_HISTORY_VERSION in {1, 2}:
+        # Preserve immutable JSON versions and checkout CRLF compatibility.
+        return DURATION_HISTORY_PATH.read_bytes().replace(b"\r\n", b"\n")
+    if DURATION_HISTORY_VERSION != 3:
+        raise ValueError("Unsupported duration history")
+    with DURATION_HISTORY_PATH.open("rb") as source:
+        packed = source.read(DURATION_HISTORY_MAX_COMPRESSED_BYTES + 1)
+    if len(packed) > DURATION_HISTORY_MAX_COMPRESSED_BYTES:
+        raise ValueError("Compressed duration history exceeds limit")
+    if hashlib.sha256(packed).hexdigest() != DURATION_HISTORY_COMPRESSED_SHA256:
+        raise ValueError("Frozen compressed history digest mismatch")
+    if not packed.startswith(DURATION_HISTORY_GZIP_HEADER):
+        raise ValueError("Noncanonical duration history gzip header")
+    decoder = zlib.decompressobj(wbits=31)
+    chunks, size = [], 0
+    try:
+        for offset in range(0, len(packed), 64 * 1024):
+            chunk = decoder.decompress(packed[offset:offset + 64 * 1024],
+                                       DURATION_HISTORY_MAX_RAW_BYTES - size + 1)
+            size += len(chunk)
+            if size > DURATION_HISTORY_MAX_RAW_BYTES or decoder.unconsumed_tail:
+                raise ValueError("Uncompressed duration history exceeds limit")
+            chunks.append(chunk)
+            if decoder.unused_data:
+                raise ValueError("Trailing or concatenated duration history gzip data")
+    except zlib.error as exc:
+        raise ValueError("Corrupt duration history gzip data") from exc
+    if not decoder.eof:
+        raise ValueError("Truncated duration history gzip data")
+    return b"".join(chunks)
+
+
 def load_duration_history():
     """Read a reviewed scheduling input, never prior pass/fail evidence."""
-    raw = DURATION_HISTORY_PATH.read_bytes().replace(b"\r\n", b"\n")
+    raw = _duration_history_bytes()
     if hashlib.sha256(raw).hexdigest() != DURATION_HISTORY_SHA256:
         raise ValueError("Frozen duration history digest mismatch")
     history = json.loads(raw)
