@@ -33,10 +33,11 @@ under the original **20 CNY total cap / 3 CNY per-call reservation**. Each outpu
 is bounded to 512 tokens, thinking disabled; no retry, fallback, extra title,
 external search/fetch or tool calls are allowed. Unknown costs stay reserved.
 
-**Not armed:** the old **2026-11-03 00:00 UTC** quote deadline remains expired.
-This preparation cannot admit a live call. A newly approved time window, exact
-helper/request SHA binding, fresh readback and owner environment review are still
-required before live execution. Environment protection and provider secret are
+**Not armed:** the owner renewed only this v2 quote window to **2026-11-05
+00:00 UTC (Beijing 08:00)**, with at least 20 minutes remaining at admission.
+The old v1 deadline remains expired in its immutable commit. Exact helper/request
+SHA binding, fresh readback and owner environment review are still required
+before live execution. Environment protection and provider secret are
 unchanged. Official peak prices were rechecked on 2026-11-04: input cache miss
 2 CNY / million and output 8 CNY / million; a future admission must recheck them.
 

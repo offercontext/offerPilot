@@ -25,7 +25,7 @@ def test_nine_archives_replayed_and_budget_not_reset(monkeypatch):
     assert lineage.OPERATIONS == ("x01", "x02", "x03", "x09", "x11")
     assert lineage.CORRECTION_ORDINAL == 10
     assert lineage.BUDGET == 20000000 and lineage.RESERVATION == 3000000
-    assert lineage.PRICE_VALID_UNTIL == 1793664000
+    assert lineage.PRICE_VALID_UNTIL == 1793836800
     assert lineage.PREDECESSOR_SOURCE_SHA in lineage.ALL_HISTORICAL_IDENTITIES
     assert lineage.OPERATIONS_SHA256 != lineage.old.OPERATIONS_SHA256
 

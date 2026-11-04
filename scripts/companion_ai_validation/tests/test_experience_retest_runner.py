@@ -192,5 +192,5 @@ def test_only_offline_time_is_extended_no_paid_protection_changes():
     assert "OFFERPILOT_COMPANION_DEEPSEEK_20261021" not in json.dumps(jobs["offline"])
     assert "secrets.GITHUB_TOKEN" in json.dumps(jobs["offline"])
     assert (b.REQUEST_SECONDS, b.SESSION_SECONDS, b.BUDGET, b.RESERVATION) == (90, 1200, 20000000, 3000000)
-    assert exp.PRICE_VALID_UNTIL == 1793664000
+    assert exp.PRICE_VALID_UNTIL == 1793836800
     assert "--experience-retest" in json.dumps(jobs["paid"])

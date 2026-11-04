@@ -120,7 +120,7 @@ def test_experience_admission_is_new_lineage(tmp_path):
 
 @pytest.mark.parametrize("remaining", [1200, 1199, 0, -1])
 def test_new_deadline_cannot_extend(monkeypatch, remaining):
-    assert q.PRICE_VALID_UNTIL == 1793664000
+    assert q.PRICE_VALID_UNTIL == 1793836800
     monkeypatch.setattr(p.time, "time", lambda: q.PRICE_VALID_UNTIL - remaining)
     if remaining == 1200:
         assert execute(fixture())["ok"]
