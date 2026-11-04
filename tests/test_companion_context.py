@@ -248,10 +248,8 @@ def test_life_envelope_obeys_total_budget_and_current_request_remains_last(compa
     small = replace(request, provider_budgets=(ProviderBudget(
         context_window=tool_size + 500, output_reserve=0, framing_reserve=0,
     ),))
-    limited = ModelSurfaceProjector().project(small)
-    assert frozen_life not in limited.messages
-    assert limited.messages[-1].content == query
-    assert limited.audit.truncated
+    with pytest.raises(ProjectionError, match="mandatory_surface_over_budget"):
+        ModelSurfaceProjector().project(small)
 
 
 def test_shared_chat_runtime_keeps_life_before_request_and_out_of_work_and_memory(tmp_path):

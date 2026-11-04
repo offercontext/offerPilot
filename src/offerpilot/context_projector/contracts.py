@@ -183,6 +183,9 @@ class FrozenMessage:
     provider_blocks_json: bytes = b"{}"
     source_message_id: int = 0
     images: tuple[ImageReference, ...] = ()
+    # Server source-carrier constraint, not provider text. Keep it in equality:
+    # identical untrusted prose must not compare as the required evidence.
+    required_scope: bool = False
 
     @classmethod
     def freeze(cls, message: Message, *, source_message_id: int = 0) -> FrozenMessage:
@@ -202,9 +205,13 @@ class FrozenMessage:
             provider_blocks_json=blocks,
             source_message_id=source_message_id,
             images=images,
+            required_scope=(message.surface_contributor == "current_scope"
+                            and message.surface_revision.startswith("companion:")),
         )
 
     def thaw(self) -> Message:
+        # Provider terminal only: projection constraints and routing stay internal.
+        # Runtime continuation reuses the original source carriers, not this output.
         blocks = json.loads(self.provider_blocks_json.decode("utf-8"))
         return Message(
             role=self.role,

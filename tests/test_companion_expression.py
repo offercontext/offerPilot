@@ -243,12 +243,14 @@ def test_unsupported_or_malicious_current_shapes_fail_closed(life, path, value):
         companion_context_message(data)
 
 
-def test_valid_context_too_large_for_budget_is_omitted_atomically(life, monkeypatch):
+def test_valid_context_too_large_for_budget_fails_closed(life, monkeypatch):
     from offerpilot.companion import context
 
     data = read(life)
     before = deepcopy(data)
     assert compile_companion_expression(data)
     monkeypatch.setattr(context, 'COMPANION_CONTEXT_BYTE_CAP', 32)
-    assert companion_context_message(data) is None
+    with pytest.raises(ProjectionError, match="companion_source_over_budget"):
+        companion_context_message(data)
+    assert companion_context_message(None) is None
     assert data == before

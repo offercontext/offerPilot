@@ -13,7 +13,7 @@ from offerpilot.companion.context import (
 )
 from offerpilot.companion.contracts import CompanionResetCommand
 from offerpilot.companion.models import CompanionChatEvidence
-from offerpilot.context_projector.contracts import FrozenMessage, canonical_json
+from offerpilot.context_projector.contracts import FrozenMessage, ProjectionError, canonical_json
 from offerpilot.models import ChatMessage
 from offerpilot.repositories.chat import ChatRepository
 from tests.test_companion_chat import command, life as life, run
@@ -122,25 +122,29 @@ def test_admitted_promise_question_can_read_but_cannot_rearm_short_reply(life):
     assert life[1].read()['state']['activity']['status'] == 'waiting_shared'
 
 
-def test_optional_recall_yields_to_current_state_without_mutating_source(life, monkeypatch):
+@pytest.mark.parametrize('prior_activity', [False, True])
+def test_recall_cannot_be_silently_dropped_to_fit_current_state(life, monkeypatch, prior_activity):
     choose(life)
+    if prior_activity:
+        next_activity(life)
     data = read(life)
+    if prior_activity:
+        assert data['actual_user_participation'] is None
+        assert data['recent_shared_choice']['activity_relation'] == 'prior_activity'
     from offerpilot.companion import context
 
     before = deepcopy(data)
     full = companion_context_message(data)
-    without_history = {key: value for key, value in data.items() if key != 'recent_shared_choice'}
-    current = companion_context_message(without_history)
-    size = len(canonical_json(FrozenMessage.freeze(current).canonical_value())) + 1
+    size = len(canonical_json(FrozenMessage.freeze(full).canonical_value())) + 1
     monkeypatch.setattr(context, 'COMPANION_CONTEXT_BYTE_CAP', size)
-    message = companion_context_message(data)
-    assert message is not None
-    assert message.content == current.content
-    assert message.surface_revision != current.surface_revision
-    assert message.surface_revision == full.surface_revision
-    assert '这次活动完成了选颜色这一步' in message.content
+    assert companion_context_message(data) == full
+    monkeypatch.setattr(context, 'COMPANION_CONTEXT_BYTE_CAP', size - 1)
+    with pytest.raises(ProjectionError, match='companion_source_over_budget'):
+        companion_context_message(data)
+    # Even if removing the choice could fit, do not turn known evidence into unknown.
+    without_choice = {key: value for key, value in data.items() if key != 'recent_shared_choice'}
+    assert companion_context_message(without_choice) is not None
     assert data == before
-    assert len(canonical_json(FrozenMessage.freeze(message).canonical_value())) < COMPANION_CONTEXT_BYTE_CAP
 
 
 def test_maximum_actual_name_keeps_current_promise_envelope_bounded(life):

@@ -44,7 +44,7 @@
 
 2026-11-01 陪伴整合边界：`companion/chat.py::freeze_chat_command` 只冻结闭合纯文本生活命令，携图请求不能因文字匹配而取得该指令来源；`DeterministicPilotAdapter.matches` 也先排图片。人设通过接纳 Turn 的 `source_versions_json` 绑定不可变 revision，`_ContextAdapter.assemble` 同时保留当前图片策略和该人设表达，不把历史人设当作权限策略。交叉回归见 [图片与人设](../../../tests/test_companion_image_integration.py)、[人设冻结与恢复](../../../tests/test_persona_runtime.py)。
 
-`companion/context.py` 的直接角色活动回指与纸船简称只选择只读来源；工作请求仍优先，无关请求不注入。来源不足既不证明发生也不证明未发生，不授权补写共同记忆或查证过程。删除/撤回/来源绑定与固定预算回归见 [事实边界](../../../tests/test_companion_fact_boundaries.py)。
+`companion/context.py` 的直接角色活动回指与纸船简称只选择只读来源；工作请求仍优先，无关请求不注入。来源不足既不证明发生也不证明未发生，不授权补写共同记忆或查证过程。服务器 `current_scope` / `companion:` carrier 在 `FrozenMessage.freeze` 冻结内部必保标记，`ModelSurfaceProjector._required_scope` 让默认及自定义人设都保留角色事实；默认人设下无关业务 scope 不因此升级，自定义人设原有的完整 scope 必保行为不变。完整来源超过 2KiB 直接失败，不删除近期选择后继续生成；模型出口不携带路由元数据，下一步从原 carrier 重算。预算、关闭与重放回归见 [证据预算](../../../tests/test_companion_evidence_budget.py)。删除/撤回/来源绑定与固定预算回归见 [事实边界](../../../tests/test_companion_fact_boundaries.py)。
 
 图片 Provider 能力测试与真实会话调用分开；设置通过不代表历史消息完整性或授权通过。会话来源删除和暂时不可读也应分开调查，不能把临时锁错误解释成真实删除。
 
