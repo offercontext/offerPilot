@@ -91,3 +91,15 @@ class CompanionChatEvidence(Base):
     action: Mapped[str] = mapped_column(String(16), nullable=False)
     step_kind: Mapped[str | None] = mapped_column(String(16), nullable=True)
     value: Mapped[str | None] = mapped_column(String(40), nullable=True)
+
+
+class CompanionFactReadReceipt(Base):
+    """Refs-only result identity; source deletion never leaves a second name copy."""
+    __tablename__ = "companion_fact_read_receipts"
+    turn_id: Mapped[str] = mapped_column(ForeignKey("pilot_turns.id", ondelete="CASCADE"), primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False)
+    assistant_message_id: Mapped[int] = mapped_column(ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, unique=True)
+    identity: Mapped[str] = mapped_column(String(36), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    frozen_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    bindings_json: Mapped[str] = mapped_column(Text, nullable=False)

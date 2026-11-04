@@ -25,6 +25,7 @@ from secrets import compare_digest
 from typing import Any, Protocol, TypeVar, cast
 from uuid import UUID, uuid4
 
+from offerpilot.companion.fact_read import CompanionFactReadService
 from offerpilot.companion.chat import CompanionChatService
 from offerpilot.companion.repository import CompanionConflict
 from offerpilot.ai.agent_contracts import PendingAction
@@ -179,6 +180,7 @@ class DeterministicDependencies:
     application_jd_versions: object
     application_outcomes: object
     companion_chat: CompanionChatService | None = None
+    companion_fact_read: CompanionFactReadService | None = None
     write_operations: object | None = None
     write_coordinator: object | None = None
     legacy_request_owner_lease_factory: RuntimeRequestOwnerLeaseFactory | None = field(
@@ -964,6 +966,14 @@ class DeterministicPilotAdapter:
                     ),
                 )
 
+    def _companion_fact_matches(self, request: StartTurnRequest, conversation: object) -> bool:
+        service = self.dependencies.companion_fact_read
+        message_id = getattr(self.dependencies.persistence, "admitted_user_message_id", None)
+        return (type(service) is CompanionFactReadService and type(message_id) is int
+                and not any((request.attachments, request.image_attachment_ids, request.images,
+                             request.page_context, request.pilot_action))
+                and service.matches(message_id, request.message, self._conversation_id(conversation)))
+
     def _companion_matches(self, request: StartTurnRequest, conversation: object) -> bool:
         service = self.dependencies.companion_chat
         message_id = getattr(self.dependencies.persistence, "admitted_user_message_id", None)
@@ -975,6 +985,8 @@ class DeterministicPilotAdapter:
         # also resembles a companion command. Never silently consume only text.
         if request.image_attachment_ids:
             return False
+        if self._companion_fact_matches(request, conversation):
+            return True
         if self._companion_matches(request, conversation):
             return True
         if request.pilot_action is not None:
@@ -1174,6 +1186,25 @@ class DeterministicPilotAdapter:
                 pending_replay=True,
             )
             return self._with_transport_initial(execution, transport)
+
+        if self._companion_fact_matches(request, conversation):
+            if existing is not None or self._clarification_for(conversation) is not None:
+                return DeterministicExecution(_error(
+                    RuntimeFailureCode.PENDING_CONFIRMATION_REQUIRED, "请先处理当前待确认操作", 409))
+            service = self.dependencies.companion_fact_read
+            message_id = getattr(self.dependencies.persistence, "admitted_user_message_id", None)
+            assert service is not None and type(message_id) is int
+            try:
+                message = service.execute(message_id, request.message, conversation_id)
+            except CompanionConflict:
+                return DeterministicExecution(_error(
+                    RuntimeFailureCode.OPERATION_FAILED, "小日常的来源或状态已变化，请重新提问。", 409))
+            if on_user_message_persisted is not None:
+                on_user_message_persisted(message_id)
+            return DeterministicExecution(MessageOutcome(message, conversation_id=conversation_id), events=(
+                MetaEvent(supports_delta=False, supports_tool_events=False), UserMessageSavedEvent(),
+                AssistantMessageEvent(message=message),
+            ), input_message_id=message_id)
 
         if self._companion_matches(request, conversation):
             if existing is not None:

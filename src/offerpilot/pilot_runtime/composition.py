@@ -23,6 +23,7 @@ from uuid import uuid4
 
 from sqlalchemy import event as sqlalchemy_event, select, update
 
+from offerpilot.companion.fact_read import CompanionFactReadService
 from offerpilot.companion.chat import CompanionChatService
 
 from offerpilot.ai.agent_contracts import (
@@ -1868,6 +1869,7 @@ def build_pilot_runtime(
             write_operations=write_operations,
             write_coordinator=write_coordinator,
             companion_chat=CompanionChatService(write_operations.session_factory),
+            companion_fact_read=CompanionFactReadService(write_operations.session_factory),
             legacy_confirmation_routes=metadata_components.confirmation_routes,
             operation_port=metadata_components.operation_port,
             pending_persistence_route_port=metadata_components.pending_persistence_route_port,

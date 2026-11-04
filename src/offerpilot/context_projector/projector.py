@@ -125,15 +125,14 @@ class ModelSurfaceProjector:
             history = history[len(covered):]
         shares, shared_pool = optional_shares(remainder - optional_used)
 
-        # Editable expression must never displace the facts it qualifies. With
-        # a persona, retain the entire current-scope envelope as mandatory (or
-        # fail closed), not as individual items competing for optional budget.
-        # Calls without persona retain the existing optional scope policy.
-        required_scope = (self._messages_for(contributors, "current_scope")
-                          if self._messages_for(contributors, "persona_profile") else ())
-        scope_messages = (() if required_scope else self._messages_for(contributors, "current_scope")) + self._messages_for(
-            contributors, "request_page_context"
-        )
+        # Companion evidence is mandatory with either default or custom expression.
+        # Only server-bound evidence gets this protection; unrelated business scope
+        # keeps its optional budget. Preserve the existing custom-persona envelope.
+        required_scope = self._required_scope(contributors)
+        scope_messages = tuple(
+            message for message in self._messages_for(contributors, "current_scope")
+            if message not in required_scope
+        ) + self._messages_for(contributors, "request_page_context")
         attachment_messages = self._messages_for(contributors, "request_attachments")
         groups = group_history(history, legacy_orphan_compat=True)
         ranked_groups = rank_history(groups, current_request=request.tool_signals.current_request)
@@ -290,6 +289,14 @@ class ModelSurfaceProjector:
         contributor = contributors[name]
         return contributor.messages if contributor.status == "ready" else ()
 
+    def _required_scope(
+        self, contributors: dict[str, ContributorResult]
+    ) -> tuple[FrozenMessage, ...]:
+        scope = self._messages_for(contributors, "current_scope")
+        if self._messages_for(contributors, "persona_profile"):
+            return scope
+        return tuple(message for message in scope if message.required_scope)
+
     def _mandatory_messages(
         self, contributors: dict[str, ContributorResult]
     ) -> tuple[FrozenMessage, ...]:
@@ -298,8 +305,7 @@ class ModelSurfaceProjector:
             # Persona is one bounded data envelope: never truncate it or let a
             # scope budget eviction silently change the admitted expression.
             *self._messages_for(contributors, "persona_profile"),
-            *(self._messages_for(contributors, "current_scope")
-              if self._messages_for(contributors, "persona_profile") else ()),
+            *self._required_scope(contributors),
             *self._messages_for(contributors, "active_control"),
             *self._messages_for(contributors, "current_request"),
         )

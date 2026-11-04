@@ -124,6 +124,7 @@ def init_database(db_path: Path) -> SessionFactory:
     _record_migration(engine, "0035_companion_chat", "Ground bounded companion chat actions in actual admitted user messages")
     _ensure_column(engine, "companion_events", "template_id", "TEXT")
     _record_migration(engine, "0036_companion_activity_binding", "Bind virtual objects to sourced activity identities without guessing legacy history")
+    _record_migration(engine, "0038_companion_fact_read", "Add refs-only atomic companion fact read receipts")
     _record_migration(engine, "0037_companion_persona", "Add isolated immutable companion persona revisions and command receipts")
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),

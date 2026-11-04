@@ -388,17 +388,16 @@ def companion_context_message(data: dict[str, object] | None) -> Message | None:
     if data is None:
         return None
     content = compile_companion_expression(data)
-    # Bind all original facts, even if optional history is omitted for budget.
-    # Routing metadata is stripped by FrozenMessage/adapters, not model text.
+    # Bind all original facts before atomic budget admission.
+    # Provider serialization strips routing metadata; freezing derives retention
+    # from this server carrier without adding it to model text.
     revision = f"companion:{data['identity']}:{data['revision']}:{sha256(canonical_json(data)).hexdigest()}"
-    message = _context_envelope(content, revision)
-    if message is None and "recent_shared_choice" in data:
-        current = {key: value for key, value in data.items() if key != "recent_shared_choice"}
-        message = _context_envelope(compile_companion_expression(current), revision)
-    return message
+    # A known choice is evidence too. Never silently turn it into unknown by
+    # stripping it, or lose the whole source before mandatory budget admission.
+    return _context_envelope(content, revision)
 
 
-def _context_envelope(content: str, revision: str) -> Message | None:
+def _context_envelope(content: str, revision: str) -> Message:
     message = Message(
         role="user",
         content=content,
@@ -408,7 +407,7 @@ def _context_envelope(content: str, revision: str) -> Message | None:
     if len(canonical_json(FrozenMessage.freeze(message).canonical_value())) + 1 > (
         COMPANION_CONTEXT_BYTE_CAP
     ):
-        return None
+        raise ProjectionError("companion_source_over_budget")
     return message
 
 
