@@ -42,7 +42,22 @@ test('legacy builder ASAR retains callable minimatch and callback glob', async t
   await assertAsarRoundTrip(t, builderRequire('@electron/asar'));
 });
 
-test('universal ASAR allowlist rejects unexpected files and merges an allowed file', async t => {
+test('universal named minimatch API preserves allowlist boundaries on every platform', () => {
+  const { minimatch } = universalRequire('minimatch');
+  for (const platform of ['win32', 'darwin', 'linux']) {
+    const options = { matchBase: true, platform };
+    assert.equal(minimatch('native/extra-x64.node', '*-x64.node', options), true);
+    assert.equal(minimatch('native/extra-arm64.node', '*-x64.node', options), false);
+    assert.equal(minimatch('native/extra-x64.txt', '*.node', options), false);
+    assert.equal(minimatch('Contents/Info.plist', '*.plist', options), true);
+  }
+});
+
+// universal packages macOS apps and assumes POSIX archive entry separators.
+// Its matcher contract above still runs on Windows, where this merge API is unsupported.
+test('universal ASAR allowlist rejects unexpected files and merges an allowed file', {
+  skip: process.platform === 'win32' ? 'macOS universal merge requires POSIX archive paths' : false,
+}, async t => {
   const asar = universalRequire('@electron/asar');
   const { mergeASARs } = require(path.join(path.dirname(require.resolve('@electron/universal')), 'asar-utils.js'));
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'offerpilot universal '));

@@ -13,7 +13,7 @@
 
 **修复：** desktop 仅覆盖 `minimatch@>=7 <11` 到 11.0.4，保留旧 3/5 系列；两套 helper 对 ASAR 4.3.1 配套覆盖 glob 14.0.3/minimatch 11.0.4，并重建锁文件。回归实际优化器上界、builder 文件筛选、universal allowlist、ASAR 打包/解包/unpack 与目录链接。现有 Node 22 工具链满足新依赖要求；应用代码、Electron 版本和其他安全告警不在本次改动范围。
 
-**教训：** `npm ci` 或 audit 通过不代表跨主版本 API 兼容，须核对实际解析树和调用点。上游原生支持安全版本后再移除 overrides；增加依赖消费者时重查 minimatch 的已移除 API。完整 Windows 安装包和 release gate 仍是独立验收，不由离线打包夹具替代。
+**教训：** `npm ci` 或 audit 通过不代表跨主版本 API 兼容，须核对实际解析树和调用点。上游原生支持安全版本后再移除 overrides；增加依赖消费者时重查 minimatch 的已移除 API。ASAR 查询使用宿主分隔符，不能复用 glob 的 POSIX 路径；macOS universal 合包夹具不在 Windows 执行，其纯匹配边界仍跨平台验证。完整 Windows 安装包和 release gate 仍是独立验收，不由离线打包夹具替代。
 
 ## 默认陪伴事实被历史挤出与来源超限静默降级（2026-11-04）
 

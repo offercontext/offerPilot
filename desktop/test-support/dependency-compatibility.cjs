@@ -38,10 +38,11 @@ async function assertAsarRoundTrip(t, asar) {
   for (const [name, content] of Object.entries(files)) {
     if (name.startsWith('ignored/')) continue;
     assert.ok(entries.includes('/' + name), `missing archive entry ${name}`);
-    assert.equal(asar.extractFile(archive, name).toString(), content);
+    // ASAR lookups split by the host separator, unlike glob patterns above.
+    assert.equal(asar.extractFile(archive, path.normalize(name)).toString(), content);
   }
   for (const name of ['native/addon.node', 'unpacked/data.txt']) {
-    assert.equal(asar.statFile(archive, name).unpacked, true);
+    assert.equal(asar.statFile(archive, path.normalize(name)).unpacked, true);
     assert.equal(await fs.readFile(path.join(archive + '.unpacked', name), 'utf8'), files[name]);
   }
   const extracted = path.join(root, 'extracted');
@@ -63,7 +64,7 @@ async function assertAsarDirectoryLink(t, asar) {
   assert.ok(entries.includes('/linked-assets'));
   assert.ok(!entries.some(value => value.startsWith('/linked-assets/')));
   assert.equal(asar.statFile(archive, 'linked-assets', false).link, 'assets');
-  assert.equal(asar.extractFile(archive, 'linked-assets/sprite.txt').toString(), 'linked resource');
+  assert.equal(asar.extractFile(archive, path.join('linked-assets', 'sprite.txt')).toString(), 'linked resource');
 }
 
 module.exports = { assertBoundedMinimatch, assertAsarRoundTrip, assertAsarDirectoryLink };
