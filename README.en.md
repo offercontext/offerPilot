@@ -53,7 +53,7 @@ This is an experimental prerelease, not a stable production release. Python, Nod
 3. After verifying the source and hash, open the installer, choose an installation folder, then launch the desktop shortcut. This unsigned build may trigger Windows SmartScreen or an unknown-publisher warning. If your browser, Windows or security software blocks the download or execution, stop and report it; do not disable protection or bypass warnings.
 4. Start with test data. Before installing another version, fully quit the app and back up `%APPDATA%\OfferPilot Desktop\`. This workspace is separate from the source edition's `~/.offerpilot`; migration is not automatic and upgrade/downgrade compatibility is not guaranteed. Uninstalling retains app data by default, which is not a substitute for a backup.
 
-The release update channel is not enabled; in-app update checks, downloads and installation are unavailable. Get future test builds manually from Releases. Real QQ mailbox setup and resumed mailbox reading are disabled in this EXE; manual email pasting and suggestion review remain available. AI features require your own model service and may transmit relevant data and incur provider fees.
+The release update channel is not enabled; in-app update checks, downloads and installation are unavailable. Get future test builds manually from Releases. AI features require your own model service and may transmit relevant data and incur provider fees.
 
 See the Release notes for build provenance, checksums and validation scope, plus the [desktop validation notes](docs/architecture/desktop-validation.md) and [update boundaries](docs/architecture/desktop-updates.md) (Chinese).
 
@@ -66,42 +66,16 @@ Basic application tracking does not require AI configuration.
 
 ## Use your own local agent (MCP)
 
-Connect DSH, Claude Code or another agent that supports local stdio MCP. Your agent manages the conversation and model;
-OfferPilot provides authorized local data and tools without calling its built-in model. No separate OfferPilot model configuration is needed for this connection.
-If your agent uses a cloud model, retrieved data may still be sent to that provider and incur fees.
+Use DSH, Claude Code or another local stdio MCP client to read authorized job-search materials and propose changes.
+Your agent manages the model and conversation without calling OfferPilot's built-in model.
+If it uses a cloud model, retrieved data may still leave your device and incur provider fees.
 
-| Capability | What your agent can do |
-| --- | --- |
-| Read information | Read authorized applications, events, resumes and raw interview notes; search current Knowledge |
-| Propose changes | Create, update or delete applications, resumes and notes; schedule or reschedule interviews |
-| Read back results | Check the saved status and actual records after you approve in a separate trusted terminal |
+Connections initially allow only reads of selected applications and events. Other capabilities need explicit grants;
+resume and Knowledge reads grant independent global access. Proposals require your approval in a separate trusted terminal before saving.
+The MCP surface has no tool for the model to approve its own requests.
 
-After installing from source, run these commands in the repository to install the MCP extra and start the updated app once to initialize or upgrade the database:
-
-```bash
-uv sync --frozen --extra mcp
-uv run oc start
-```
-
-You can then stop the app; MCP runs independently. Create a read-only connection, replacing `12` with an existing application ID:
-
-```bash
-uv run oc mcp connect my-agent --application-id 12
-```
-
-Use the returned `connection_id` to export the client configuration:
-
-```bash
-uv run oc mcp config <connection_id> --format mcp --output offerpilot-mcp.json
-```
-
-Add the generated `mcpServers.offerpilot` entry using your agent's configuration format, then reconnect MCP.
-For DSH, export with `--format dsh` and load it with `dsh web --patch <config-file>`; no OfferPilot native plugin is required.
-These commands default to the source edition's `~/.offerpilot`; use the same `--data-dir` for every command when connecting another workspace.
-
-Connections initially allow only application and event reads within the selected scope. Resumes, notes, Knowledge and write proposals require separate explicit grants.
-Resume and Knowledge reads grant global access independently of the selected applications. Proposals do not save changes until you review and approve them in a separate trusted terminal;
-the MCP surface has no approval tool. See the [grant options, revocation, setup and local trust boundaries (Chinese)](docs/architecture/external-agent-mcp.md).
+See the [source setup, grants, client configuration and revocation guide (Chinese)](docs/architecture/external-agent-mcp.md).
+DSH also has an optional [plugin package (Chinese)](plugins/dsh-offerpilot/README.md); do not enable it alongside the configuration-file approach.
 This describes source-edition support, not MCP availability in the Windows test installer linked above.
 
 ## How it helps during your job search
