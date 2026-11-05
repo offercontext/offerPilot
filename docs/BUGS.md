@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 桌面构建依赖的 glob 模式放大漏洞（2026-11-05）
+
+**现象：** 三个桌面锁文件仍包含受 [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) 影响的 minimatch 9/10；两套验收 helper 的 glob 13 另受 [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) 影响。有限重复模式在 `braceExpandMax=32` 时仍生成 128 行。
+
+**根因：** 当前上游 ASAR 4.3.1、app-builder-lib 26.15.3 和 universal 2.0.3 尚未放宽依赖范围。minimatch 11 移除了正则相关 API，不能只在 glob 13 下强换；父包级覆盖还会向后代传播，破坏旧 ASAR 3/glob 7 的 callable API。
+
+**修复：** desktop 仅覆盖 `minimatch@>=7 <11` 到 11.0.4，保留旧 3/5 系列；两套 helper 对 ASAR 4.3.1 配套覆盖 glob 14.0.3/minimatch 11.0.4，并重建锁文件。回归实际优化器上界、builder 文件筛选、universal allowlist、ASAR 打包/解包/unpack 与目录链接。现有 Node 22 工具链满足新依赖要求；应用代码、Electron 版本和其他安全告警不在本次改动范围。
+
+**教训：** `npm ci` 或 audit 通过不代表跨主版本 API 兼容，须核对实际解析树和调用点。上游原生支持安全版本后再移除 overrides；增加依赖消费者时重查 minimatch 的已移除 API。完整 Windows 安装包和 release gate 仍是独立验收，不由离线打包夹具替代。
+
 ## 默认陪伴事实被历史挤出与来源超限静默降级（2026-11-04）
 
 **现象：** 默认人设在输入预算 15850 时可保留“刚挑完纸，等第二折”的助手历史，却丢掉数据库仍处第1步的当前来源；自定义人设同预算已失败关闭。
