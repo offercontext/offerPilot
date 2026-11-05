@@ -31,6 +31,15 @@ describe('today inbox summary', () => {
       job('succeeded', { kind: 'interview_draft', result_text: '   ' }),
     ])).toEqual({ active: 3, attention: 2, drafts: 1 });
   });
+  it('excludes every companion state from job counts without dropping job work', async () => {
+    const companionJobs = (['pending', 'leased', 'running', 'succeeded', 'failed', 'result_unknown', 'cancelled'] as const)
+      .map((state) => job(state, { kind: 'companion_life', application_id: 0, result_text: 'private virtual activity' }));
+    expect(summarizeTodayJobs(companionJobs)).toEqual({ active: 0, attention: 0, drafts: 0 });
+    query.current = { data: [...companionJobs, job('pending'), job('failed'), job('succeeded', { kind: 'interview_draft', result_text: 'work draft' })] };
+    await act(async () => root.render(<TodayInboxSummary onOpen={vi.fn()} />));
+    expect(host.textContent).toContain('进行中 1 · 需要检查 1 · 准备草稿 1');
+    expect(host.textContent).not.toContain('private virtual activity');
+  });
   it('does not show cached success counts after a read failure and keeps one destination', async () => {
     const onOpen = vi.fn();
     query.current = { isPending: true };

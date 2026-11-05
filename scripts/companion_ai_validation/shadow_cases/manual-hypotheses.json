@@ -1,0 +1,23 @@
+{
+  "not_gold": true,
+  "s01": [
+    "contradicted",
+    "ambiguous"
+  ],
+  "s02": [
+    "supported"
+  ],
+  "s03": [
+    "supported"
+  ],
+  "s04": [
+    "unknown"
+  ],
+  "s05": [
+    "not_factual"
+  ],
+  "s06": [
+    "supported"
+  ],
+  "note": "s01 ownership presupposition may be judged ambiguous; s04 absent completion evidence is unknown, not necessarily contradicted. Preserve independent disagreements."
+}

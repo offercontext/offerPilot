@@ -23,6 +23,9 @@ from uuid import uuid4
 
 from sqlalchemy import event as sqlalchemy_event, select, update
 
+from offerpilot.companion.fact_read import CompanionFactReadService
+from offerpilot.companion.chat import CompanionChatService
+
 from offerpilot.ai.agent_contracts import (
     AgentAssistantDelta,
     AgentLoopEvent,
@@ -37,6 +40,7 @@ from offerpilot.ai.agent_loop import (
     SegmentSurfaceGate,
     AgentLoopInvocation,
     AgentLoopRunner,
+    NewTurnSeed,
     build_segment_surface_gate,
 )
 from offerpilot.ai.client import ConfiguredAIClient
@@ -782,6 +786,9 @@ class _ContextAdapter(ContextAssembler):
     __slots__ = (
         "_persistence",
         "_system_message",
+        "_general_system_message",
+        "_custom_persona_system_message",
+        "_plain_system_message",
         "_clarification_message",
         "_page_messages",
     )
@@ -793,9 +800,15 @@ class _ContextAdapter(ContextAssembler):
         system_message: Callable[[], object],
         clarification_message: Callable[[tuple[PendingAction, str] | None, str], object | None],
         page_messages: Callable[[Mapping[str, object] | None], Sequence[object]],
+        general_system_message: Callable[[], object] | None = None,
+        custom_persona_system_message: Callable[[bool], object] | None = None,
+        plain_system_message: Callable[[bool], object] | None = None,
     ) -> None:
         self._persistence = persistence
         self._system_message = system_message
+        self._general_system_message = general_system_message
+        self._custom_persona_system_message = custom_persona_system_message
+        self._plain_system_message = plain_system_message
         self._clarification_message = clarification_message
         self._page_messages = page_messages
 
@@ -804,6 +817,9 @@ class _ContextAdapter(ContextAssembler):
             persistence, system_message=self._system_message,
             clarification_message=self._clarification_message,
             page_messages=self._page_messages,
+            general_system_message=self._general_system_message,
+            custom_persona_system_message=self._custom_persona_system_message,
+            plain_system_message=self._plain_system_message,
         )
 
     @staticmethod
@@ -833,7 +849,8 @@ class _ContextAdapter(ContextAssembler):
         attachment_messages: tuple[object, ...] = tuple(
             cast(Sequence[object], _attribute(source, "attachment_messages", ()) or ())
         )
-        values: list[object] = [self._system_message()]
+        values: list[object] = []
+        clarification = None
         if (isinstance(request, StartTurnRequest) and request.images) or any(
             getattr(message, "images", ()) for message in history
         ):
@@ -867,6 +884,32 @@ class _ContextAdapter(ContextAssembler):
                 if request.page_context is not None
                 else None
             )
+        # Presentation is not an intent classifier or a permission boundary.
+        # Ordinary workspace turns default to neutral expression: page facts,
+        # attachments and prior work do not require a report. Explicit task and
+        # control contexts keep their existing work protocol; source assembly,
+        # tool capabilities, owner and approval state below remain unchanged.
+        general = (
+            self._general_system_message is not None
+            and isinstance(request, StartTurnRequest)
+            and _attribute(source, "context_type") == "workspace"
+            and _attribute(source, "mode") == "general"
+            and request.pilot_action is None
+            and not _attribute(conversation, "pending_tool_call_id", "")
+            and clarification is None
+        )
+        policy = self._general_system_message if general else self._system_message
+        assert policy is not None
+        persona_message = _attribute(source, "persona_message")
+        if _attribute(source, "companion_enabled") is False and self._plain_system_message is not None:
+            values.insert(0, self._plain_system_message(general))
+        elif persona_message is not None:
+            if self._custom_persona_system_message is None:
+                raise ValueError("custom persona policy compiler unavailable")
+            values.insert(0, self._custom_persona_system_message(general))
+            values.append(persona_message)
+        else:
+            values.insert(0, policy())
         if context_message is not None:
             values.append(context_message)
         if isinstance(request, StartTurnRequest):
@@ -996,9 +1039,11 @@ def _agent_payload_tuple(value: object) -> tuple[Mapping[str, JsonValue], ...]:
 
 
 class _AgentDriver:
-    __slots__ = ("_runner", "_optional_loader" )
+    __slots__ = ("_runner", "_optional_loader", "_companion_enabled")
 
-    def __init__(self, optional_loader: ContextSourceLoader[Any, Any] | None = None) -> None:
+    def __init__(self, optional_loader: ContextSourceLoader[Any, Any] | None = None,
+                 companion_enabled: Callable[[], bool] | None = None) -> None:
+        self._companion_enabled = companion_enabled
         self._runner = AgentLoopRunner()
         self._optional_loader = optional_loader
 
@@ -1022,6 +1067,22 @@ class _AgentDriver:
         runtime_sink = cast(RuntimeEventSink | None, invocation.event_sink)
         agent_sink = _AgentEventAdapter(runtime_sink) if runtime_sink is not None else None
         optional_loader = self._optional_loader
+        revoked = False
+
+        def guard_expression(active: AgentLoopInvocation) -> None:
+            nonlocal revoked
+            # Check the active continuation seed, not the original approval seed.
+            # Only physical provider calls are gated: an approved business write
+            # remains authorized and is never rolled back by an expression toggle.
+            if not isinstance(active.seed, NewTurnSeed) or not any(
+                message.surface_revision == "companion-expression"
+                for message in active.seed.messages
+            ):
+                return
+            if self._companion_enabled is not None and (revoked or not self._companion_enabled()):
+                revoked = True
+                raise ChatRunCancelled("companion expression disabled before provider attempt")
+
         try:
             frozen_readiness = current_frozen_readiness()
             binding_unavailable = False
@@ -1044,6 +1105,7 @@ class _AgentDriver:
                     invocation,
                     run_recorder=cast(Any, recorder),
                     event_sink=agent_sink,
+                    before_provider_attempt=guard_expression,
                 )
             if not isinstance(result, AgentTurnResult):
                 raise TypeError("Agent Loop must return AgentTurnResult")
@@ -1732,6 +1794,10 @@ def build_pilot_runtime(
     system_message: Callable[[], object],
     clarification_message: Callable[[tuple[PendingAction, str] | None, str], object | None],
     page_context_messages: Callable[[Mapping[str, object] | None], Sequence[object]],
+    general_system_message: Callable[[], object] | None = None,
+    custom_persona_system_message: Callable[[bool], object] | None = None,
+    plain_system_message: Callable[[bool], object] | None = None,
+    companion_enabled: Callable[[], bool] | None = None,
     title_from_message: Callable[[str], str] | None = None,
     clock: Callable[[], object] | None = None,
     image_reader: Callable[[ImageReference], bytes] | None = None,
@@ -1769,8 +1835,11 @@ def build_pilot_runtime(
         system_message=system_message,
         clarification_message=clarification_message,
         page_messages=page_context_messages,
+        general_system_message=general_system_message,
+        custom_persona_system_message=custom_persona_system_message,
+        plain_system_message=plain_system_message,
     )
-    driver = _AgentDriver(context_source_loader)
+    driver = _AgentDriver(context_source_loader, companion_enabled)
     policy_resolver = _PolicyCatalogResolver(
         typed_catalog,
         provider_view=provider_view,
@@ -1799,6 +1868,8 @@ def build_pilot_runtime(
             application_outcomes=application_outcomes,
             write_operations=write_operations,
             write_coordinator=write_coordinator,
+            companion_chat=CompanionChatService(write_operations.session_factory),
+            companion_fact_read=CompanionFactReadService(write_operations.session_factory),
             legacy_confirmation_routes=metadata_components.confirmation_routes,
             operation_port=metadata_components.operation_port,
             pending_persistence_route_port=metadata_components.pending_persistence_route_port,

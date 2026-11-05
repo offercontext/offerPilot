@@ -1,3 +1,5 @@
+import CompanionPersonaSettings from '@/features/companionPersona/CompanionPersonaSettings';
+import CompanionLifeSettings from '@/features/companionLife/CompanionLifeSettings';
 import { liveText } from '@/i18n/liveText';
 import { localizedModal } from '@/i18n/modal';
 import { t, useLocale, getLocale, setLocale } from '@/i18n';
@@ -288,6 +290,8 @@ export default function SettingsView({
 
       <ContextPolicySettings />
       <ConfirmedMemorySettings />
+      <CompanionPersonaSettings />
+      <CompanionLifeSettings />
 
       <Typography.Title id="settings-connections" level={3}>{t("连接与自动任务")}</Typography.Title>
       <Typography.Paragraph type="secondary">{t("这里只管理连接、权限和自动任务范围；提醒、邮件待审与任务结果统一在今日待办处理。")}</Typography.Paragraph>

@@ -11,6 +11,21 @@ export const allowedWrites = new Set([
 ]);
 const copy = value => structuredClone(value);
 const answer = (data, status = 200) => ({ status, data: copy(data) });
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const presenceSignals = ['visible', 'typing', 'work_running', 'awaiting_approval', 'mock_interview', 'quiet', 'failure'];
+const presenceKeys = new Set(['identity', 'client_id', 'sequence', ...presenceSignals]);
+const isContentFreePresence = body => Boolean(body && typeof body === 'object' && !Array.isArray(body)
+  && Object.keys(body).length === presenceKeys.size && Object.keys(body).every(key => presenceKeys.has(key))
+  && typeof body.identity === 'string' && uuid.test(body.identity)
+  && typeof body.client_id === 'string' && uuid.test(body.client_id)
+  && Number.isSafeInteger(body.sequence) && body.sequence >= 1
+  && presenceSignals.every(key => typeof body[key] === 'boolean'));
+// Shared by fixture admission, browser write accounting and its full-request
+// guard. Malformed/lookalike presence remains a write attempt, never invisible.
+export const isContentFreePresenceRequest = request => request.method === 'POST'
+  && request.path === '/api/companion/presence' && request.query === ''
+  && isContentFreePresence(request.body);
+export const isDomainWriteAttempt = request => request.method !== 'GET' && !isContentFreePresenceRequest(request);
 
 export function createSimplificationFixture({ firstUse = false, today = false, materials = false } = {}) {
   const base = createFixtureApi();
@@ -75,8 +90,13 @@ export function createSimplificationFixture({ firstUse = false, today = false, m
   async function handle(method, url, body) {
     const parsed = new URL(url, 'http://127.0.0.1');
     const p = parsed.pathname, key = `${method} ${p}`;
-    requests.push({ method, path: p, query: parsed.search, body: body === undefined ? null : copy(body), at: Date.now() });
-    if (method !== 'GET' && !allowedWrites.has(key)) {
+    const request = { method, path: p, query: parsed.search, body: body === undefined ? null : copy(body), at: Date.now() };
+    requests.push(request);
+    // Disabled life still emits these content-free UI signals. Permit only this
+    // exact envelope/route to reach the base fixture, never companion commands
+    // or domain/model writes (and never a hold that could arm either).
+    const presenceOnly = isContentFreePresenceRequest(request);
+    if (method !== 'GET' && !allowedWrites.has(key) && !presenceOnly) {
       unexpected.push({ method, path: p });
       return answer({ error_code: 'unmocked_test_request', detail: 'Strict synthetic fixture rejected write' }, 501);
     }

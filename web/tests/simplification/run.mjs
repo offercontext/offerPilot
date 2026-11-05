@@ -11,7 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
 import { loadHaruAssetExpectations, observeHaruAssets } from '../../../desktop/live2d-assets.mjs';
-import { createSimplificationFixture, knowledgeTitle, referenceTitle, frozenEvidence, allowedWrites } from './fixture-api.mjs';
+import { createSimplificationFixture, knowledgeTitle, referenceTitle, frozenEvidence, allowedWrites, isDomainWriteAttempt, isContentFreePresenceRequest } from './fixture-api.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = path.join(root, 'dist');
@@ -40,7 +40,7 @@ for (const file of ['index.html', ...(await readdir(path.join(dist, 'assets'))).
 let haruAssetExpectations;
 let browser;
 const counts = (api, method, pathname) => api.requests.filter(request => request.method === method && request.path === pathname);
-const writes = api => api.requests.filter(request => request.method !== 'GET');
+const writes = api => api.requests.filter(isDomainWriteAttempt);
 async function eventually(predicate, message, timeout = 10000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) { if (await predicate()) return; await new Promise(resolve => setTimeout(resolve, 50)); }
@@ -175,7 +175,8 @@ async function runCase(name, options, work) {
     check('No unmocked API endpoint', api.unexpected.length === 0, JSON.stringify(api.unexpected));
     check('No external network or websocket attempt', result.forbiddenNetwork.length === 0, JSON.stringify(result.forbiddenNetwork));
     check('No uncaught browser runtime error', result.pageErrors.length === 0, JSON.stringify(result.pageErrors));
-    check('Every write is an explicitly synthetic operation', writes(api).every(request => allowedWrites.has(`${request.method} ${request.path}`)));
+    check('Every write is explicitly synthetic or validated content-free presence', api.requests.filter(request => request.method !== 'GET')
+      .every(request => allowedWrites.has(`${request.method} ${request.path}`) || isContentFreePresenceRequest(request)));
     assert.equal(result.live2dAssets.status, 'passed', 'All four Haru responses must complete with source/dist bytes');
     result.status = 'passed'; console.log(`PASS ${name}`);
   } catch (error) {

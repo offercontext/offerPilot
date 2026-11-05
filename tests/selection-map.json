@@ -215,6 +215,33 @@
       "depends_on": []
     },
     {
+      "id": "companion",
+      "production": [
+        "src/offerpilot/companion/**",
+        "scripts/persona_browser_server.py",
+        "web/src/features/companionLife/**",
+        "web/src/features/companionPersona/**",
+        "web/src/services/companion.ts",
+        "web/src/services/persona.ts",
+        "web/src/i18n/catalogs/companionLife.ts",
+        "web/src/i18n/catalogs/companionPersona.ts"
+      ],
+      "tests": [
+        "tests/test_companion*.py",
+        "tests/test_persona*.py",
+        "tests/_companion.py",
+        "tests/fixtures/persona_default_v16.json"
+      ],
+      "surfaces": [
+        "backend",
+        "frontend"
+      ],
+      "depends_on": [
+        "runtime",
+        "knowledge"
+      ]
+    },
+    {
       "id": "frontend",
       "production": [
         "web/src/**",
@@ -8348,6 +8375,20 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/tests/desktop-layout/mascot-fixture.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/tests/localization/mounted.test.tsx": {
       "modules": [
         "frontend"
@@ -8370,6 +8411,417 @@
       "requires": [],
       "risk_tags": [
         "conservative_master_port_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_ai_platform_contract.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_chat.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_context.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_context_facts.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_continuity.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_dialogue_policy.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_expression.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_boundaries.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_image_integration.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_life.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_master_switch.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_migration.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_object_recall.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_opt_in.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_provider_gate.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_queue.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_response_policy.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_withdrawal.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_persona_activities.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_persona_browser_harness.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_persona_fact_isolation.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_persona_runtime.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_persona_storage.py": {
+      "modules": [
+        "companion"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/ProactiveInbox.interaction.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionLife/CompanionLifeSettings.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionLife/CompanionLifeStatus.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionLife/copy.test.ts": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionLife/model.test.ts": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionLife/useCompanionLife.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionPersona/CompanionPersonaSettings.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/features/companionPersona/useCompanionName.test.tsx": {
+      "modules": [
+        "companion",
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_companion_integration"
       ],
       "level": "test",
       "estimated_seconds": null

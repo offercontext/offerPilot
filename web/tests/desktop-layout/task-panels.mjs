@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { createTaskPanelFixture } from './task-panel-fixture.mjs';
 
 async function checkOffer(page) {
   await page.locator('[data-testid="offer-negotiation-drawer"]').waitFor();
@@ -183,17 +184,18 @@ export async function runTaskPanelCases(browser, output, results) {
           page.setDefaultTimeout(15_000);
           page.setDefaultNavigationTimeout(15_000);
           const unexpectedRequests = [];
-          // Synthetic reads only: do not submit a draft, call AI, or create a practice case.
+          const fixture = createTaskPanelFixture();
+          // Synthetic reads, strict presence and app_open/chat_end wake commands only.
+          // Wake commands are not content-free; no other business/model write is allowed.
           await page.route('**/api/**', async route => {
             const request = route.request();
             const pathname = new URL(request.url()).pathname;
-            const allowed = request.method() === 'GET' && (
-              pathname === '/api/offers/7/negotiation/proposals'
-              || pathname === '/api/offers/comparison-dimensions'
-              || pathname === '/api/offers/7/comparison-values'
-            );
-            if (!allowed) unexpectedRequests.push(`${request.method()} ${pathname}`);
-            await route.fulfill({ status: allowed ? 200 : 403, contentType: 'application/json', body: allowed ? '[]' : '{}' });
+            let body;
+            try { body = request.postDataJSON(); } catch { body = undefined; }
+            const response = fixture.handle(request.method(), request.url(), body);
+            if (!response) unexpectedRequests.push(`${request.method()} ${pathname}`);
+            await route.fulfill({ status: response?.status ?? 403, contentType: 'application/json',
+              body: JSON.stringify(response?.data ?? {}) });
           });
           try {
             await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/task-panels.html?surface=${surface}&theme=${theme}&language=${language}`);

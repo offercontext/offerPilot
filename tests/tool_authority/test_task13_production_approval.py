@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Callable
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -529,8 +530,12 @@ def test_production_agent_driver_retains_approval_context_seals(tmp_path) -> Non
             *,
             run_recorder: object,
             event_sink: object,
+            before_provider_attempt: Callable[[AgentLoopInvocation], None],
         ) -> AgentTurnResult:
             del run_recorder, event_sink
+            assert candidate is invocation
+            assert callable(before_provider_attempt)
+            before_provider_attempt(candidate)
             received.append(candidate.tool_context)
             return AgentTurnResult([], "", None)
 
@@ -541,6 +546,7 @@ def test_production_agent_driver_retains_approval_context_seals(tmp_path) -> Non
         assert result.reply == ""
         assert len(received) == 1
         rebound = received[0]
+        assert rebound is context
         assert rebound.authority is origin.authority
         assert rebound.authority_factory is origin.authority_factory
         assert rebound.scope_constraint is origin.scope_constraint
