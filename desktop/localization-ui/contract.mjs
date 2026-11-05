@@ -12,14 +12,14 @@ export const MAIL = Object.freeze({
   body: '仅供本地预览。Interview 2026-10-20T15:00:00+08:00 for 45 minutes.\n<img src="https://example.invalid/not-to-load.png">\nDo not translate this user-provided text.',
 });
 export const TEXT = {
-  'zh-CN': { navigation: '主导航', settings: '设置', language: '界面语言', haru: 'Haru 桌面小窗',
-    expand: '展开 Haru 对话', pin: 'Haru 始终置顶', send: '发送', mailbox: '求职邮箱',
+  'zh-CN': { navigation: '主导航', settings: '设置', language: '界面语言', haru: 'Pilot 桌面小窗',
+    expand: '展开 Pilot 对话', pin: 'Pilot 始终置顶', close: '关闭 Pilot 对话', send: '发送', mailbox: '求职邮箱',
     paste: '粘贴单封邮件', preview: '预览将提交的文本', submit: '提交文本并生成待确认建议',
     back: '返回编辑', cancel: '取消', guide: '连接 QQ 邮箱说明',
     file: '文件', menu: ['文件', '编辑', '视图', '窗口'], quit: '退出并停止本地服务',
     tray: ['打开 OfferPilot', '隐藏 Haru', 'Haru 始终置顶', '退出并停止本地服务'] },
-  'en-US': { navigation: 'Main navigation', settings: 'Settings', language: 'Interface language', haru: 'Haru Desktop Companion',
-    expand: 'Expand Haru Chat', pin: 'Keep Haru on Top', send: 'Send', mailbox: 'Job-search mailbox',
+  'en-US': { navigation: 'Main navigation', settings: 'Settings', language: 'Interface language', haru: 'Pilot Desktop Companion',
+    expand: 'Expand Pilot Chat', pin: 'Keep Pilot on Top', close: 'Close Pilot chat', send: 'Send', mailbox: 'Job-search mailbox',
     paste: 'Paste one email', preview: 'Preview text to submit', submit: 'Submit text and generate suggestions',
     back: 'Back to editing', cancel: 'Cancel', guide: 'QQ Mail connection guide',
     file: 'File', menu: ['File', 'Edit', 'View', 'Window'], quit: 'Quit and Stop Local Service',
