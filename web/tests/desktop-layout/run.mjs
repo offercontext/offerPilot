@@ -1,3 +1,4 @@
+import './fixture-contract.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -7,6 +8,7 @@ import path from 'node:path';
 import { runTaskPanelCases } from './task-panels.mjs';
 import { runKanbanCases } from './kanban.mjs';
 import { captureFailureScreenshot, observeLayoutFailure } from './failure-evidence.mjs';
+import { installMascotFixture } from './mascot-fixture.mjs';
 
 // Reuse the already locked, isolated UI helper; no production dependency changes.
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -32,6 +34,7 @@ try {
       for (const mascot of ['failure', 'normal', 'hidden']) {
         const name = `${width}x689-${count}-${mascot}`;
         const page = await browser.newPage({ viewport: { width, height: 689 }, colorScheme: 'dark' });
+        const unexpectedRequests = await installMascotFixture(page);
         page.setDefaultTimeout(15_000);
         page.setDefaultNavigationTimeout(15_000);
         const evidence = observeLayoutFailure(page, output, name);
@@ -136,6 +139,7 @@ try {
             await page.getByRole('menuitem', { name: '隐藏角色' }).click();
             assert.equal(await page.getByRole('complementary', { name: 'Haru 助手' }).count(), 0);
           }
+          assert.deepEqual(unexpectedRequests, [], 'mascot layout must use only synthetic persona and companion reads');
           results.push({ name, status: 'passed' });
         } catch (error) {
           const failure = { name, status: 'failed', stage, error: String(error) };
@@ -150,6 +154,7 @@ try {
     for (const theme of ['dark', 'light']) {
       const name = `${width}x689-header-fallback-${theme}`;
       const page = await browser.newPage({ viewport: { width, height: 689 } });
+      const unexpectedRequests = await installMascotFixture(page);
       page.setDefaultTimeout(15_000);
       try {
         await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/fixture.html?surface=header&mascot=failure&theme=${theme}`);
@@ -168,6 +173,7 @@ try {
         await page.getByRole('dialog').waitFor();
         await page.getByRole('button', { name: 'Close', exact: true }).click();
         await page.getByRole('dialog').waitFor({ state: 'hidden' });
+        assert.deepEqual(unexpectedRequests, [], 'header layout must use only synthetic persona and companion reads');
         results.push({ name, status: 'passed' });
       } catch (error) {
         await page.screenshot({ path: path.join(output, `${name}-failed.png`), animations: 'disabled' });
@@ -180,9 +186,11 @@ try {
       for (const theme of ['dark', 'light']) {
         const name = `${width}x${height}-sidebar-normal-${theme}`;
         const page = await browser.newPage({ viewport: { width, height }, colorScheme: theme });
+        const unexpectedRequests = await installMascotFixture(page);
         page.setDefaultTimeout(15000);
         try {
           await page.goto(`http://127.0.0.1:5174/tests/desktop-layout/fixture.html?surface=header&mascot=normal&theme=${theme}`);
+          await page.locator('[data-layout-result="passed"]').waitFor();
           const mascot = page.locator('[data-sidebar-docked="true"][data-runtime-ready="true"]');
           await mascot.waitFor();
           const assertDock = async () => assert.equal(await mascot.evaluate(node => {
@@ -214,6 +222,7 @@ try {
           await page.screenshot({ path: path.join(output, `${name}-modal.png`), animations: 'disabled' });
           await modal.getByRole('button', { name: 'Close', exact: true }).click();
           await modal.waitFor({ state: 'hidden' });
+          assert.deepEqual(unexpectedRequests, [], 'sidebar layout must use only synthetic persona and companion reads');
           results.push({ name, status: 'passed' });
         } catch (error) {
           await page.screenshot({ path: path.join(output, `${name}-failed.png`), animations: 'disabled' });

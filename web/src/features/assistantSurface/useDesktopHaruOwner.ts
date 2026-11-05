@@ -1,3 +1,4 @@
+import type { CompanionMirror } from '@/features/companionLife/contracts';
 import { t, useLocale } from '@/i18n';
 import { pilotPageContextControlProjection } from '@/lib/pilotPageContext';
 import { useEffect, useRef, useState } from 'react';
@@ -45,7 +46,7 @@ function controlSignature(controller: PilotConversationController) {
     controller.executionControl.execution, controller.activeConversationSelectionRef.current]);
 }
 
-export function useDesktopHaruOwner(controller: PilotConversationController, openPending: () => void) {
+export function useDesktopHaruOwner(controller: PilotConversationController, openPending: () => void, companionLife?: CompanionMirror) {
   useLocale();
   const { mode } = useThemeMode();
   const bridge = window.offerpilotDesktop;
@@ -67,7 +68,7 @@ export function useDesktopHaruOwner(controller: PilotConversationController, ope
     || controller.conversationId !== authoredSendFailure.current.conversationId)) authoredSendFailure.current = null;
   const current = useRef({ controller, openPending });
   current.current = { controller, openPending };
-  const data = isOwner ? { ...desktopHaruSnapshot(controller), theme: mode, animationLevel,
+  const data = isOwner ? { ...desktopHaruSnapshot(controller), theme: mode, animationLevel, companionLife,
     ...(authoredSendFailure.current ? { errorKey: 'desktop_send_failed' as const } : {}),
   } : null;
   const signature = JSON.stringify(data);

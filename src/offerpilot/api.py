@@ -28,6 +28,8 @@ from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
+from offerpilot.companion.fact_read import freeze_fact_read
+from offerpilot.companion.chat import freeze_chat_command
 from offerpilot.ai.agent_contracts import ChatModel, PendingAction
 from offerpilot.presentation import AgentActionPresentationBuilder, build_conversation_presentation
 from offerpilot.pilot_timeline import (
@@ -226,6 +228,14 @@ from offerpilot.knowledge import (
     KnowledgeRepository,
 )
 from offerpilot.proactive.api import register_proactive_routes
+from offerpilot.companion.api import register_companion_routes
+from offerpilot.companion.persona import companion_persona_policy, persona_profile_message, plain_pilot_safety_policy
+from offerpilot.companion.repository import companion_policy
+from offerpilot.companion.persona_contracts import PersonaSpec
+from offerpilot.companion.persona_repository import capture_persona_binding, load_persona_spec
+from offerpilot.models import PilotTurnRecord
+from offerpilot.pilot_control import current_execution_scope
+from offerpilot.companion.context import companion_context_message, read_companion_context
 from offerpilot.knowledge.note_api import register_knowledge_note_routes
 from offerpilot.knowledge.brief import (
     BriefSchemaError,
@@ -1323,6 +1333,7 @@ def create_app(
         local_setup_enabled=job_mail_local_setup_enabled,
     )
     register_memory_routes(app, session_factory)
+    register_companion_routes(app, session_factory)
     register_context_policy_routes(app, session_factory)
     register_readiness_context_routes(app, session_factory)
     register_summary_routes(app, session_factory)
@@ -1509,12 +1520,31 @@ def create_app(
                 ref = attachment.get("id", attachment.get("ref"))
                 if isinstance(kind, str) and isinstance(ref, str):
                     normalized_attachments.append({"kind": kind, "id": ref})
-        return _load_chat_source_messages(
+        source = _load_chat_source_messages(
             context_source_loader,
             conversation,
             normalized_attachments or None,
             pending_tool_call_id=pending_tool_call_id,
+            query=getattr(request, "message", "") if not pending_tool_call_id else "",
         )
+        with session_factory() as session:
+            scope = current_execution_scope()
+            binding = None
+            admitted_enabled = None
+            if scope is not None and scope.lease is not None:
+                binding = _persona_binding_for_turn(
+                    session, scope.lease.turn_id, int(getattr(conversation, "id", 0)),
+                )
+                admitted_enabled = _companion_enabled_for_turn(session, scope.lease.turn_id)
+            # Historical/unadmitted executions explicitly use the official
+            # default, never today's mutable active pointer.
+            return _bind_persona_source(
+                replace(source, companion_enabled=admitted_enabled), session, binding,
+            )
+
+    def _companion_expression_enabled() -> bool:
+        with session_factory() as session:
+            return companion_policy(session)[1].enabled
 
     app.state.pilot_runtime = build_pilot_runtime(
         data_dir=resolved_data_dir,
@@ -1535,6 +1565,14 @@ def create_app(
         write_coordinator=write_coordinator,
         source_loader=_runtime_source_loader,
         system_message=_chat_response_system_message,
+        companion_enabled=_companion_expression_enabled,
+        plain_system_message=lambda general: _chat_response_system_message(
+            general=general, companion_enabled=False,
+        ),
+        general_system_message=lambda: _chat_response_system_message(general=True),
+        custom_persona_system_message=lambda general: _chat_response_system_message(
+            general=general, custom_persona=True,
+        ),
         clarification_message=_chat_clarification_message,
         page_context_messages=lambda page: _chat_page_context_messages(
             dict(page) if page is not None else None
@@ -5004,9 +5042,15 @@ def create_app(
                 cast(Any, loader), conversation,
                 [{"kind": ref.kind, "id": ref.ref} for ref in request.attachments],
                 pending_tool_call_id=conversation.pending_tool_call_id,
+                query=request.message if not conversation.pending_tool_call_id else "",
             )
+            source = _bind_persona_source(source, session, capture_persona_binding(session))
             frozen_source.append(source)
             return {
+                **freeze_chat_command(session, conversation, request),
+                **freeze_fact_read(session, conversation, request),
+                "companion_persona_v1": json.dumps(source.persona_binding, sort_keys=True),
+                "companion_enabled_v1": json.dumps(source.companion_enabled),
                 "conversation_scope": str(source.scope_revision),
                 "current_scope": (
                     source.context_message.surface_revision or "absent"
@@ -5036,7 +5080,9 @@ def create_app(
                 persistence=cast(Any, ChatPersistenceCoordinator(
                     chat.for_turn(admission.turn_id), admitted_user_message_id=admission.user_message_id,
                 )),
-                source_loader=cast(Any, _AdmittedChatSourceLoader(frozen_source[0])),
+                source_loader=cast(Any, _AdmittedChatSourceLoader(
+                    frozen_source[0], persona_sessions=session_factory,
+                )),
             )
             return replace(request, conversation_id=admission.conversation_id, images=frozen_images[0]), runtime, admission, request_id, control
         except ImageInputError as exc:
@@ -5578,6 +5624,7 @@ def create_app(
                 conversation,
                 [{"kind": item.kind, "id": item.ref} for item in request.attachments],
                 pending_tool_call_id=conversation.pending_tool_call_id,
+                query=request.message if not conversation.pending_tool_call_id else "",
             )
             frozen_readiness.append(
                 readiness_contexts.capture_enabled_binding_in_session(
@@ -5585,6 +5632,7 @@ def create_app(
                     conversation.id,
                 )
             )
+            source = _bind_persona_source(source, session, capture_persona_binding(session))
             frozen_source.append(source)
             if source.context_type == "application" and source.context_ref:
                 context_ref = f"context:application:{source.context_ref}"
@@ -5592,6 +5640,10 @@ def create_app(
                     refs.append(context_ref)
                 metadata["source_refs_json"] = json.dumps(refs, ensure_ascii=False, separators=(",", ":"))
             return {
+                **freeze_chat_command(session, conversation, request),
+                **freeze_fact_read(session, conversation, request),
+                "companion_persona_v1": json.dumps(source.persona_binding, sort_keys=True),
+                "companion_enabled_v1": json.dumps(source.companion_enabled),
                 "conversation_scope": str(source.scope_revision),
                 "current_scope": (
                     source.context_message.surface_revision or "absent"
@@ -9051,18 +9103,35 @@ def _generate_conversation_title(
         )
 
 
-def _chat_response_system_message() -> Message:
+def _chat_response_system_message(
+    *, general: bool = False, custom_persona: bool = False, companion_enabled: bool = True,
+) -> Message:
+    custom_persona = custom_persona and companion_enabled
+    # Same execution boundaries; only expression and presentation are scoped.
+    # General expression must not classify real work as leisure. Only explicit
+    # task/control contexts receive a fixed report layout; all facts and history
+    # remain intact, and a user's requested structure can still be followed.
+    presentation = (
+        "围绕用户当前请求自然、直接作答，按问题复杂度展开；需要时可用列表或小标题，"
+        "遵循用户要求的格式，不套固定汇报格式。"
+        if general else
+        "仅对需要结论和后续行动的求职工作任务，请先给出证据与注意事项，再以 `## 结论` 收束为一条简短结论，"
+        "并以 `## 下一步` 结尾，列出一到三条以 `- ` 开头的后续行动；该列表后不要追加文本。"
+    )
     return Message(
         role="system",
         surface_contributor="static_policy",
+        surface_revision="companion-expression" if companion_enabled else "pilot-plain",
         content=(
             "你是 OfferPilot，一个求职领航助手。始终使用用户的语言回复。"
             "当前对话界面支持助手文本增量流式输出。"
-            "对于实质性回答，请保持简洁，并优先按「结论、依据、下一步」组织。"
-            "对于需要结论和后续行动的实质任务，请先给出证据与注意事项，再以 `## 结论` 收束为一条简短结论，"
-            "并以 `## 下一步` 结尾，列出一到三条以 `- ` 开头的后续行动；该列表后不要追加文本。"
-            "问候语和澄清问题不需要使用这两个标题。"
-            "如果本地工具依据较少，要明确说明。"
+            + ("回答避免无关重复，详略遵循表达资料和用户当前要求。"
+               if custom_persona else "回答保持简洁。")
+            + presentation
+            + ("问候语、澄清问题与日常陪伴（包括等待、暂停、回忆共同选择）直接自然回应，"
+               "不套用工作总结、结论标题或下一步清单。" if companion_enabled else
+               "问候语和澄清问题直接自然回应，不套用工作总结、结论标题或下一步清单。")
+            + "如果本地工具依据较少，要明确说明。"
             "不要暴露隐藏推理。不要提到 update_application_status、create_application_event "
             "等内部工具或 API 名称；请改用用户能理解的动作描述。"
             "当面试复盘属于某家公司但系统里已有不同岗位投递时，"
@@ -9070,6 +9139,8 @@ def _chat_response_system_message() -> Message:
             "如果写入工具提示必填信息缺失或不明确，只追问一个最关键问题，"
             "不要继续尝试另一个写入。成功写入后，只给一个实用的下一步建议，"
             "例如添加日程、生成改进计划，或继续补充复盘。"
+            + (companion_persona_policy(custom=custom_persona)
+               if companion_enabled else plain_pilot_safety_policy())
         ),
     )
 
@@ -9361,6 +9432,63 @@ class _FrozenChatSourceMessages:
     context_ref: str | None = None
     mode: str = ""
     scope_revision: int = -1
+    persona_binding: Mapping[str, Any] | None = None
+    persona_message: Message | None = None
+    # Separate expression admission from immutable persona identity.
+    companion_enabled: bool | None = None
+
+
+def _persona_binding_for_turn(
+    session: Session, turn_id: str, conversation_id: int,
+) -> Mapping[str, Any] | None:
+    turn = session.get(PilotTurnRecord, turn_id)
+    if turn is None or turn.conversation_id != conversation_id:
+        raise RuntimeError("persona turn binding unavailable")
+    versions = json.loads(turn.source_versions_json)
+    if not isinstance(versions, dict):
+        raise ValueError("persona source versions invalid")
+    if "companion_persona_v1" not in versions:
+        return None  # Explicit legacy official default, not active profile.
+    raw = versions["companion_persona_v1"]
+    if not isinstance(raw, str):
+        raise ValueError("persona binding invalid")
+    binding = json.loads(raw)
+    if not isinstance(binding, dict):
+        raise ValueError("persona binding invalid")
+    load_persona_spec(session, binding)
+    return binding
+
+
+
+def _companion_enabled_for_turn(session: Session, turn_id: str) -> bool | None:
+    turn = session.get(PilotTurnRecord, turn_id)
+    if turn is None:
+        raise RuntimeError("companion turn binding unavailable")
+    versions = json.loads(turn.source_versions_json)
+    if "companion_enabled_v1" not in versions:
+        return None  # Legacy turn: current opt-in still gates any expression.
+    value = versions["companion_enabled_v1"]
+    if not isinstance(value, str) or value not in ("true", "false"):
+        raise ValueError("companion enabled binding invalid")
+    return value == "true"
+
+
+def _without_companion_expression(source: _FrozenChatSourceMessages) -> _FrozenChatSourceMessages:
+    context = source.context_message
+    if context is not None and (context.surface_revision or "").startswith("companion:"):
+        context = None
+    return replace(source, companion_enabled=False, persona_message=None, context_message=context)
+
+def _bind_persona_source(
+    source: _FrozenChatSourceMessages, session: Session, binding: Mapping[str, Any] | None,
+) -> _FrozenChatSourceMessages:
+    spec = PersonaSpec() if binding is None else load_persona_spec(session, dict(binding))
+    # Never replace the frozen revision with today's active profile. A new opt-in
+    # also cannot add expression to a turn admitted while the switch was off.
+    enabled = source.companion_enabled is not False and companion_policy(session)[1].enabled
+    bound = replace(source, persona_binding=binding, companion_enabled=enabled,
+                    persona_message=persona_profile_message(spec, binding) if enabled else None)
+    return bound if enabled else _without_companion_expression(bound)
 
 
 class _TransactionChatSourceLoader:
@@ -9375,8 +9503,10 @@ class _TransactionChatSourceLoader:
 
 
 class _AdmittedChatSourceLoader:
-    def __init__(self, source: _FrozenChatSourceMessages) -> None:
+    def __init__(self, source: _FrozenChatSourceMessages, *,
+                 persona_sessions: sessionmaker[Session] | None = None) -> None:
         self.source = source
+        self.persona_sessions = persona_sessions
 
     def load(self, conversation: object, request: object, **_kwargs: object) -> object:
         scope = _canonical_source_scope(conversation)
@@ -9388,6 +9518,9 @@ class _AdmittedChatSourceLoader:
             or scope.mode != self.source.mode
         ):
             raise RuntimeError("Conversation scope changed after admission")
+        if self.persona_sessions is not None:
+            with self.persona_sessions() as session:
+                return _bind_persona_source(self.source, session, self.source.persona_binding)
         return self.source
 
 
@@ -9425,16 +9558,21 @@ class _FreshAdmittedChatSourceLoader:
             getattr(value, "scope_revision", None),
             str(context_revision),
             attachment_revisions,
+            getattr(value, "persona_binding", None),
+            getattr(value, "companion_enabled", None),
         )
 
     def load(self, conversation: object, request: object, **kwargs: object) -> object:
         current = self.loader(conversation, request, **kwargs)
-        if self._revision(current) != self._revision(self.source):
+        effective = self.source
+        if getattr(current, "companion_enabled", None) is False:
+            effective = _without_companion_expression(effective)
+        if self._revision(current) != self._revision(effective):
             raise RuntimeError("source changed after admission")
         # Return the frozen pre-user-message source.  The fresh read above is
         # validation only; returning it would feed the admitted user message
-        # into the model a second time.
-        return self.source
+        # into the model a second time. Revoked expression is the only removal.
+        return effective
 
 
 @dataclass(frozen=True, slots=True)
@@ -9496,6 +9634,7 @@ def _load_chat_source_messages(
     attachments: list[dict[str, str]] | None,
     *,
     pending_tool_call_id: str = "",
+    query: str = "",
 ) -> _FrozenChatSourceMessages:
     scope = _canonical_source_scope(conversation)
     from offerpilot.ai.tool_authority.visibility import AuthorityApplicationVisibilityQuery
@@ -9508,7 +9647,7 @@ def _load_chat_source_messages(
             raise RuntimeError("source query returned multiple rows")
         return rows[0] if rows else None
 
-    def read(connection: sqlite3.Connection) -> tuple[Any, Any, Any]:
+    def read(connection: sqlite3.Connection) -> tuple[Any, Any, Any, Any]:
         conversation_row = one(
             connection,
             "SELECT context_type, context_ref, mode, scope_revision "
@@ -9597,10 +9736,13 @@ def _load_chat_source_messages(
                     (record_id,),
                 )
             attachment_rows.append((kind, raw_id, row))
-        return history_rows, context_row, tuple(attachment_rows)
+        companion = read_companion_context(
+            connection, query, context_type=scope.context_type, conversation_id=scope.conversation_id,
+        ) if not attachments and not pending_tool_call_id and scope.mode == "general" else None
+        return history_rows, context_row, tuple(attachment_rows), companion
 
-    def freeze(raw: tuple[Any, Any, Any]) -> _FrozenChatSourceMessages:
-        history_rows, context_row, attachment_rows = raw
+    def freeze(raw: tuple[Any, Any, Any, Any]) -> _FrozenChatSourceMessages:
+        history_rows, context_row, attachment_rows, companion = raw
         frozen_history = [
             _FrozenStoredMessage(
                 id=int(str(row[0])),
@@ -9616,7 +9758,7 @@ def _load_chat_source_messages(
         history = tuple(
             _stored_messages_to_ai(frozen_history, pending_tool_call_id=pending_tool_call_id)
         )
-        context_message = _snapshot_context_message(context_row)
+        context_message = _snapshot_context_message(context_row) or companion_context_message(companion)
         attachment_messages = tuple(_snapshot_attachment_messages(attachment_rows))
         return _FrozenChatSourceMessages(
             history,

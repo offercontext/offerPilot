@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from fnmatch import fnmatchcase
 from pathlib import Path
 import subprocess
 import sys
@@ -440,3 +441,47 @@ def test_master_safety_registration_preserves_existing_source_identities():
         if not entry["id"].startswith("tests/evaluation/"):
             assert entry["id"] in required
     assert core.digest(master) == core.MASTER_SAFETY_BASELINE_HASH
+
+
+@pytest.mark.parametrize("path", [
+    "src/offerpilot/api.py",
+    "src/offerpilot/ai/agent_loop.py",
+    "src/offerpilot/pilot_runtime/composition.py",
+    "src/offerpilot/companion/contracts.py",
+    "src/offerpilot/companion/repository.py",
+    "src/offerpilot/companion/persona.py",
+    "src/offerpilot/companion/persona_repository.py",
+    "web/src/features/companionLife/useCompanionLife.tsx",
+    "web/src/features/companionPersona/CompanionPersonaSettings.tsx",
+    "web/src/services/companion.ts",
+    "web/src/services/persona.ts",
+])
+def test_companion_changes_select_default_off_and_persona_guards_on_both_surfaces(path):
+    mapping = load_mapping(ROOT)
+    required = {
+        "tests/test_companion_opt_in.py",
+        "tests/test_companion_master_switch.py",
+        "tests/test_companion_provider_gate.py",
+        "tests/test_persona_runtime.py",
+        "tests/test_persona_storage.py",
+        "web/src/features/companionLife/CompanionLifeSettings.test.tsx",
+        "web/src/features/companionLife/useCompanionLife.test.tsx",
+        "web/src/features/companionPersona/CompanionPersonaSettings.test.tsx",
+        "web/src/features/companionPersona/useCompanionName.test.tsx",
+    }
+    assert required <= mapping["test_metadata"].keys()
+    for name in required:
+        entry = mapping["test_metadata"][name]
+        assert entry["priority"] == "p0" and entry["requires"] == []
+    catalog = [{"id": name, "file": name, **entry}
+               for name, entry in mapping["test_metadata"].items()]
+    affected, reasons, surfaces = impact([path], [mapping])
+    force_full = any(rule["expand"] == "full" and any(fnmatchcase(path, pattern)
+                     for pattern in rule["paths"]) for rule in mapping["risk_rules"])
+    if path in {"src/offerpilot/api.py", "src/offerpilot/pilot_runtime/composition.py"}:
+        assert force_full, "Shared API and runtime changes must retain master full expansion"
+    selected, unknown = select(catalog, affected, surfaces, reasons, [path], "dev", full=force_full)
+    assert required <= {test["file"] for test in selected}
+    assert not unknown
+    if force_full:
+        assert len(selected) == len(catalog)

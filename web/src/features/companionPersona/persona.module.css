@@ -1,0 +1,11 @@
+.settings { margin: 24px 0; padding: 20px; border: 1px solid var(--op-border-color, #d9d9d9); border-radius: 12px; }
+.fields { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); margin: 16px 0; }
+.fields label { display: flex; flex-direction: column; gap: 6px; }
+.activities { margin: 20px 0; border: 0; padding: 0; }
+.preview { padding: 16px; border-radius: 8px; background: var(--op-surface-secondary, rgba(128,128,128,.08)); }
+.preview blockquote { margin: 12px 0; }
+.diff { margin: 16px 0; overflow-wrap: anywhere; }
+.diff > div { display: grid; gap: 8px; grid-template-columns: 130px 1fr 1fr; padding: 8px 0; }
+.diff del { opacity: .7; } .diff ins { text-decoration: none; border-left: 2px solid #52a088; padding-left: 8px; }
+.actions { display: flex; margin-top: 16px; }
+.history { padding-left: 20px; }.history li { margin: 10px 0; }.history li span { margin-right: 16px; }

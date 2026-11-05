@@ -589,6 +589,9 @@ def test_real_unknown_source_probe_shape_cannot_masquerade_as_fast():
     'web/src/components/ChatPanel/index.tsx', 'web/src/components/ui/ConfirmationPanel.tsx',
     'web/src/features/desktopUpdates/installSafety.ts',
     'web/src/features/actionPresentation/timeline.ts', 'web/src/layout/AppShell.tsx',
+    'web/src/features/companionLife/CompanionLifeSettings.tsx',
+    'web/src/features/companionPersona/CompanionPersonaSettings.tsx',
+    'web/src/services/companion.ts', 'web/src/services/persona.ts',
     'web/src/new-unclassified-presentation.tsx',
 ])
 def test_frontend_surface_does_not_authorize_cross_boundary_or_unknown_changes(path):

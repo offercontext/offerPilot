@@ -1701,21 +1701,52 @@ describe('Pilot turn presentation reconstruction', () => {
     });
   });
 
-  it('falls back for incomplete or reversed presentation headings', () => {
-    const onlyConclusion = '## 结论\n\n继续跟进。';
-    const noAction = '## 结论\n\n继续跟进。\n\n## 下一步\n\n稍后处理。';
-    const reversed = '## 下一步\n\n- 跟进\n\n## 结论\n\n继续跟进。';
+  it.each([
+    ['only a conclusion', '## 结论\n\n继续跟进。'],
+    ['no actionable bullet', '## 结论\n\n继续跟进。\n\n## 下一步\n\n稍后处理。'],
+    ['reversed headings', '## 下一步\n\n- 跟进\n\n## 结论\n\n继续跟进。'],
+    ['a partial next-step heading', '## 结论\n\n技术经验匹配，但交付证据不足。\n\n## 下一'],
+    ['an unfinished bullet', '## 结论\n\n技术经验匹配，但交付证据不足。\n\n## 下一步\n\n- '],
+    ['a malformed heading', '##结论\n\n技术经验匹配，但交付证据不足。\n\n## 下一步\n\n- 整理项目案例'],
+  ])('preserves all persisted text with %s instead of creating a partial presentation', async (_, content) => {
+    expect(parseTurnPresentation(content)).toBeUndefined();
 
-    expect(parseTurnPresentation(onlyConclusion)).toBeUndefined();
-    expect(parseTurnPresentation(noAction)).toBeUndefined();
-    expect(parseTurnPresentation(reversed)).toBeUndefined();
-
-    const turns = buildTurns([msg({ role: 'assistant', content: noAction })]);
-    expect(turns[0]).toMatchObject({
-      content: noAction,
+    const stored = [msg({ role: 'assistant', content })];
+    const turns = await reloadConversationTurns(1, async () => stored);
+    expect(turns).toHaveLength(1);
+    expect(turns![0]).toMatchObject({
+      content,
       taskTitle: '本轮任务',
       presentation: undefined,
     });
+    expect(turns![0].action).toBeUndefined();
+    expect(turns![0].steps).toBeUndefined();
+    expect(stored[0].content).toBe(content);
+  });
+
+  it('does not carry a historical presentation or actions into a new heading-free work reply', async () => {
+    const prior = '## 结论\n\n先补充项目证据。\n\n## 下一步\n\n- 整理项目案例';
+    const content = '这次只比较岗位要求，尚未修改任何记录。\n\n1. 技术深度：两者都要求系统设计。\n2. 协作范围：第二个岗位要求跨团队推进。';
+    const stored = [
+      msg({ id: 1, role: 'user', content: '之前的简历分析' }),
+      msg({ id: 2, role: 'assistant', content: prior }),
+      msg({ id: 3, role: 'user', content: '现在比较两个岗位，不要执行修改' }),
+      msg({ id: 4, role: 'assistant', content }),
+    ];
+    const turns = await reloadConversationTurns(1, async () => stored);
+
+    expect(turns).toHaveLength(4);
+    expect(turns![1].presentation?.actions).toEqual(['整理项目案例']);
+    expect(turns![3]).toMatchObject({
+      content,
+      taskTitle: '现在比较两个岗位，不要执行修改',
+      presentation: undefined,
+    });
+    expect(turns![3].action).toBeUndefined();
+    expect(turns![3].steps).toBeUndefined();
+    expect(stored.map((message) => message.content)).toEqual([
+      '之前的简历分析', prior, '现在比较两个岗位，不要执行修改', content,
+    ]);
   });
 
   it('keeps at most the first three actionable bullets', () => {

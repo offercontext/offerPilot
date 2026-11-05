@@ -38,9 +38,25 @@
 
 ## 4. 图片与上下文
 
+2026-11-03 陪伴总开关：接纳同时冻结 `companion_enabled_v1` 与原人设身份；`_bind_persona_source`、两个 admitted loader 门控当前表达，关闭返回普通 Pilot 而不改历史/绑定。`_ContextAdapter` 选择普通安全策略；`_AgentDriver` 的表达检查经 `_LoopServices._before_provider_attempt` 覆盖每次模型候选与确认续跑，不能因关闭取消 provider-free 已授权写入。回归见 [总开关](../../../tests/test_companion_master_switch.py) 与 [物理调用撤回](../../../tests/test_companion_provider_gate.py)。
+
 `ChatImageStore.upload` 先完整保存规范化文件，再发布数据库附件；`resolve_in_session` 校验作用域/内容，`bind_in_session` 将附件绑定消息并冻结引用；历史模型读取还检查尺寸/哈希及当前授权。已绑定图片跟随会话归属，未绑定草稿受创建范围限制。
 
+2026-11-01 陪伴整合边界：`companion/chat.py::freeze_chat_command` 只冻结闭合纯文本生活命令，携图请求不能因文字匹配而取得该指令来源；`DeterministicPilotAdapter.matches` 也先排图片。人设通过接纳 Turn 的 `source_versions_json` 绑定不可变 revision，`_ContextAdapter.assemble` 同时保留当前图片策略和该人设表达，不把历史人设当作权限策略。交叉回归见 [图片与人设](../../../tests/test_companion_image_integration.py)、[人设冻结与恢复](../../../tests/test_persona_runtime.py)。
+
+`companion/context.py` 的直接角色活动回指与纸船简称只选择只读来源；工作请求仍优先，无关请求不注入。来源不足既不证明发生也不证明未发生，不授权补写共同记忆或查证过程。服务器 `current_scope` / `companion:` carrier 在 `FrozenMessage.freeze` 冻结内部必保标记，`ModelSurfaceProjector._required_scope` 让默认及自定义人设都保留角色事实；默认人设下无关业务 scope 不因此升级，自定义人设原有的完整 scope 必保行为不变。完整来源超过 2KiB 直接失败，不删除近期选择后继续生成；模型出口不携带路由元数据，下一步从原 carrier 重算。预算、关闭与重放回归见 [证据预算](../../../tests/test_companion_evidence_budget.py)。删除/撤回/来源绑定与固定预算回归见 [事实边界](../../../tests/test_companion_fact_boundaries.py)。
+
 图片 Provider 能力测试与真实会话调用分开；设置通过不代表历史消息完整性或授权通过。会话来源删除和暂时不可读也应分开调查，不能把临时锁错误解释成真实删除。
+
+2026-11-04 有限陪伴事实读取：`api._admit_pilot_start` 在接纳事务调用
+`companion/fact_read.py::freeze_fact_read` 冻结摘要，`DeterministicPilotAdapter` 经
+`CompanionFactReadService.execute` 同事务验证来源并保存 assistant、PilotTurnMessage 与
+refs-only `CompanionFactReadReceipt`，成功后才发布无 delta 结果。pending/clarification、
+非纯文本或业务上下文不接管，未知语法保留原模型路径；时序指代无结构化锚则澄清。
+生命周期与原聊天历史重放边界见 [ADR 0016](../decisions/0016-bound-companion-life.md)。
+回归：[语法/准入](../../../tests/test_companion_fact_read_parser.py)、
+[真实事务/来源](../../../tests/test_companion_fact_read_atomic.py)、
+[HTTP 三入口](../../../tests/test_companion_fact_read_api.py)。
 
 ## 5. 症状和回归入口
 

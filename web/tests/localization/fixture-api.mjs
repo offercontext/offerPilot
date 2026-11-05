@@ -8,6 +8,10 @@ export const sampleEvent = {id:201,application_id:101,event_type:'interview',sub
 export const sampleMail = {id:'mail-fixture-1',version:1,status:'pending',action:'create_event',reason:'',time_mode:'fixed_time',proposed_fields:{event_type:'interview',scheduled_at:'2026-10-22T10:00:00Z',duration_minutes:60,location:'Video call',notes:'',round:1,tags:[]},field_evidence:{},application_candidates:[{id:101,company_name:sampleApplication.company_name,position_name:sampleApplication.position_name}],target_event_id:null,evidence:{id:'evidence-fixture-1',subject:'Interview invitation',sender:'recruiter@example.invalid',received_at:'2026-10-15T07:00:00Z',snippet:'请在 2026-10-22 10:00 UTC 参加面试。',body_fingerprint:'synthetic',truncated:false,cleared_at:null},receipt:null};
 export const retainedUserBody='用户输入：请帮我准备面试。';
 export const retainedAiBody='AI 原文：我们可以先整理你的项目经历。';
+const personaSpec = { display_name: 'Haru', traits: ['gentle'], speaking_style: '', verbosity: 'balanced', interests_text: '', fictional_background: '', additional_style_notes: '', enabled_activity_templates: ['paper_boat', 'cloud_catalog', 'paper_stars'] };
+export const samplePersona = { profile_id: '22222222-2222-4222-8222-222222222222', revision: 0, content_hash: 'synthetic-persona', policy_version: 'synthetic-core', spec: personaSpec, presets: [
+  { id: 'official', spec: personaSpec }, { id: 'gentle', spec: { ...personaSpec, verbosity: 'brief' } }, { id: 'concise', spec: { ...personaSpec, traits: ['calm'], verbosity: 'brief' } },
+] };
 export function createFixtureApi({ retainedConversation = false, configuredAi = false } = {}) {
   const requests=[]; const unexpected=[];
   // Readiness boolean only; no credentials or provider endpoints exist in this fixture.
@@ -20,9 +24,12 @@ export function createFixtureApi({ retainedConversation = false, configuredAi = 
   function handle(method,url,body) {
     const parsed=new URL(url,'http://localhost');const p=parsed.pathname;
     requests.push({method,path:p,query:parsed.search,body,at:Date.now()});
+    if(method==='POST'&&p==='/api/companion/presence')return answer({session_id:'fixture-session',session_quiet:false,active:body.visible,blocked:!body.visible||Boolean(body.typing||body.work_running||body.awaiting_approval||body.mock_interview||body.quiet||body.failure),blockers:[]});
     if(method==='GET') {
       if(p==='/api/auth/status')return answer({auth_enabled:false,authenticated:true});
       if(p==='/api/settings')return answer(settings);
+      if(p==='/api/companion/persona')return answer(samplePersona);
+      if(p==='/api/companion')return answer({identity:'11111111-1111-4111-8111-111111111111',revision:1,persona_version:'companion-v1',settings:{enabled:false,proactivity:'off',hide_status:false},state:{interests:[],activity:null,wish:null},recent_events:[],shared_participation:[],presence:{session_id:'',session_quiet:false,active:false,blocked:true,blockers:[]}});
       if(p==='/api/logs')return answer({entries:[],total:0,limit:20,offset:0,has_more:false});
       if(p==='/api/applications')return answer([sampleApplication]);
       if(p==='/api/applications/creation-context')return answer({scope_id:'browser-fixture-scope'});

@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { CompanionLifeContext, useCompanionLifeController } from '@/features/companionLife/useCompanionLife';
 import { useDesktopHaruOwner } from './useDesktopHaruOwner';
 import { isDesktopOwner } from './desktopHaru';
 import {
@@ -54,6 +55,8 @@ const PilotConversationContext = createContext<PilotConversationController | nul
 export function AssistantSurfaceProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(assistantSurfaceReducer, initialAssistantSurfaceState);
   const controller = usePilotConversationControllerState(isDesktopOwner() || state.surface !== 'mascot');
+  const life = useCompanionLifeController(controller);
+  const lifeEvent = useRef(life.event); lifeEvent.current = life.event;
   const surfaceRef = useRef(state.surface);
   const [conversationRequest, setConversationRequest] = useState<AssistantConversationRequest>();
   const nextConversationRequestKeyRef = useRef(0);
@@ -92,7 +95,10 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
       current?.requestKey === requestKey ? undefined : current
     ));
   }, []);
-  const closeSurface = useCallback(() => dispatch({ type: 'close_surface' }), []);
+  const closeSurface = useCallback(() => {
+    if (surfaceRef.current !== 'mascot') void lifeEvent.current('chat_end');
+    dispatch({ type: 'close_surface' });
+  }, []);
   const dismissNotice = useCallback(() => dispatch({ type: 'dismiss_notice' }), []);
   const reportTaskState = useCallback((taskState: AssistantTaskState, conversationId?: number) => {
     if (taskState === 'running') {
@@ -118,6 +124,7 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
         active.terminal = true;
       }
       reportedLifecycleGenerationRef.current = activeRequestRef.current?.generation ?? null;
+      if (!alreadyReported && taskState === 'completed') void lifeEvent.current('work_completed');
       dispatch({
         type: 'task_state_changed',
         taskState,
@@ -156,6 +163,7 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
       };
     }
     reportedLifecycleGenerationRef.current = requestGeneration;
+    if (event.status === 'success') void lifeEvent.current('work_completed');
     dispatch({
       type: 'task_state_changed',
       taskState: event.status === 'success' ? 'completed' : 'failed',
@@ -164,7 +172,7 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
     });
   }, []);
   controller.bindTaskStateReporter(reportTaskState);
-  useDesktopHaruOwner(controller, openPending);
+  useDesktopHaruOwner(controller, openPending, life.mirror);
   const surfaceValue = useMemo(() => ({
     ...state,
     conversationRequest,
@@ -196,7 +204,7 @@ export function AssistantSurfaceProvider({ children }: { children: ReactNode }) 
   return (
     <PilotConversationContext.Provider value={controller}>
       <AssistantSurfaceContext.Provider value={surfaceValue}>
-        {children}
+        <CompanionLifeContext.Provider value={life}>{children}</CompanionLifeContext.Provider>
       </AssistantSurfaceContext.Provider>
     </PilotConversationContext.Provider>
   );

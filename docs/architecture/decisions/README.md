@@ -13,6 +13,10 @@
 
 - [ADR-0015: 精简入口并保留领域草稿所有权](./0015-simplify-product-entry-and-draft-ownership.md) — Accepted
 
+### 陪伴日常
+
+- [ADR-0016: 隔离且有界的陪伴日常](./0016-bound-companion-life.md) — Implemented on feature branch; real-dialogue acceptance pending
+
 ### 界面语言
 
 - [ADR-0014: 在展示边界切换中英文界面](./0014-localize-authored-interface-copy.md) — Implemented on feature branch; pending acceptance

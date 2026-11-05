@@ -2,7 +2,12 @@
 import { act, createRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it, vi } from 'vitest';
+import { publishCompanionSnapshot, publishPersona } from '@/features/companionPersona/useCompanionName';
+import { enabledCompanionSnapshot } from '@/features/companionLife/testFixtures';
+import type { PersonaView } from '@/services/persona';
 import CalendarHaruPresentation from './CalendarHaruPresentation';
+vi.mock('@/services/companion', async () => { const { enabledCompanionSnapshot } = await import('@/features/companionLife/testFixtures'); return { getCompanion: async () => ({ ...enabledCompanionSnapshot, settings: { ...enabledCompanionSnapshot.settings, enabled: false } }) }; });
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Nova' } }) }));
 vi.mock('@/features/pilotMascot/live2dRuntime', () => ({ live2dPilotMascotRuntime: { mount: vi.fn().mockResolvedValue({ setActivity: vi.fn(), dispose: vi.fn(), setZoom: vi.fn() }) } }));
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 it('right-clicks without opening chat, persists mode, and retains the same toggle callback', async () => {
@@ -13,6 +18,9 @@ it('right-clicks without opening chat, persists mode, and retains the same toggl
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host); const toggle = vi.fn();
   const ref = createRef<HTMLButtonElement>();
   await act(async () => root.render(<CalendarHaruPresentation activity="idle" panelOpen={false} onToggle={toggle} triggerRef={ref} onAnchorRectChange={() => undefined} />));
+  expect(ref.current?.getAttribute('aria-label')).toContain('Pilot');
+  act(() => { publishCompanionSnapshot({ ...enabledCompanionSnapshot, revision: 2 }); publishPersona({ profile_id: 'fixture', revision: 1, spec: { display_name: 'Nova' } } as PersonaView); });
+  expect(ref.current?.getAttribute('aria-label')).toContain('Nova');
   expect(host.querySelector('[data-haru-mode="compact"]')).not.toBeNull();
   await act(async () => { ref.current?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 1780, clientY: 830 })); });
   expect(toggle).not.toHaveBeenCalled();

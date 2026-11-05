@@ -1,3 +1,4 @@
+import { companionText } from '@/features/companionPersona/useCompanionName';
 import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { CloseOutlined, PictureOutlined, SendOutlined } from '@ant-design/icons';
@@ -11,6 +12,7 @@ interface Props {
   onSend: () => void;
   disabled: boolean;
   placeholder?: string;
+  companionName?: string;
   inputRef: RefObject<HTMLTextAreaElement>;
   drafts: ChatImageDraft[];
   imageDisabledReason?: string;
@@ -23,7 +25,7 @@ interface Props {
   children?: ReactNode;
 }
 
-export default function HaruComposer({ value, onChange, onSend, disabled, placeholder, inputRef,
+export default function HaruComposer({ value, onChange, onSend, disabled, placeholder, companionName = 'Haru', inputRef,
   drafts, imageDisabledReason, onAdd, onRemove, onRetry, activePreviewKey, onPreviewChange, stopAction, children }: Props) {
   useLocale();
   const fileRef = useRef<HTMLInputElement>(null);
@@ -68,9 +70,9 @@ export default function HaruComposer({ value, onChange, onSend, disabled, placeh
           disabled={uploadBlocked} aria-label={t("重试图片 {index}", { index: index + 1 })} onClick={() => onRetry(draft)}>{t("重试")}</button> : null}
       </div>)}
     </div> : null}
-    <label htmlFor="haru-composer" className={styles.srOnly}>{t("给 Haru 发消息")}</label>
+    <label htmlFor="haru-composer" className={styles.srOnly}>{companionText(t("给 Haru 发消息"), companionName)}</label>
     <textarea id="haru-composer" ref={inputRef} rows={2} value={value} disabled={disabled}
-      placeholder={placeholder ?? t('问 Haru…')}
+      placeholder={placeholder ?? companionText(t('问 Haru…'), companionName)}
       aria-describedby="haru-image-hint haru-image-errors"
       onChange={(event) => onChange(event.target.value)}
       onPaste={(event) => {

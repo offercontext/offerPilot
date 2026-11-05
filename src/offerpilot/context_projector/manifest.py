@@ -230,7 +230,7 @@ def _build_manifest_payload(
 
     _check_budget(budget_check)
     manifest: dict[str, object] = {
-        "manifest_schema_version": 3 if any(name == "confirmed_readiness" for name, _ in audit.contributor_statuses) else 2,
+        "manifest_schema_version": 4 if any(name == "persona_profile" for name, _ in audit.contributor_statuses) else (3 if any(name == "confirmed_readiness" for name, _ in audit.contributor_statuses) else 2),
         "budget_policy_version": audit.budget_policy_version,
         "providers": providers,
         "contributors": contributors,
@@ -330,7 +330,7 @@ def validate_surface_manifest_v2(
     _check_budget(budget_check)
     if type(manifest) is not dict or set(manifest) != required or canonical_manifest != value:
         raise ManifestV2ValidationError("invalid manifest shape or canonical form")
-    if manifest["manifest_schema_version"] not in {2, 3}:
+    if manifest["manifest_schema_version"] not in {2, 3, 4}:
         raise ManifestV2ValidationError("invalid manifest version")
     if manifest["budget_policy_version"] not in {"model-surface-budget-v1", "model-surface-budget-v2", "model-surface-budget-v3-images"}:
         raise ManifestV2ValidationError("invalid budget policy")
@@ -340,7 +340,22 @@ def validate_surface_manifest_v2(
     if not providers:
         raise ManifestV2ValidationError("empty provider chain")
     contributors = manifest["contributors"]
-    expected_order = CONTRIBUTOR_ORDER if manifest["manifest_schema_version"] == 3 else ("static_policy", "current_scope", "active_control", "request_page_context", "request_attachments", "conversation_history", "current_request", "confirmed_memory", "knowledge_context", "older_conversation_summary")
+    # Historical orders are fixed contracts, not derived from today's list.
+    expected_order: tuple[str, ...]
+    if manifest["manifest_schema_version"] == 4:
+        expected_order = CONTRIBUTOR_ORDER
+    elif manifest["manifest_schema_version"] == 3:
+        expected_order = (
+            "static_policy", "current_scope", "active_control", "request_page_context",
+            "request_attachments", "conversation_history", "confirmed_readiness",
+            "confirmed_memory", "knowledge_context", "older_conversation_summary", "current_request",
+        )
+    else:
+        expected_order = (
+            "static_policy", "current_scope", "active_control", "request_page_context",
+            "request_attachments", "conversation_history", "current_request", "confirmed_memory",
+            "knowledge_context", "older_conversation_summary",
+        )
     if type(contributors) is not list or len(contributors) != len(expected_order):
         raise ManifestV2ValidationError("invalid contributors")
     _check_budget(budget_check)
