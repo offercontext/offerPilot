@@ -4,7 +4,7 @@
 
 ## 来源与隔离
 
-[desktop-localization.yml](../../.github/workflows/desktop-localization.yml) 只自动响应 `feat/20261019-localization-integration` 上相关桌面、前端、后端、测试、锁文件或本工作流/说明的 push。另提供 `workflow_dispatch`；新工作流仅在功能分支时，手动入口受 GitHub 默认分支注册限制，不为此自动修改 master。首次构建可由已授权的限定分支 push 启动。`desktop/localization-ui/**` 未纳入 package push 路径：仅修 harness 的提交不会重复冻结/构建；如真实 run 需要重试，再建立明确绑定该新 run、artifact、source SHA 和 installer SHA256 的独立同包重试入口，不预设或使用旧 PIN。
+[desktop-localization.yml](../../.github/workflows/desktop-localization.yml) 只自动响应 `feat/20261019-localization-integration`、`feat/20261021-product-simplification` 上相关桌面、前端、后端、测试、锁文件或本工作流/说明的 push。另提供 `workflow_dispatch`；新工作流仅在功能分支时，手动入口受 GitHub 默认分支注册限制，不为此自动修改 master。首次构建可由已授权的限定分支 push 启动。`desktop/localization-ui/**` 未纳入 package push 路径：仅修 harness 的提交不会自动重复冻结/构建。需要证明旧包时，应建立明确绑定原 run、artifact、source SHA 和 installer SHA256 的同包重试入口，不预设或使用其他旧 PIN；也可以经既有手动入口重新构建并验收新产物，但不得将其结果追认给旧包。
 
 本次整合基于 `8fdc4f0aecf9612731bdd0590bbd0966af873279`，逐项移植网页本地化 `f6c19f1a` 至 `02b35bc6` 和桌面 `05fcd54a` 的语言增量。状态消息修复 `e74fcfa7` 与网页 `64a18a76` patch-id 相同，且最新主线已含其行为，不重复应用。保留新主线 Haru X 收起回角色、右键隐藏/置顶、默认置顶与显式 false 偏好。
 
@@ -58,6 +58,14 @@ Windows 2022 x64 runner 使用 Python 3.12、uv 0.12.19、Node 22。锁定安装
 `security.mjs` 要求实际 `process.versions.electron` 与本次产品源码锁定版本精确相同。`devTools` getter 缺失仅接受已审查的 `44.5.1`（历史同包重试）与 `44.10.2`，不接受版本范围或仅凭 undefined 推断关闭。新版本的 [`SaveLastPreferences()`](https://github.com/electron/electron/blob/v44.10.2/shell/browser/web_contents_preferences.cc#L389-L411) 仍省略该字段，且 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.10.2/shell/browser/api/electron_api_web_contents.cc#L3499-L3527) 在禁用时直接返回。必须同时保留安装 ASAR/源码身份、owner/Haru 构造策略及两窗口五项负向行为探针；其他版本、版本不符、证据缺失或任一打开观察都失败。
 
 旧 `installed-ui` 和 `real-ai-validation` 的 installer PIN、摘要及历史运行记录不随依赖升级改写。历史同包重试仍要求 harness/product lock 完全相同，因此本升级分支不能直接重试旧 `44.5.1` 包；保留旧版本策略不等于允许混用新依赖与旧安装器。新包仍须记录自己的 source SHA、安装器与安装资源摘要及 Windows 实装结果；本节不是新包已通过或发布就绪的声明。
+
+### 默认关闭陪伴时的限定实装检查（2026-11-05）
+
+全新 profile 的 renderer 应显示 Pilot，不开启陪伴或改人设来满足旧 Haru 选择器。main、展开、置顶和关闭按钮使用精确中英文 Pilot 文案，native tray 仍按真实菜单的固定 Haru 文案核对。owner 与 companion 初始 landmark 分阶段记录匹配数量和受限 DOM lang，不输出整页、请求 body 或凭据。
+
+产品关闭陪伴时仍会 POST `/api/companion/presence`，此请求会持久化状态，不能放行。harness 继续先 abort 所有非只读请求；仅将已成功阻断、精确同源路径、无重定向/worker/子 frame、来自已核验 owner main frame 的 presence 单列为 `suppressedPresence`。要求真实 GET `/api/companion` 明确返回关闭状态及匹配 identity，body 不超过 2 KiB、键和类型完全匹配、仅单一 client 且 sequence 递增，工作/审批/面试/quiet 信号为 false。早于身份读取的请求暂存内存，安全检查前必须逐一验证，未知/开启状态及其他请求仍失败；不伪造响应、不改产品或数据库。报告不保留原始 body、identity 或 client_id。
+
+这是“主动阻断后台 presence 写入条件下”的限定 UI/安全检查，不是未干预运行；Playwright 附着前的请求窗口仍不在 guard 覆盖内，不能声称全进程零写入或网络沙箱。原 [run 41983234656](https://github.com/offercontext/offerPilot/actions/runs/41983234656) 的 `d4e6d6efde66dca70646b6c5ee813128c8b3bd8d` 包（SHA256 `329f6d1bec5af34657c74a54d7e821a3351d1c60686a75ea5ec74291a63bd5ec`）仍是失败/未完整验收状态。修复 harness 后通过不变的 `workflow_dispatch` 重建，必须记录新 run、source SHA 与安装包 hash；不会覆盖旧失败证据、历史 provenance 或 PIN，也不改 CI 触发路由。
 
 `ui-localization.yml` 是另外的 Web 合成浏览器截图入口；此 Windows job 不依赖或启动它。Mounted/jsdom 测试不等于真实浏览器截图，更不等于 installed Electron UI。
 

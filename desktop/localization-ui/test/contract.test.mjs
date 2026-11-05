@@ -9,6 +9,14 @@ import { buttonName, classifyRequest, safeRequest, samePath, ownedProcesses, ear
 
 const origin = 'http://127.0.0.1:43123';
 const here = path.dirname(fileURLToPath(import.meta.url));
+test('fresh disabled companion uses exact Pilot renderer copy without renaming the native tray', () => {
+  assert.deepEqual(['haru', 'expand', 'pin', 'close'].map(key => TEXT['zh-CN'][key]),
+    ['Pilot 桌面小窗', '展开 Pilot 对话', 'Pilot 始终置顶', '关闭 Pilot 对话']);
+  assert.deepEqual(['haru', 'expand', 'pin', 'close'].map(key => TEXT['en-US'][key]),
+    ['Pilot Desktop Companion', 'Expand Pilot Chat', 'Keep Pilot on Top', 'Close Pilot chat']);
+  assert.equal(TEXT['zh-CN'].tray[1], '隐藏 Haru');
+  assert.equal(TEXT['en-US'].tray[1], 'Hide Haru');
+});
 test('visible AntD two-Han-character button typography is matched without broadening the action', () => {
   assert.match('取消', buttonName('取消'));
   assert.match('取 消', buttonName('取消'));
@@ -99,6 +107,13 @@ test('new harness uses installed executable, explicit quit, and no product or ol
   assert.match(code, /app\.getPath\('userData'\)/);
   assert.match(code, /getByRole\('combobox'/);
   assert.match(code, /route\.abort\('blockedbyclient'\)/);
+  assert.ok(code.indexOf("await route.abort('blockedbyclient')") < code.indexOf('launch.presence.recordAborted('));
+  assert.ok(code.indexOf('captured = capturePresenceRequest(request)') < code.indexOf('return launch.requestQueue.schedule('));
+  assert.ok(code.indexOf('return launch.requestQueue.schedule(') < code.indexOf('origin = `http://127.0.0.1:${await port()}`'));
+  assert.match(code, /ownerMainFrame: active\.page\.mainFrame\(\)/);
+  assert.match(code, /snapshot: \{ identity: snapshot\.identity, enabled: snapshot\.settings\?\.enabled \}/);
+  assert.ok(code.indexOf("await launchPhase('verify-disabled-companion-presence')") < code.indexOf("await launchPhase('runtime-security-read')"));
+  assert.match(code, /await current\.requestQueue\.drain\(\);\s+ensureSafe\(\)/);
   assert.match(code, /original\.call\(this, menu\)/);
   assert.match(code, /await launch\(1, 'zh-CN'\)/);
   assert.match(code, /await launch\(2, 'en-US'\)/);

@@ -9,6 +9,7 @@ import { loadHaruAssetExpectations, observeHaruAssets } from '../live2d-assets.m
 import { waitForDialogSettled, waitForPaintedCharacter } from './dialog-readiness.mjs';
 import { loadOriginalEvidence } from './retry.mjs';
 import { preferenceObservation, assertDevToolsPreference, assertDevToolsProbe, probeDevToolsDisabled } from './security.mjs';
+import { createPresenceSuppression, capturePresenceRequest, createSerialRequestQueue } from './presence-guard.mjs';
 import { PROFILE, DRAFT, MAIL, TEXT, samePath, buttonName, classifyRequest, safeRequest, ownedProcesses, earlyOwnedProcesses,
   validateSockets, sha256, treeDigest, assertNativeMenu } from './contract.mjs';
 
@@ -31,6 +32,7 @@ const report = {
     nativeMenuPointerValidated: false, unsignedSmartScreenValidated: false, undebuggedLaunchValidated: false,
     devTools: 'negative openDevTools event/state/contents probes on both installed windows; runtime must match the source lock; omitted getter requires an explicitly reviewed exact Electron version plus hash-verified packaged constructor policies',
     network: 'renderer requests abort on non-GET/HEAD or unexpected origin; process TCP snapshots at checkpoints',
+    presence: 'all POSTs remain aborted; exact owner presence heartbeats are separately counted only after real backend opt-out, identity, frame and schema verification; UI is tested with this background write suppressed',
     networkLimit: 'Renderer guard begins after Playwright attaches. OS snapshots are not continuous backend packet capture.',
   },
   exclusions: ['real mail', 'real models', 'credential setup', 'mail submission', 'business confirmation',
@@ -54,16 +56,25 @@ let installedIdentity;
 let sourceIdentity;
 let originalEvidence;
 let _electron;
+const presenceTrackers = [];
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const exists = async filename => fs.access(filename).then(() => true, () => false);
 let reportWrite = Promise.resolve();
 async function saveReport() {
+  report.suppressedPresence = presenceTrackers.map(({ number, tracker }) => ({ launch: number, ...tracker.summary() }));
   const text = JSON.stringify(report, null, 2) + '\n';
   reportWrite = reportWrite.then(() => fs.writeFile(path.join(evidence, 'result.json'), text));
   await reportWrite;
 }
-function ensureSafe() { assert.equal(report.blockedRequests.length, 0, 'unexpected request was aborted; acceptance fails closed'); }
+function ensureSafe({ allowPendingPresence = false } = {}) {
+  assert.equal(report.blockedRequests.length, 0, 'unexpected request was aborted; acceptance fails closed');
+  for (const { tracker } of presenceTrackers) {
+    if (allowPendingPresence && tracker === active?.presence && !active.presenceVerified) continue;
+    tracker.assertSettled();
+  }
+}
 async function checkpoint(name, details = {}) {
+  if (active) await verifyPresenceContext();
   ensureSafe();
   report.stages.push({ name, status: 'passed', ...details });
   await saveReport();
@@ -75,9 +86,9 @@ async function launchPhase(name, observations) {
   if (observations) active.attempt.observations.push({ phase: name, ...observations });
   await saveReport();
 }
-async function until(test, timeout = 30000) {
+async function until(test, timeout = 30000, safety = {}) {
   const end = Date.now() + timeout;
-  while (Date.now() < end) { ensureSafe(); if (await test()) return; await delay(200); }
+  while (Date.now() < end) { ensureSafe(safety); if (await test()) return; await delay(200); }
   throw new Error('bounded-wait-timeout');
 }
 async function command(program, args, env = process.env, timeout = 240000) {
@@ -156,26 +167,52 @@ async function verifySource() {
   return identity;
 }
 async function installRequestGuard(app) {
+  const launch = active;
   await app.context().routeWebSocket('**/*', socket => {
     report.blockedRequests.push(safeRequest(socket.url(), 'WEBSOCKET', { reason: 'unexpected-websocket' }));
     socket.close({ code: 1008, reason: 'Read-only localization validation' });
     void saveReport();
   });
-  await app.context().route('**/*', async route => {
+  await app.context().route('**/*', route => {
     const request = route.request();
-    let decision;
-    try { decision = classifyRequest(request.url(), request.method(), `http://127.0.0.1:${await port()}`); }
-    catch { decision = { allowed: false, reason: 'unverified-backend-origin' }; }
-    if (!decision.allowed) {
-      report.blockedRequests.push(safeRequest(request.url(), request.method(), decision));
-      await route.abort('blockedbyclient');
-      await saveReport();
-      return;
-    }
-    report.localReads++;
-    if (new URL(request.url()).pathname.startsWith('/api/')) report.apiReads++;
-    await route.continue();
+    let captured;
+    try { captured = capturePresenceRequest(request); } catch { /* Still abort; unverifiable origins cannot be suppressed. */ }
+    return launch.requestQueue.schedule(async () => {
+      let decision, origin;
+      try { origin = `http://127.0.0.1:${await port()}`; decision = classifyRequest(request.url(), request.method(), origin); }
+      catch { decision = { allowed: false, reason: 'unverified-backend-origin' }; }
+      if (!decision.allowed) {
+        let aborted = false;
+        try {
+          await route.abort('blockedbyclient'); aborted = true;
+          assert.ok(captured, 'presence frame provenance must be captured before abort');
+          launch.presence.recordAborted({ ...captured, origin, aborted });
+        } catch {
+          report.blockedRequests.push(safeRequest(request.url(), request.method(),
+            { reason: aborted ? decision.reason : 'request-abort-unconfirmed' }));
+        }
+        await saveReport();
+        return;
+      }
+      report.localReads++;
+      if (new URL(request.url()).pathname.startsWith('/api/')) report.apiReads++;
+      await route.continue();
+    });
   });
+}
+async function verifyPresenceContext() {
+  await active.requestQueue.drain();
+  const observed = await active.page.evaluate(async () => {
+    const response = await fetch('/api/companion', { method: 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error('companion-opt-out-read-failed');
+    const snapshot = await response.json();
+    return { ownerRole: window.offerpilotDesktop?.role, snapshot: { identity: snapshot.identity, enabled: snapshot.settings?.enabled } };
+  });
+  active.presence.verifyContext({ origin: active.origin, ownerPage: active.page, ownerMainFrame: active.page.mainFrame(),
+    ownerURL: active.page.url(), ...observed });
+  active.presenceVerified = true;
+  await active.requestQueue.drain();
+  ensureSafe();
 }
 async function launch(number, locale) {
   stage = `launch-${number}-preflight`;
@@ -187,7 +224,9 @@ async function launch(number, locale) {
   await saveReport();
   const app = await _electron.launch({ executablePath: paths.exe, cwd: paths.install, env: environment,
     chromiumSandbox: true, bypassCSP: false, timeout: 90000 });
-  active = { app, number, child: app.process(), startedAt, attempt };
+  active = { app, number, child: app.process(), startedAt, attempt,
+    presence: createPresenceSuppression(), presenceVerified: false, requestQueue: createSerialRequestQueue() };
+  presenceTrackers.push({ number, tracker: active.presence });
   // Guard installation must remain the first awaited action after attachment.
   stage = `launch-${number}-request-guards`;
   attempt.phase = 'request-guards';
@@ -202,7 +241,7 @@ async function launch(number, locale) {
   await launchPhase('owned-main-process');
   owned = ownedProcesses((await windows('snapshot')).processes, identity.pid, paths.exe, paths.backend);
   await launchPhase('backend-port-file');
-  await until(() => exists(path.join(paths.userData, 'desktop-port.json')), 90000);
+  await until(() => exists(path.join(paths.userData, 'desktop-port.json')), 90000, { allowPendingPresence: true });
   active.port = await port();
   active.origin = `http://127.0.0.1:${active.port}`;
   await launchPhase('renderer-roles');
@@ -225,10 +264,15 @@ async function launch(number, locale) {
     }
     assert.ok(active.page && active.haru && active.page !== active.haru, 'distinct owner and Haru renderers must both exist');
     return true;
-  }, 90000);
+  }, 90000, { allowPendingPresence: true });
   for (const page of [active.page, active.haru]) page.setDefaultTimeout(20000);
-  await launchPhase('initial-localized-landmarks');
+  await launchPhase('verify-disabled-companion-presence');
+  await verifyPresenceContext();
+  await launchPhase('initial-owner-localized-landmark', { matched: await active.page.getByRole('navigation', { name: TEXT[locale].navigation, exact: true }).count(),
+    lang: await active.page.evaluate(() => ['zh-CN', 'en-US'].includes(document.documentElement.lang) ? document.documentElement.lang : 'unexpected') });
   await active.page.getByRole('navigation', { name: TEXT[locale].navigation, exact: true }).waitFor();
+  await launchPhase('initial-companion-localized-landmark', { matched: await active.haru.getByRole('main', { name: TEXT[locale].haru, exact: true }).count(),
+    lang: await active.haru.evaluate(() => ['zh-CN', 'en-US'].includes(document.documentElement.lang) ? document.documentElement.lang : 'unexpected') });
   await active.haru.getByRole('main', { name: TEXT[locale].haru, exact: true }).waitFor();
   await launchPhase('runtime-security-read');
   const security = await app.evaluate(({ app, BrowserWindow, session }) => {
@@ -326,7 +370,7 @@ async function launch(number, locale) {
     return state.connected && state.snapshot?.aiConfigured === false;
   }));
   await launchPhase('real-haru-close-collapses-to-character');
-  await active.haru.getByRole('button', { name: locale === 'zh-CN' ? '关闭 Haru 对话' : 'Close Haru chat', exact: true }).click();
+  await active.haru.getByRole('button', { name: TEXT[locale].close, exact: true }).click();
   await active.haru.getByRole('button', { name: TEXT[locale].expand, exact: true }).waitFor();
   const collapsed = await active.haru.evaluate(async () => window.offerpilotDesktop.getState());
   assert.equal(collapsed.expanded, false, 'X must collapse the conversation');
@@ -464,6 +508,7 @@ async function mailPreview(locale) {
 async function quitNormally() {
   stage = `launch-${active.number}-explicit-menu-exit`;
   const current = active;
+  await verifyPresenceContext();
   const quit = await current.app.evaluate(({ Menu }) => {
     const matches = Menu.getApplicationMenu().items.flatMap(item => item.submenu?.items || [])
       .filter(item => ['退出并停止本地服务', 'Quit and Stop Local Service'].includes(item.label));
@@ -479,6 +524,8 @@ async function quitNormally() {
     socket.setTimeout(1000, () => done(false)); socket.once('connect', () => done(true)); socket.once('error', () => done(false));
   });
   await until(async () => !(await portOpen()), 10000);
+  await current.requestQueue.drain();
+  ensureSafe();
   current.info.explicitProductionMenuQuit = true;
   current.info.mainAndBackendExited = true;
   current.info.backendPortClosedBeforeRestart = true;

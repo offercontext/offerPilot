@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 新 profile 的桌面实装测试仍等待旧角色名（2026-11-05）
+
+**现象：** Electron 升级的 [Windows run 41983234656](https://github.com/offercontext/offerPilot/actions/runs/41983234656) 安装及资源身份核对通过，但初始本地化 landmark 超时；报告另记录三次已阻断的 presence POST，安全断言尚未执行。
+
+**根因：** 主线 `54c7cc66` 已将未开启陪伴的新 profile 显示为 Pilot，实装 helper 的 main/expand/pin/close 仍精确等待 Haru；同阶段没有拆开 owner/companion 诊断，无法仅凭旧报告确定首先超时的 locator。当前产品默认关闭时仍尝试持久化 presence，旧只读 helper 对所有已阻断请求均报失败。这些契约差异不能当作 Electron 回归证据。
+
+**修复：** renderer 精确使用默认关闭后的 Pilot 文案，native tray 保持 Haru。presence 仍必须先 abort，仅精确同源 owner main frame、已读回关闭状态及真实身份、完整有界 schema、单 client 递增 sequence 的已确认阻断单列计数；未知状态、Haru/子 frame/worker、额外字段或任何其他写入继续失败。早期请求不能在身份核验前算通过；报告明确这是主动阻断背景写入后的限定 UI 验证。
+
+**教训：** 生产默认状态变化应同步真实实装契约，不能恢复默认开启、放宽角色正则、允许写入或伪造响应来让测试变绿。旧失败包及证据保持原状；修复 helper 后手动新构建的结果只能证明新产物，不能追认旧包通过。
+
 ## Electron 受损中间证书信任与升级验证版本绑定（2026-11-05）
 
 **现象：** 桌面运行时 Electron 44.5.1 命中 [GHSA-jr5w-w6x2-84p9](https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9)。攻击者须持有相关受损中间 CA 签发证书并可拦截 TLS；离线语音模型下载存在 Electron 外连路径，不能仅因依赖在 devDependencies 就忽略。
