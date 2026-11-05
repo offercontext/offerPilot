@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 正常 Windows 验收误用失败收尾的短超时（2026-11-05）
+
+**现象：** [run 42050324523](https://github.com/offercontext/offerPilot/actions/runs/42050324523) 通过 Windows 41 项 harness 测试、构建和实际安装，但 `launch-1-preflight` 在首次进程/端口快照的 10 秒上限触发 `owned-command-timeout`，尚未启动 Electron。
+
+**根因：** 为有界失败收尾新增的短超时误施加到所有非 install 的 PowerShell 调用。正常 CIM/TCP 观测耗时与收尾预算不同；本地 Linux 测试没有执行实际 Windows 快照，未暴露这一回归。
+
+**修复：** 普通验收恢复既有 240 秒命令预算，只在失败收尾显式传入 20 秒；安全断言、进程所有权、请求阻断与 workflow 不变。超时先拒绝 Promise 再结束自有子进程，关闭事件不能将超时变为成功。回归执行实际命令适配器的预算传递和模拟子进程超时/关闭顺序，旧失败包和报告保留。
+
+**教训：** 不将异常收尾时限全局套用正常验证，模拟测试通过不等于真实平台可用；超时诊断应区分未启动、失败与未执行阶段。
+
 ## 实装只读检查遗漏 Settings 路由并在失败后继续等待（2026-11-05）
 
 **现象：** [run 42030588664](https://github.com/offercontext/offerPilot/actions/runs/42030588664) 的真实 Electron 44.10.2 安装身份、双窗口安全和初始语言检查通过，但邮件预览阶段拒绝 presence，最终任务超时。报告保留 `aborted=2 / validated=2 / rejected=true`，未记录首拒绝原因；清理未确认进程退出。

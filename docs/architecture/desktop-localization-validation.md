@@ -71,6 +71,8 @@ owner 初始身份仍要求根地址；随后仅允许本场景实际导航的�
 
 随后 [run 42030588664](https://github.com/offercontext/offerPilot/actions/runs/42030588664) 的 source `d6e3b225bb1233d4ca8868866548923497892e9f`、安装器 SHA256 `95457ef65ed6fd7b407d602deda867e624df36674743a82de086f86a34e874f4` 已通过初次安装身份和运行时安全阶段，但邮件预览失败、完整退出与后续语言恢复未完成。Settings 路由契约缺陷在本地独立复现；旧报告没有首拒绝代码，不能宣称排除了所有其他原因，也不能追认为完整通过。下一次新构建必须单独验证。
 
+[run 42050324523](https://github.com/offercontext/offerPilot/actions/runs/42050324523) 的 source `c975dc2ee9aebaed4cb1af588d6442a71916d3d2`、安装器 SHA256 `d4666f19b8bb1eae2863b6d432b0b65035d1be08ae1943121a2b8e7fc72b0077` 通过实际安装与 Windows 41/41 harness 测试（包括真实 PowerShell JSON 日期往返），但首次进程/端口快照因新增 10 秒预算超时，Electron 尚未启动。此失败单独保留，不能引用上一轮 UI 安全结果替代本包验收。普通 PowerShell 验收已恢复原 240 秒预算，只有失败收尾使用显式 20 秒时限；断言与工作流未放宽。
+
 `ui-localization.yml` 是另外的 Web 合成浏览器截图入口；此 Windows job 不依赖或启动它。Mounted/jsdom 测试不等于真实浏览器截图，更不等于 installed Electron UI。
 
 此工作流没有运行完整 pytest/前端回归、完整 release gate、真实 AI、真实邮箱、代码签名、更新发布或生产分发。完成实验包不免除 [AGENTS.md §7](../../AGENTS.md#7-验证与-code-review) 与 [Windows 人工验收](desktop-validation.md#windows-人工验收清单) 的相关义务。

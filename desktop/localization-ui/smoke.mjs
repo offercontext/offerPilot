@@ -97,7 +97,7 @@ async function command(program, args, env = process.env, timeout = 240000) {
     const child = spawn(program, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks = [];
     let bytes = 0;
-    const timer = setTimeout(() => { child.kill(); reject(new Error('owned-command-timeout')); }, timeout);
+    const timer = setTimeout(() => { reject(new Error('owned-command-timeout')); child.kill(); }, timeout);
     child.stdout.on('data', chunk => { bytes += chunk.length; if (bytes <= 16 * 1024 * 1024) chunks.push(chunk); });
     // Never publish child stderr, inspector endpoints, tokens, or a whole environment.
     child.stderr.resume();
@@ -109,9 +109,9 @@ async function command(program, args, env = process.env, timeout = 240000) {
     });
   });
 }
-async function windows(mode, extra = {}) {
+async function windows(mode, extra = {}, timeout = 240000) {
   return JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'windows.ps1'), '-Mode', mode],
-    { ...environment, ...extra }, mode === 'install' ? 240000 : 10000));
+    { ...environment, ...extra }, timeout));
 }
 async function port() {
   const saved = JSON.parse(await fs.readFile(path.join(paths.userData, 'desktop-port.json'), 'utf8'));
@@ -655,7 +655,7 @@ try {
       requestQuit: () => requestProductionQuit(current.app),
       waitExited: () => bounded(async () => {
         const end = Date.now() + 15000;
-        while ((await windows('snapshot')).processes.length > 0) {
+        while ((await windows('snapshot', {}, 20000)).processes.length > 0) {
           if (Date.now() >= end) throw new Error('owned-processes-still-running');
           await delay(250);
         }
@@ -675,19 +675,19 @@ try {
       }, 20000),
       forceOwned: async () => {
         if (!owned.length && current.child) {
-          const snapshot = await windows('snapshot');
+          const snapshot = await windows('snapshot', {}, 20000);
           // The live Playwright wrapper is evidence of lineage, not a kill target.
           owned = earlyOwnedProcesses(snapshot.processes, { handlePid: current.child.pid,
             handleRunning: current.child.exitCode === null && current.child.signalCode === null,
             startedAt: current.startedAt, observedAt: Date.now() }, paths.exe, paths.backend);
         }
         assert.ok(owned.length, 'no-independently-verified-process-identity');
-        const snapshot = await windows('snapshot');
+        const snapshot = await windows('snapshot', {}, 20000);
         const main = owned[0];
         if (snapshot.processes.some(item => item.pid === main.pid && item.parentPid === main.parentPid && item.created === main.created && samePath(item.path, main.path))) {
           owned = ownedProcesses(snapshot.processes, main.pid, paths.exe, paths.backend);
         }
-        return windows('cleanup', { LOCALIZATION_OWNED_IDENTITIES: JSON.stringify(owned) });
+        return windows('cleanup', { LOCALIZATION_OWNED_IDENTITIES: JSON.stringify(owned) }, 20000);
       },
     });
   }

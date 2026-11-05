@@ -4,6 +4,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { buttonName, classifyRequest, safeRequest, samePath, ownedProcesses, earlyOwnedProcesses, validateSockets, treeDigest, assertNativeMenu, TEXT } from '../contract.mjs';
 
@@ -138,4 +139,34 @@ test('non-CI invocation fails before installer or browser launch and writes expl
   assert.deepEqual(result.launches, []);
   assert.deepEqual(result.screenshots, []);
   assert.ok(result.requiredStageResults.every(item => item.status === 'not-run-or-incomplete'));
+});
+
+test('normal Windows inspection retains its established budget; only failure containment uses a short deadline', async () => {
+  const code = await fs.readFile(path.join(here, '../smoke.mjs'), 'utf8');
+  const helper = code.match(/async function windows\([^]*?\n\}/)?.[0];
+  assert.ok(helper);
+  const calls = [];
+  const command = async (...args) => { calls.push(args); return '{"processes":[]}'; };
+  // Exercise the actual adapter with a harmless command spy, without launching
+  // the Windows-only acceptance entrypoint or replacing product responses.
+  const windows = new Function('command', 'path', 'here', 'environment', `return (${helper});`)(command, path, here, {});
+  await windows('snapshot'); await windows('install'); await windows('snapshot', {}, 20000);
+  assert.deepEqual(calls.map(args => args[3]), [240000, 240000, 20000]);
+  assert.deepEqual(calls.map(args => args[1].at(-1)), ['snapshot', 'install', 'snapshot']);
+  const containment = code.slice(code.indexOf('report.failureCleanup = await containFailedLaunch({'));
+  assert.equal((containment.match(/windows\('snapshot', \{\}, 20000\)/g) || []).length, 3);
+  assert.match(containment, /windows\('cleanup', \{ LOCALIZATION_OWNED_IDENTITIES: JSON\.stringify\(owned\) \}, 20000\)/);
+  assert.doesNotMatch(code.slice(0, code.indexOf('report.failureCleanup = await containFailedLaunch({')), /windows\('snapshot',/);
+});
+
+test('an owned command timeout kills the child and cannot become success from its close event', async () => {
+  const code = await fs.readFile(path.join(here, '../smoke.mjs'), 'utf8');
+  const helper = code.match(/async function command\([^]*?\n\}/)?.[0];
+  assert.ok(helper);
+  const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = { resume() {} };
+  let killed = 0;
+  child.kill = () => { killed++; child.emit('close', 0); return true; };
+  const command = new Function('spawn', `return (${helper});`)(() => child);
+  await assert.rejects(command('owned-command-spy', [], {}, 10), /owned-command-timeout/);
+  assert.equal(killed, 1);
 });
