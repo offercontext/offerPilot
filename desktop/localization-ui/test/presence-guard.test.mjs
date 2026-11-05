@@ -81,6 +81,40 @@ test('queued invalid ownership cannot be erased or converted to accepted suppres
   assert.equal(guard.summary().rejected, true);
 });
 
+test('verified owner Settings navigation keeps exact provenance and sequence without allowing other URLs', () => {
+  const { input, context, body } = fixture(); const guard = createPresenceSuppression();
+  guard.verifyContext(context); guard.recordAborted(input);
+  const ownerURL = `${origin}/?view=settings`;
+  guard.recordAborted({ ...input, frameURL: ownerURL, body: JSON.stringify({ ...body, sequence: 2 }) });
+  guard.verifyContext({ ...context, ownerURL });
+  guard.recordAborted({ ...input, body: JSON.stringify({ ...body, sequence: 3 }) });
+  guard.verifyContext(context); guard.assertSettled();
+  assert.equal(guard.summary().validated, 3);
+  for (const suffix of ['/?view=pilot', '/?view=settings&x=1', '/?view=settings&view=settings',
+    '/?view=settings#x', '/?view=%73ettings', '/?View=settings', '/?view=settings&',
+    '/?desktopSurface=haru', '/settings', '/./?view=settings', '/?view=settings/']) {
+    for (const target of ['request', 'context']) {
+      const rejected = createPresenceSuppression(); rejected.verifyContext(context);
+      assert.throws(() => target === 'request'
+        ? rejected.recordAborted({ ...input, frameURL: `${origin}${suffix}` })
+        : rejected.verifyContext({ ...context, ownerURL: `${origin}${suffix}` }), `${target}: ${suffix}`);
+      assert.equal(rejected.summary().firstRejection, 'owner-document');
+    }
+  }
+});
+
+test('first rejection is a fixed safe code and survives sticky failures without leaking values', () => {
+  const { input, context, body } = fixture(); const guard = createPresenceSuppression(); guard.verifyContext(context);
+  assert.throws(() => guard.recordAborted({ ...input, frameURL: `${origin}/?secret=private` }));
+  assert.throws(() => guard.recordAborted(input));
+  assert.throws(() => guard.verifyContext(context));
+  assert.equal(guard.summary().firstRejection, 'owner-document');
+  assert.doesNotMatch(JSON.stringify(guard.summary()), /secret|private|11111111|22222222|127\.0\.0\.1/);
+  const flags = createPresenceSuppression(); flags.verifyContext(context);
+  assert.throws(() => flags.recordAborted({ ...input, body: JSON.stringify({ ...body, quiet: true }) }));
+  assert.equal(flags.summary().firstRejection, 'inactive-signals');
+});
+
 test('route queue registers before delayed port reads and drains requests added during shutdown', async () => {
   const queue = createSerialRequestQueue(); const order = [];
   let release;

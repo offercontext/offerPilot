@@ -9,6 +9,7 @@ import { loadHaruAssetExpectations, observeHaruAssets } from '../live2d-assets.m
 import { waitForDialogSettled, waitForPaintedCharacter } from './dialog-readiness.mjs';
 import { loadOriginalEvidence } from './retry.mjs';
 import { preferenceObservation, assertDevToolsPreference, assertDevToolsProbe, probeDevToolsDisabled } from './security.mjs';
+import { bounded, requestProductionQuit, containFailedLaunch } from './shutdown.mjs';
 import { createPresenceSuppression, capturePresenceRequest, createSerialRequestQueue } from './presence-guard.mjs';
 import { PROFILE, DRAFT, MAIL, TEXT, samePath, buttonName, classifyRequest, safeRequest, ownedProcesses, earlyOwnedProcesses,
   validateSockets, sha256, treeDigest, assertNativeMenu } from './contract.mjs';
@@ -109,7 +110,8 @@ async function command(program, args, env = process.env, timeout = 240000) {
   });
 }
 async function windows(mode, extra = {}) {
-  return JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'windows.ps1'), '-Mode', mode], { ...environment, ...extra }));
+  return JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'windows.ps1'), '-Mode', mode],
+    { ...environment, ...extra }, mode === 'install' ? 240000 : 10000));
 }
 async function port() {
   const saved = JSON.parse(await fs.readFile(path.join(paths.userData, 'desktop-port.json'), 'utf8'));
@@ -509,13 +511,7 @@ async function quitNormally() {
   stage = `launch-${active.number}-explicit-menu-exit`;
   const current = active;
   await verifyPresenceContext();
-  const quit = await current.app.evaluate(({ Menu }) => {
-    const matches = Menu.getApplicationMenu().items.flatMap(item => item.submenu?.items || [])
-      .filter(item => ['退出并停止本地服务', 'Quit and Stop Local Service'].includes(item.label));
-    if (matches.length !== 1 || matches[0].enabled === false || typeof matches[0].click !== 'function') throw new Error('explicit-quit-not-found');
-    setTimeout(() => matches[0].click(matches[0], undefined, {}), 0);
-    return true;
-  });
+  const quit = await requestProductionQuit(current.app);
   assert.equal(quit, true);
   await until(async () => (await windows('snapshot')).processes.length === 0, 60000);
   const portOpen = () => new Promise(resolve => {
@@ -652,36 +648,48 @@ try {
   }
 } finally {
   if (active) {
-    try { await quitNormally(); report.failureCleanup = 'explicit-menu-exit'; }
-    catch {
-      if (!owned.length && active.child) {
-        try {
-          const snapshot = await windows('snapshot');
-          // Playwright uses shell:true on Windows: this handle may be cmd.exe.
-          // Independently identify only the installed EXE in its live lineage.
-          // Never kill the wrapper or infer that doing so stops Electron.
-          owned = earlyOwnedProcesses(snapshot.processes, { handlePid: active.child.pid,
-            handleRunning: active.child.exitCode === null && active.child.signalCode === null,
-            startedAt: active.startedAt, observedAt: Date.now() }, paths.exe, paths.backend);
-        } catch { report.failureCleanup = 'early-installed-process-lineage-unconfirmed'; }
-      }
-      if (owned.length) {
-        try {
-          const snapshot = await windows('snapshot');
-          const main = owned[0];
-          // Refresh only if the independently captured main identity still exists.
-          // This includes a backend that became ready after an early UI failure.
-          if (snapshot.processes.some(item => item.pid === main.pid && item.parentPid === main.parentPid && item.created === main.created && samePath(item.path, main.path))) {
-            owned = ownedProcesses(snapshot.processes, main.pid, paths.exe, paths.backend);
-          }
-          report.failureCleanup = await windows('cleanup', { LOCALIZATION_OWNED_IDENTITIES: JSON.stringify(owned) });
-          const end = Date.now() + 15000;
-          while (Date.now() < end && (await windows('snapshot')).processes.length > 0) await delay(250);
-          report.failureCleanup.allInstalledProcessesExited = (await windows('snapshot')).processes.length === 0;
+    const current = active;
+    // Failure containment deliberately bypasses acceptance assertions only.
+    // Request guards stay installed; no failed stage becomes passed here.
+    report.failureCleanup = await containFailedLaunch({
+      requestQuit: () => requestProductionQuit(current.app),
+      waitExited: () => bounded(async () => {
+        const end = Date.now() + 15000;
+        while ((await windows('snapshot')).processes.length > 0) {
+          if (Date.now() >= end) throw new Error('owned-processes-still-running');
+          await delay(250);
         }
-        catch { report.failureCleanup = 'owned-process-cleanup-unconfirmed'; }
-      } else report.failureCleanup ??= 'no-independently-verified-process-identity';
-    }
+        let backendPort = current.port;
+        if (!backendPort) { try { backendPort = await port(); } catch { /* Early launch may have no port. */ } }
+        let backendPortClosed = null;
+        if (backendPort) {
+          backendPortClosed = await new Promise(resolve => {
+            const socket = net.connect({ host: '127.0.0.1', port: backendPort });
+            const done = closed => { socket.destroy(); resolve(closed); };
+            socket.setTimeout(1000, () => done(false)); socket.once('connect', () => done(false));
+            socket.once('error', error => done(error.code === 'ECONNREFUSED'));
+          });
+          assert.equal(backendPortClosed, true, 'failure containment requires the observed backend port to close');
+        }
+        return { allInstalledProcessesExited: true, backendPortClosed };
+      }, 20000),
+      forceOwned: async () => {
+        if (!owned.length && current.child) {
+          const snapshot = await windows('snapshot');
+          // The live Playwright wrapper is evidence of lineage, not a kill target.
+          owned = earlyOwnedProcesses(snapshot.processes, { handlePid: current.child.pid,
+            handleRunning: current.child.exitCode === null && current.child.signalCode === null,
+            startedAt: current.startedAt, observedAt: Date.now() }, paths.exe, paths.backend);
+        }
+        assert.ok(owned.length, 'no-independently-verified-process-identity');
+        const snapshot = await windows('snapshot');
+        const main = owned[0];
+        if (snapshot.processes.some(item => item.pid === main.pid && item.parentPid === main.parentPid && item.created === main.created && samePath(item.path, main.path))) {
+          owned = ownedProcesses(snapshot.processes, main.pid, paths.exe, paths.backend);
+        }
+        return windows('cleanup', { LOCALIZATION_OWNED_IDENTITIES: JSON.stringify(owned) });
+      },
+    });
   }
   const passed = new Set(report.stages.map(item => item.name));
   report.requiredStageResults = report.requiredStages.map(name => ({ name,
@@ -692,5 +700,9 @@ try {
     process.exitCode = 1;
   }
   report.completedAt = new Date().toISOString();
+  if (report.status === 'failed') report.failedHarnessExitAfterEvidence = true;
   await saveReport();
+  // Failed Playwright connections can keep Node alive after product cleanup.
+  // Persist failure and cleanup uncertainty, then exit nonzero, never timeout-green.
+  if (report.status === 'failed') process.exit(1);
 }

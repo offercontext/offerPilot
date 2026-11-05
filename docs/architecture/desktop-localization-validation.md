@@ -65,7 +65,11 @@ Windows 2022 x64 runner 使用 Python 3.12、uv 0.12.19、Node 22。锁定安装
 
 产品关闭陪伴时仍会 POST `/api/companion/presence`，此请求会持久化状态，不能放行。harness 继续先 abort 所有非只读请求；仅将已成功阻断、精确同源路径、无重定向/worker/子 frame、来自已核验 owner main frame 的 presence 单列为 `suppressedPresence`。要求真实 GET `/api/companion` 明确返回关闭状态及匹配 identity，body 不超过 2 KiB、键和类型完全匹配、仅单一 client 且 sequence 递增，工作/审批/面试/quiet 信号为 false。早于身份读取的请求暂存内存，安全检查前必须逐一验证，未知/开启状态及其他请求仍失败；不伪造响应、不改产品或数据库。报告不保留原始 body、identity 或 client_id。
 
+owner 初始身份仍要求根地址；随后仅允许本场景实际导航的精确 `/` 与 `/?view=settings`，不接纳其他 query、重复/编码参数、hash 或 surface。身份、client 与 sequence 不因导航重置。`firstRejection` 只保留首个固定拒绝代码，后续 sticky 失败不能覆盖它。失败收尾独立于通过断言，优先调用生产退出菜单，必要时四字段重验后清理已观察的自有进程，并记录进程/端口退出是否确认；绝不补写通过 stage。失败报告落盘后 Node 退出非零，不能把未确认清理包装为通过。PowerShell 创建时间保留完整 UTC 精度；其 JSON 往返测试在既有 Windows 单元步骤执行，缺 PowerShell 的本地平台须明确记为跳过。
+
 这是“主动阻断后台 presence 写入条件下”的限定 UI/安全检查，不是未干预运行；Playwright 附着前的请求窗口仍不在 guard 覆盖内，不能声称全进程零写入或网络沙箱。原 [run 41983234656](https://github.com/offercontext/offerPilot/actions/runs/41983234656) 的 `d4e6d6efde66dca70646b6c5ee813128c8b3bd8d` 包（SHA256 `329f6d1bec5af34657c74a54d7e821a3351d1c60686a75ea5ec74291a63bd5ec`）仍是失败/未完整验收状态。修复 harness 后通过不变的 `workflow_dispatch` 重建，必须记录新 run、source SHA 与安装包 hash；不会覆盖旧失败证据、历史 provenance 或 PIN，也不改 CI 触发路由。
+
+随后 [run 42030588664](https://github.com/offercontext/offerPilot/actions/runs/42030588664) 的 source `d6e3b225bb1233d4ca8868866548923497892e9f`、安装器 SHA256 `95457ef65ed6fd7b407d602deda867e624df36674743a82de086f86a34e874f4` 已通过初次安装身份和运行时安全阶段，但邮件预览失败、完整退出与后续语言恢复未完成。Settings 路由契约缺陷在本地独立复现；旧报告没有首拒绝代码，不能宣称排除了所有其他原因，也不能追认为完整通过。下一次新构建必须单独验证。
 
 `ui-localization.yml` 是另外的 Web 合成浏览器截图入口；此 Windows job 不依赖或启动它。Mounted/jsdom 测试不等于真实浏览器截图，更不等于 installed Electron UI。
 

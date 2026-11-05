@@ -27,30 +27,47 @@ export function createSerialRequestQueue() {
     },
   };
 }
-function rootDocument(raw, origin) {
-  const url = new URL(raw);
-  assert.equal(url.href, `${origin}/`, 'presence source must be the exact owner root document');
+// Diagnostics carry fixed codes only, never assertion values or request bodies.
+function checked(code, operation) {
+  try { return operation(); }
+  catch { const error = new Error(code); error.presenceCode = code; throw error; }
+}
+function ownerDocument(raw, origin) {
+  checked('owner-document', () => {
+    // The only navigation exercised by this read-only scenario is Settings.
+    // Compare raw strings so normalization cannot admit other query variants.
+    assert.ok(raw === `${origin}/` || raw === `${origin}/?view=settings`);
+  });
 }
 function parse(input) {
-  assert.equal(input.aborted, true, 'suppression requires confirmed request abort');
-  assert.equal(input.method, 'POST', 'only the exact presence POST can be suppressed');
-  const origin = new URL(input.origin);
-  assert.equal(origin.protocol, 'http:'); assert.equal(origin.hostname, '127.0.0.1');
-  assert.ok(origin.port); assert.equal(origin.origin, input.origin);
-  assert.equal(input.url, `${input.origin}/api/companion/presence`, 'presence URL must be exact and credential/query-free');
-  assert.match(input.contentType, /^application\/json(?:;\s*charset=utf-8)?$/i);
-  for (const key of ['redirected', 'worker']) assert.equal(input[key], false);
-  assert.equal(input.mainFrame, true, 'worker and child-frame presence are forbidden');
-  rootDocument(input.frameURL, input.origin);
-  assert.equal(typeof input.body, 'string');
-  assert.ok(Buffer.byteLength(input.body, 'utf8') <= 2048, 'presence body exceeds the bounded schema');
-  const body = JSON.parse(input.body);
-  assert.ok(body && typeof body === 'object' && !Array.isArray(body));
-  assert.deepEqual(Object.keys(body).sort(), keys, 'presence body must have only the complete known schema');
-  for (const key of ['identity', 'client_id']) assert.match(body[key], uuid);
-  assert.ok(Number.isSafeInteger(body.sequence) && body.sequence >= 0);
-  for (const key of signals) assert.equal(typeof body[key], 'boolean');
-  for (const key of ['work_running', 'awaiting_approval', 'mock_interview', 'quiet']) assert.equal(body[key], false);
+  checked('confirmed-abort', () => assert.equal(input.aborted, true));
+  checked('request-target', () => {
+    assert.equal(input.method, 'POST');
+    const origin = new URL(input.origin);
+    assert.equal(origin.protocol, 'http:'); assert.equal(origin.hostname, '127.0.0.1');
+    assert.ok(origin.port); assert.equal(origin.origin, input.origin);
+    assert.equal(input.url, `${input.origin}/api/companion/presence`);
+  });
+  checked('content-type', () => assert.match(input.contentType, /^application\/json(?:;\s*charset=utf-8)?$/i));
+  checked('request-provenance', () => {
+    for (const key of ['redirected', 'worker']) assert.equal(input[key], false);
+    assert.equal(input.mainFrame, true);
+  });
+  ownerDocument(input.frameURL, input.origin);
+  const body = checked('body-schema', () => {
+    assert.equal(typeof input.body, 'string');
+    assert.ok(Buffer.byteLength(input.body, 'utf8') <= 2048);
+    const body = JSON.parse(input.body);
+    assert.ok(body && typeof body === 'object' && !Array.isArray(body));
+    assert.deepEqual(Object.keys(body).sort(), keys);
+    for (const key of ['identity', 'client_id']) assert.match(body[key], uuid);
+    assert.ok(Number.isSafeInteger(body.sequence) && body.sequence >= 0);
+    for (const key of signals) assert.equal(typeof body[key], 'boolean');
+    return body;
+  });
+  checked('inactive-signals', () => {
+    for (const key of ['work_running', 'awaiting_approval', 'mock_interview', 'quiet']) assert.equal(body[key], false);
+  });
   return { origin: input.origin, sourcePage: input.sourcePage, sourceFrame: input.sourceFrame, body };
 }
 
@@ -58,15 +75,24 @@ function parse(input) {
 // heartbeats remain unaccepted until the real owner and backend opt-out are read.
 // Raw request bodies and identifiers are held only in memory, never in evidence.
 export function createPresenceSuppression() {
-  let context, client, sequence = -1, aborted = 0, validated = 0, rejected = false;
+  let context, client, sequence = -1, aborted = 0, validated = 0, rejected = false, firstRejection;
   const pending = [];
+  function reject(error) {
+    firstRejection ??= error.presenceCode || 'unclassified-validation';
+    rejected = true;
+    throw error;
+  }
   function validate(candidate) {
-    assert.equal(candidate.origin, context.origin);
-    assert.equal(candidate.sourcePage, context.ownerPage, 'only the verified owner may emit suppressed presence');
-    assert.equal(candidate.sourceFrame, context.ownerMainFrame, 'presence must originate in the verified owner main frame');
-    assert.equal(candidate.body.identity, context.snapshot.identity, 'presence identity must match the actual disabled backend');
-    if (client !== undefined) assert.equal(candidate.body.client_id, client, 'presence client cannot change during a launch');
-    assert.ok(candidate.body.sequence > sequence, 'presence sequence must advance without replay');
+    checked('owner-provenance', () => {
+      assert.equal(candidate.origin, context.origin);
+      assert.equal(candidate.sourcePage, context.ownerPage);
+      assert.equal(candidate.sourceFrame, context.ownerMainFrame);
+    });
+    checked('backend-identity', () => assert.equal(candidate.body.identity, context.snapshot.identity));
+    checked('client-continuity', () => {
+      if (client !== undefined) assert.equal(candidate.body.client_id, client);
+    });
+    checked('sequence-advance', () => assert.ok(candidate.body.sequence > sequence));
     client = candidate.body.client_id; sequence = candidate.body.sequence; validated++;
   }
   return {
@@ -75,22 +101,23 @@ export function createPresenceSuppression() {
         assert.equal(rejected, false, 'a rejected presence cannot later be accepted');
         const candidate = parse(input); aborted++;
         if (context) validate(candidate); else pending.push(candidate);
-      } catch (error) { rejected = true; throw error; }
+      } catch (error) { reject(error); }
     },
     verifyContext(next) {
       try {
         assert.equal(rejected, false, 'a rejected presence cannot later be accepted');
-        assert.equal(next.ownerRole, 'owner'); rootDocument(next.ownerURL, next.origin);
-        assert.ok(next.ownerPage && next.ownerMainFrame);
-        assert.equal(next.snapshot?.enabled, false, 'backend opt-out must be explicitly observed');
-        assert.match(next.snapshot.identity, uuid);
-        if (context) {
-          for (const key of ['origin', 'ownerPage', 'ownerMainFrame']) assert.equal(next[key], context[key]);
-          assert.equal(next.snapshot.identity, context.snapshot.identity, 'backend identity must not change during a launch');
-        }
+        ownerDocument(next.ownerURL, next.origin);
+        checked('owner-context', () => {
+          assert.equal(next.ownerRole, 'owner'); assert.ok(next.ownerPage && next.ownerMainFrame);
+          if (context) for (const key of ['origin', 'ownerPage', 'ownerMainFrame']) assert.equal(next[key], context[key]);
+        });
+        checked('backend-opt-out', () => {
+          assert.equal(next.snapshot?.enabled, false); assert.match(next.snapshot.identity, uuid);
+          if (context) assert.equal(next.snapshot.identity, context.snapshot.identity);
+        });
         context = next;
         while (pending.length) { validate(pending[0]); pending.shift(); }
-      } catch (error) { rejected = true; throw error; }
+      } catch (error) { reject(error); }
     },
     assertSettled() {
       assert.equal(rejected, false, 'unexpected presence must fail acceptance');
@@ -98,6 +125,6 @@ export function createPresenceSuppression() {
       assert.equal(pending.length, 0, 'unverified early presence must fail acceptance');
       assert.equal(aborted, validated, 'every suppressed request must have verified abort and provenance');
     },
-    summary() { return { aborted, validated, pending: pending.length, rejected }; },
+    summary() { return { aborted, validated, pending: pending.length, rejected, ...(firstRejection ? { firstRejection } : {}) }; },
   };
 }

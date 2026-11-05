@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 实装只读检查遗漏 Settings 路由并在失败后继续等待（2026-11-05）
+
+**现象：** [run 42030588664](https://github.com/offercontext/offerPilot/actions/runs/42030588664) 的真实 Electron 44.10.2 安装身份、双窗口安全和初始语言检查通过，但邮件预览阶段拒绝 presence，最终任务超时。报告保留 `aborted=2 / validated=2 / rejected=true`，未记录首拒绝原因；清理未确认进程退出。
+
+**根因：** `pushWorkspaceView('settings')` 将 owner 地址改为 `/?view=settings`，presence helper 的请求来源及上下文校验仅接受 `/`，这是可独立复现的契约缺陷，不能据此排除旧运行并发的其他异常。失败收尾复用带安全前置断言的 `quitNormally()`，已失败 guard 阻止了生产退出菜单执行；Node 连接存活又延长到 job timeout。PowerShell 的 JSON 日期反序列化还可能使原字符串创建时间比较失败，此兼容路径须在真实 runner 验证。
+
+**修复：** 仅接受相同已验证 owner/frame 的精确 `/` 或 `/?view=settings`，其他 query/hash/path、client/sequence/flags 异常仍失败，所有 POST 仍先阻断。首拒绝保存固定代码，不保存请求或身份值。失败收尾独立尝试生产退出、有界等待，必要时按 PID/父 PID/路径/创建时间四项重验清理，不生成通过 stage；创建时间统一 UTC 精确格式。保留清理未确认状态并在落盘后退出非零，不再依赖长任务超时。新增真实 PowerShell JSON 往返的模拟进程测试，在既有 Windows 测试步骤执行。
+
+**教训：** 只读拦截也须跟踪合法页面导航；验收断言失败不能阻止失败收尾。单元测试和部分实装安全通过均不等于完整 UI 验收，旧包及失败证据不得改写。
+
 ## 新 profile 的桌面实装测试仍等待旧角色名（2026-11-05）
 
 **现象：** Electron 升级的 [Windows run 41983234656](https://github.com/offercontext/offerPilot/actions/runs/41983234656) 安装及资源身份核对通过，但初始本地化 landmark 超时；报告另记录三次已阻断的 presence POST，安全断言尚未执行。
