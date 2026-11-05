@@ -1,5 +1,13 @@
 import assert from 'node:assert/strict';
 
+// Retain the historical policy without permitting mixed old/new dependencies:
+// retry also requires identical harness/product locks before any installation.
+// Both exact versions omit devTools in SaveLastPreferences; OpenDevTools still
+// rejects the call when the constructor disables it. Do not accept a semver range.
+// https://github.com/electron/electron/blob/v44.10.2/shell/browser/web_contents_preferences.cc#L389-L411
+// https://github.com/electron/electron/blob/v44.10.2/shell/browser/api/electron_api_web_contents.cc#L3499-L3527
+const reviewedOmittedDevToolsVersions = new Set(['44.5.1', '44.10.2']);
+
 export function preferenceObservation(value) {
   if (value === undefined) return 'undefined';
   if (typeof value === 'boolean') return value;
@@ -7,14 +15,16 @@ export function preferenceObservation(value) {
 }
 
 export function assertDevToolsPreference(value, runtimeElectron, proof) {
+  assert.equal(typeof runtimeElectron, 'string', 'installed Electron version must be observed');
+  assert.equal(runtimeElectron, proof?.lockedElectron, 'installed Electron must match the exact product source lock');
   if (value !== undefined) {
     assert.equal(value, false, 'reported packaged devTools preference must be explicitly false');
     return;
   }
-  // Electron 44.5.1 can omit this constructor-only preference. Missing is not
+  // The reviewed runtimes omit this constructor-only preference. Missing is not
   // equivalent to false: require the exact version and verified source policy.
-  assert.equal(runtimeElectron, '44.5.1', 'missing devTools getter is supported only for exact Electron 44.5.1');
-  assert.deepEqual(proof, { lockedElectron: '44.5.1', installedSourcesHashMatched: true,
+  assert.ok(reviewedOmittedDevToolsVersions.has(runtimeElectron), 'missing devTools getter requires an explicitly reviewed Electron version');
+  assert.deepEqual(proof, { lockedElectron: runtimeElectron, installedSourcesHashMatched: true,
     ownerPackagedDisabled: true, haruDisabled: true }, 'missing devTools getter requires exact hash-bound packaged constructor policies');
 }
 

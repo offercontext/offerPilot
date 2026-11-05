@@ -29,7 +29,7 @@ const report = {
     applicationMenu: 'read-only native Menu object; explicit production quit callback invoked through inspector',
     tray: 'transparent setContextMenu observation; production call, this and return preserved',
     nativeMenuPointerValidated: false, unsignedSmartScreenValidated: false, undebuggedLaunchValidated: false,
-    devTools: 'negative openDevTools event/state/contents probes on both installed windows; omitted getter accepted only for exact Electron 44.5.1 plus hash-verified packaged constructor policies',
+    devTools: 'negative openDevTools event/state/contents probes on both installed windows; runtime must match the source lock; omitted getter requires an explicitly reviewed exact Electron version plus hash-verified packaged constructor policies',
     network: 'renderer requests abort on non-GET/HEAD or unexpected origin; process TCP snapshots at checkpoints',
     networkLimit: 'Renderer guard begins after Playwright attaches. OS snapshots are not continuous backend packet capture.',
   },

@@ -51,6 +51,14 @@ Windows 2022 x64 runner 使用 Python 3.12、uv 0.12.19、Node 22。锁定安装
 
 工作流要求 harness 成功退出才将限定 installed UI 标为通过；失败时仍保留已构建且已验证 hash 的同一实验 installer、明确未通过的状态 manifest、UI 报告与截图，便于只重试同包安装验收。保留 artifact 不会把失败的 job 变绿，也不是发布。该限定检查不替代安装/卸载/升级、完整桌面功能、所有菜单和系统对话框等全面验收。完整发布 gate 与真实 AI/邮箱验收仍未运行，不能套用旧 installed-ui artifact 的成功记录。
 
+### Electron 证书修复与精确版本验证（2026-11-05）
+
+当前构建锁定 Electron `44.10.2`，修复 [GHSA-jr5w-w6x2-84p9](https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9) 所述受损 eMudhra 中间证书信任问题；44.x 的最低修复版本是 `44.9.1`。Electron 虽列在 devDependencies，仍是安装包的运行时；模型下载经其 Chromium TLS，不能按纯开发依赖忽略。更新源码依赖不等于用户已安装的旧包已升级。
+
+`security.mjs` 要求实际 `process.versions.electron` 与本次产品源码锁定版本精确相同。`devTools` getter 缺失仅接受已审查的 `44.5.1`（历史同包重试）与 `44.10.2`，不接受版本范围或仅凭 undefined 推断关闭。新版本的 [`SaveLastPreferences()`](https://github.com/electron/electron/blob/v44.10.2/shell/browser/web_contents_preferences.cc#L389-L411) 仍省略该字段，且 [`OpenDevTools()`](https://github.com/electron/electron/blob/v44.10.2/shell/browser/api/electron_api_web_contents.cc#L3499-L3527) 在禁用时直接返回。必须同时保留安装 ASAR/源码身份、owner/Haru 构造策略及两窗口五项负向行为探针；其他版本、版本不符、证据缺失或任一打开观察都失败。
+
+旧 `installed-ui` 和 `real-ai-validation` 的 installer PIN、摘要及历史运行记录不随依赖升级改写。历史同包重试仍要求 harness/product lock 完全相同，因此本升级分支不能直接重试旧 `44.5.1` 包；保留旧版本策略不等于允许混用新依赖与旧安装器。新包仍须记录自己的 source SHA、安装器与安装资源摘要及 Windows 实装结果；本节不是新包已通过或发布就绪的声明。
+
 `ui-localization.yml` 是另外的 Web 合成浏览器截图入口；此 Windows job 不依赖或启动它。Mounted/jsdom 测试不等于真实浏览器截图，更不等于 installed Electron UI。
 
 此工作流没有运行完整 pytest/前端回归、完整 release gate、真实 AI、真实邮箱、代码签名、更新发布或生产分发。完成实验包不免除 [AGENTS.md §7](../../AGENTS.md#7-验证与-code-review) 与 [Windows 人工验收](desktop-validation.md#windows-人工验收清单) 的相关义务。
