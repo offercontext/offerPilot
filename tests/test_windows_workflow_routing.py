@@ -802,10 +802,10 @@ if (phase === 'test') {
     report = root / 'report 空格.json'
     argv = frontend_command(_command_plan(selected, all_files), report)
     code = _run_frontend_contract(argv, web, root / 'npm.log')
-    assert code == (7 if mode == 'failure' else 0), (root / 'npm.log').read_text(errors='replace')
-    phases = [json.loads(line) for line in (web / 'lifecycle.jsonl').read_text().splitlines()]
+    assert code == (7 if mode == 'failure' else 0), (root / 'npm.log').read_text(encoding='utf-8', errors='replace')
+    phases = [json.loads(line) for line in (web / 'lifecycle.jsonl').read_text(encoding='utf-8').splitlines()]
     assert [entry['phase'] for entry in phases] == (['pre', 'test'] if mode == 'failure' else ['pre', 'test', 'post'])
-    actual = json.loads(report.read_text())['args']
+    actual = json.loads(report.read_text(encoding='utf-8'))['args']
     assert actual == argv[3:]
     assert Path(phases[1]['cwd']).resolve() == web.resolve()
     assert len(argv) == (9 if mode == 'subset' else 8)

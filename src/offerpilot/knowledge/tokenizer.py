@@ -1,17 +1,19 @@
-"""Knowledge 产品 tokenizer。
+"""Knowledge 固定 tokenizer；独立加载经过校验的 cl100k_base 离线资源。
 
-Spec §4.2 要求固定 `knowledge-tokenizer-v1`：pinned `cl100k_base` 计数，不随 Provider
-切换而变化。本模块负责加载并缓存该编码器，向 Extractor 与上传 Preflight 提供稳定
-token 计数。
-
-tiktoken cl100k_base 在网络受限环境下需要下载 merges 文件。产品 tokenizer 是
-固定契约，加载失败时必须拒绝 Extraction，不能用估算值越过 token 上限门禁。
+保持 knowledge-tokenizer-v1 的精确计数与 64,000 token 门禁，不依赖 Provider SDK
+导入时的缓存初始化。显式缓存配置优先；缺失、损坏或禁用缓存时拒绝加载，不下载、
+删除资源或估算 token。默认只读已安装 LiteLLM 分发包自带的同一编码数据，不导入 SDK。
 """
 
 from __future__ import annotations
 
+import base64
 import functools
+import hashlib
+import os
 from dataclasses import dataclass
+from importlib.metadata import distribution
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 
@@ -22,6 +24,17 @@ if TYPE_CHECKING:
 TOKENIZER_VERSION = "cl100k_base-1"
 TOKENIZER_KIND = "cl100k_base"
 _MAX_TOKEN_LIMIT = 64_000
+_ENCODING_CACHE_KEY = "9b5ad71b2ce5302211f9c61530b329a4922fc6a4"
+_ENCODING_SHA256 = "223921b76ee99bde995b7ff738513eef100fb51d18c93597a113bcffe865b2a7"
+# cl100k_base-1 的定义与固定 merges 数据共同确定 token 身份。
+_PATTERN = r"""'(?i:[sdmt]|ll|ve|re)|[^\r\n\p{L}\p{N}]?+\p{L}++|\p{N}{1,3}+| ?[^\s\p{L}\p{N}]++[\r\n]*+|\s++$|\s*[\r\n]|\s+(?!\S)|\s"""
+_SPECIAL_TOKENS = {
+    "<|endoftext|>": 100257,
+    "<|fim_prefix|>": 100258,
+    "<|fim_middle|>": 100259,
+    "<|fim_suffix|>": 100260,
+    "<|endofprompt|>": 100276,
+}
 
 
 class TokenizerUnavailableError(RuntimeError):
@@ -35,16 +48,41 @@ class TokenCount:
     fallback: bool
 
 
+def _encoding_resource() -> Path:
+    for variable in ("TIKTOKEN_CACHE_DIR", "DATA_GYM_CACHE_DIR"):
+        if variable in os.environ:
+            configured = os.environ[variable]
+            if not configured:
+                raise TokenizerUnavailableError("explicit tokenizer cache is disabled")
+            return Path(configured) / _ENCODING_CACHE_KEY
+    custom = os.environ.get("CUSTOM_TIKTOKEN_CACHE_DIR")
+    if custom:
+        return Path(custom) / _ENCODING_CACHE_KEY
+    return Path(str(distribution("litellm").locate_file(
+        "litellm/litellm_core_utils/tokenizers/" + _ENCODING_CACHE_KEY
+    )))
+
+
 @functools.lru_cache(maxsize=1)
 def _load_encoding() -> "tiktoken.Encoding | None":
     try:
+        # 校验与解析同一次读取的 bytes，不再次打开文件，也不经过会删除/下载的缓存层。
+        data = _encoding_resource().read_bytes()
+        if hashlib.sha256(data).hexdigest() != _ENCODING_SHA256:
+            return None
+        ranks: dict[bytes, int] = {}
+        for line in data.splitlines():
+            if line:
+                token, rank = line.split()
+                ranks[base64.b64decode(token, validate=True)] = int(rank)
         import tiktoken
-    except OSError:
-        return None
-    except ImportError:
-        return None
-    try:
-        return tiktoken.get_encoding(TOKENIZER_KIND)
+
+        return tiktoken.Encoding(
+            name=TOKENIZER_KIND,
+            pat_str=_PATTERN,
+            mergeable_ranks=ranks,
+            special_tokens=dict(_SPECIAL_TOKENS),
+        )
     except Exception:
         return None
 

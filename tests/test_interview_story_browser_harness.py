@@ -1094,6 +1094,45 @@ def test_isolated_python_keeps_json_stdout_separate_from_diagnostics(
     assert not list(tmp_path.glob("json-probe-*"))
 
 
+@pytest.mark.parametrize("port_sequence", ("then_distinct", "always_same"))
+def test_story_browser_harness_service_proxy_ports_handle_ephemeral_reuse(
+    tmp_path: Path, port_sequence: str,
+) -> None:
+    source = _HARNESS_PATH.read_text(encoding="utf-8")
+    allocator = source[
+        source.index("function Get-DistinctFreePort("):
+        source.index("function Assert-ExitCode(")
+    ]
+    anchor = "  $providers | ConvertTo-Json -Compress | Set-Content -LiteralPath $providerAllowlist -Encoding utf8\n"
+    start = source.index(anchor) + len(anchor)
+    allocation = source[start:source.index("  $env:OFFERPILOT_DATA = $tempData", start)]
+    wrapper = tmp_path / "service-ports.ps1"
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$script:cursor = 0\n"
+        + f"$script:sequence = '{port_sequence}'\n"
+        + "function Get-FreePort {\n"
+        + "  $script:cursor++\n"
+        + "  if ($script:sequence -eq 'always_same' -or $script:cursor -le 2) { return 19100 }\n"
+        + "  return 19101\n"
+        + "}\n"
+        + allocator
+        + allocation
+        + "@{service=$port; proxy=$proxyPort; allocations=$script:cursor} | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(wrapper)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if port_sequence == "then_distinct":
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"service": 19100, "proxy": 19101, "allocations": 3}
+    else:
+        assert result.returncode != 0
+        assert "Could not allocate a distinct local port" in result.stderr
+
+
 def test_story_browser_harness_starts_audited_chromium_before_honoring_completion_signal(tmp_path: Path) -> None:
     source_data = tmp_path / "configured-data"
     source_data.mkdir()

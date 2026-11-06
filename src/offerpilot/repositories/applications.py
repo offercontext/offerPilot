@@ -9,8 +9,9 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from builtins import list as BuiltinList
 
-from sqlalchemy import and_, case, exists, func, select, update
+from sqlalchemy import and_, case, exists, func, inspect, select, update
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm.attributes import set_committed_value
 
 from offerpilot.application_status import (
     FIRST_STATUS_TIMESTAMP_ATTR,
@@ -476,7 +477,14 @@ def _normalize_model_status(app: Application) -> Application:
     for attr in FIRST_STATUS_TIMESTAMP_ATTR.values():
         value = getattr(app, attr)
         if value is not None and value.tzinfo is None:
-            setattr(app, attr, value.replace(tzinfo=timezone.utc))
+            normalized = value.replace(tzinfo=timezone.utc)
+            if inspect(app).attrs[attr].history.has_changes():
+                # Preserve a caller's actual pending mutation in a bound session.
+                setattr(app, attr, normalized)
+            else:
+                # SQLite returns naive UTC. A read-only presentation conversion
+                # must not schedule an UPDATE (and trigger updated_at on flush).
+                set_committed_value(app, attr, normalized)
     return app
 
 

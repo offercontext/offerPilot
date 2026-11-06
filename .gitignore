@@ -69,6 +69,7 @@ docs/*
 .omc/
 .codegraph/
 .codex/
+/artifacts/
 
 # Local browser and whiteboard verification artifacts
 .playwright-mcp/

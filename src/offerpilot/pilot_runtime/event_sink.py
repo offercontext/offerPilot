@@ -330,6 +330,16 @@ class InMemoryRuntimeInvocationControl:
             object.__setattr__(self, "_state", InvocationState.COMPLETED)
             return True
 
+    def claim_finish_state(self) -> InvocationState:
+        """Claim terminal convergence after its durable writer lock is held."""
+        with self._lock:
+            if self._fence_owner == get_ident():
+                raise RuntimeError("control mutation is not allowed inside a commit fence")
+            prior = self._state
+            if prior is InvocationState.ACTIVE:
+                object.__setattr__(self, "_state", InvocationState.COMPLETED)
+            return prior
+
     def is_active(self) -> bool:
         with self._lock:
             return self._state is InvocationState.ACTIVE

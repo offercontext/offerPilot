@@ -130,43 +130,144 @@ def test_timeout_receipt_fails_closed_when_execution_terminal_write_is_busy(tmp_
     import sqlite3
     from contextlib import closing
 
-    from offerpilot.pilot_control import PilotControlRepository
+    from sqlalchemy import event
+
+    from offerpilot.pilot_control import PilotControlRepository, current_execution_scope
 
     model = BarrierModel()
     worker_done = timeout_after_signal(monkeypatch, model.entered)
     original_finish = PilotControlRepository.try_finish
     busy_results = []
+    recovery_updates = []
+    rollback_snapshots = []
+    cleanup_results = []
+    listener = []
+    current_lease = []
 
-    def finish_with_busy_writer(repository, lease, state):
+    def snapshot(database, lease):
+        with closing(sqlite3.connect(str(database))) as reader:
+            execution = reader.execute(
+                'SELECT state FROM pilot_executions WHERE turn_id = ? AND generation = ? '
+                'AND owner_token = ?', (lease.turn_id, lease.generation, lease.owner_token),
+            ).fetchone()[0]
+            turn = reader.execute('SELECT state FROM pilot_turns WHERE id = ?',
+                                  (lease.turn_id,)).fetchone()[0]
+            roles = tuple(row[0] for row in reader.execute(
+                'SELECT role FROM chat_messages WHERE conversation_id = ? ORDER BY id',
+                (lease.conversation_id,),
+            ))
+            return execution, turn, roles
+
+    def finish_with_busy_writer(repository, lease, state, *, resolve_state=None):
         if state != 'interrupted' or busy_results:
-            return original_finish(repository, lease, state)
+            if recovery_updates and not rollback_snapshots:
+                rollback_snapshots.append(snapshot(repository.session_factory.kw['bind'].url.database,
+                                                   lease))
+            result = original_finish(repository, lease, state, resolve_state=resolve_state)
+            if recovery_updates:
+                cleanup_results.append((state, resolve_state is not None, result))
+            return result
         engine = repository.session_factory.kw['bind']
+        current_lease.append(lease)
         with closing(sqlite3.connect(str(engine.url.database))) as writer:
             try:
                 writer.execute('BEGIN IMMEDIATE')
-                result = original_finish(repository, lease, state)
+                result = original_finish(repository, lease, state, resolve_state=resolve_state)
                 busy_results.append(result)
-                return result
             finally:
                 writer.rollback()
+
+        def reject_recovery_transition(connection, _cursor, statement, _parameters, _context, _many):
+            scope = current_execution_scope()
+            if (scope is None or not scope.recover_timed_out_execution or scope.lease != lease
+                    or not statement.startswith('UPDATE pilot_turns')):
+                return
+            # Observe both real SQL updates before rejecting this exact recovery transaction.
+            execution = connection.exec_driver_sql(
+                'SELECT state FROM pilot_executions WHERE turn_id = ? AND generation = ? '
+                'AND owner_token = ?', (lease.turn_id, lease.generation, lease.owner_token),
+            ).scalar_one()
+            turn = connection.exec_driver_sql('SELECT state FROM pilot_turns WHERE id = ?',
+                                              (lease.turn_id,)).scalar_one()
+            recovery_updates.append((execution, turn))
+            raise RuntimeError('fixture rejects actual timeout recovery transaction')
+
+        event.listen(engine, 'after_cursor_execute', reject_recovery_transition)
+        listener.append((engine, reject_recovery_transition))
+        return result
 
     monkeypatch.setattr(PilotControlRepository, 'try_finish', finish_with_busy_writer)
     with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
         try:
             response = client.post('/api/chat', json={'message': '不能伪称超时说明已保存'})
             assert busy_results == [False]
+            assert recovery_updates == [('interrupted', 'interrupted')]
+            assert rollback_snapshots == [('running', 'started', ('user',))]
+            assert cleanup_results[0] == ('result_unknown', True, True)
             assert response.status_code == 503, response.text
             assert response.json()['error_code'] == 'operation_failed'
             assert not worker_done.is_set()
+            conversation_id = response.json()['conversation_id']
+            messages = client.get(f'/api/chat/conversations/{conversation_id}').json()
+            assert [message['role'] for message in messages] == ['user']
+            turn = client.get(f"/api/chat/turns/{response.json()['turn_id']}").json()
+            assert turn['state'] == 'result_unknown'
+            assert snapshot(listener[0][0].url.database, current_lease[0]) == (
+                'result_unknown', 'incomplete', ('user',),
+            )
         finally:
+            for engine, callback in listener:
+                event.remove(engine, 'after_cursor_execute', callback)
             model.release.set()
             assert worker_done.wait(20), 'Timed-out Agent worker did not exit'
-        conversation_id = response.json()['conversation_id']
-        messages = client.get(f'/api/chat/conversations/{conversation_id}').json()
-        assert [message['role'] for message in messages] == ['user']
-        turn = client.get(f"/api/chat/turns/{response.json()['turn_id']}").json()
-        assert turn['state'] == 'failed'
+        assert client.get(f'/api/chat/conversations/{conversation_id}').json() == messages
+        assert client.get(f"/api/chat/turns/{response.json()['turn_id']}").json() == turn
         assert model.calls == 1
+
+
+def test_durable_timeout_saves_receipt_when_initial_terminal_probe_misses(tmp_path, monkeypatch):
+    import sqlite3
+    from contextlib import closing
+
+    from offerpilot.pilot_control import PilotControlRepository
+
+    original = PilotControlRepository.try_finish
+    missed = []
+
+    def miss_once(self, lease, state, *, resolve_state=None):
+        if state == 'interrupted' and not missed:
+            with closing(sqlite3.connect(str(self.session_factory.kw['bind'].url.database))) as writer:
+                try:
+                    writer.execute('BEGIN IMMEDIATE')
+                    result = original(self, lease, state, resolve_state=resolve_state)
+                    missed.append((state, result))
+                    return result
+                finally:
+                    writer.rollback()
+        return original(self, lease, state, resolve_state=resolve_state)
+
+    monkeypatch.setattr(PilotControlRepository, 'try_finish', miss_once)
+    model = BarrierModel()
+    worker_done = timeout_after_signal(monkeypatch, model.entered)
+    try:
+        with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+            response = client.post('/api/chat', json={'message': '超时应有已保存说明'})
+            assert response.status_code == 200, response.text
+            turn = client.get(f"/api/chat/turns/{response.json()['turn_id']}").json()
+            messages = client.get(f"/api/chat/conversations/{turn['conversation_id']}").json()
+            assert missed == [('interrupted', False)]
+            assert not worker_done.is_set()
+            assert [m['role'] for m in messages] == ['user', 'assistant']
+            assert '处理时间过长' in messages[-1]['content']
+            assert turn['state'] == 'interrupted'
+            model.release.set()
+            assert worker_done.wait(20), 'Timed-out Agent worker did not exit'
+            assert client.get(f"/api/chat/conversations/{turn['conversation_id']}").json() == messages
+            assert client.get(f"/api/chat/turns/{response.json()['turn_id']}").json() == turn
+            assert model.calls == 1
+    finally:
+        model.release.set()
+        assert worker_done.wait(20), 'Timed-out Agent worker did not exit'
 
 
 def test_control_endpoints_require_existing_api_auth(tmp_path):

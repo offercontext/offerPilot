@@ -1,0 +1,101 @@
+{
+  "schema_version": 2,
+  "suite_id": "harness-core-v1",
+  "execution_items": [
+    {
+      "execution_item_id": "E01.runtime_read",
+      "spec_path": "cases/E01.runtime_read.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E02.runtime_clarify",
+      "spec_path": "cases/E02.runtime_clarify.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E03.runtime_reject",
+      "spec_path": "cases/E03.runtime_reject.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E04.runtime_edit",
+      "spec_path": "cases/E04.runtime_edit.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E05.runtime_replay",
+      "spec_path": "cases/E05.runtime_replay.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E05.runtime_conflict",
+      "spec_path": "cases/E05.runtime_conflict.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E06.legacy_saved",
+      "spec_path": "cases/E06.legacy_saved.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E06.runtime_saved",
+      "spec_path": "cases/E06.runtime_saved.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E06.legacy_missing",
+      "spec_path": "cases/E06.legacy_missing.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E06.runtime_missing_observe",
+      "spec_path": "cases/E06.runtime_missing_observe.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E07.runtime_reattach",
+      "spec_path": "cases/E07.runtime_reattach.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E08.runtime_unknown",
+      "spec_path": "cases/E08.runtime_unknown.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E08.runtime_deadline",
+      "spec_path": "cases/E08.runtime_deadline.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E08.runtime_model_budget",
+      "spec_path": "cases/E08.runtime_model_budget.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E08.runtime_tool_budget",
+      "spec_path": "cases/E08.runtime_tool_budget.v4.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E09.memory_override",
+      "spec_path": "cases/E09.memory_override.v2.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E09.memory_withdraw",
+      "spec_path": "cases/E09.memory_withdraw.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E10.knowledge_dual_retrieval",
+      "spec_path": "cases/E10.knowledge_dual_retrieval.v3.json",
+      "required": true
+    },
+    {
+      "execution_item_id": "E10.evidence_injection",
+      "spec_path": "cases/E10.evidence_injection.v3.json",
+      "required": true
+    }
+  ]
+}

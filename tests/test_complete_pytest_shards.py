@@ -325,6 +325,13 @@ def test_node_split_source_change_requires_a_new_isolation_review():
     # closures; function monkeypatch restores the model, delivery and control
     # methods. The provider exits via Future.result before timeout recovery;
     # the busy SQLite writer is closed after finally rolling back its lock.
+    # Independently re-reviewed the merged host and busy-recovery probes: their
+    # Events, executors, SQLite writer and counters are invocation-local, and
+    # function monkeypatch restores all three observed methods. The provider
+    # host's caller releases and observes its worker in finally. The selection
+    # plugin adds collection/reporting only, with no fixture or setup hooks;
+    # its process-global reports are diagnostic, under one pytest.main per
+    # official shard process. Shared globals and runtime scope guards are intact.
     # Include the shared helper, since its state is part of chat node isolation.
     # Independently re-reviewed selector registration: without selection options,
     # the plugin adds priority markers and appends per-process observation reports,
@@ -335,7 +342,7 @@ def test_node_split_source_change_requires_a_new_isolation_review():
     # Normalize only checkout CRLF so the same reviewed source works on Windows.
     reviewed = {
         "tests/test_chat_api.py":
-            "ad0021f743be5322e9ab5ea1fc4aae288411e572875f19171c806153cdf46fc9",
+            "867868390855bc1f735f2dc95d26f15e807f694fe5115815b5c8c18745ebe7fd",
         "tests/_agent_timeout.py":
             "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735",
         "tests/conftest.py":

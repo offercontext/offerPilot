@@ -198,15 +198,18 @@ function Invoke-IsolatedPython([string]$label, [string]$code) {
 }
 
 function Wait-ForHttpReady([object]$process, [string]$uri, [string]$label, [int]$attempts = 60) {
+  $readinessWatch = [Diagnostics.Stopwatch]::StartNew()
   for ($i = 0; $i -lt $attempts; $i++) {
-    if ($process.HasExited) { throw "$label exited before readiness." }
+    if ($process.HasExited) {
+      throw "$label exited before readiness. pid=$($process.Id); endpoint=$uri; elapsed_ms=$($readinessWatch.ElapsedMilliseconds)"
+    }
     try {
       $response = Invoke-RestMethod -Uri $uri -TimeoutSec 2
       if ($null -ne $response) { return $response }
     } catch { }
     Start-Sleep -Milliseconds 500
   }
-  throw "$label did not become ready."
+  throw "$label did not become ready. pid=$($process.Id); endpoint=$uri; attempts=$attempts; elapsed_ms=$($readinessWatch.ElapsedMilliseconds)"
 }
 
 function Get-ProcessDiagnostic([string]$stdoutPath, [string]$stderrPath) {
@@ -1114,8 +1117,9 @@ try {
   if (@($providers | Where-Object { $_.Scheme -ne 'https' }).Count -gt 0) { throw 'Configured Provider endpoint must use HTTPS.' }
   $providers | ConvertTo-Json -Compress | Set-Content -LiteralPath $providerAllowlist -Encoding utf8
 
-  $port = Get-FreePort
-  $proxyPort = Get-FreePort
+  $reservedServicePorts = [System.Collections.Generic.HashSet[int]]::new()
+  $port = Get-DistinctFreePort $reservedServicePorts
+  $proxyPort = Get-DistinctFreePort $reservedServicePorts
   $baseUrl = "http://127.0.0.1:$port"
   $env:OFFERPILOT_DATA = $tempData
   $env:HTTP_PROXY = "http://127.0.0.1:$proxyPort"

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import errno
+import importlib
 from io import BytesIO
 from PIL import Image
 import json
@@ -142,16 +143,28 @@ def test_streaming_provider_records_only_disconnect_errors(monkeypatch, error, r
         assert not release.is_set(), "cleanup must not supply the disconnect evidence"
 
 
-@pytest.mark.parametrize("with_image", [False, True], ids=["text", "image"])
-@pytest.mark.parametrize("mode", ["continuous", "silent", "delayed_headers"])
-@pytest.mark.parametrize("endpoint", ["/api/chat/turns", "/api/pilot/runtime/v1/turns"])
-def test_interrupt_closes_actual_provider_even_without_next_chunk(tmp_path, mode, endpoint, monkeypatch, with_image):
+@pytest.fixture
+def initialized_provider_sdk(monkeypatch):
+    """Prepare the real SDK before measuring transport readiness and cancellation.
+
+    Cold product imports remain covered separately in test_provider_sdk_loading.
+    This fixture does not construct a provider request or relax any wait below.
+    """
     # Ignore unrelated SOCKS mounts unsupported by this test environment.
     # All provider traffic below is strictly the fixture's loopback address.
     monkeypatch.delenv("ALL_PROXY", raising=False)
     monkeypatch.delenv("all_proxy", raising=False)
     monkeypatch.setenv("NO_PROXY", "127.0.0.1,localhost")
     monkeypatch.setenv("no_proxy", "127.0.0.1,localhost")
+    importlib.import_module("litellm")
+
+
+@pytest.mark.parametrize("with_image", [False, True], ids=["text", "image"])
+@pytest.mark.parametrize("mode", ["continuous", "silent", "delayed_headers"])
+@pytest.mark.parametrize("endpoint", ["/api/chat/turns", "/api/pilot/runtime/v1/turns"])
+def test_interrupt_closes_actual_provider_even_without_next_chunk(
+    tmp_path, mode, endpoint, with_image, initialized_provider_sdk,
+):
     with streaming_provider(mode) as (port, entered, disconnected, release, counters):
         config = Config(active_provider_id="synthetic", providers=[AIProviderProfile(
             id="synthetic", provider="openai_compatible", api_key="synthetic-local-key",

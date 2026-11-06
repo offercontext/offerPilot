@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "case_id": "E06",
+  "case_version": 1,
+  "execution_item_id": "E06.legacy_saved",
+  "coverage_kind": "full_recovery",
+  "adapter": "legacy-chat",
+  "fixture_id": "synthetic-interviews-v1",
+  "action_id": "E06.legacy_saved",
+  "model_id": "interviews-v1",
+  "fault_id": "after_persist",
+  "required_rules": [
+    "execution.expected_outcome",
+    "approval.before_commit",
+    "approval.effective_payload",
+    "event.exact_target",
+    "business.no_unexpected_delta",
+    "operation.single_effect",
+    "receipt.edited_no_model_continuation",
+    "recovery.saved_receipt",
+    "recovery.zero_calls",
+    "recovery.zero_committed_dml",
+    "evidence.required_complete"
+  ],
+  "product_budget": {
+    "policy": "observe_current"
+  },
+  "evaluator_limits": {
+    "wall_seconds": 180,
+    "model_calls": 6,
+    "tool_attempts": 12,
+    "script_replies": 4,
+    "startup_seconds": 30,
+    "shutdown_seconds": 30
+  }
+}

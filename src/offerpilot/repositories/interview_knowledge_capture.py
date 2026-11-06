@@ -421,6 +421,9 @@ class InterviewKnowledgeCaptureRepository:
                 )
             except InterviewKnowledgePreviewError as exc:
                 raise InterviewKnowledgeValidationError(exc.category) from exc
+            # 安全空结果可作预览。已确认版本必须含内容块才能被知识库读取。
+            if not canonical_content["blocks"]:
+                raise InterviewKnowledgeValidationError("empty_blocks")
             snapshot_bytes, snapshot_ranges = serialize_capture_snapshot_with_ranges(fragments)
             snapshot_text = snapshot_bytes.decode("utf-8")
             snapshot_digest = hashlib.sha256(snapshot_bytes).hexdigest()
