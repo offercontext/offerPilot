@@ -32,6 +32,17 @@ from offerpilot.evaluation.runner import ROOT
 from scripts.evaluation_subject.process_tree import ProcessTree
 
 
+from tests.evaluation._windows_owner import account_default_owner
+
+
+@pytest.fixture(scope="module", autouse=True)
+def test_account_owner():
+    # Elevated Windows CI otherwise creates files owned by Administrators. Keep
+    # real require_owned checks, including claims and atomic replacements.
+    with account_default_owner():
+        yield
+
+
 class LoopbackBackend(offline.OfflineBackend):
     report_filename = "targeted-report.json"
     require_owned_exit = True
@@ -110,13 +121,18 @@ def private_fixture(tmp_path):
         assert tmp_path.is_dir() and not tmp_path.is_symlink() and not list(tmp_path.iterdir())
         identity = subprocess.check_output(["whoami","/user","/fo","csv","/nh"],text=True)
         sid = next(csv.reader([identity.strip()]))[1]
+        subprocess.run(["icacls",str(tmp_path),"/setowner",f"*{sid}"],
+            check=True,capture_output=True)
         subprocess.run(["icacls",str(tmp_path),"/inheritance:r","/grant:r",
             f"*{sid}:(OI)(CI)F","*S-1-5-18:(OI)(CI)F","*S-1-5-32-544:(OI)(CI)F"],
             check=True,capture_output=True)
 
+    from offerpilot.evaluation.core_targeted_trust import require_owned
+    require_owned(tmp_path)
+
 
 @pytest.fixture(scope="module")
-def frozen_inputs(tmp_path_factory):
+def frozen_inputs(tmp_path_factory, test_account_owner):
     tmp_path = tmp_path_factory.mktemp("measured-inputs")
     private_fixture(tmp_path)
     variants = tmp_path / "variants.json"
@@ -161,6 +177,21 @@ def prepare(setup, *, max_requests=27, cap=1, cli=False, authorization="test-aut
 
 def account(setup, **kwargs):
     return FileBudgetAccount(setup["ports"].registry, setup["config"], **kwargs)
+
+
+def test_new_authority_files_and_atomic_replacements_are_account_owned(setup):
+    # Exercise actual ownership, not a mock: Windows CI must create descendants
+    # and replacement files with the account SID, including after fixture setup.
+    from offerpilot.evaluation.core_targeted_trust import require_owned
+    root = setup["ports"].registry.root
+    child = root / "owner-regression" / "nested"
+    child.mkdir(parents=True)
+    target = child / "state.json"
+    atomic_json(target, {"value": 1})
+    for path in (root, child.parent, child, target):
+        require_owned(path)
+    atomic_json(target, {"value": 2})
+    require_owned(target)
 
 
 def test_preflight_is_read_only_and_freezes_full13(setup):
