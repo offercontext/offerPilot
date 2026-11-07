@@ -31,6 +31,7 @@ from .contracts import (
     CompletedEvent,
     ConfirmationRequiredOutcome,
     ErrorEvent,
+    InvocationState,
     MessageOutcome,
     OperationPendingOutcome,
     OperationReplayOutcome,
@@ -1088,17 +1089,21 @@ class RuntimeExecutionManager:
         *,
         safe_message: str = _SAFE_TIMEOUT_MESSAGE,
         request_timeout: bool = True,
+        honor_finish_claim: bool = False,
     ) -> None:
+        if request_timeout:
+            try:
+                changed = handle.invocation_control.request_timeout()
+                if (honor_finish_claim and not changed
+                        and handle.invocation_control.state is InvocationState.COMPLETED):
+                    return
+            except BaseException:
+                pass
         handle.timeout_requested = handle.timeout_requested or request_timeout
         handle.state = "result_unknown"
         handle.logical_terminal = True
         handle.outcome = None
         self._emit_terminal_locked(handle, None, safe_message)
-        if request_timeout:
-            try:
-                handle.invocation_control.request_timeout()
-            except BaseException:
-                pass
 
     def _emit_terminal_locked(self, handle: _ManagedRun, outcome: object | None, message: str) -> None:
         if message:
@@ -1472,7 +1477,7 @@ class RuntimeExecutionManager:
                     if handle.state == "queued":
                         self._finish_before_start_locked(handle, "runtime deadline exhausted")
                     elif handle.state in {"running", "accepted"}:
-                        self._finish_unknown_locked(handle, "runtime deadline exhausted")
+                        self._finish_unknown_locked(handle, "runtime deadline exhausted", honor_finish_claim=True)
 
     def close(self, *, wait: bool = False) -> None:
         with self._condition:

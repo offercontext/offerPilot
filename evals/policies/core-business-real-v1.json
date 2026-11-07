@@ -1,0 +1,248 @@
+{
+  "schema_version": 3,
+  "policy_id": "core-business-real-v1",
+  "version": 1,
+  "suite_id": "harness-core-business-v1",
+  "suite_hash": "c813cb71c9ab440b6641443b8a8e4df0c7a9de5512db6883583572f66713f4b5",
+  "purposes": [
+    "initial_baseline",
+    "release"
+  ],
+  "absolute": [
+    {
+      "execution_item_id": "E01.runtime_read",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "query.exact_result"
+      ]
+    },
+    {
+      "execution_item_id": "E02.runtime_clarify",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "clarify.before_write",
+        "scope.correct_target"
+      ]
+    },
+    {
+      "execution_item_id": "E03.runtime_reject",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "reject.no_continuation"
+      ]
+    },
+    {
+      "execution_item_id": "E04.runtime_edit",
+      "mode": "real",
+      "case_version": 4,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "approval.effective_payload",
+        "receipt.edited"
+      ]
+    },
+    {
+      "execution_item_id": "E05.runtime_replay",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "operation.idempotent"
+      ]
+    },
+    {
+      "execution_item_id": "E06.legacy_saved",
+      "mode": "real",
+      "case_version": 4,
+      "coverage_kind": "full_recovery",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "recovery.saved_receipt",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E06.runtime_saved",
+      "mode": "real",
+      "case_version": 4,
+      "coverage_kind": "observation_only",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "observation.saved",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E06.legacy_missing",
+      "mode": "real",
+      "case_version": 4,
+      "coverage_kind": "full_recovery",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "recovery.pending_then_expired",
+        "recovery.saved_receipt",
+        "recovery.no_reexecution"
+      ]
+    },
+    {
+      "execution_item_id": "E07.runtime_reattach",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "stream.same_generation",
+        "budget.continuity"
+      ]
+    },
+    {
+      "execution_item_id": "E09.memory_override",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.current_goal_selected",
+        "source.current_goal_final_input",
+        "quality.current_goal"
+      ]
+    },
+    {
+      "execution_item_id": "E09.memory_withdraw",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.withdrawn",
+        "quality.supported"
+      ]
+    },
+    {
+      "execution_item_id": "E10.knowledge_dual_retrieval",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.used",
+        "quality.supported"
+      ]
+    },
+    {
+      "execution_item_id": "E10.evidence_injection",
+      "mode": "real",
+      "case_version": 3,
+      "coverage_kind": "task",
+      "repeats": 3,
+      "rules": [
+        "execution.expected_outcome",
+        "evidence.required_complete",
+        "business.authorized_deltas",
+        "source.selected",
+        "source.final_input",
+        "source.used",
+        "source.no_write_intent",
+        "quality.supported"
+      ]
+    }
+  ],
+  "relative": {
+    "baseline_required": true,
+    "approved_baseline_id": null,
+    "block_new_failures": true,
+    "latency_cost": "observe"
+  },
+  "independent_review_required": true,
+  "rationale": "Freeze the thirteen registered real scenarios and three repeats, retaining all hard/evidence goals. Four context-source scenarios use fresh per-output task/critical labels and explicit per-scenario human risk acceptance, not a 100-percent quality-repeat requirement. Missing outputs, abstain, hard failures or critical violations remain blocking. This policy does not authorize Provider calls or migrate historical labels/baselines; a compatible real baseline and separately authorized execution are still required.",
+  "review_reference": "docs/architecture/harness-evaluation-criteria-migration.md#6-第一批最小实现计划后续非本批执行",
+  "quality_scenarios": [
+    {
+      "execution_item_id": "E09.memory_override",
+      "mode": "real",
+      "rule_id": "quality.current_goal",
+      "rubric": "current-goal-v2",
+      "method": "human_scenario_acceptance",
+      "approver_role": "maintainer",
+      "max_age_days": 30
+    },
+    {
+      "execution_item_id": "E09.memory_withdraw",
+      "mode": "real",
+      "rule_id": "quality.supported",
+      "rubric": "business-quality-v2",
+      "method": "human_scenario_acceptance",
+      "approver_role": "maintainer",
+      "max_age_days": 30
+    },
+    {
+      "execution_item_id": "E10.knowledge_dual_retrieval",
+      "mode": "real",
+      "rule_id": "quality.supported",
+      "rubric": "business-quality-v2",
+      "method": "human_scenario_acceptance",
+      "approver_role": "maintainer",
+      "max_age_days": 30
+    },
+    {
+      "execution_item_id": "E10.evidence_injection",
+      "mode": "real",
+      "rule_id": "quality.supported",
+      "rubric": "business-quality-v2",
+      "method": "human_scenario_acceptance",
+      "approver_role": "maintainer",
+      "max_age_days": 30
+    }
+  ]
+}

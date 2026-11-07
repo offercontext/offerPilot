@@ -1,0 +1,8 @@
+{
+  "fixture_id": "synthetic-e09-current-goal-v1",
+  "application_fixture": "synthetic-interviews-v1",
+  "memory": "此前的面试准备偏好是只练习前端页面和 CSS 布局，所有建议都围绕页面视觉效果。",
+  "current_request": "本次面试目标改为接口测试与故障定位。请给出两条可立即练习的准备建议，分别围绕这两个目标；只使用已知资料，未提供的个人经历不要假定。只读回答，不做任何写入。",
+  "scripted_answer": "选择一个公开 API，列出正常、边界与异常输入并说明断言依据。\n用一个自造的接口失败例子练习分层排查，区分请求、服务和依赖并列出需要的日志。",
+  "scope": "Synthetic business-goal conflict. The deterministic answer proves only fixed-script data flow; real goal following requires output-bound human review."
+}

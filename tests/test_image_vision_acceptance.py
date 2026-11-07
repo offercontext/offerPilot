@@ -182,7 +182,7 @@ def test_dry_run_never_reads_key_or_calls_provider(tmp_path: Path, monkeypatch: 
     assert report["status"] == "dry_run"
     assert report["provider_calls"] == []
     assert len(list((tmp_path / "fixtures").glob("*.png"))) == 3
-    assert "not-used-private-key" not in (tmp_path / "report.json").read_text()
+    assert "not-used-private-key" not in (tmp_path / "report.json").read_text(encoding="utf-8")
 
 
 def test_execute_without_dedicated_key_fails_without_fallback(
@@ -243,15 +243,15 @@ def test_real_product_path_with_offline_transport_and_no_key_file(
     assert report["provider_calls"][-1]["image_sha256"] == report["provider_calls"][-2][
         "image_sha256"
     ]
-    assert "synthetic-test-private-key" not in (tmp_path / "report.json").read_text()
-    assert "base64" not in (tmp_path / "report.json").read_text()
+    assert "synthetic-test-private-key" not in (tmp_path / "report.json").read_text(encoding="utf-8")
+    assert "base64" not in (tmp_path / "report.json").read_text(encoding="utf-8")
 
 
 def test_history_only_cli_dry_run_plans_two_without_calls(tmp_path: Path, monkeypatch: Any) -> None:
     monkeypatch.setattr("sys.argv", ["image_vision_acceptance.py", "--history-only",
                                     "--output", str(tmp_path / "report.json")])
     assert acceptance.main() == 0
-    report = json.loads((tmp_path / "report.json").read_text())
+    report = json.loads((tmp_path / "report.json").read_text(encoding="utf-8"))
     assert report["scope"] == "history_only"
     assert report["planned_calls"] == 2
     assert report["status"] == "dry_run"

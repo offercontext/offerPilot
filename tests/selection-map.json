@@ -8825,7 +8825,994 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_async_transport.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "provider_admission",
+        "task_isolation",
+        "transport_closure"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_budget_denial_attribution.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_cleanup_failures.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_cli.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_commit_observer.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_compare.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_context_observer.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_contracts.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_control_exit_drain.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_acceptance.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_adjudication.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_baselines.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_contracts.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_extensions.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_governance.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_integrity.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_origin_reads.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_planning.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_planning_targets.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_history.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_parallel.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_paths.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_refresh_sources.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release_capture.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_release_reads.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_review.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_core_review_evidence.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_external_reports.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "estimated_seconds": null,
+      "level": "test"
+    },
+    "tests/evaluation/test_failure_observations.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_final_input.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_legacy_http_deadline.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_local_http_cancellation.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_observer_crash.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_p0_cases.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_pretrial_failure_diagnostics.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_process_signals.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_product_budget_probe.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_provider_network.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_read_normalization.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_read_run.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_redaction.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_run_budget.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_runner.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_snapshot_workers.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_source_functional_goals.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_stream_consumption.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_subject_shutdown.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_subject_source_loading.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_targeted_authorized.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_targeted_offline.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_targeted_paths.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_unknown_cleanup_boundary.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_verdicts.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_application_event_update_presence.py": {
+      "modules": [
+        "applications"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_chat_line_format_policy.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_knowledge_tokenizer_offline.py": {
+      "modules": [
+        "knowledge"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_provider_sdk_loading.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/tool_metadata/test_integrity_work.py": {
+      "modules": [
+        "tool_pipeline"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_account_archive.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_bounded_ledger.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_channel_transport.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_cli_isolation.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_final_dispatch.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_protocol_journal.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_review_regressions.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_runtime_context.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_sdk_wire.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_utf8.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_wire.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_current_goal_migration.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_task_quality_decisions.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_quality_output_inventory.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_task_review_workflow.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_business_policy_consumers.py": {
+      "modules": [
+        "evaluation"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
     }
   },
-  "safety_baseline": "tests/selection-safety-master-v1.json"
+  "safety_baseline": "tests/selection-safety-integrated-v1.json"
 }

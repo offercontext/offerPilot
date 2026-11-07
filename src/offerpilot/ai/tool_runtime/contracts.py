@@ -476,13 +476,15 @@ class ProviderToolContract:
 
     def _checked_identity_snapshot(self) -> tuple[str, str, int, int]:
         """Validate once and expose only scalars, never private query nodes."""
-        self._ensure_provider_integrity()
-        return (
+        snapshot = (
             self.name,
             self.description,
             id(object.__getattribute__(self, "_payload_snapshot")),
             id(object.__getattribute__(self, "_parameters_snapshot")),
         )
+        # Detect drift caused while reading scalar fields and root identities.
+        self._ensure_provider_integrity()
+        return snapshot
 
     def __deepcopy__(self, memo: dict[int, object]) -> ProviderToolContract:
         del memo

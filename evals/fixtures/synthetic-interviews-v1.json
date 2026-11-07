@@ -1,0 +1,50 @@
+{
+  "fixture_id": "synthetic-interviews-v1",
+  "timezone": "Asia/Shanghai",
+  "applications": [
+    {
+      "alias": "target_application",
+      "company_name": "云岚数据",
+      "position_name": "测试开发"
+    },
+    {
+      "alias": "other_application",
+      "company_name": "云岚数据",
+      "position_name": "后端开发"
+    }
+  ],
+  "events": [
+    {
+      "alias": "technical_interview",
+      "application": "target_application",
+      "event_type": "interview",
+      "subtype": "technical",
+      "scheduled_at": "2026-10-14T10:00:00+08:00",
+      "duration_minutes": 60
+    },
+    {
+      "alias": "other_interview",
+      "application": "target_application",
+      "event_type": "interview",
+      "subtype": "hr",
+      "scheduled_at": "2026-10-14T14:00:00+08:00",
+      "duration_minutes": 60
+    },
+    {
+      "alias": "outside_month",
+      "application": "target_application",
+      "event_type": "interview",
+      "subtype": "technical",
+      "scheduled_at": "2026-11-02T10:00:00+08:00",
+      "duration_minutes": 60
+    },
+    {
+      "alias": "other_scope_interview",
+      "application": "other_application",
+      "event_type": "interview",
+      "subtype": "technical",
+      "scheduled_at": "2026-10-14T10:00:00+08:00",
+      "duration_minutes": 60
+    }
+  ]
+}
