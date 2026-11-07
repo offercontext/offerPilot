@@ -11,6 +11,12 @@
     "prepare": "node prepare.mjs",
     "validate": "node run.mjs"
   },
+  "overrides": {
+    "@electron/asar@4.3.1": {
+      "minimatch": "11.0.4",
+      "glob": { ".": "14.0.3", "minimatch": "11.0.4" }
+    }
+  },
   "dependencies": {
     "@electron/asar": "4.3.1",
     "@electron/fuses": "2.1.3",

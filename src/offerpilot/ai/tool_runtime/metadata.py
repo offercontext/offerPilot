@@ -822,12 +822,18 @@ class BundleInstanceToken(TransientToolRuntimeValue):
                 ),
             )
 
-    def _ensure_integrity(self) -> None:
+    def _ensure_integrity(self, *, last_view: object | None = None) -> None:
         try:
             self._ensure_registry_integrity()
+            deferred: tuple[object, object] | None = None
             for view, expected_snapshot in self._issued.values():
+                if view is last_view:
+                    deferred = (view, expected_snapshot)
+                    continue
                 if not _bundle_view_matches_integrity_snapshot(view, expected_snapshot):
                     raise ValueError("metadata Bundle view integrity drift")
+            if deferred is not None and not _bundle_view_matches_integrity_snapshot(*deferred):
+                raise ValueError("metadata Bundle view integrity drift")
         except (AttributeError, TypeError, ValueError) as exc:
             raise ValueError("Bundle instance token integrity drift") from exc
 
@@ -848,11 +854,13 @@ class BundleInstanceToken(TransientToolRuntimeValue):
 
     def _require_view(self, view: object, expected_type: type[object]) -> None:
         with self._lock:
-            self._ensure_integrity()
+            self._ensure_integrity(last_view=view)
             issued = self._issued.get(expected_type)
             if type(view) is not expected_type or issued is None or issued[0] is not view:
                 raise TypeError("metadata view was not issued by this Bundle token")
-            # The complete Bundle check above already checked this exact view.
+            # Validate the exact requested view last, retaining detection of
+            # target drift during other-view scans without visiting it twice.
+            # Every later public access still performs the full Bundle check.
 
     def _require_issued_view_integrity(
         self,
@@ -1326,6 +1334,8 @@ def _bundle_view_matches_integrity_snapshot(value: object, expected: object) -> 
         return False
     snapshot = cast(tuple[object, ...], expected)
     kind = snapshot[0]
+    if value is None or type(value) in {bool, int, float, str}:
+        return len(snapshot) == 2 and kind is type(value) and value == snapshot[1]
     if kind is ProviderToolContract:
         if type(value) is not ProviderToolContract or len(snapshot) != 6:
             return False
@@ -1378,8 +1388,6 @@ def _bundle_view_matches_integrity_snapshot(value: object, expected: object) -> 
             _bundle_view_matches_integrity_snapshot(item, item_snapshot)
             for item, item_snapshot in zip(value, expected_items)
         )
-    if value is None or type(value) in {bool, int, float, str}:
-        return len(snapshot) == 2 and kind is type(value) and value == snapshot[1]
     if isinstance(
         value,
         (

@@ -98,13 +98,13 @@ class ProcessTree:
 
     def wait(self, timeout: float) -> int:
         result = self.process.wait(timeout=timeout)
-        if os.name != "nt":
+        if sys.platform != "win32":
             limit = time.monotonic() + min(timeout, 5)
             while self._posix_group_alive():
                 if time.monotonic() >= limit:
                     raise TimeoutError("owned POSIX descendants did not exit")
                 time.sleep(0.02)
-        if os.name == "nt" and self.job:
+        if sys.platform == "win32" and self.job:
             from ctypes import wintypes as w
             class Accounting(ctypes.Structure):
                 _fields_ = [(n, ctypes.c_int64) for n in ("user", "kernel", "period_user", "period_kernel")] + [

@@ -39,6 +39,7 @@ from offerpilot.ai.tool_specs.applications import LIST_APPLICATIONS_RESULT_BYTE_
 from offerpilot.ai.write_operations import (
     TypedPendingRouteHandle,
     WriteOperationError,
+    WriteOperationRepository,
     pending_route_claim_for_cleanup,
 )
 from offerpilot.agent_runtime.journal import NullRunRecorderFactory, RunRecorderFactory
@@ -96,6 +97,44 @@ from tests._agent_timeout import timeout_after_signal
 _LEGACY_JD_EXECUTION_EVENTS: list[str] | None = None
 _LEGACY_JD_EXECUTION_ORIGINAL: Any = None
 _TEST_TOOL_CATALOG = build_model_tool_catalog()
+
+
+def _timeout_after_agent_signal_host(
+    signal: Event,
+    worker_done: Event | None = None,
+    *,
+    signal_timeout_seconds: float = 5,
+    timeout_requested: Event | None = None,
+):
+    """Return a deterministic non-joining host that times out after Agent work starts."""
+
+    class TimeoutAfterAgentSignalHost:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def run(self, thunk, invocation_control):
+            executor = transport_module.ThreadPoolExecutor(max_workers=1)
+
+            def run_worker():
+                try:
+                    return thunk()
+                finally:
+                    if worker_done is not None:
+                        worker_done.set()
+
+            executor.submit(transport_module.copy_context().run, run_worker)
+            try:
+                assert signal.wait(timeout=signal_timeout_seconds), (
+                    "Agent work did not reach the timeout probe"
+                )
+                assert invocation_control.request_timeout()
+                if timeout_requested is not None:
+                    timeout_requested.set()
+                raise RuntimeAgentTimedOut()
+            finally:
+                executor.shutdown(wait=False, cancel_futures=False)
+
+    return TimeoutAfterAgentSignalHost
 
 
 def _record_legacy_jd_execution(service: Any, encoded_args: str) -> str:
@@ -7804,6 +7843,17 @@ def test_chat_confirm_result_cas_loss_stays_stale_on_followup_failure(
 def test_chat_confirm_followup_timeout_busy_transition_preserves_original_pending(
     tmp_path, monkeypatch, endpoint
 ):
+    _assert_confirm_followup_busy_transition(tmp_path, monkeypatch, endpoint, expire_delivery=True)
+
+
+@pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
+def test_chat_confirm_followup_timeout_released_busy_transition_delivers_one_fallback(
+    tmp_path, monkeypatch, endpoint
+):
+    _assert_confirm_followup_busy_transition(tmp_path, monkeypatch, endpoint, expire_delivery=False)
+
+
+def _assert_confirm_followup_busy_transition(tmp_path, monkeypatch, endpoint, *, expire_delivery):
     model = TimeoutAfterPendingModel(
         ToolCall(
             id="busy-timeout-transition",
@@ -7817,22 +7867,40 @@ def test_chat_confirm_followup_timeout_busy_transition_preserves_original_pendin
     original_try_finish = PilotControlRepository.try_finish
     busy_results = []
 
-    def finish_with_busy_writer(repository, lease, state):
+    def finish_with_busy_writer(repository, lease, state, *, resolve_state=None):
         if state != "interrupted" or busy_results:
-            return original_try_finish(repository, lease, state)
+            return original_try_finish(repository, lease, state, resolve_state=resolve_state)
         assert model.calls == 2
         database = repository.session_factory.kw["bind"].url.database
         with closing(sqlite3.connect(str(database))) as writer:
             try:
                 writer.execute("BEGIN IMMEDIATE")
-                result = original_try_finish(repository, lease, state)
+                result = original_try_finish(repository, lease, state, resolve_state=resolve_state)
                 busy_results.append(result)
+                if expire_delivery:
+                    # A released short lock alone still permits trusted receipt recovery.
+                    # Invalidate only this committed operation's real delivery qualification.
+                    cursor = writer.execute(
+                        "UPDATE write_operations SET delivery_lease_expires_at = 0 "
+                        "WHERE id = ? AND status = 'committed' AND delivery_status = 'pending'",
+                        (pending["pending_action"]["operation_id"],),
+                    )
+                    assert cursor.rowcount == 1
+                    writer.commit()
                 return result
             finally:
                 writer.rollback()
 
     delivery_attempts = []
     original_delivery = ChatPersistenceCoordinator.persist_confirmation_delivery
+    heartbeat_results = []
+    original_heartbeat = WriteOperationRepository.heartbeat
+
+    def observe_heartbeat(repository, ownership):
+        result = original_heartbeat(repository, ownership)
+        if ownership.operation_id == pending["pending_action"]["operation_id"]:
+            heartbeat_results.append(result)
+        return result
 
     def observe_delivery(self, *args, **kwargs):
         delivery_attempts.append(True)
@@ -7840,6 +7908,7 @@ def test_chat_confirm_followup_timeout_busy_transition_preserves_original_pendin
 
     monkeypatch.setattr(PilotControlRepository, "try_finish", finish_with_busy_writer)
     monkeypatch.setattr(ChatPersistenceCoordinator, "persist_confirmation_delivery", observe_delivery)
+    monkeypatch.setattr(WriteOperationRepository, "heartbeat", observe_heartbeat)
     response = client.post(
         endpoint,
         json={
@@ -7851,6 +7920,55 @@ def test_chat_confirm_followup_timeout_busy_transition_preserves_original_pendin
 
     assert model.calls == 2, response.text
     assert busy_results == [False]
+    if not expire_delivery:
+        assert delivery_attempts == [True], response.text
+        assert response.status_code == 200
+        if endpoint.endswith("/stream"):
+            event = _parse_sse_events(response.text)[-1]
+            assert event["event"] == "completed", response.text
+            body = event["data"]["data"]["response"]
+        else:
+            body = response.json()
+        assert body["operation_id"] == pending["pending_action"]["operation_id"]
+        assert body["write_status"] == "success"
+        assert "写入已完成" in body["message"]
+        assert body["undo"]["application_id"] == application["id"]
+        conversation = client.get("/api/chat/conversations").json()[0]
+        assert conversation["pending_action"] is None
+        assert conversation["last_write_undo"] == body["undo"]
+        retry = client.post(
+            endpoint,
+            json={
+                "conversation_id": pending["conversation_id"],
+                "operation_id": body["operation_id"],
+                "approved": True,
+                "confirmation_token": pending["pending_action"]["confirmation_token"],
+            },
+        )
+        assert retry.status_code == 200
+        if endpoint.endswith("/stream"):
+            event = _parse_sse_events(retry.text)[-1]
+            assert event["event"] == "completed", retry.text
+            replay = event["data"]["data"]["response"]
+        else:
+            replay = retry.json()
+        assert replay["replayed"] is True
+        for key in ("operation_id", "message", "undo", "write_status"):
+            assert replay[key] == body[key]
+        assert model.calls == 2
+        assert delivery_attempts == [True]
+        stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+        assert sum(message["role"] == "tool" for message in stored) == 1
+        assert sum(message["content"] == body["message"] for message in stored) == 1
+        operations, _ = _ledger_rows(tmp_path)
+        assert len(operations) == 1
+        assert operations[0].status == "committed"
+        assert operations[0].delivery_status == "failed"
+        assert operations[0].delivery_outcome == "fallback"
+        assert operations[0].delivery_failure_code == "operation_delivery_failed"
+        assert app_client.get(f"/api/applications/{application['id']}").json()["status"] == "offer"
+        return
+    assert False in heartbeat_results
     assert delivery_attempts == [], response.text
     if endpoint.endswith("/stream"):
         error = _parse_sse_events(response.text)[-1]
@@ -7870,6 +7988,7 @@ def test_chat_confirm_followup_timeout_busy_transition_preserves_original_pendin
     assert len(operations) == 1
     assert operations[0].status == "committed"
     assert operations[0].delivery_status == "pending"
+    assert operations[0].delivery_lease_expires_at == 0
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
@@ -7911,7 +8030,7 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
     assert response.status_code == 200
     if endpoint.endswith("/stream"):
         events = _parse_sse_events(response.text)
-        assert events[-1]["event"] == "completed"
+        assert events[-1]["event"] == "completed", response.text
         body = events[-1]["data"]["data"]["response"]
     else:
         body = response.json()
@@ -7935,7 +8054,7 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
     assert retry.status_code == 200
     if endpoint.endswith("/stream"):
         retry_events = _parse_sse_events(retry.text)
-        assert retry_events[-1]["event"] == "completed"
+        assert retry_events[-1]["event"] == "completed", retry.text
         retry_body = retry_events[-1]["data"]["data"]["response"]
     else:
         retry_body = retry.json()
@@ -7944,6 +8063,86 @@ def test_chat_confirm_timeout_after_write_returns_completed_fallback(
     assert retry_body["undo"] == body["undo"]
     assert retry_body["operation_id"] == body["operation_id"]
     assert retry_body["write_status"] == body["write_status"]
+
+
+@pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])
+def test_chat_confirm_host_timeout_after_committed_origin_delivers_one_fallback(
+    tmp_path, monkeypatch, endpoint
+):
+    provider_entered = Event()
+    provider_returned = Event()
+    timeout_requested = Event()
+    release_provider = Event()
+    worker_done = Event()
+
+    class BlockedPostCommitModel(TimeoutAfterPendingModel):
+        def complete(self, messages, tools):
+            if self.calls == 0:
+                return super().complete(messages, tools)
+            self.calls += 1
+            provider_entered.set()
+            assert release_provider.wait(timeout=15), "test did not release the late provider"
+            provider_returned.set()
+            return Assistant(content="late provider response must not replace the saved fallback")
+
+    model = BlockedPostCommitModel(
+        ToolCall(
+            id="post-commit-host-timeout",
+            name="update_application_status",
+            args=json.dumps({"id": 1, "status": "offer"}),
+        )
+    )
+    _, client, _, pending = _create_status_confirmation(tmp_path, model)
+    monkeypatch.setattr(
+        transport_module,
+        "SyncAgentExecutionHost",
+        _timeout_after_agent_signal_host(
+            provider_entered,
+            worker_done,
+            signal_timeout_seconds=60,
+            timeout_requested=timeout_requested,
+        ),
+    )
+    request = {
+        "conversation_id": pending["conversation_id"],
+        "approved": True,
+        "confirmation_token": pending["pending_action"]["confirmation_token"],
+    }
+    try:
+        response = client.post(endpoint, json=request)
+        assert provider_entered.is_set(), response.text
+        assert timeout_requested.is_set(), response.text
+        assert response.status_code == 200, response.text
+        if endpoint.endswith("/stream"):
+            events = _parse_sse_events(response.text)
+            assert events[-1]["event"] == "completed", response.text
+            body = events[-1]["data"]["data"]["response"]
+        else:
+            body = response.json()
+        assert "写入已完成" in body["message"], response.text
+        assert body["undo"]["application_id"] == 1
+    finally:
+        release_provider.set()
+        assert worker_done.wait(timeout=15), "late confirmation worker did not exit"
+
+    assert provider_returned.is_set(), "late provider failed before producing its reply"
+
+    stored = client.get(f"/api/chat/conversations/{pending['conversation_id']}").json()
+    assert [message["role"] for message in stored].count("tool") == 1
+    assert [message["content"] for message in stored].count(body["message"]) == 1
+    assert not any("late provider response" in message["content"] for message in stored)
+    replay = client.post(endpoint, json={**request, "operation_id": body["operation_id"]})
+    assert replay.status_code == 200, replay.text
+    if endpoint.endswith("/stream"):
+        replay_events = _parse_sse_events(replay.text)
+        assert replay_events[-1]["event"] == "completed", replay.text
+        replay_body = replay_events[-1]["data"]["data"]["response"]
+    else:
+        replay_body = replay.json()
+    assert replay_body["replayed"] is True
+    assert replay_body["message"] == body["message"]
+    assert replay_body["operation_id"] == body["operation_id"]
+    assert model.calls == 2
 
 
 @pytest.mark.parametrize("endpoint", ["/api/chat/confirm", "/api/chat/confirm/stream"])

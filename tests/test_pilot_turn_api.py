@@ -117,11 +117,11 @@ def test_failed_terminal_write_retries_the_known_result_not_interrupted(tmp_path
     original = PilotControlRepository.finish
     attempted = []
 
-    def finish(self, lease, state):
+    def finish(self, lease, state, **kwargs):
         attempted.append(state)
         if len(attempted) == 1:
             raise RuntimeError('temporary display write failure')
-        original(self, lease, state)
+        original(self, lease, state, **kwargs)
 
     monkeypatch.setattr(PilotControlRepository, 'finish', finish)
     with TestClient(create_app(data_dir=tmp_path, chat_model=CountingModel())) as client:

@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "suite_id": "harness-core-stream-preflight-v1",
+  "execution_items": [
+    {
+      "execution_item_id": "E07.runtime_reattach",
+      "spec_path": "cases/E07.runtime_reattach.v3.json",
+      "required": true
+    }
+  ]
+}

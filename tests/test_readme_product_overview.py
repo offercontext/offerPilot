@@ -41,6 +41,6 @@ def test_readme_keeps_pilot_and_offer_negotiation_visible():
     assert "Pilot 求职 Agent" in readme
     assert "Haru" in readme
     assert "谈薪" in readme
-    assert "默认需要你的确认" in readme
+    assert "默认需要用户确认" in readme
     assert "自动完成投递" not in readme
     assert "替你筛选最优 Offer" not in readme

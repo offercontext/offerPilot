@@ -280,7 +280,7 @@ try {
 }
 Write-Output 'native group routing passed'
 ''', encoding='utf-8')
-    result = subprocess.run([_powershell(), '-NoProfile', '-File', str(script)],
+    result = subprocess.run([_powershell(), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'native group routing passed' in result.stdout
@@ -313,7 +313,7 @@ $all = @($groups.Values | ForEach-Object { $_ })
 if (@(Get-OrdinalDuplicates $all).Count) { throw 'duplicate import/group results' }
 Write-Output 'selector AST dependency closure passed'
 ''', encoding='utf-8')
-    result = subprocess.run([_powershell(), '-NoProfile', '-File', str(script)],
+    result = subprocess.run([_powershell(), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, result.stdout + result.stderr
     assert 'selector AST dependency closure passed' in result.stdout

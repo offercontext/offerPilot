@@ -80,6 +80,8 @@
 | 从复盘沉淀知识 | [InterviewKnowledgeCaptureDrawer](../../../web/src/components/InterviewKnowledgeCaptureDrawer.tsx) → [capture service](../../../web/src/services/interviewKnowledgeCapture.ts) → [api.py](../../../src/offerpilot/api.py) `create_interview_knowledge_preview` / `confirm_interview_knowledge_capture` → [capture Repository](../../../src/offerpilot/repositories/interview_knowledge_capture.py) / [capture AI](../../../src/offerpilot/ai/interview_knowledge_capture.py) | [Knowledge 架构](../knowledge-system.md)、[捕获 API 测试](../../../tests/test_interview_knowledge_capture_api.py) |
 | 经历故事、版本、AI 草稿 | [InterviewStoryDrawer](../../../web/src/components/InterviewStoryDrawer.tsx) → [stories service](../../../web/src/services/interviewStories.ts) → [stories Repository](../../../src/offerpilot/repositories/interview_stories.py) / [stories AI](../../../src/offerpilot/ai/interview_stories.py) | [故事设计](../../superpowers/specs/2026-08-10-interview-story-library-design.md)、[stories API 测试](../../../tests/test_interview_stories_api.py) |
 
+复盘沉淀的 `safe_empty` 预览允许沿用同一尝试切换到直接保存原文。首次确认提交空内容块时返回 422，原尝试仍可用于有效确认。成功后按确认回执的版本和来源核对知识历史。
+
 ## 7. 就近规则与回归入口
 
 下表沿用前文代码入口，进一步定位容易混淆的恢复与写入边界。

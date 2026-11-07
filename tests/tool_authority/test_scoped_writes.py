@@ -1565,3 +1565,79 @@ def test_scoped_write_ports_have_no_unscoped_repository_or_orm_fallback() -> Non
                 raise AssertionError(
                     f"{port.__qualname__} uses ORM fallback {node.func.attr}"
                 )
+
+
+@pytest.mark.parametrize("field_name", ["scheduled_at", "tags"])
+def test_scoped_event_presence_updates_only_selected_columns_and_can_roll_back(seeded, field_name):
+    factory = AuthorityFactory()
+    authority, constraint = _scope(factory, seeded["first_id"])
+    data = _event_data(seeded["first_id"], notes="must not overwrite omitted notes")
+    data.scheduled_at = _WHEN.replace(hour=15)
+    data.tags = ["new-tag"]
+    engine = seeded["session_factory"].kw["bind"]
+    writes: list[str] = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _executemany):
+        normalized = statement.lower()
+        if normalized.startswith("update application_events "):
+            writes.append(normalized.split(" set ", 1)[1].split(" where ", 1)[0])
+
+    event.listen(engine, "before_cursor_execute", capture)
+    try:
+        with seeded["session_factory"]() as session:
+            events = _bind(seeded["events"], session, factory, authority, constraint)
+            changed = events.update_application_event_scoped(
+                constraint, seeded["first_event_id"], data,
+                provided_fields=frozenset({field_name}),
+            )
+            assert changed is not None and changed.notes == ""
+            assert writes == [f"{field_name}=?"]
+            if field_name == "tags":
+                assert changed.tags == ["new-tag"] and changed.scheduled_at == _WHEN.replace(tzinfo=None)
+            else:
+                assert changed.scheduled_at != _WHEN.replace(tzinfo=None) and changed.tags == []
+            session.rollback()
+        restored = seeded["events"].get(seeded["first_event_id"])
+        assert restored.tags == [] and restored.scheduled_at == _WHEN.replace(tzinfo=None)
+    finally:
+        event.remove(engine, "before_cursor_execute", capture)
+        factory.close()
+
+
+@pytest.mark.parametrize("foreign_target", [False, True])
+def test_scoped_event_presence_keeps_target_and_parent_scope_guards(seeded, foreign_target):
+    factory = AuthorityFactory()
+    authority, constraint = _scope(factory, seeded["first_id"])
+    target = seeded["second_event_id"] if foreign_target else seeded["first_event_id"]
+    parent = seeded["first_id"] if foreign_target else seeded["second_id"]
+    try:
+        with seeded["session_factory"]() as session:
+            events = _bind(seeded["events"], session, factory, authority, constraint)
+            with pytest.raises(ScopeAccessDenied):
+                events.update_application_event_scoped(
+                    constraint, target, _event_data(parent),
+                    provided_fields=frozenset({"scheduled_at"}),
+                )
+            session.rollback()
+        for event_id in [seeded["first_event_id"], seeded["second_event_id"]]:
+            assert seeded["events"].get(event_id).scheduled_at == _WHEN.replace(tzinfo=None)
+    finally:
+        factory.close()
+
+
+@pytest.mark.parametrize("provided", [frozenset(), frozenset({"id"}), frozenset({"created_at"})])
+def test_scoped_event_presence_rejects_empty_or_non_data_columns(seeded, provided):
+    factory = AuthorityFactory()
+    authority, constraint = _scope(factory, seeded["first_id"])
+    try:
+        with seeded["session_factory"]() as session:
+            events = _bind(seeded["events"], session, factory, authority, constraint)
+            with pytest.raises(ValueError, match="invalid application event update fields"):
+                events.update_application_event_scoped(
+                    constraint, seeded["first_event_id"], _event_data(seeded["first_id"]),
+                    provided_fields=provided,
+                )
+            session.rollback()
+        assert seeded["events"].get(seeded["first_event_id"]).scheduled_at == _WHEN.replace(tzinfo=None)
+    finally:
+        factory.close()

@@ -19,7 +19,11 @@ from offerpilot.ai.tool_runtime.legacy_proof import (
     LegacyApprovedConfirmationInput,
     LegacyConfirmationLookupIdentity,
 )
-from offerpilot.ai.tool_runtime.metadata import OperationRouteIdentityV1, ToolMetadataBundleV1
+from offerpilot.ai.tool_runtime.metadata import (
+    BundleInstanceToken,
+    OperationRouteIdentityV1,
+    ToolMetadataBundleV1,
+)
 from offerpilot.ai.tool_specs import legacy as legacy_specs
 from offerpilot.ai.tool_specs.catalog import build_model_tool_catalog
 from offerpilot.ai.write_operations import (
@@ -40,7 +44,7 @@ from offerpilot.pilot_runtime.deterministic import (
     DeterministicDependencies,
     DeterministicPilotAdapter,
 )
-from offerpilot.pilot_runtime.service import RuntimeDependencies
+from offerpilot.pilot_runtime.service import PilotRuntime, RuntimeDependencies
 from offerpilot.product_actions.catalog import (
     ProductActionCatalogV1,
     ProductActionCompensationCatalogV1,
@@ -788,3 +792,72 @@ def test_production_component_factory_has_one_application_composition_caller() -
                     callers.append((path.relative_to(ROOT).as_posix(), node.name))
 
     assert callers == [("src/offerpilot/pilot_runtime/composition.py", "build_pilot_runtime")]
+
+
+def test_runtime_pending_ports_require_only_one_complete_graph_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    components = _production_components()
+    bundle = components.bundle
+    expected_ports = (components.operation_port, components.pending_persistence_route_port)
+    calls = 0
+    original = BundleInstanceToken._ensure_integrity
+
+    def counted(token: BundleInstanceToken, *, last_view: object | None = None) -> None:
+        nonlocal calls
+        calls += 1
+        original(token, last_view=last_view)
+
+    monkeypatch.setattr(BundleInstanceToken, "_ensure_integrity", counted)
+    components._ensure_integrity()
+    single_validation_calls = calls
+    assert single_validation_calls > 0
+    calls = 0
+    runtime = SimpleNamespace(
+        _dependencies=SimpleNamespace(metadata_components=components, metadata_bundle=bundle)
+    )
+    assert PilotRuntime._metadata_operation_ports(runtime) == expected_ports  # type: ignore[arg-type]
+    assert calls == single_validation_calls, (
+        f"Pending binding validation count differs: {calls} != {single_validation_calls}"
+    )
+
+
+def test_pending_ports_reject_a_different_bundle_without_publishing_ports() -> None:
+    components = _production_components()
+    other = _production_components()
+    with pytest.raises(ValueError, match="provenance|Bundle"):
+        components.pending_persistence_ports(other.bundle)
+
+
+@pytest.mark.parametrize(
+    "component",
+    [
+        "_operation_port",
+        "_pending_persistence_route_port",
+        "_compensation_registry",
+        "_bundle",
+        "_initial_routes",
+        "_confirmation_routes",
+        "_legacy_route_verifier",
+    ],
+)
+def test_pending_ports_revalidate_component_identity_after_previous_success(component: str) -> None:
+    components = _production_components()
+    other = _production_components()
+    bundle = components.bundle
+    components.pending_persistence_ports(bundle)
+    object.__setattr__(components, component, object.__getattribute__(other, component))
+    expected_bundle = other.bundle if component == "_bundle" else bundle
+    with pytest.raises(ValueError, match="integrity|provenance|drift"):
+        components.pending_persistence_ports(expected_bundle)
+
+
+def test_pending_ports_revalidate_nested_pending_port_after_previous_success() -> None:
+    components = _production_components()
+    other = _production_components()
+    bundle = components.bundle
+    operation_port, pending_port = components.pending_persistence_ports(bundle)
+    assert pending_port._operation_port is operation_port
+    object.__setattr__(pending_port, "_operation_port", other.operation_port)
+    with pytest.raises(ValueError, match="integrity|provenance|drift"):
+        components.pending_persistence_ports(bundle)

@@ -1,4 +1,4 @@
-# 快照绑定的测试选择器（master 移植）
+# 快照绑定的测试选择器（主线与 Harness 集成）
 
 这是开发反馈工具，**不是 release gate**。计划和执行摘要始终 `release_eligible=false`；ready-for-review / 发布仍需现有完整门禁。完整任务被 skipped 不能充当发布证据。
 
@@ -9,6 +9,8 @@
 - `tests/selection-master-migration.json` 记录真实收集摘要、每条保留/新增/不可用 mandatory identity，以及每个映射增删。原 `selection-safety-v1.json` / `-v2.json` 保持来源字节，作为历史，**不宣称本移植满足原 v1/v2 完整验收**。
 - 独立注册 `selection-safety-master-v1.json`：完整保留 69 条来源非 evaluation identity，新增其余 48 条 selector 守卫，共 117 条。缺失、改名、降级或重复身份不能通过验证；执行结果缺项、重复、skip 或证据不完整不能算成功。
 - 初始目录为 325 个后端文件 / 7,983 nodes 和 298 个 Vitest 文件；共 619 P0 / 2 P1 / 2 P2 文件。这种保守分级不承诺立刻获得模块级提速。新增测试必须显式审查并登记 metadata，不能按路径猜测或静默漏测。
+
+2026-11-03 的集成候选将已审设计 `34e45b13` 与冻结主线 `62abd7a2` 合并；上面五项保留原移植的来源与覆盖记录，不表示当前完整验收已完成。新注册 `selection-safety-integrated-v1.json` 为原111项 Harness与117项主线身份的159项精确并集，原 v1/v2/master 文件不改；逐项来源与身份不变的语义迁移记录见 `tests/selection-integration-migration.json`。映射合并为694个文件条目，保留两侧相同的模块、风险和优先级。新基线仍须具体候选验证和独立审查，不由文件存在宣称通过。
 
 ## 用法与既有语义
 
@@ -30,17 +32,17 @@ python scripts/select_tests.py execute --plan artifacts/test-plans/<unique-run>/
 
 影响分析保留反向 `depends_on` 闭包、旧新映射并集、rename 两端，以及 committed / staged / worktree / untracked。继承的未知 `src/` fallback **仅后端 surface**，不能据此认定共享代码不影响前端；CI 外层必须将未知或高风险改动回现有 full。
 
-## 明确未迁移的能力
+## 集成后的能力与缺栈边界
 
-未迁移来源 Harness evaluation 生产栈、suite 或双 checkout 六次验收；其 42 条 mandatory evaluation identity 在审计中逐项列为不可用，不删除或重命名历史来假装通过。
+原 master 移植没有 Harness evaluation 栈，42条来源 evaluation identity 在当时的迁移记录中为不可用；该历史记录不改。当前集成分支恢复这些代码、suite和身份，支持真实双 checkout 的六次 P0 确定性验收；“支持”不等于这份候选已经执行通过，也不证明真实 Provider 能力。
 
-`full`、full-risk 扩张或 evaluation 影响仍在 `required_checks` 保留 `harness_p0`，但计划显式返回：
+`full`、full-risk 扩张或 evaluation 影响仍在 `required_checks` 保留 `harness_p0`。计划和执行前检查该 checkout 的基本栈文件；缺栈时显式返回：
 
 ```json
 {"selection_status":"blocked","unsupported_checks":["harness_p0"],"needs_full":true,"release_eligible":false}
 ```
 
-成功生成 blocked 计划时 `plan` 退出 0；`execute` 在任何测试或命令启动前做整个计划的能力检查，返回 3。外层可在**计划阶段**回现有 master 完整 release gate，但该 gate 只验其原有范围，不等于来源额外 Harness 验收。已经执行失败不能用成功 fallback 洗掉。
+成功生成 blocked 计划时 `plan` 退出0；`execute` 在任何测试或命令启动前检查整个计划，缺栈则返回3。缺栈fixture及其原三项参数化身份仍覆盖这条边界。文件存在只是能力前置，不能充当实际执行证据：已集成分支仍必须提供两个checkout的冻结绑定、原生退出结果及精确六trial对账；空返回码、空报告、缺项、错绑均不能通过。外层只可在计划阶段按明确覆盖回完整gate，不能用成功fallback洗掉已执行失败或冒充缺失的Harness验收。
 
 初期 Draft 接线只允许三个已核验样式角色：`web/src/theme/tokens.css`、`web/src/layout/Sidebar.module.css`、`web/src/layout/TopBar.module.css`，且仍需原 dev 计划为纯 frontend、无 risk expansion / fallback / deleted tests / unclassified / unsupported。这是按 AGENTS §7 的展示范围缩减，不是把所有前端视为低风险；`services/chat.ts`、`services/pilotRuntime.ts`、认证/http、共享 types、确认/恢复 controller 以及装配多业务写入与草稿的 AppShell 均回 full。多文件和重命名两端取并集，出现一个未允许路径就回 full。依据见 [Pilot 地图](code-map/pilot-runtime.md) 与 [设置/桌面地图](code-map/settings-desktop.md)。其他范围和计划错误明确回现有 full。不得另行放宽 selector 的 content-only allowlist，尤其 prompt、template 和 runtime Markdown。
 

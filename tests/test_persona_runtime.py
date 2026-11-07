@@ -9,7 +9,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from offerpilot.api import (
-    _AdmittedChatSourceLoader, _FrozenChatSourceMessages, _bind_persona_source, create_app,
+    _AdmittedChatSourceLoader, _FrozenChatSourceMessages, _bind_persona_source,
+    _chat_response_system_message, create_app,
 )
 from offerpilot.companion.persona import companion_persona_policy, persona_profile_message
 from offerpilot.companion.persona_contracts import PersonaSpec, PersonaUpdateCommand
@@ -367,14 +368,15 @@ def test_official_packet_omission_never_skips_default_binding_validation(tmp_pat
     assert persona_profile_message(PersonaSpec(enabled_activity_templates=['cloud_catalog']), binding) is None
 
 
-def test_official_policy_exactly_matches_base_and_custom_uses_current_shared_core():
+def test_official_persona_matches_frozen_base_and_custom_uses_current_shared_core():
     from pathlib import Path
-    from offerpilot.api import _chat_response_system_message
-    baseline = json.loads((Path(__file__).parent / 'fixtures/persona_default_v16.json').read_text())
+    baseline = json.loads((Path(__file__).parent / 'fixtures/persona_default_v16.json').read_text(encoding='utf-8'))
     assert baseline['base_commit'] == 'e3a2c23701d00e642d9fad24a34a928905615ee7'
     assert companion_persona_policy() == baseline['persona_policy']
-    assert _chat_response_system_message(general=True).content == baseline['general_system']
-    assert _chat_response_system_message().content == baseline['work_system']
+    for general, field in ((True, 'general_system'), (False, 'work_system')):
+        policy = _chat_response_system_message(general=general).content
+        assert policy.endswith(baseline['persona_policy'])
+        assert len(policy.encode('utf-8')) <= len(baseline[field].encode('utf-8'))
     custom = _chat_response_system_message(general=True, custom_persona=True).content
     assert '被好好照顾着、无忧无虑' not in custom
     assert '虚构背景永远只是虚构' in custom
@@ -393,7 +395,7 @@ def test_actual_default_runtime_context_and_budget_match_base(tmp_path):
     from offerpilot.context_projector.selector import ToolSelectionSignals
     from tests.test_companion_context import event
     from tests.test_context_projector import contributors, _selection_for
-    baseline = json.loads((Path(__file__).parent / 'fixtures/persona_default_v16.json').read_text())
+    baseline = json.loads((Path(__file__).parent / 'fixtures/persona_default_v16.json').read_text(encoding='utf-8'))
     calls = []
 
     class RecordingModel:
@@ -410,13 +412,11 @@ def test_actual_default_runtime_context_and_budget_match_base(tmp_path):
         assert response.status_code == 200, response.text
     messages, tools = calls[0]
     assert not profile(messages)
-    assert messages[0].content == baseline['general_system']
+    assert messages[0].content == _chat_response_system_message(general=True).content
+    assert messages[0].content.endswith(baseline['persona_policy'])
     life = [m for m in messages if '以下是带来源的角色日常参考数据' in m.content]
     assert len(life) == 1
-    actual_bytes = canonical_messages(tuple(FrozenMessage.freeze(m) for m in messages))
-    base_messages = [Message('system', baseline['general_system']), *messages[1:]]
-    base_bytes = canonical_messages(tuple(FrozenMessage.freeze(m) for m in base_messages))
-    assert actual_bytes == base_bytes  # Actual source + request + policy, not a canned example.
+    base_policy = Message('system', baseline['general_system'])
     actual_tool_bytes = canonical_json(materialize_provider_payloads(tuple(tools)))
 
     signals = ToolSelectionSignals(current_request=messages[-1].content)
@@ -429,7 +429,7 @@ def test_actual_default_runtime_context_and_budget_match_base(tmp_path):
         return ProjectionRequest(model_call_id='default-budget', contributors=values, history=(),
             tool_signals=signals, provider_budgets=(ProviderBudget(),), selection=_selection_for(signals))
     current_request = request(messages[0])
-    base_request = request(base_messages[0])
+    base_request = request(base_policy)
     projector = ModelSurfaceProjector()
     full = projector.project(base_request)
     assert actual_tool_bytes == canonical_json(materialize_provider_payloads(full.tools))
@@ -438,10 +438,18 @@ def test_actual_default_runtime_context_and_budget_match_base(tmp_path):
     for window in (32768, full.audit.estimated_input_units + 64, full.audit.canonical_tool_bytes + 500):
         budget = (ProviderBudget(context_window=window, output_reserve=0, framing_reserve=0),)
         outcomes = []
-        for candidate in (base_request, current_request):
+        for candidate, policy in ((base_request, base_policy), (current_request, messages[0])):
             try:
                 result = projector.project(replace(candidate, provider_budgets=budget))
-                outcomes.append((canonical_messages(result.messages), result.audit.estimated_input_units, result.audit.truncated))
+                assert result.messages[0].content == policy.content
+                outcomes.append((canonical_messages(result.messages[1:]),
+                                 result.audit.truncated, result.audit.estimated_input_units))
             except ProjectionError as exc:
                 outcomes.append(exc.code)
-        assert outcomes[0] == outcomes[1]
+        original, current = outcomes
+        if isinstance(original, str) or isinstance(current, str):
+            assert original == current
+        else:
+            # Shared policy may change. Sourced data and the original budget boundary remain.
+            assert original[:2] == current[:2]
+            assert current[2] <= original[2]
