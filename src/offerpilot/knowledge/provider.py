@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from litellm import completion
+def completion(*args: Any, **kwargs: Any) -> Any:
+    """Defer SDK loading without changing the raw Knowledge-provider call boundary."""
+    from litellm import completion as sdk_completion
+
+    return sdk_completion(*args, **kwargs)
 
 
 class LiteLLMKnowledgeBriefProviderClient:

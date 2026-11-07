@@ -12,12 +12,17 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from offerpilot.api import create_app
 from offerpilot.ai.write_operations import LedgerKeyDomain, build_terminal_payload
-from offerpilot.models import InterviewNote, InterviewStoryProposalAttempt
+from offerpilot.models import (
+    InterviewNote,
+    InterviewStoryProposalAttempt,
+    InterviewStoryUserAssertion,
+)
 from offerpilot.product_actions.catalog import ProductActionCatalogV1
 from offerpilot.product_actions.contracts import (
     ProductActionExecutionAuthorization,
@@ -1059,14 +1064,23 @@ def test_story_undo_accepts_provable_legacy_manual_create_attempt_shape(
     ]
 
 
+@pytest.mark.parametrize("equal_timestamp", [False, True], ids=["wall-clock", "equal-clock"])
+@pytest.mark.parametrize("lifecycle_before_manual", [False, True], ids=["versions", "lifecycle"])
 def test_story_undo_accepts_provable_legacy_manual_update_attempt_shape(
     story_client,
+    monkeypatch: pytest.MonkeyPatch,
+    equal_timestamp: bool,
+    lifecycle_before_manual: bool,
 ) -> None:
     client, data_dir = story_client
-    seeded = _manual_history_then_product_action_append(
-        client,
-        key_prefix="story-undo-legacy-manual-update",
-    )
+    with monkeypatch.context() as clock:
+        if equal_timestamp:
+            _pin_story_repository_clock(clock, datetime.now(timezone.utc).isoformat())
+        seeded = _manual_history_then_product_action_append(
+            client,
+            key_prefix="story-undo-legacy-manual-update",
+            lifecycle_before_manual=lifecycle_before_manual,
+        )
     with sqlite3.connect(data_dir / "data.db") as connection:
         attempt_id, raw = connection.execute(
             "SELECT id,input_snapshot_json FROM interview_story_proposal_attempts "
@@ -1440,8 +1454,42 @@ def test_manual_writer_reserves_lifecycle_namespace_without_breaking_legacy_repl
         )
 
 
+def _pin_story_repository_clock(clock_patch, timestamp: str) -> None:
+    pinned = datetime.fromisoformat(timestamp).replace(tzinfo=timezone.utc)
+
+    class PinnedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fromtimestamp(pinned.timestamp(), tz)
+
+    clock_patch.setattr(
+        "offerpilot.repositories.interview_stories.datetime", PinnedDateTime
+    )
+    insert_version = InterviewStoriesRepository._insert_version
+
+    def insert_at_pinned_time(session: Session, **kwargs):
+        version = insert_version(session, **kwargs)
+        # SQLite server defaults have a separate clock. Keep the new immutable
+        # records in this same simulated instant, even if execution crosses a second.
+        version.confirmed_at = pinned
+        session.execute(
+            update(InterviewStoryUserAssertion)
+            .where(InterviewStoryUserAssertion.story_version_id == version.id)
+            .values(confirmed_at=pinned)
+        )
+        session.flush()
+        return version
+
+    clock_patch.setattr(
+        InterviewStoriesRepository, "_insert_version", staticmethod(insert_at_pinned_time)
+    )
+
+
+@pytest.mark.parametrize("equal_timestamp", [False, True], ids=["wall-clock", "equal-clock"])
 def test_story_undo_validates_pre_isolation_lifecycle_audit_identity(
     story_client,
+    monkeypatch,
+    equal_timestamp,
 ) -> None:
     client, data_dir = story_client
     note = _note(client)
@@ -1454,10 +1502,18 @@ def test_story_undo_validates_pre_isolation_lifecycle_audit_identity(
         json=_confirmation_from_attempt(attempt),
     ).json()
     story_id = confirmed["story_id"]
-    archived = client.post(
-        f"/api/interview-stories/{story_id}/archive",
-        json={"expected_story_revision": 1},
-    )
+    with monkeypatch.context() as clock_patch:
+        if equal_timestamp:
+            with sqlite3.connect(data_dir / "data.db") as connection:
+                timestamp = connection.execute(
+                    "SELECT confirmed_at FROM interview_story_proposal_attempts WHERE id=?",
+                    (attempt["id"],),
+                ).fetchone()[0]
+            _pin_story_repository_clock(clock_patch, timestamp)
+        archived = client.post(
+            f"/api/interview-stories/{story_id}/archive",
+            json={"expected_story_revision": 1},
+        )
     assert archived.status_code == 200, archived.json()
     material = canonical_json(
         {
@@ -1486,10 +1542,89 @@ def test_story_undo_validates_pre_isolation_lifecycle_audit_identity(
     assert response.json()["result"]["code"] == "interview_story_undo_stale"
 
 
+@pytest.mark.parametrize("undo_latest", [False, True], ids=["later-drift", "pre-parent-history"])
+def test_story_undo_orders_same_clock_lifecycle_by_causal_revision(
+    story_client, monkeypatch, undo_latest
+) -> None:
+    client, data_dir = story_client
+    note = _note(client)
+    first = client.post(
+        "/api/interview-story-proposals",
+        json=_proposal_request(note["id"], key="same-clock-base-0001"),
+    ).json()
+    created = client.post(
+        f"/api/interview-story-proposals/{first['id']}/confirm",
+        json=_confirmation_from_attempt(first),
+    )
+    assert created.status_code == 201, created.json()
+    story_id, previous_version = created.json()["story_id"], created.json()["version_id"]
+    with sqlite3.connect(data_dir / "data.db") as connection:
+        timestamp = connection.execute(
+            "SELECT confirmed_at FROM interview_story_proposal_attempts WHERE id=?",
+            (first["id"],),
+        ).fetchone()[0]
+    revision = 1
+    with monkeypatch.context() as clock_patch:
+        _pin_story_repository_clock(clock_patch, timestamp)
+        # Cross the decimal ID boundary while every event has the same time.
+        for _ in range(5):
+            for action in ("archive", "restore"):
+                changed = client.post(
+                    f"/api/interview-stories/{story_id}/{action}",
+                    json={"expected_story_revision": revision},
+                )
+                assert changed.status_code == 200, changed.json()
+                revision += 1
+        request = _proposal_request(note["id"], key="same-clock-append-0001")
+        request.update(target_story_id=story_id, expected_current_version_id=previous_version,
+                       expected_story_revision=revision)
+        second = client.post("/api/interview-story-proposals", json=request).json()
+        confirmation = _confirmation_from_attempt(second)
+        confirmation.update(expected_current_version_id=previous_version,
+                            expected_story_revision=revision)
+        appended = client.post(
+            f"/api/interview-story-proposals/{second['id']}/confirm", json=confirmation
+        )
+        assert appended.status_code == 201, appended.json()
+        revision += 1
+        if not undo_latest:
+            for action in ("archive", "restore"):
+                changed = client.post(
+                    f"/api/interview-stories/{story_id}/{action}",
+                    json={"expected_story_revision": revision},
+                )
+                assert changed.status_code == 200, changed.json()
+                revision += 1
+    with sqlite3.connect(data_dir / "data.db") as connection:
+        assert connection.execute(
+            "SELECT count(DISTINCT confirmed_at) FROM interview_story_proposal_attempts"
+        ).fetchone()[0] == 1
+    parent = second if undo_latest else first
+    response = client.post(
+        f"/api/interview-stories/{story_id}/product-action-undo",
+        json={"parent_operation_id": parent["product_action"]["operation_id"]},
+    )
+    assert response.status_code == 200, response.json()
+    state = client.get(f"/api/interview-stories/{story_id}").json()
+    assert state["status"] == "active"
+    if undo_latest:
+        assert response.json()["status"] == "committed"
+        assert state["current_version_id"] == previous_version
+        assert state["story_revision"] == revision + 1
+    else:
+        assert response.json()["status"] == "failed"
+        assert response.json()["result"]["code"] == "interview_story_undo_stale"
+        assert state["current_version_id"] == appended.json()["version_id"]
+        assert state["story_revision"] == revision
+
+
 @pytest.mark.parametrize("corruption", ("coherent_revision", "confirmed_at"))
+@pytest.mark.parametrize("equal_timestamp", [False, True], ids=["wall-clock", "equal-clock"])
 def test_story_undo_fails_closed_on_lifecycle_event_corruption(
     story_client,
+    monkeypatch,
     corruption: str,
+    equal_timestamp,
 ) -> None:
     client, data_dir = story_client
     note = _note(client)
@@ -1506,10 +1641,18 @@ def test_story_undo_fails_closed_on_lifecycle_event_corruption(
     ).json()
     story_id = confirmed["story_id"]
     parent_operation_id = attempt["product_action"]["operation_id"]
-    archived = client.post(
-        f"/api/interview-stories/{story_id}/archive",
-        json={"expected_story_revision": 1},
-    )
+    with monkeypatch.context() as clock_patch:
+        if equal_timestamp:
+            with sqlite3.connect(data_dir / "data.db") as connection:
+                timestamp = connection.execute(
+                    "SELECT confirmed_at FROM interview_story_proposal_attempts WHERE id=?",
+                    (attempt["id"],),
+                ).fetchone()[0]
+            _pin_story_repository_clock(clock_patch, timestamp)
+        archived = client.post(
+            f"/api/interview-stories/{story_id}/archive",
+            json={"expected_story_revision": 1},
+        )
     assert archived.status_code == 200, archived.json()
     with sqlite3.connect(data_dir / "data.db") as connection:
         lifecycle_id, payload_json = connection.execute(
@@ -4658,8 +4801,11 @@ def _assert_historical_bridge_commit_unknown_projection(
         attempt,
         token="story-historical-unknown-token-0001",
     )
+    repository = client.app.state.interview_stories_repository
     product_actions = client.app.state.product_action_proposal_repository
     original_publish = product_actions.publish_historical_story_bridge_in_session
+    original_reconcile = repository._reconcile_historical_story_bridge
+    reconciliations = 0
     fault = _CommitUnknownFault(monkeypatch, commit_then_raise=commit_then_raise)
 
     def publish(session: Session, *args: Any, **kwargs: Any) -> Any:
@@ -4667,7 +4813,13 @@ def _assert_historical_bridge_commit_unknown_projection(
         fault.arm(session)
         return publication
 
+    def observe_reconciliation(**kwargs: Any) -> ProductActionPublicationV1:
+        nonlocal reconciliations
+        reconciliations += 1
+        return original_reconcile(**kwargs)
+
     monkeypatch.setattr(product_actions, "publish_historical_story_bridge_in_session", publish)
+    monkeypatch.setattr(repository, "_reconcile_historical_story_bridge", observe_reconciliation)
     if unrelated_commit:
         _commit_unrelated_scheduler_transaction(client)
         assert fault.injected is None
@@ -4679,6 +4831,8 @@ def _assert_historical_bridge_commit_unknown_projection(
     assert response.json()["created"] is False
     assert fault.injected is not None and fault.injected == fault.target
     assert fault.owner_commits == (2 if commit_then_raise else 3)
+    if not commit_then_raise:
+        assert reconciliations == 1
     replay = client.post(
         f"/api/interview-story-proposals/{attempt['id']}/confirm",
         json=request,

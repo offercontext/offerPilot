@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "case_id": "E03",
+  "case_version": 2,
+  "execution_item_id": "E03.runtime_reject",
+  "fixture_id": "synthetic-core-v1",
+  "action_id": "E03.runtime_reject",
+  "model_id": "core-script-v1",
+  "grader_id": "core-v1",
+  "supported_modes": [
+    "deterministic",
+    "real"
+  ],
+  "coverage_kind": "task",
+  "coverage_profile": "business.v1",
+  "fault_profile": "none",
+  "required_capabilities": [
+    "runtime-v1",
+    "core-observer-v1"
+  ],
+  "required_rules": [
+    "execution.expected_outcome",
+    "evidence.required_complete",
+    "business.authorized_deltas",
+    "reject.no_continuation"
+  ],
+  "product_budget": {
+    "policy": "observe_current"
+  },
+  "allowed_actions": [
+    "submit",
+    "read",
+    "clarify",
+    "confirm",
+    "reject",
+    "reattach",
+    "fixture_control"
+  ],
+  "allowed_approvals": [
+    "technical_interview"
+  ],
+  "evaluator_limits": {
+    "wall_seconds": 360,
+    "model_calls": 12,
+    "tool_attempts": 16,
+    "script_replies": 8,
+    "startup_seconds": 90,
+    "shutdown_seconds": 30
+  }
+}

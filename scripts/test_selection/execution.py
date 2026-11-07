@@ -134,12 +134,12 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
     output = plan_path.parent / "execution"
     output.mkdir(exist_ok=False)
     rows: list[dict[str, Any]] = []
-    unsupported_capabilities = unsupported_checks(value["required_checks"])
+    unsupported_capabilities = unsupported_checks(value["required_checks"], root=root)
     if unsupported_capabilities:
         # Preflight the entire plan, before any selected test or command starts.
         summary = {"plan_id": value["plan_id"], "planned": len(value["selected_tests"]),
                    "checks": [{"check": check, "status": "blocked", "code": 3,
-                               "reason": "harness_evaluation_not_migrated"}
+                               "reason": "harness_evaluation_unavailable"}
                               for check in unsupported_capabilities],
                    "exit_code": 3, "release_eligible": False, "selection_status": "blocked",
                    "needs_full": True}
@@ -265,7 +265,40 @@ def execute(root: Path, plan_path: Path, review_evidence: Path | None = None) ->
                     rows.append({"check": "local_smoke_completion", "code": 3, "status": "blocked",
                                  "reason": "smoke_completion_missing"})
         elif check == "harness_p0":
-            raise SelectionError("Harness evaluation is not migrated")
+            if not value.get("harness_variants"):
+                rows.append({"check": check, "code": 3, "status": "blocked",
+                             "reason": "baseline_and_candidate_required_for_six_trials"})
+                continue
+            variants_path = output / "harness-variants.json"
+            variants_path.write_text(json.dumps(value["harness_variants"]), encoding="utf-8")
+            command(check, cli_command("eval", "run", "--suite",
+                str(root / "evals/suites/harness-p0-v1.json"), "--variants", str(variants_path.resolve()),
+                "--output", str((output / "harness-p0").resolve())), root)
+            try:
+                from offerpilot.evaluation.compare import read_run
+                from offerpilot.evaluation.reporting import aggregate
+                manifest, trials = read_run(output / "harness-p0")
+                checked = aggregate(manifest, trials)
+                code = checked["exit_code"]
+                bindings_match = all(
+                    Path(manifest.variants[v["variant_id"]]["checkout"]).resolve() == Path(v["checkout"]).resolve()
+                    and Path(manifest.variants[v["variant_id"]]["interpreter"]).resolve() == Path(v["interpreter"]).resolve()
+                    and manifest.variants[v["variant_id"]]["commit"] == value["harness_snapshots"][v["variant_id"]]["head"]
+                    and manifest.variants[v["variant_id"]]["files_hash"] == digest({
+                        name: record["hash"] for name, record in value["harness_snapshots"][v["variant_id"]]["files"].items()})
+                    for v in value["harness_variants"])
+                if not code and (manifest.plan_kind != "p0" or checked["planned"] != 6
+                                 or set(manifest.variants) != {"baseline", "candidate"} or not bindings_match):
+                    code = 2
+                rows.append({"check": "harness_reconciliation", "code": code,
+                             "status": "passed" if code == 0 else "failed" if code == 1 else "blocked" if code == 3 else "error",
+                             "planned": checked["planned"], "counts": checked["counts"], "bindings_match": bindings_match})
+            except OSError:
+                rows.append({"check": "harness_reconciliation", "code": 3, "status": "blocked",
+                             "reason": "missing_harness_report"})
+            except (ValueError, KeyError, TypeError):
+                rows.append({"check": "harness_reconciliation", "code": 2, "status": "error",
+                             "reason": "invalid_harness_report"})
         elif check == "independent_review":
             try:
                 review = json.loads(review_evidence.read_bytes()) if review_evidence else {}

@@ -192,7 +192,7 @@ type RuntimeFunctionLike =
   | ts.GetAccessorDeclaration
   | ts.SetAccessorDeclaration;
 
-const RUNTIME_FUNCTION_KINDS = new Set<ts.SyntaxKind>([
+const RUNTIME_FUNCTION_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
   ts.SyntaxKind.FunctionDeclaration,
   ts.SyntaxKind.FunctionExpression,
   ts.SyntaxKind.ArrowFunction,
