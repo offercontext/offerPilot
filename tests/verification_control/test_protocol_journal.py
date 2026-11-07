@@ -25,6 +25,7 @@ from scripts.real_ai_control.protocol import (
     write_packet,
 )
 from scripts.real_ai_control.journal import ReservationJournal
+from scripts.real_ai_control.private import _temp_base
 from scripts.real_ai_control.wire import WirePolicy
 
 JOURNALS = []
@@ -32,7 +33,8 @@ JOURNALS = []
 
 @contextmanager
 def folder_scope():
-    with tempfile.TemporaryDirectory() as folder:
+    # Preserve the production anti-link checks while expanding Windows TEMP 8.3 names.
+    with tempfile.TemporaryDirectory(dir=_temp_base()) as folder:
         try:
             yield folder
         finally:
