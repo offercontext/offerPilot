@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Windows 验证夹具所有者与临时目录别名（2026-11-07）
+
+**现象：** 最新主线整合后的 Windows full gate 在 targeted authorization 出现 `authority owner/null DACL invalid`，私有配置清理边界测试出现 `noncanonical authority/account path`。
+
+**根因：** 测试只限制 DACL，未保证新建后代/原子替换文件的 owner 是当前账户；提升权限进程可能默认使用 Administrators owner。Windows TEMP 也可能返回账户目录的 8.3 短路径，严格规范路径检查会拒绝别名。具体平台修复效果须以新 Windows run 为准。
+
+**修复：** 仅在测试模块生命周期将当前 pytest 进程的默认 owner 设为自身账户并在 finally 恢复，保持生产所有权检查；私有 TEMP 先检查原始路径全部祖先的链接/reparse，再展开 Windows 别名并重新严格检查。其他 authority/account 路径仍拒绝非规范输入。
+
+**教训：** DACL 与 owner 是两个独立条件；路径规范化不能先吞掉链接证据。新增真实文件 owner、正常/异常退出恢复，以及原始路径链接和检查错误回归。
+
 ## 空复盘沉淀确认后在历史中不可见（2026-11-05）
 
 **现象：** 知识预览返回 `safe_empty` 后，烟测提交空内容块，确认返回 201，知识历史没有对应版本。
