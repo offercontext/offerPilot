@@ -340,10 +340,14 @@ def test_node_split_source_change_requires_a_new_isolation_review():
     # owns its worker; exact-node and static/dynamic scope guards remain active.
     # A real plugin-loaded two-shard probe passed all four nodes; an injected
     # autouse session fixture still refused splitting. Bind the plugin source too.
+    # Re-reviewed context-policy parametrization: both workspace/application
+    # nodes create their own model, client, context and application under the
+    # function-scoped tmp_path. No globals or fixture scopes changed; a real
+    # two-shard probe passed both nodes with exact coverage and no skips.
     # Normalize only checkout CRLF so the same reviewed source works on Windows.
     reviewed = {
         "tests/test_chat_api.py":
-            "867868390855bc1f735f2dc95d26f15e807f694fe5115815b5c8c18745ebe7fd",
+            "8f0aa82abb4cea49106c76456fdb46c2f6347156bc9dd72cf66b33978c85c0b9",
         "tests/_agent_timeout.py":
             "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735",
         "tests/conftest.py":
