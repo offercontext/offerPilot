@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import create_engine, update
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.api import create_app
 from offerpilot.ai.write_operations import LedgerKeyDomain, build_terminal_payload
@@ -4976,3 +4976,71 @@ def test_n_plus_one_refuses_stale_and_invalidated_attempts(story_client) -> None
 def test_story_attempt_model_carries_product_action_pointer_shape() -> None:
     assert "product_action_operation_id" in InterviewStoryProposalAttempt.__table__.columns
     assert "product_action_generation" in InterviewStoryProposalAttempt.__table__.columns
+
+
+@pytest.mark.parametrize("tamper_terminal_input", [False, True])
+def test_locked_terminal_replay_releases_connection_before_persisted_input_read(
+    story_client,
+    monkeypatch: pytest.MonkeyPatch,
+    tamper_terminal_input: bool,
+) -> None:
+    """A decision that loses the race must not require two pool slots to replay."""
+    client, data_dir = story_client
+    note = _note(client)
+    attempt = client.post(
+        "/api/interview-story-proposals", json=_proposal_request(note["id"])
+    ).json()
+    operation_id = attempt["product_action"]["operation_id"]
+    token = attempt["product_action"]["confirmation_token"]
+    coordinator = client.app.state.product_action_coordinator
+    proposals = client.app.state.product_action_proposal_repository
+    initial = proposals.load_bundle(operation_id)
+    control = coordinator._decode_decision({"confirmation_token": token, "decision": "approve"})
+    handler = coordinator._handlers["confirm_interview_story"]
+    route = coordinator._route_payload(initial)
+    trusted = coordinator._seal_preflight(
+        handler, handler.external_preflight(route, control), stage="external"
+    )
+    fingerprint = coordinator._request_fingerprint(initial, control, trusted.effective_payload_sha256)
+    # Another request wins after this request's preflight but before its writer lock.
+    assert coordinator.decide(
+        operation_id=operation_id, request={"confirmation_token": token, "decision": "approve"}
+    ).status == "committed"
+    if tamper_terminal_input:
+        with sqlite3.connect(data_dir / "data.db") as connection:
+            connection.execute(
+                "UPDATE interview_story_proposal_attempts SET confirmation_payload_hash=? WHERE id=?",
+                ("sha256:" + "0" * 64, attempt["id"]),
+            )
+    # A bounded pool makes the nested checkout deterministic instead of relying
+    # on eight concurrent decisions saturating the application's five slots.
+    engine = create_engine(
+        f"sqlite:///{data_dir / 'data.db'}",
+        connect_args={"check_same_thread": False},
+        pool_size=1, max_overflow=0, pool_timeout=0.05,
+    )
+    factory = sessionmaker(bind=engine)
+    original_handler = handler._persisted_terminal_effective_payload_sha256.__self__
+    monkeypatch.setattr(coordinator, "_session_factory", factory)
+    monkeypatch.setattr(original_handler, "_session_factory", factory)
+    try:
+        def replay() -> Any:
+            return coordinator._execute(
+                initial, control, trusted, fingerprint,
+                allow_retry=True, completion_kind="direct_commit",
+            )
+        if tamper_terminal_input:
+            with pytest.raises(ProductActionIntegrityError, match="product_action_input_fingerprint"):
+                replay()
+        else:
+            result = replay()
+            assert result.status == "committed" and result.completion_kind == "replay"
+        assert engine.pool.checkedout() == 0
+        with sqlite3.connect(data_dir / "data.db") as connection:
+            assert connection.execute("SELECT COUNT(*) FROM interview_stories").fetchone()[0] == 1
+            assert connection.execute(
+                "SELECT state FROM write_operation_transitions WHERE operation_id=? ORDER BY seq",
+                (operation_id,),
+            ).fetchall() == [("proposed",), ("approved",), ("claimed",), ("committed",)]
+    finally:
+        engine.dispose()
