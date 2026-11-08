@@ -29,6 +29,8 @@ def execute_case(tmp_path: Path, item: str, fault: str = "none", shutdown_second
     atomic_json(tmp_path / "trial-result.json", result.model_dump(mode="json"))
     atomic_json(tmp_path / "trial-config.json", {"plan": p.model_dump(mode="json"),
         "variant": variant.model_dump(mode="json"), "source": expected, "spec": spec.model_dump(mode="json")})
+    from tests.evaluation.p0_diagnostics import export_diagnostics
+    export_diagnostics(tmp_path / "private", p, spec, expected, result, evidence)
     return result, evidence
 
 
@@ -73,3 +75,34 @@ def test_actual_shutdown_failure_cannot_pass(tmp_path: Path) -> None:
     assert evidence.coverage.status == "gap" and evidence.fragment_errors["control"]
     assert result.verdict == "incomplete" and result.consumption["model_attempts"] is None
     assert result.consumption["model_attempts_observed_lower_bound"] > 0
+
+
+def test_saved_receipt_recovery_survives_control_poll_rescheduling(tmp_path, monkeypatch):
+    import time
+    from offerpilot.evaluation.runner import Subject
+
+    original_init = Subject.__init__
+    delayed = []
+
+    def init(self, *args, **kwargs):
+        original_init(self, *args, **kwargs)
+        original_get = self.messages.get
+
+        def rescheduled_get(*args, **kwargs):
+            event = original_get(*args, **kwargs)
+            if event.get("type") == "fault_reached":
+                delayed.append(event["seq"])
+                # Real control frame is already dequeued and ACKed. Model a
+                # scheduler pause longer than E06's 0.2s polling slice.
+                time.sleep(.3)
+            return event
+
+        self.messages.get = rescheduled_get
+
+    monkeypatch.setattr(Subject, "__init__", init)
+    result, evidence = execute_case(tmp_path, "E06.legacy_saved")
+    assert len(delayed) == 1
+    assert result.verdict == "pass", (result, evidence.fragment_errors)
+    assert len(evidence.faults) == 1
+    assert len(evidence.facts["replays"]) == 2
+    assert not [call for call in evidence.calls if call["epoch"] == 2]
