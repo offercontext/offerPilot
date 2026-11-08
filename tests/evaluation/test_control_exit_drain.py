@@ -96,3 +96,69 @@ def test_receipt_observed_after_original_deadline_is_rejected(subject_type, poll
     monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
     with pytest.raises(TimeoutError, match="deadline"):
         subject.wait("shutdown_complete", .5)
+
+
+@pytest.mark.parametrize("subject_type", [Subject, CoreSubject])
+def test_poll_timeout_preserves_dequeued_event_before_later_frames(subject_type, monkeypatch):
+    from offerpilot.evaluation import runner
+    clock = [100.0]
+    fault = dict(type="fault_reached", seq=2)
+    later = dict(type="ready", seq=3)
+
+    class RescheduledQueue(queue.Queue):
+        def get(self, *args, **kwargs):
+            value = super().get(*args, **kwargs)
+            clock[0] += .3
+            return value
+
+    subject = object.__new__(subject_type)
+    subject.messages = RescheduledQueue()
+    subject.messages.put(fault)
+    subject.messages.put(later)
+    subject.deadline = 110
+    subject.process = SimpleNamespace(poll=lambda: None)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    with pytest.raises(TimeoutError, match="deadline"):
+        subject.wait("fault_reached", .2)
+    assert subject.wait("fault_reached", .2) is fault
+    assert subject.wait("ready", .5) is later
+    assert subject.messages.empty()
+
+
+@pytest.mark.parametrize("subject_type", [Subject, CoreSubject])
+def test_deferred_event_never_extends_trial_deadline(subject_type, monkeypatch):
+    from offerpilot.evaluation import runner
+    clock = [100.0]
+    subject = object.__new__(subject_type)
+    subject.messages = queue.Queue()
+    subject._deferred_event = dict(type="fault_reached", seq=2)
+    subject.deadline = 100.0
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    with pytest.raises(TimeoutError):
+        subject.wait("fault_reached", 10)
+    assert subject._deferred_event["type"] == "fault_reached"
+
+
+@pytest.mark.parametrize("subject_type", [Subject, CoreSubject])
+def test_poll_timeout_preserves_error_for_next_wait(subject_type, monkeypatch):
+    from offerpilot.evaluation import runner
+    clock = [100.0]
+    error = dict(type="error", message="control rejected", error_type="ValueError")
+
+    class RescheduledQueue(queue.Queue):
+        def get(self, *args, **kwargs):
+            value = super().get(*args, **kwargs)
+            clock[0] += .3
+            return value
+
+    subject = object.__new__(subject_type)
+    subject.messages = RescheduledQueue()
+    subject.messages.put(error)
+    subject.deadline = 110
+    subject.process = SimpleNamespace(poll=lambda: None)
+    monkeypatch.setattr(runner.time, "monotonic", lambda: clock[0])
+    with pytest.raises(TimeoutError, match="deadline"):
+        subject.wait("fault_reached", .2)
+    with pytest.raises(DriverError, match="control rejected"):
+        subject.wait("fault_reached", .2)
+    assert subject._deferred_event is None

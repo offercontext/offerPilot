@@ -416,6 +416,9 @@ jobs:
   # and at most four pytest shards run concurrently.
   pytest-shards:
     name: Complete pytest shard ${{ matrix.shard }} of 20
+    env:
+      OFFERPILOT_P0_DIAGNOSTICS: ${{ runner.temp }}/p0-diagnostics
+      OFFERPILOT_P0_DIAGNOSTIC_CONTEXT: shard
     if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     needs: [pr-feedback, pytest-manifest]
     runs-on: windows-2022
@@ -460,6 +463,13 @@ jobs:
         run: |
           uv sync --frozen
           if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+      - name: Independently verify E06 control scheduling and hard deadlines
+        if: ${{ matrix.shard == 5 }}
+        env:
+          OFFERPILOT_P0_DIAGNOSTIC_CONTEXT: isolated
+        run: |
+          uv run --frozen pytest -q "tests/evaluation/test_p0_cases.py::test_legal_http_case[E06.legacy_saved]" tests/evaluation/test_p0_cases.py::test_saved_receipt_recovery_survives_control_poll_rescheduling tests/evaluation/test_control_exit_drain.py tests/evaluation/test_cleanup_failures.py tests/evaluation/test_subject_shutdown.py
+          if ($LASTEXITCODE -ne 0) { throw "Isolated E06 control/cleanup verification failed" }
       - name: Execute exact manifest partition in isolated process
         run: |
           npm.cmd ci --prefix web
@@ -474,6 +484,15 @@ jobs:
           name: pytest-shard-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}
           path: pytest-evidence/shard-*.json
           if-no-files-found: warn
+          retention-days: 7
+
+      - name: Preserve allowlisted synthetic P0 diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p0-control-diagnostics-${{ matrix.shard }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/p0-diagnostics/*.json
+          if-no-files-found: ignore
           retention-days: 7
 
   full-regression:

@@ -249,7 +249,11 @@ class Subject:
         limit = min(self.deadline, time.monotonic() + timeout)
         while time.monotonic() < limit:
             try:
-                event = self.messages.get(timeout=min(0.1, max(0.001, limit - time.monotonic())))
+                event = getattr(self, "_deferred_event", None)
+                if event is None:
+                    event = self.messages.get(timeout=min(0.1, max(0.001, limit - time.monotonic())))
+                else:
+                    self._deferred_event = None
             except queue.Empty:
                 if self.process.poll() is None:
                     continue
@@ -263,6 +267,11 @@ class Subject:
                 except queue.Empty:
                     raise DriverError("subject exited before control event") from None
             if time.monotonic() >= limit:
+                # A short polling budget can expire after dequeue. The reader
+                # has already ACKed this event: preserve it ahead of later
+                # frames for the next wait, without accepting it after either
+                # this call's deadline or the immutable trial deadline.
+                self._deferred_event = event
                 raise TimeoutError(f"subject control event {kind} exceeded deadline")
             if event["type"] == kind:
                 return event
