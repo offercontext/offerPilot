@@ -23,11 +23,11 @@ import zlib
 NODE_SPLIT_FILES = frozenset({"tests/test_chat_api.py"})
 MANIFEST_VERSION = 4
 PARTITION_STRATEGY = "duration-lpt-v1"
-DURATION_HISTORY_PATH = Path(__file__).with_name("durations-v3.json.gz")
+DURATION_HISTORY_PATH = Path(__file__).with_name("durations-v4.json.gz")
 # SHA256 of the checked-in history with checkout CRLF normalized to LF.
-DURATION_HISTORY_SHA256 = "15e1b18ae12b3bf219f727666979f994ea47c685618c25d0cea4686131ebff1d"
-DURATION_HISTORY_VERSION = 3
-DURATION_HISTORY_COMPRESSED_SHA256 = "0f27cf1cb6b314864144eae39568ad3a148d637c256de1162e14d4b80b1ee512"
+DURATION_HISTORY_SHA256 = "8486405f633d3560bc0d8b4e55f0f9a71405f7d18b9db7a65a94804c519296e3"
+DURATION_HISTORY_VERSION = 4
+DURATION_HISTORY_COMPRESSED_SHA256 = "8bc0fcf5bbf5fdc8bca132aea28393802d93ad1e030853f786386f172fbf56e2"
 DURATION_HISTORY_MAX_COMPRESSED_BYTES = 512 * 1024
 DURATION_HISTORY_MAX_RAW_BYTES = 5 * 1024 * 1024
 # gzip: DEFLATE, no flags, mtime=0, XFL=2 (level 9), OS=255 (unknown).
@@ -130,7 +130,7 @@ def _duration_history_bytes():
     if DURATION_HISTORY_VERSION in {1, 2}:
         # Preserve immutable JSON versions and checkout CRLF compatibility.
         return DURATION_HISTORY_PATH.read_bytes().replace(b"\r\n", b"\n")
-    if DURATION_HISTORY_VERSION != 3:
+    if DURATION_HISTORY_VERSION not in {3, 4}:
         raise ValueError("Unsupported duration history")
     with DURATION_HISTORY_PATH.open("rb") as source:
         packed = source.read(DURATION_HISTORY_MAX_COMPRESSED_BYTES + 1)

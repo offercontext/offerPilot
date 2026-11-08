@@ -800,7 +800,7 @@ def test_refreshed_history_partition_keeps_exact_nodes_and_module_lifecycles():
     assert gate.digest(manifest) == gate.digest({**manifest, "shards": gate.partition(nodes[::-1], 20)})
 
 
-def test_windows_v3_conservatively_preserves_v2_and_full_source_audit(duration_refresh):
+def test_windows_v3_conservatively_preserves_v2_and_full_source_audit(frozen_v3_history, duration_refresh):
     baseline_path = SCRIPT.with_name("durations-v2.json")
     assert duration_refresh.file_digest(baseline_path) == duration_refresh.V3_BASELINE_SHA256
     baseline, history = gate.read(baseline_path), gate.load_duration_history()
@@ -950,7 +950,7 @@ def test_v3_skip_is_preserved_but_never_added_as_passed_duration(v3_archive, dur
     }
 
 
-def test_v3_current_8934_nodes_partition_exactly_once_with_skips_and_whole_files():
+def test_v3_current_8934_nodes_partition_exactly_once_with_skips_and_whole_files(frozen_v3_history):
     history = gate.load_duration_history()
     source = history["source"]
     nodes = sorted(list(source["node_observations"]) +
@@ -984,7 +984,7 @@ def test_v3_refresh_rejects_changed_manifest_and_baseline(v3_archive, duration_r
         duration_refresh.refresh_v3(path)
 
 
-def test_v3_fixed_gzip_preserves_reviewed_raw_bytes_and_loads_without_encoder_version(duration_refresh):
+def test_v3_fixed_gzip_preserves_reviewed_raw_bytes_and_loads_without_encoder_version(frozen_v3_history, duration_refresh):
     packed = gate.DURATION_HISTORY_PATH.read_bytes()
     raw = gate._duration_history_bytes()
     assert len(packed) == 395886 and len(raw) == 4332137
@@ -998,7 +998,7 @@ def test_v3_fixed_gzip_preserves_reviewed_raw_bytes_and_loads_without_encoder_ve
         assert duration_refresh.canonical_history_gzip(raw) == packed
 
 
-def test_v3_writer_pins_encoder_and_both_digests(tmp_path, monkeypatch, duration_refresh):
+def test_v3_writer_pins_encoder_and_both_digests(frozen_v3_history, tmp_path, monkeypatch, duration_refresh):
     history = gate.load_duration_history()
     path = tmp_path / "new.json.gz"
     runtime = duration_refresh.zlib.ZLIB_RUNTIME_VERSION
@@ -1011,7 +1011,7 @@ def test_v3_writer_pins_encoder_and_both_digests(tmp_path, monkeypatch, duration
         with pytest.raises(ValueError, match="raw history size or digest"):
             duration_refresh.write_v3_compressed(path, history)
         history["fallback_ms"] -= 1
-        monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256", "0" * 64)
+        monkeypatch.setattr(duration_refresh, "V4_BASELINE_COMPRESSED_SHA256", "0" * 64)
         with pytest.raises(ValueError, match="compressed history size or digest"):
             duration_refresh.write_v3_compressed(path, history)
     monkeypatch.setattr(duration_refresh.zlib, "ZLIB_RUNTIME_VERSION", "unreviewed")
@@ -1063,10 +1063,135 @@ def test_v3_compressed_history_fails_closed(tmp_path, monkeypatch, duration_refr
         gate.load_duration_history()
 
 
-def test_v3_raw_limit_exact_boundary_is_accepted(tmp_path, monkeypatch, duration_refresh):
+def test_v3_raw_limit_exact_boundary_is_accepted(frozen_v3_history, tmp_path, monkeypatch, duration_refresh):
     raw = gate._duration_history_bytes()
     monkeypatch.setattr(gate, "DURATION_HISTORY_MAX_RAW_BYTES", len(raw))
     assert gate.load_duration_history()["version"] == 3
     monkeypatch.setattr(gate, "DURATION_HISTORY_MAX_RAW_BYTES", len(raw) - 1)
     with pytest.raises(ValueError, match="Uncompressed.*exceeds limit"):
         gate.load_duration_history()
+
+
+@pytest.fixture
+def frozen_v3_history(monkeypatch):
+    """Keep the earlier immutable history and its regeneration tests covered."""
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v3.json.gz"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 3)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256",
+                        "15e1b18ae12b3bf219f727666979f994ea47c685618c25d0cea4686131ebff1d")
+    monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256",
+                        "0f27cf1cb6b314864144eae39568ad3a148d637c256de1162e14d4b80b1ee512")
+
+
+@pytest.fixture
+def v4_archive(v3_archive, monkeypatch, duration_refresh):
+    # Synthetic file-level units partition identically under either history.
+    manifest, results, package = v3_archive
+    manifest["partition"]["history_sha256"] = duration_refresh.V4_BASELINE_SHA256
+    for result in results:
+        result["manifest"] = gate.digest(manifest)
+
+    def build(**kwargs):
+        path = package(**kwargs)
+        monkeypatch.setattr(duration_refresh, "V4_SOURCE", duration_refresh.V3_SOURCE.copy())
+        return path
+    return manifest, results, build
+
+
+def test_v4_archive_reproduction_and_pins(v4_archive, duration_refresh, monkeypatch):
+    _, _, package = v4_archive
+    path = package()
+    first = duration_refresh.refresh_v4(path)
+    assert first == duration_refresh.refresh_v4(path)
+    assert first["version"] == 4 and first["source"]["execution_audit"]["passed"] == 20
+    monkeypatch.setattr(duration_refresh, "V4_BASELINE_COMPRESSED_SHA256", "0" * 64)
+    with pytest.raises(ValueError, match="Frozen v3 compressed"):
+        duration_refresh.refresh_v4(path)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "extra", "path_traversal"])
+def test_v4_archive_rejects_wrong_evidence_file_set(v4_archive, duration_refresh, mutation):
+    _, _, package = v4_archive
+    options = {"missing": {"omitted": "shard-0.json"},
+               "duplicate": {"duplicate": "shard-0.json"},
+               "extra": {"extra": "shard-20.json"},
+               "path_traversal": {"extra": "../../outside.json"}}[mutation]
+    with pytest.raises(ValueError, match="evidence files"):
+        duration_refresh.refresh_v4(package(**options))
+
+
+@pytest.mark.parametrize("mutation", ["exit", "identity", "missing_node", "selection",
+                                      "failed", "xfail", "negative", "skip_no_reason"])
+def test_v4_archive_requires_complete_successful_execution(v4_archive, duration_refresh, mutation):
+    _, results, package = v4_archive
+    result = results[0]
+    phases = next(iter(result["reports"].values()))
+    if mutation == "exit":
+        result["exit_code"] = 2
+    elif mutation == "identity":
+        result["identity"] = {"run": "other", "platform": "Windows"}
+    elif mutation == "missing_node":
+        result["reports"] = {}
+    elif mutation == "selection":
+        result["selected"] = []
+    elif mutation == "failed":
+        phases[1]["outcome"] = "failed"
+    elif mutation == "xfail":
+        phases[1]["xfail"] = True
+    elif mutation == "skip_no_reason":
+        phases[1]["outcome"] = "skipped"
+    else:
+        phases[1]["duration_seconds"] = -1
+    with pytest.raises(ValueError):
+        duration_refresh.refresh_v4(package())
+
+
+def test_windows_v4_preserves_v3_costs_skips_and_complete_audit(duration_refresh):
+    baseline = json.loads(duration_refresh.zlib.decompress(
+        SCRIPT.with_name("durations-v3.json.gz").read_bytes(), wbits=31))
+    history = gate.load_duration_history()
+    assert history["version"] == 4
+    source = history["source"]
+    assert source["previous_history_sha256"] == duration_refresh.V4_BASELINE_SHA256
+    assert source["scope"] == "scheduling-only; not completed execution evidence"
+    assert source["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    run, = source["runs"]
+    for key, value in duration_refresh.V4_SOURCE.items():
+        assert run[key] == value
+    assert run["identity"]["attempt"] == "2"
+    assert run["identity"]["commit"] == "8d2d6e5d969110c94ce585f870a839025b5ba796"
+    assert run["manifest_nodes"] == 10405
+    assert all(s["exit_code"] == 0 for s in run["shards"])
+    assert sum(s["complete_passed_nodes"] for s in run["shards"]) == 10381
+    assert source["execution_audit"]["passed"] == 10381
+    assert len(source["execution_audit"]["skipped"]) == 24
+    assert source["execution_audit"]["collection_skips"] == []
+    assert history["historical_skips"] == baseline["historical_skips"]
+    expected = dict(baseline["duration_ms"])
+    for node, audit in source["node_observations"].items():
+        assert audit["previous_ms"] == baseline["duration_ms"].get(node)
+        observation, = audit["observations"]
+        expected[node] = max(audit["previous_ms"] or 0, observation["observed_ms"])
+        assert audit["effective_ms"] == expected[node]
+    assert history["duration_ms"] == expected
+    assert source["added_nodes"] == 1474 and source["raised_nodes"] == 1134
+    assert history["fallback_ms"] == max(expected.values())
+    nodes = sorted(list(source["node_observations"]) +
+                   [s["node"] for s in source["execution_audit"]["skipped"]])
+    shards = gate.partition(nodes, 20)
+    assert sorted(sum(shards, [])) == nodes and len(set(nodes)) == 10405
+    assert shards == gate.partition(nodes[::-1], 20)
+
+
+def test_v4_writer_reproduces_checked_in_bytes(tmp_path, duration_refresh):
+    history = gate.load_duration_history()
+    path = tmp_path / "v4.json.gz"
+    if duration_refresh.zlib.ZLIB_RUNTIME_VERSION != duration_refresh.V4_ENCODER_ZLIB_VERSION:
+        with pytest.raises(ValueError, match="requires zlib"):
+            duration_refresh.write_v4_compressed(path, history)
+    else:
+        duration_refresh.write_v4_compressed(path, history)
+        assert path.read_bytes() == gate.DURATION_HISTORY_PATH.read_bytes()
+        history["fallback_ms"] += 1
+        with pytest.raises(ValueError, match="raw history size or digest"):
+            duration_refresh.write_v4_compressed(path, history)

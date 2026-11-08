@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Windows 分片历史不足导致实际负载不均（2026-11-08）
+
+**现象：** PR62 的分片估算近似均衡，但 run `42455126084` attempt 2 的实测测试阶段合计为每片 19.98–88.88 分钟。
+
+**根因：** 新增节点缺少实测时长，保守回退上限使估算偏离真实负载；不能把回退权重当作真实运行时间。
+
+**修复：** 保留 v1–v3，以该候选完整 Windows 证据 artifact `13622048742` 生成冻结 v4。严格验证 20 分片身份与 10,405 节点完整执行，仅采纳 10,381 个三阶段成功节点，24 个 skip 不作为成功时长；沿用旧成本与新观测最大值，新增 1,474 项、上调 1,134 项。保持文件级隔离、精确覆盖、120 分钟预算和所有门禁不变。可用 `python scripts/test_shards/refresh_durations.py --v4 ARTIFACT_ZIP OUTPUT` 在 zlib 1.3.2 下复现双摘要一致的 gzip。
+
+**教训：** 同次数据回算新分配为 30.89–43.07 分钟，仅是调度估计，不代表未来提速或通过证据；新分配必须独立完整验证，不能复用源分片结果。
+
 ## Windows 验证夹具所有者与临时目录别名（2026-11-07）
 
 **现象：** 最新主线整合后的 Windows full gate 在 targeted authorization 出现 `authority owner/null DACL invalid`，私有配置清理边界测试出现 `noncanonical authority/account path`。
