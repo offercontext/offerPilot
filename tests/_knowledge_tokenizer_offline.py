@@ -7,15 +7,19 @@ import os
 from pathlib import Path
 import sys
 import traceback
+from types import SimpleNamespace
 
 from fixed_evaluation_source_launcher import policy_proof
 
-attempts: list[str] = []
+attempts: list[dict[str, object]] = []
+sdk_attempts: list[str] = []
 
 
 def reject_network(event: str, _args: tuple[object, ...]) -> None:
     if event in {"socket.connect", "socket.getaddrinfo", "socket.bind", "socket.sendto", "socket.sendmsg", "subprocess.Popen", "os.system"}:
-        attempts.append(event)
+        attempts.append(dict(event=event, arguments=repr(_args),
+            frames=[dict(file=frame.filename, line=frame.lineno, function=frame.name)
+                    for frame in traceback.extract_stack()[:-1]]))
         raise RuntimeError("network forbidden in offline tokenizer regression")
 
 
@@ -29,6 +33,7 @@ assert source_before['guard_active'] and sys.dont_write_bytecode and sys.flags.i
 class NoSDK(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
         if fullname.split('.')[0] in {'litellm', 'openai', 'anthropic'}:
+            sdk_attempts.append(fullname)
             raise AssertionError('Provider SDK import forbidden: ' + fullname)
 
 
@@ -75,10 +80,101 @@ def ingest_before_tokenizer_use() -> None:
         sessions.kw["bind"].dispose()
 
 
+def cache_contract() -> None:
+    """Strict offline scope belongs to this fresh process, not prior SDK threads."""
+    from offerpilot.knowledge import tokenizer
+
+    keys = ("TIKTOKEN_CACHE_DIR", "DATA_GYM_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR")
+    key = "9b5ad71b2ce5302211f9c61530b329a4922fc6a4"
+    state, variable = config["state"], config["cache_variable"]
+    cache = Path(config["cache"]) if config["cache"] else None
+    data_dir.mkdir()
+    selected = data_dir / "selected"
+    selected.mkdir()
+    entry = selected / key
+    if mode == "cache-unavailable":
+        if state == "corrupt":
+            entry.write_bytes(b"corrupt")
+        os.environ[variable] = "" if state == "disabled" else str(selected)
+        if variable != "CUSTOM_TIKTOKEN_CACHE_DIR":
+            os.environ["CUSTOM_TIKTOKEN_CACHE_DIR"] = str(cache)
+    elif mode == "default-unavailable":
+        if state == "corrupt":
+            entry.write_bytes(b"corrupt")
+        tokenizer.distribution = lambda _name: SimpleNamespace(locate_file=lambda _path: entry)
+    before = {name: os.environ.get(name) for name in keys}
+    if mode in {"cache-unavailable", "default-unavailable"}:
+        try:
+            if mode == "default-unavailable":
+                tokenizer.tokenizer_status()
+            else:
+                tokenizer.count_tokens("hello world")
+        except tokenizer.TokenizerUnavailableError as error:
+            assert "tokenizer_unavailable" in str(error)
+        else:
+            raise AssertionError("unavailable resource must fail closed")
+        if state == "corrupt":
+            assert entry.read_bytes() == b"corrupt"
+        else:
+            assert not entry.exists()
+    else:
+        assert cache is not None
+        entry = cache / key
+        original = entry.read_bytes()
+        if mode == "cache-mutated":
+            read_bytes = Path.read_bytes
+            reads = []
+
+            def change_after_read(path):
+                content = read_bytes(path)
+                if path == entry:
+                    reads.append(path)
+                    path.write_bytes(b"changed after the verified read")
+                return content
+
+            Path.read_bytes = change_after_read
+            try:
+                assert tokenizer.count_tokens("hello world").count == 2
+            finally:
+                Path.read_bytes = read_bytes
+            assert reads == [entry]
+            assert read_bytes(entry) == b"changed after the verified read"
+        else:
+            assert tokenizer.count_tokens("hello world").count == 2
+            assert entry.read_bytes() == original
+            assert {path.name for path in cache.iterdir()} == {key}
+    assert {name: os.environ.get(name) for name in keys} == before
+
+
 def run() -> dict[str, object]:
     assert "litellm" not in sys.modules
     cache_keys = ("TIKTOKEN_CACHE_DIR", "DATA_GYM_CACHE_DIR", "CUSTOM_TIKTOKEN_CACHE_DIR")
     environment_before = {key: os.environ.get(key) for key in cache_keys}
+    if mode == "deny-sdk":
+        try:
+            __import__("litellm")
+        except AssertionError:
+            pass
+        assert not sdk_attempts, "swallowed SDK import attempt must still fail"
+    if mode in {"deny-connect", "deny-dns"}:
+        import socket
+
+        # Negative controls deliberately swallow the immediate exception. The
+        # retained audit record must still fail the probe; loopback is not exempt.
+        try:
+            if mode == "deny-connect":
+                with socket.socket() as connection:
+                    connection.connect(("127.0.0.1", 9))
+            else:
+                socket.getaddrinfo("example.invalid", 443)
+        except RuntimeError:
+            pass
+        assert not attempts, "swallowed network attempt must still fail"
+    if mode in {"cache-valid", "cache-unavailable", "cache-mutated", "default-unavailable"}:
+        cache_contract()
+        assert "litellm" not in sys.modules and not attempts and not sdk_attempts
+        assert policy_proof() == source_before
+        return dict(cache_contract_passed=True, network_attempts=attempts, sdk_imported=False)
     if mode == "product":
         ingest_before_tokenizer_use()
     if mode == "official":
@@ -118,7 +214,7 @@ def run() -> dict[str, object]:
     if mode == "product":
         result["ingest_extraction_and_limit_passed"] = True
     assert "litellm" not in sys.modules
-    assert not attempts
+    assert not attempts and not sdk_attempts
     assert {key: os.environ.get(key) for key in cache_keys} == environment_before
     assert policy_proof() == source_before
     result.update(network_attempts=attempts, sdk_imported=False, environment_unchanged=True)
@@ -130,7 +226,7 @@ if __name__ == "__main__":
         print(json.dumps(run(), ensure_ascii=False))
     except BaseException as error:
         print(json.dumps(dict(error_type=type(error).__name__, network_attempts=attempts,
-                              sdk_imported="litellm" in sys.modules,
+                              sdk_imported="litellm" in sys.modules, sdk_attempts=sdk_attempts,
                               frames=[dict(file=frame.filename, line=frame.lineno, function=frame.name)
                                       for frame in traceback.extract_tb(error.__traceback__)])))
         raise
