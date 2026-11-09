@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
+import { message } from 'antd';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -39,7 +40,16 @@ beforeEach(async () => {
   qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } } });
   render(true); await flush(); advanced();
 });
-afterEach(() => { act(() => root.unmount()); qc.clear(); host.remove(); vi.restoreAllMocks(); });
+afterEach(async () => {
+  try {
+    // Static messages own a separate root; unmounting the drawer alone leaves
+    // expiry callbacks alive after Vitest tears down this jsdom window.
+    await act(async () => { message.destroy(); root.unmount(); });
+    expect(document.querySelector('.ant-message')).toBeNull();
+  } finally {
+    qc.clear(); host.remove(); vi.restoreAllMocks();
+  }
+});
 
 describe('AI settings draft lifecycle', () => {
   it('tests an unchanged saved provider when its older profile omits vision capability', async () => {

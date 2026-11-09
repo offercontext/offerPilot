@@ -2532,9 +2532,10 @@ class ProductActionCoordinator:
                 if not hmac.compare_digest(locked_fingerprint, request_fingerprint):
                     raise ProductActionCoordinatorError("product_action_request_conflict")
                 if bundle.classification == "exact_terminal":
-                    result = self._terminal_replay(bundle, request_fingerprint)
+                    # Terminal bundles are immutable snapshots. Release the writer
+                    # lock/connection before replay may open its own read session.
                     session.rollback()
-                    return result
+                    return self._terminal_replay(bundle, request_fingerprint)
                 operation = session.get(WriteOperation, bundle.operation.id)
                 if operation is None or operation.status != "proposed":
                     raise ProductActionIntegrityError("product_action_parent_missing")
@@ -2629,13 +2630,15 @@ class ProductActionCoordinator:
                 )
                 self._verify_token(bundle, control.confirmation_token, control.decision)
                 if bundle.classification == "exact_terminal":
-                    result = self._terminal_replay(
+                    # A competing decision may finish after our preflight. Replay
+                    # checks persisted input through a separate read session; do
+                    # not keep a writer lock while waiting for another pool slot.
+                    session.rollback()
+                    return self._terminal_replay(
                         bundle,
                         request_fingerprint,
                         effective_payload_sha256=trusted.effective_payload_sha256,
                     )
-                    session.rollback()
-                    return result
                 self._require_capability(bundle.operation.tool_name)
                 route_payload = self._route_payload(bundle)
                 handler = self._handlers.get(bundle.operation.tool_name)
