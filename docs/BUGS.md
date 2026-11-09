@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Windows 验证夹具所有者与临时目录别名（2026-11-07）
+
+**现象：** 最新主线整合后的 Windows full gate 在 targeted authorization 出现 `authority owner/null DACL invalid`，私有配置清理边界测试出现 `noncanonical authority/account path`。
+
+**根因：** 测试只限制 DACL，未保证新建后代/原子替换文件的 owner 是当前账户；提升权限进程可能默认使用 Administrators owner。Windows TEMP 也可能返回账户目录的 8.3 短路径，严格规范路径检查会拒绝别名。具体平台修复效果须以新 Windows run 为准。
+
+**修复：** 仅在测试模块生命周期将当前 pytest 进程的默认 owner 设为自身账户并在 finally 恢复，保持生产所有权检查；私有 TEMP 先检查原始路径全部祖先的链接/reparse，再展开 Windows 别名并重新严格检查。其他 authority/account 路径仍拒绝非规范输入。
+
+**教训：** DACL 与 owner 是两个独立条件；路径规范化不能先吞掉链接证据。新增真实文件 owner、正常/异常退出恢复，以及原始路径链接和检查错误回归。
+
 ## 空复盘沉淀确认后在历史中不可见（2026-11-05）
 
 **现象：** 知识预览返回 `safe_empty` 后，烟测提交空内容块，确认返回 201，知识历史没有对应版本。
@@ -754,6 +764,16 @@
 **验证：** 新回归在修复前明确失败；修复后同时检查读取不产生已提交业务 DML，以及真实时间修改仍能提交。相关应用、scope、事件与 Runtime 回归列于 Harness 验证记录。
 
 **教训：** 绑定事务中的读取辅助函数不得通过呈现转换触发持久化副作用；最终状态相等不足以证明零业务提交。
+
+## 桌面构建依赖的 glob 模式放大漏洞（2026-11-05）
+
+**现象：** 三个桌面锁文件仍包含受 [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) 影响的 minimatch 9/10；两套验收 helper 的 glob 13 另受 [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) 影响。有限重复模式在 `braceExpandMax=32` 时仍生成 128 行。
+
+**根因：** 当前上游 ASAR 4.3.1、app-builder-lib 26.15.3 和 universal 2.0.3 尚未放宽依赖范围。minimatch 11 移除了正则相关 API，不能只在 glob 13 下强换；父包级覆盖还会向后代传播，破坏旧 ASAR 3/glob 7 的 callable API。
+
+**修复：** desktop 仅覆盖 `minimatch@>=7 <11` 到 11.0.4，保留旧 3/5 系列；两套 helper 对 ASAR 4.3.1 配套覆盖 glob 14.0.3/minimatch 11.0.4，并重建锁文件。回归实际优化器上界、builder 文件筛选、universal allowlist、ASAR 打包/解包/unpack 与目录链接。现有 Node 22 工具链满足新依赖要求；应用代码、Electron 版本和其他安全告警不在本次改动范围。
+
+**教训：** `npm ci` 或 audit 通过不代表跨主版本 API 兼容，须核对实际解析树和调用点。上游原生支持安全版本后再移除 overrides；增加依赖消费者时重查 minimatch 的已移除 API。ASAR 查询使用宿主分隔符，不能复用 glob 的 POSIX 路径；macOS universal 合包夹具不在 Windows 执行，其纯匹配边界仍跨平台验证。完整 Windows 安装包和 release gate 仍是独立验收，不由离线打包夹具替代。
 
 ## 默认陪伴事实被历史挤出与来源超限静默降级（2026-11-04）
 

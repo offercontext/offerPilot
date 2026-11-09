@@ -6182,22 +6182,42 @@ def test_chat_exposes_module_tools_to_model(tmp_path):
     assert len(captured_tools) == 26
 
 
-def test_chat_injects_response_structure_prompt(tmp_path):
+@pytest.mark.parametrize("context_type", ["workspace", "application"])
+def test_chat_injects_context_appropriate_response_policy(tmp_path, context_type):
     model = CapturingScriptedModel([Assistant(content="ok")])
     client = TestClient(create_app(data_dir=tmp_path, chat_model=model))
+    context = {}
+    if context_type == "application":
+        application = client.post(
+            "/api/applications",
+            json={"company_name": "合成公司", "position_name": "测试开发"},
+        )
+        assert application.status_code == 201
+        context = {"context_type": "application", "context_ref": str(application.json()["id"])}
 
     response = client.post(
-        "/api/chat", json={"message": "what should I do next?", "conversation_id": 0}
+        "/api/chat",
+        json={"message": "what should I do next?", "conversation_id": 0, **context},
     )
 
     assert response.status_code == 200
     system = model.calls[0][0]
     assert system.role == "system"
-    assert "结论" in system.content
-    assert "依据" in system.content
-    assert "下一步" in system.content
-    assert "只追问一个最关键问题" in system.content
-    assert "成功写入后" in system.content
+    # Default workspace conversation is neutral, while explicit work contexts
+    # retain a conditional report format. Neither overrides the user's format.
+    assert "用用户语言完成当前任务，遵守条数、行数、篇幅和结构" in system.content
+    if context_type == "workspace":
+        assert "不套固定汇报格式" in system.content
+        assert "## 结论" not in system.content
+        assert "## 下一步" not in system.content
+    else:
+        assert "仅在用户未限定数量或结构" in system.content
+        assert "证据与注意事项" in system.content
+        assert "## 结论" in system.content
+        assert "## 下一步" in system.content
+    assert "只追问一个关键问题，不要继续其他写入" in system.content
+    assert "保留安全和写入确认" in system.content
+    assert "写入成功后仅给一个实用下一步" in system.content
     assert "Conclusion" not in system.content
 
 

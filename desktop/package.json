@@ -18,6 +18,9 @@
     "electron": "44.5.1",
     "electron-builder": "26.15.3"
   },
+  "overrides": {
+    "minimatch@>=7 <11": "11.0.4"
+  },
   "build": {
     "appId": "org.offerpilot.desktop",
     "productName": "OfferPilot Desktop",

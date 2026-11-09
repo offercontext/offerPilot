@@ -80,7 +80,9 @@ def test_actual_owned_local_request_preserves_response_and_bearer(tmp_path, path
             assert record["owned_tree_exited"] and record["child_exit"] == 0
             assert record["response_received"] and record["response_status"] == 200
             assert record["body_complete"] is True
-            assert record["timeout_seconds"] == 121
+            # Diagnostic duration subtracts two monotonic floats; only tolerate
+            # sub-microsecond roundoff, not a wider request/deadline budget.
+            assert record["timeout_seconds"] == pytest.approx(121, rel=0, abs=1e-6)
             assert "synthetic" not in Path(record["progress_file"]).read_text(encoding="utf-8")
         finally:
             driver.close()

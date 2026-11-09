@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
+import stat
 import re
 import tempfile
 from typing import Any
@@ -10,10 +12,23 @@ from typing import Any
 from offerpilot.evaluation.core_targeted_account import safe_path
 
 
+def _temp_base() -> Path:
+    path = Path(tempfile.gettempdir()).absolute()
+    if os.name == "nt":
+        # Windows TEMP may use an 8.3 account name. Inspect the original spelling
+        # BEFORE expansion so resolve cannot hide a junction/reparse ancestor.
+        for entry in [path, *path.parents]:
+            info = entry.lstat()
+            if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 1024:
+                raise ValueError("linked authority/account path")
+        path = path.resolve(strict=True)
+    return safe_path(path)
+
+
 def work_path(run_id: str, evidence: Path) -> Path:
     if not re.fullmatch(r"offline-[a-f0-9]{16}", run_id):
         raise ValueError("Fresh owned offline run identifier required")
-    base = safe_path(Path(tempfile.gettempdir()).absolute())
+    base = _temp_base()
     path = base / ("offerpilot-verify-owned-" + run_id)
     if (
         path.exists()
@@ -28,7 +43,7 @@ def remove_owned_config_copies(root: Path, *, owned_tree_exited: Any) -> dict[st
     if owned_tree_exited is not True:
         return dict(removed=[], held_for_audit=True, reason="ownership not proven")
     root = safe_path(root)
-    base = safe_path(Path(tempfile.gettempdir()).absolute())
+    base = _temp_base()
     if root.parent != base or not re.fullmatch(
         r"offerpilot-verify-owned-offline-[a-f0-9]{16}", root.name
     ):
