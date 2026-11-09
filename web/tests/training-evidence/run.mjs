@@ -45,13 +45,14 @@ async function until(name, predicate) {
   }
   throw new Error(`Timed out: ${name}`);
 }
-async function capture(page, panel, stem) {
-  await panel.scrollIntoViewIfNeeded();
+async function capture(page, panel, stem, failure = false) {
+  if (!failure) await panel.scrollIntoViewIfNeeded();
   await page.evaluate(() => document.fonts.ready);
   await writeFile(path.join(output, `${stem}.html`), await page.content());
   await writeFile(path.join(output, `${stem}.aria.txt`), await page.locator('body').ariaSnapshot());
   await page.screenshot({ path: path.join(output, `${stem}.png`), fullPage: true, animations: 'disabled' });
   report.screenshots.push({ file: `${stem}.png`, sha256: hash(await readFile(path.join(output, `${stem}.png`))) });
+  if (!panel || (failure && !(await panel.isVisible()))) return;
   // Element capture includes the tall panel, not just the shell's internally scrolled viewport.
   await panel.screenshot({ path: path.join(output, `${stem}-panel.png`), animations: 'disabled' });
   report.screenshots.push({ file: `${stem}-panel.png`, sha256: hash(await readFile(path.join(output, `${stem}-panel.png`))) });
@@ -154,7 +155,7 @@ async function exercise(locale, width) {
     result.status = 'passed';
   } catch (error) {
     result.status = 'failed'; report.failures.push({ locale, error: error.stack || String(error) });
-    if (page && panel) await capture(page, panel, `${locale}-failure`).catch(captureError => report.failures.push({ locale, captureError: String(captureError) }));
+    if (page) await capture(page, panel, `${locale}-failure`, true).catch(captureError => report.failures.push({ locale, captureError: String(captureError) }));
   } finally {
     result.requests = api.requests; result.fixtureViolations = api.violations; result.finalState = api.state();
     await context.close();

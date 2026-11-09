@@ -27,7 +27,7 @@ vi.mock('@/services/adaptiveInterviewPractice', () => ({
 }));
 vi.mock('@/features/reviewReadiness/service', () => ({ getReadinessPracticeFocus: service.focus }));
 
-const { default: AdaptiveInterviewPracticeWorkspace, recoverAdaptivePracticeDrafts, replaceTrainingEvidenceDraft } = await import('./AdaptiveInterviewPracticeWorkspace');
+const { default: AdaptiveInterviewPracticeWorkspace, recoverAdaptivePracticeDrafts, replaceTrainingEvidenceDraft, PracticeHistoryDetails } = await import('./AdaptiveInterviewPracticeWorkspace');
 const { createCoreTaskSurfaceController } = await import('@/features/coreTaskSurface/controller');
 const ControlledAdaptiveInterviewPracticeWorkspace = AdaptiveInterviewPracticeWorkspace as unknown as ComponentType<Record<string, unknown>>;
 
@@ -656,5 +656,30 @@ describe('completed training evidence owner recovery', () => {
     const draft = { ...owned({ signalVersionId: null, targetEventId: null }), resultUnknown: true, completionInput: { expected_revision: 1, response_text: 'original answer', reflection_text: '', self_assessment: 'clearer' as const, idempotency_key: 'completion-key' } };
     const remaining = replaceTrainingEvidenceDraft(draft, null, { signalVersionId: null, targetEventId: null });
     expect(remaining?.resultUnknown).toBe(true); expect(remaining?.completionInput).toEqual(draft.completionInput); expect(remaining?.trainingEvidenceDraft).toBeUndefined();
+  });
+});
+
+describe('completed history disclosure', () => {
+  it('keeps saved evidence visible and lets the user close a restored draft', () => {
+    const render = (restoreOpen: boolean) => act(() => root?.render(<PracticeHistoryDetails restoreOpen={restoreOpen}><summary>History</summary><p>Evidence and next exercise</p></PracticeHistoryDetails>));
+    render(false);
+    const details = container!.querySelector('details')!;
+    expect(details.open).toBe(false);
+    act(() => { details.open = true; }); // Native summary toggle.
+    render(true); // User edits training evidence.
+    render(false); // Successful save clears the draft.
+    expect(details.open).toBe(true);
+    act(() => { details.open = false; });
+    render(false);
+    expect(details.open).toBe(false);
+    render(true); // A recovered draft is made visible.
+    expect(details.open).toBe(true);
+    act(() => { details.open = false; });
+    render(true); // Editing/rerendering the same draft must not fight manual close.
+    expect(details.open).toBe(false);
+  });
+  it('opens an already recovered draft on mount', () => {
+    act(() => root?.render(<PracticeHistoryDetails restoreOpen><summary>History</summary><p>Pending retry</p></PracticeHistoryDetails>));
+    expect(container!.querySelector('details')!.open).toBe(true);
   });
 });
