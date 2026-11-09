@@ -9,6 +9,8 @@ import { loadHaruAssetExpectations, observeHaruAssets } from '../live2d-assets.m
 import { waitForDialogSettled, waitForPaintedCharacter } from './dialog-readiness.mjs';
 import { loadOriginalEvidence } from './retry.mjs';
 import { preferenceObservation, assertDevToolsPreference, assertDevToolsProbe, probeDevToolsDisabled } from './security.mjs';
+import { bounded, requestProductionQuit, containFailedLaunch } from './shutdown.mjs';
+import { createPresenceSuppression, capturePresenceRequest, createSerialRequestQueue } from './presence-guard.mjs';
 import { PROFILE, DRAFT, MAIL, TEXT, samePath, buttonName, classifyRequest, safeRequest, ownedProcesses, earlyOwnedProcesses,
   validateSockets, sha256, treeDigest, assertNativeMenu } from './contract.mjs';
 
@@ -29,8 +31,9 @@ const report = {
     applicationMenu: 'read-only native Menu object; explicit production quit callback invoked through inspector',
     tray: 'transparent setContextMenu observation; production call, this and return preserved',
     nativeMenuPointerValidated: false, unsignedSmartScreenValidated: false, undebuggedLaunchValidated: false,
-    devTools: 'negative openDevTools event/state/contents probes on both installed windows; omitted getter accepted only for exact Electron 44.5.1 plus hash-verified packaged constructor policies',
+    devTools: 'negative openDevTools event/state/contents probes on both installed windows; runtime must match the source lock; omitted getter requires an explicitly reviewed exact Electron version plus hash-verified packaged constructor policies',
     network: 'renderer requests abort on non-GET/HEAD or unexpected origin; process TCP snapshots at checkpoints',
+    presence: 'all POSTs remain aborted; exact owner presence heartbeats are separately counted only after real backend opt-out, identity, frame and schema verification; UI is tested with this background write suppressed',
     networkLimit: 'Renderer guard begins after Playwright attaches. OS snapshots are not continuous backend packet capture.',
   },
   exclusions: ['real mail', 'real models', 'credential setup', 'mail submission', 'business confirmation',
@@ -54,16 +57,25 @@ let installedIdentity;
 let sourceIdentity;
 let originalEvidence;
 let _electron;
+const presenceTrackers = [];
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const exists = async filename => fs.access(filename).then(() => true, () => false);
 let reportWrite = Promise.resolve();
 async function saveReport() {
+  report.suppressedPresence = presenceTrackers.map(({ number, tracker }) => ({ launch: number, ...tracker.summary() }));
   const text = JSON.stringify(report, null, 2) + '\n';
   reportWrite = reportWrite.then(() => fs.writeFile(path.join(evidence, 'result.json'), text));
   await reportWrite;
 }
-function ensureSafe() { assert.equal(report.blockedRequests.length, 0, 'unexpected request was aborted; acceptance fails closed'); }
+function ensureSafe({ allowPendingPresence = false } = {}) {
+  assert.equal(report.blockedRequests.length, 0, 'unexpected request was aborted; acceptance fails closed');
+  for (const { tracker } of presenceTrackers) {
+    if (allowPendingPresence && tracker === active?.presence && !active.presenceVerified) continue;
+    tracker.assertSettled();
+  }
+}
 async function checkpoint(name, details = {}) {
+  if (active) await verifyPresenceContext();
   ensureSafe();
   report.stages.push({ name, status: 'passed', ...details });
   await saveReport();
@@ -75,9 +87,9 @@ async function launchPhase(name, observations) {
   if (observations) active.attempt.observations.push({ phase: name, ...observations });
   await saveReport();
 }
-async function until(test, timeout = 30000) {
+async function until(test, timeout = 30000, safety = {}) {
   const end = Date.now() + timeout;
-  while (Date.now() < end) { ensureSafe(); if (await test()) return; await delay(200); }
+  while (Date.now() < end) { ensureSafe(safety); if (await test()) return; await delay(200); }
   throw new Error('bounded-wait-timeout');
 }
 async function command(program, args, env = process.env, timeout = 240000) {
@@ -85,7 +97,7 @@ async function command(program, args, env = process.env, timeout = 240000) {
     const child = spawn(program, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const chunks = [];
     let bytes = 0;
-    const timer = setTimeout(() => { child.kill(); reject(new Error('owned-command-timeout')); }, timeout);
+    const timer = setTimeout(() => { reject(new Error('owned-command-timeout')); child.kill(); }, timeout);
     child.stdout.on('data', chunk => { bytes += chunk.length; if (bytes <= 16 * 1024 * 1024) chunks.push(chunk); });
     // Never publish child stderr, inspector endpoints, tokens, or a whole environment.
     child.stderr.resume();
@@ -97,8 +109,9 @@ async function command(program, args, env = process.env, timeout = 240000) {
     });
   });
 }
-async function windows(mode, extra = {}) {
-  return JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'windows.ps1'), '-Mode', mode], { ...environment, ...extra }));
+async function windows(mode, extra = {}, timeout = 240000) {
+  return JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'windows.ps1'), '-Mode', mode],
+    { ...environment, ...extra }, timeout));
 }
 async function port() {
   const saved = JSON.parse(await fs.readFile(path.join(paths.userData, 'desktop-port.json'), 'utf8'));
@@ -156,26 +169,52 @@ async function verifySource() {
   return identity;
 }
 async function installRequestGuard(app) {
+  const launch = active;
   await app.context().routeWebSocket('**/*', socket => {
     report.blockedRequests.push(safeRequest(socket.url(), 'WEBSOCKET', { reason: 'unexpected-websocket' }));
     socket.close({ code: 1008, reason: 'Read-only localization validation' });
     void saveReport();
   });
-  await app.context().route('**/*', async route => {
+  await app.context().route('**/*', route => {
     const request = route.request();
-    let decision;
-    try { decision = classifyRequest(request.url(), request.method(), `http://127.0.0.1:${await port()}`); }
-    catch { decision = { allowed: false, reason: 'unverified-backend-origin' }; }
-    if (!decision.allowed) {
-      report.blockedRequests.push(safeRequest(request.url(), request.method(), decision));
-      await route.abort('blockedbyclient');
-      await saveReport();
-      return;
-    }
-    report.localReads++;
-    if (new URL(request.url()).pathname.startsWith('/api/')) report.apiReads++;
-    await route.continue();
+    let captured;
+    try { captured = capturePresenceRequest(request); } catch { /* Still abort; unverifiable origins cannot be suppressed. */ }
+    return launch.requestQueue.schedule(async () => {
+      let decision, origin;
+      try { origin = `http://127.0.0.1:${await port()}`; decision = classifyRequest(request.url(), request.method(), origin); }
+      catch { decision = { allowed: false, reason: 'unverified-backend-origin' }; }
+      if (!decision.allowed) {
+        let aborted = false;
+        try {
+          await route.abort('blockedbyclient'); aborted = true;
+          assert.ok(captured, 'presence frame provenance must be captured before abort');
+          launch.presence.recordAborted({ ...captured, origin, aborted });
+        } catch {
+          report.blockedRequests.push(safeRequest(request.url(), request.method(),
+            { reason: aborted ? decision.reason : 'request-abort-unconfirmed' }));
+        }
+        await saveReport();
+        return;
+      }
+      report.localReads++;
+      if (new URL(request.url()).pathname.startsWith('/api/')) report.apiReads++;
+      await route.continue();
+    });
   });
+}
+async function verifyPresenceContext() {
+  await active.requestQueue.drain();
+  const observed = await active.page.evaluate(async () => {
+    const response = await fetch('/api/companion', { method: 'GET', credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (!response.ok) throw new Error('companion-opt-out-read-failed');
+    const snapshot = await response.json();
+    return { ownerRole: window.offerpilotDesktop?.role, snapshot: { identity: snapshot.identity, enabled: snapshot.settings?.enabled } };
+  });
+  active.presence.verifyContext({ origin: active.origin, ownerPage: active.page, ownerMainFrame: active.page.mainFrame(),
+    ownerURL: active.page.url(), ...observed });
+  active.presenceVerified = true;
+  await active.requestQueue.drain();
+  ensureSafe();
 }
 async function launch(number, locale) {
   stage = `launch-${number}-preflight`;
@@ -187,7 +226,9 @@ async function launch(number, locale) {
   await saveReport();
   const app = await _electron.launch({ executablePath: paths.exe, cwd: paths.install, env: environment,
     chromiumSandbox: true, bypassCSP: false, timeout: 90000 });
-  active = { app, number, child: app.process(), startedAt, attempt };
+  active = { app, number, child: app.process(), startedAt, attempt,
+    presence: createPresenceSuppression(), presenceVerified: false, requestQueue: createSerialRequestQueue() };
+  presenceTrackers.push({ number, tracker: active.presence });
   // Guard installation must remain the first awaited action after attachment.
   stage = `launch-${number}-request-guards`;
   attempt.phase = 'request-guards';
@@ -202,7 +243,7 @@ async function launch(number, locale) {
   await launchPhase('owned-main-process');
   owned = ownedProcesses((await windows('snapshot')).processes, identity.pid, paths.exe, paths.backend);
   await launchPhase('backend-port-file');
-  await until(() => exists(path.join(paths.userData, 'desktop-port.json')), 90000);
+  await until(() => exists(path.join(paths.userData, 'desktop-port.json')), 90000, { allowPendingPresence: true });
   active.port = await port();
   active.origin = `http://127.0.0.1:${active.port}`;
   await launchPhase('renderer-roles');
@@ -225,10 +266,15 @@ async function launch(number, locale) {
     }
     assert.ok(active.page && active.haru && active.page !== active.haru, 'distinct owner and Haru renderers must both exist');
     return true;
-  }, 90000);
+  }, 90000, { allowPendingPresence: true });
   for (const page of [active.page, active.haru]) page.setDefaultTimeout(20000);
-  await launchPhase('initial-localized-landmarks');
+  await launchPhase('verify-disabled-companion-presence');
+  await verifyPresenceContext();
+  await launchPhase('initial-owner-localized-landmark', { matched: await active.page.getByRole('navigation', { name: TEXT[locale].navigation, exact: true }).count(),
+    lang: await active.page.evaluate(() => ['zh-CN', 'en-US'].includes(document.documentElement.lang) ? document.documentElement.lang : 'unexpected') });
   await active.page.getByRole('navigation', { name: TEXT[locale].navigation, exact: true }).waitFor();
+  await launchPhase('initial-companion-localized-landmark', { matched: await active.haru.getByRole('main', { name: TEXT[locale].haru, exact: true }).count(),
+    lang: await active.haru.evaluate(() => ['zh-CN', 'en-US'].includes(document.documentElement.lang) ? document.documentElement.lang : 'unexpected') });
   await active.haru.getByRole('main', { name: TEXT[locale].haru, exact: true }).waitFor();
   await launchPhase('runtime-security-read');
   const security = await app.evaluate(({ app, BrowserWindow, session }) => {
@@ -326,7 +372,7 @@ async function launch(number, locale) {
     return state.connected && state.snapshot?.aiConfigured === false;
   }));
   await launchPhase('real-haru-close-collapses-to-character');
-  await active.haru.getByRole('button', { name: locale === 'zh-CN' ? '关闭 Haru 对话' : 'Close Haru chat', exact: true }).click();
+  await active.haru.getByRole('button', { name: TEXT[locale].close, exact: true }).click();
   await active.haru.getByRole('button', { name: TEXT[locale].expand, exact: true }).waitFor();
   const collapsed = await active.haru.evaluate(async () => window.offerpilotDesktop.getState());
   assert.equal(collapsed.expanded, false, 'X must collapse the conversation');
@@ -464,13 +510,8 @@ async function mailPreview(locale) {
 async function quitNormally() {
   stage = `launch-${active.number}-explicit-menu-exit`;
   const current = active;
-  const quit = await current.app.evaluate(({ Menu }) => {
-    const matches = Menu.getApplicationMenu().items.flatMap(item => item.submenu?.items || [])
-      .filter(item => ['退出并停止本地服务', 'Quit and Stop Local Service'].includes(item.label));
-    if (matches.length !== 1 || matches[0].enabled === false || typeof matches[0].click !== 'function') throw new Error('explicit-quit-not-found');
-    setTimeout(() => matches[0].click(matches[0], undefined, {}), 0);
-    return true;
-  });
+  await verifyPresenceContext();
+  const quit = await requestProductionQuit(current.app);
   assert.equal(quit, true);
   await until(async () => (await windows('snapshot')).processes.length === 0, 60000);
   const portOpen = () => new Promise(resolve => {
@@ -479,6 +520,8 @@ async function quitNormally() {
     socket.setTimeout(1000, () => done(false)); socket.once('connect', () => done(true)); socket.once('error', () => done(false));
   });
   await until(async () => !(await portOpen()), 10000);
+  await current.requestQueue.drain();
+  ensureSafe();
   current.info.explicitProductionMenuQuit = true;
   current.info.mainAndBackendExited = true;
   current.info.backendPortClosedBeforeRestart = true;
@@ -605,36 +648,48 @@ try {
   }
 } finally {
   if (active) {
-    try { await quitNormally(); report.failureCleanup = 'explicit-menu-exit'; }
-    catch {
-      if (!owned.length && active.child) {
-        try {
-          const snapshot = await windows('snapshot');
-          // Playwright uses shell:true on Windows: this handle may be cmd.exe.
-          // Independently identify only the installed EXE in its live lineage.
-          // Never kill the wrapper or infer that doing so stops Electron.
-          owned = earlyOwnedProcesses(snapshot.processes, { handlePid: active.child.pid,
-            handleRunning: active.child.exitCode === null && active.child.signalCode === null,
-            startedAt: active.startedAt, observedAt: Date.now() }, paths.exe, paths.backend);
-        } catch { report.failureCleanup = 'early-installed-process-lineage-unconfirmed'; }
-      }
-      if (owned.length) {
-        try {
-          const snapshot = await windows('snapshot');
-          const main = owned[0];
-          // Refresh only if the independently captured main identity still exists.
-          // This includes a backend that became ready after an early UI failure.
-          if (snapshot.processes.some(item => item.pid === main.pid && item.parentPid === main.parentPid && item.created === main.created && samePath(item.path, main.path))) {
-            owned = ownedProcesses(snapshot.processes, main.pid, paths.exe, paths.backend);
-          }
-          report.failureCleanup = await windows('cleanup', { LOCALIZATION_OWNED_IDENTITIES: JSON.stringify(owned) });
-          const end = Date.now() + 15000;
-          while (Date.now() < end && (await windows('snapshot')).processes.length > 0) await delay(250);
-          report.failureCleanup.allInstalledProcessesExited = (await windows('snapshot')).processes.length === 0;
+    const current = active;
+    // Failure containment deliberately bypasses acceptance assertions only.
+    // Request guards stay installed; no failed stage becomes passed here.
+    report.failureCleanup = await containFailedLaunch({
+      requestQuit: () => requestProductionQuit(current.app),
+      waitExited: () => bounded(async () => {
+        const end = Date.now() + 15000;
+        while ((await windows('snapshot', {}, 20000)).processes.length > 0) {
+          if (Date.now() >= end) throw new Error('owned-processes-still-running');
+          await delay(250);
         }
-        catch { report.failureCleanup = 'owned-process-cleanup-unconfirmed'; }
-      } else report.failureCleanup ??= 'no-independently-verified-process-identity';
-    }
+        let backendPort = current.port;
+        if (!backendPort) { try { backendPort = await port(); } catch { /* Early launch may have no port. */ } }
+        let backendPortClosed = null;
+        if (backendPort) {
+          backendPortClosed = await new Promise(resolve => {
+            const socket = net.connect({ host: '127.0.0.1', port: backendPort });
+            const done = closed => { socket.destroy(); resolve(closed); };
+            socket.setTimeout(1000, () => done(false)); socket.once('connect', () => done(false));
+            socket.once('error', error => done(error.code === 'ECONNREFUSED'));
+          });
+          assert.equal(backendPortClosed, true, 'failure containment requires the observed backend port to close');
+        }
+        return { allInstalledProcessesExited: true, backendPortClosed };
+      }, 20000),
+      forceOwned: async () => {
+        if (!owned.length && current.child) {
+          const snapshot = await windows('snapshot', {}, 20000);
+          // The live Playwright wrapper is evidence of lineage, not a kill target.
+          owned = earlyOwnedProcesses(snapshot.processes, { handlePid: current.child.pid,
+            handleRunning: current.child.exitCode === null && current.child.signalCode === null,
+            startedAt: current.startedAt, observedAt: Date.now() }, paths.exe, paths.backend);
+        }
+        assert.ok(owned.length, 'no-independently-verified-process-identity');
+        const snapshot = await windows('snapshot', {}, 20000);
+        const main = owned[0];
+        if (snapshot.processes.some(item => item.pid === main.pid && item.parentPid === main.parentPid && item.created === main.created && samePath(item.path, main.path))) {
+          owned = ownedProcesses(snapshot.processes, main.pid, paths.exe, paths.backend);
+        }
+        return windows('cleanup', { LOCALIZATION_OWNED_IDENTITIES: JSON.stringify(owned) }, 20000);
+      },
+    });
   }
   const passed = new Set(report.stages.map(item => item.name));
   report.requiredStageResults = report.requiredStages.map(name => ({ name,
@@ -645,5 +700,9 @@ try {
     process.exitCode = 1;
   }
   report.completedAt = new Date().toISOString();
+  if (report.status === 'failed') report.failedHarnessExitAfterEvidence = true;
   await saveReport();
+  // Failed Playwright connections can keep Node alive after product cleanup.
+  // Persist failure and cleanup uncertainty, then exit nonzero, never timeout-green.
+  if (report.status === 'failed') process.exit(1);
 }

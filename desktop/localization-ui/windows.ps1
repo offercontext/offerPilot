@@ -44,9 +44,14 @@ if ($Mode -eq 'snapshot') {
 # uninstall, or PID copied from product logs. Revalidate all identity fields.
 $stopped = 0
 foreach ($identity in @($env:LOCALIZATION_OWNED_IDENTITIES | ConvertFrom-Json)) {
+  # ConvertFrom-Json may turn ISO strings into DateTime. Compare the same UTC
+  # round-trip representation without dropping birth-time precision or fields.
+  $created = $identity.created
+  if ($created -is [DateTime]) { $created = $created.ToUniversalTime().ToString('o') }
+  if ($created -isnot [string] -or $created -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{7}Z$') { continue }
   $match = @($processes | Where-Object {
     $_.pid -eq $identity.pid -and $_.parentPid -eq $identity.parentPid -and
-    $_.path -ieq $identity.path -and $_.created -eq $identity.created
+    $_.path -ieq $identity.path -and $_.created -ceq $created
   })
   if ($match.Count -eq 1) { Stop-Process -Id $identity.pid -Force -ErrorAction Stop; $stopped++ }
 }
