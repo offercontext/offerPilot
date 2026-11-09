@@ -258,8 +258,16 @@ def test_stop_rejects_new_attempts_and_keeps_terminal_records(channel, wire):
 
 
 @pytest.mark.parametrize("failure", [None, "ready", "cleanup"])
-def test_completion_requires_ready_exit_and_resource_cleanup(channel, wire, failure):
+@pytest.mark.parametrize("elapsed", [0, 2, 31], ids=["full-budget", "spent-budget", "expired"])
+def test_completion_requires_ready_exit_and_resource_cleanup(
+    channel, wire, failure, elapsed, monkeypatch,
+):
     base = importlib.import_module("scripts.evaluation_subject.bootstrap")
+    # This test controls shutdown ordering, not host-clock floating-point rounding.
+    # Integer clock points keep the exact bound and exercise consumed/expired budget.
+    clock = iter([100, 100 + elapsed])
+    channel.deadline = 280
+    monkeypatch.setattr(base, "time", SimpleNamespace(monotonic=lambda: next(clock)))
     actions = []
     resources = contextlib.ExitStack()
 
@@ -273,6 +281,7 @@ def test_completion_requires_ready_exit_and_resource_cleanup(channel, wire, fail
     class Ready:
         def join(self, timeout):
             actions.append("ready_join")
+            assert timeout == max(0, 30 - elapsed)
             assert 0 <= timeout <= 30
 
         def is_alive(self):
