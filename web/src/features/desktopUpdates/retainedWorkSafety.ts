@@ -71,8 +71,8 @@ export function interviewRetainedWorkSafety(buckets: Pick<RetainedWorkBuckets,
   let activeRun = Object.keys(buckets.preparationAttempts).length > 0 || Object.keys(buckets.reviewAttempts).length > 0;
   let pendingApproval = false;
   for (const draft of Object.values(buckets.adaptivePractice)) {
-    hasDraft ||= Boolean(draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput);
-    activeRun ||= draft.pendingOperation !== null || draft.resultUnknown;
+    hasDraft ||= Boolean(draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput || draft.trainingEvidenceDraft);
+    activeRun ||= draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command);
   }
   for (const draft of Object.values(buckets.reviewReadiness)) {
     hasDraft ||= isReviewReadinessDraftUnsaved(draft);

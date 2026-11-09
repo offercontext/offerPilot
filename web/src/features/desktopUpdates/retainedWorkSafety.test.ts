@@ -166,3 +166,13 @@ describe('retained draft update guards', () => {
     expect(retainedWorkSafety(value).pendingApproval).toBe(true);
   });
 });
+
+it('blocks desktop updates for unresolved training evidence in an owned completed plan', () => {
+  const value = buckets();
+  value.adaptivePractice = { 'practice:7:91:103:plan:8': {
+    ownerKey: 'practice:7:91:103:plan:8', ownerGeneration: 7, signalVersionId: 91, targetEventId: 103, planId: 8,
+    answer: '', reflection: '', assessment: null, startInput: null, completionInput: null, resultUnknown: false, pendingOperation: null,
+    trainingEvidenceDraft: { scenario: 'original', answer: 'private answer', assistance: 'unknown', editingId: null, command: { action: 'withdraw', expected_revision: 1, idempotency_key: 'original-key', record_id: 1 } },
+  } };
+  expect(retainedWorkSafety(value)).toEqual({ hasDraft: true, activeRun: true, pendingApproval: false });
+});
