@@ -4,11 +4,20 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { spawnSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { fileURLToPath } from 'node:url';
 import { buttonName, classifyRequest, safeRequest, samePath, ownedProcesses, earlyOwnedProcesses, validateSockets, treeDigest, assertNativeMenu, TEXT } from '../contract.mjs';
 
 const origin = 'http://127.0.0.1:43123';
 const here = path.dirname(fileURLToPath(import.meta.url));
+test('fresh disabled companion uses exact Pilot renderer copy without renaming the native tray', () => {
+  assert.deepEqual(['haru', 'expand', 'pin', 'close'].map(key => TEXT['zh-CN'][key]),
+    ['Pilot 桌面小窗', '展开 Pilot 对话', 'Pilot 始终置顶', '关闭 Pilot 对话']);
+  assert.deepEqual(['haru', 'expand', 'pin', 'close'].map(key => TEXT['en-US'][key]),
+    ['Pilot Desktop Companion', 'Expand Pilot Chat', 'Keep Pilot on Top', 'Close Pilot chat']);
+  assert.equal(TEXT['zh-CN'].tray[1], '隐藏 Haru');
+  assert.equal(TEXT['en-US'].tray[1], 'Hide Haru');
+});
 test('visible AntD two-Han-character button typography is matched without broadening the action', () => {
   assert.match('取消', buttonName('取消'));
   assert.match('取 消', buttonName('取消'));
@@ -99,6 +108,13 @@ test('new harness uses installed executable, explicit quit, and no product or ol
   assert.match(code, /app\.getPath\('userData'\)/);
   assert.match(code, /getByRole\('combobox'/);
   assert.match(code, /route\.abort\('blockedbyclient'\)/);
+  assert.ok(code.indexOf("await route.abort('blockedbyclient')") < code.indexOf('launch.presence.recordAborted('));
+  assert.ok(code.indexOf('captured = capturePresenceRequest(request)') < code.indexOf('return launch.requestQueue.schedule('));
+  assert.ok(code.indexOf('return launch.requestQueue.schedule(') < code.indexOf('origin = `http://127.0.0.1:${await port()}`'));
+  assert.match(code, /ownerMainFrame: active\.page\.mainFrame\(\)/);
+  assert.match(code, /snapshot: \{ identity: snapshot\.identity, enabled: snapshot\.settings\?\.enabled \}/);
+  assert.ok(code.indexOf("await launchPhase('verify-disabled-companion-presence')") < code.indexOf("await launchPhase('runtime-security-read')"));
+  assert.match(code, /await current\.requestQueue\.drain\(\);\s+ensureSafe\(\)/);
   assert.match(code, /original\.call\(this, menu\)/);
   assert.match(code, /await launch\(1, 'zh-CN'\)/);
   assert.match(code, /await launch\(2, 'en-US'\)/);
@@ -123,4 +139,34 @@ test('non-CI invocation fails before installer or browser launch and writes expl
   assert.deepEqual(result.launches, []);
   assert.deepEqual(result.screenshots, []);
   assert.ok(result.requiredStageResults.every(item => item.status === 'not-run-or-incomplete'));
+});
+
+test('normal Windows inspection retains its established budget; only failure containment uses a short deadline', async () => {
+  const code = await fs.readFile(path.join(here, '../smoke.mjs'), 'utf8');
+  const helper = code.match(/async function windows\([^]*?\n\}/)?.[0];
+  assert.ok(helper);
+  const calls = [];
+  const command = async (...args) => { calls.push(args); return '{"processes":[]}'; };
+  // Exercise the actual adapter with a harmless command spy, without launching
+  // the Windows-only acceptance entrypoint or replacing product responses.
+  const windows = new Function('command', 'path', 'here', 'environment', `return (${helper});`)(command, path, here, {});
+  await windows('snapshot'); await windows('install'); await windows('snapshot', {}, 20000);
+  assert.deepEqual(calls.map(args => args[3]), [240000, 240000, 20000]);
+  assert.deepEqual(calls.map(args => args[1].at(-1)), ['snapshot', 'install', 'snapshot']);
+  const containment = code.slice(code.indexOf('report.failureCleanup = await containFailedLaunch({'));
+  assert.equal((containment.match(/windows\('snapshot', \{\}, 20000\)/g) || []).length, 3);
+  assert.match(containment, /windows\('cleanup', \{ LOCALIZATION_OWNED_IDENTITIES: JSON\.stringify\(owned\) \}, 20000\)/);
+  assert.doesNotMatch(code.slice(0, code.indexOf('report.failureCleanup = await containFailedLaunch({')), /windows\('snapshot',/);
+});
+
+test('an owned command timeout kills the child and cannot become success from its close event', async () => {
+  const code = await fs.readFile(path.join(here, '../smoke.mjs'), 'utf8');
+  const helper = code.match(/async function command\([^]*?\n\}/)?.[0];
+  assert.ok(helper);
+  const child = new EventEmitter(); child.stdout = new EventEmitter(); child.stderr = { resume() {} };
+  let killed = 0;
+  child.kill = () => { killed++; child.emit('close', 0); return true; };
+  const command = new Function('spawn', `return (${helper});`)(() => child);
+  await assert.rejects(command('owned-command-spy', [], {}, 10), /owned-command-timeout/);
+  assert.equal(killed, 1);
 });

@@ -30,6 +30,28 @@ test('omitted DevTools preference requires exact Electron and independently hash
   assert.throws(() => assertDevToolsPreference(undefined, '44.5.1', undefined));
 });
 
+test('patched Electron omission requires its exact source lock without weakening old-package evidence', () => {
+  const patchedPolicy = { ...policy, lockedElectron: '44.10.2' };
+  assertDevToolsPreference(undefined, '44.10.2', patchedPolicy);
+  assertDevToolsPreference(false, '44.10.2', patchedPolicy);
+  for (const value of [undefined, false]) {
+    assert.throws(() => assertDevToolsPreference(value, '44.10.2', policy));
+    assert.throws(() => assertDevToolsPreference(value, '44.5.1', patchedPolicy));
+    assert.throws(() => assertDevToolsPreference(value, undefined, undefined));
+  }
+  for (const version of ['44.9.1', '44.10.1', '44.10.3', '45.2.3']) {
+    assert.throws(() => assertDevToolsPreference(undefined, version, { ...patchedPolicy, lockedElectron: version }));
+  }
+  for (const field of Object.keys(patchedPolicy)) {
+    assert.throws(() => assertDevToolsPreference(undefined, '44.10.2', { ...patchedPolicy, [field]: false }));
+    const missing = { ...patchedPolicy }; delete missing[field];
+    assert.throws(() => assertDevToolsPreference(undefined, '44.10.2', missing));
+  }
+  for (const value of [true, null, 0, 'false']) {
+    assert.throws(() => assertDevToolsPreference(value, '44.10.2', patchedPolicy));
+  }
+});
+
 test('negative behavioral proof rejects every open-state, contents, event or missing observation', () => {
   assertDevToolsProbe(negative);
   for (const field of Object.keys(negative)) {

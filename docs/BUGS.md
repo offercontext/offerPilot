@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## 终态重放持有外层写事务导致连接池等待（2026-11-09）
+
+**现象：** Windows run `42514387406` 的故事并发确认测试出现 SQLite 写锁超时。原 CI 没有记录所有线程栈，不能据此认定唯一原因。
+
+**复现：** 独立单连接池测试确定复现资源循环：竞争请求取得写事务后发现操作已终态，重放读取持久输入时又申请连接，但外层连接尚未释放；正常和篡改输入两种情况均失败。
+
+**修复：** 仅在已验证的 `exact_terminal` 路径先回滚外层只读写锁事务，再从不可变快照执行重放。保留确认令牌、请求指纹、持久输入与结果校验，不改变实际写入事务，也不提高锁等待时限。
+
+**验证与教训：** 单槽回归在原版两项失败、修复后通过；保留八线程并发与篡改拒绝验证。终态读取也可能耗尽共享连接池，不能在持有写锁时等待另一个池连接。完整候选仍须独立 Windows 门禁，不把已复现机制等同于原 CI 的唯一根因。
+
 ## AI 设置测试卸载后静态通知仍存活（2026-11-08）
 
 **现象：** Windows run `42496324988` 的 3,108 条前端测试通过，但 `AISettingsDrawer.interaction.test.tsx` 环境销毁后，AntD 通知计时器触发 `window is not defined`，完整门禁失败。
@@ -784,6 +794,56 @@
 **验证：** 新回归在修复前明确失败；修复后同时检查读取不产生已提交业务 DML，以及真实时间修改仍能提交。相关应用、scope、事件与 Runtime 回归列于 Harness 验证记录。
 
 **教训：** 绑定事务中的读取辅助函数不得通过呈现转换触发持久化副作用；最终状态相等不足以证明零业务提交。
+
+## 桌面构建依赖的 glob 模式放大漏洞（2026-11-05）
+
+**现象：** 三个桌面锁文件仍包含受 [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249) 影响的 minimatch 9/10；两套验收 helper 的 glob 13 另受 [GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4) 影响。有限重复模式在 `braceExpandMax=32` 时仍生成 128 行。
+
+**根因：** 当前上游 ASAR 4.3.1、app-builder-lib 26.15.3 和 universal 2.0.3 尚未放宽依赖范围。minimatch 11 移除了正则相关 API，不能只在 glob 13 下强换；父包级覆盖还会向后代传播，破坏旧 ASAR 3/glob 7 的 callable API。
+
+**修复：** desktop 仅覆盖 `minimatch@>=7 <11` 到 11.0.4，保留旧 3/5 系列；两套 helper 对 ASAR 4.3.1 配套覆盖 glob 14.0.3/minimatch 11.0.4，并重建锁文件。回归实际优化器上界、builder 文件筛选、universal allowlist、ASAR 打包/解包/unpack 与目录链接。现有 Node 22 工具链满足新依赖要求；应用代码、Electron 版本和其他安全告警不在本次改动范围。
+
+**教训：** `npm ci` 或 audit 通过不代表跨主版本 API 兼容，须核对实际解析树和调用点。上游原生支持安全版本后再移除 overrides；增加依赖消费者时重查 minimatch 的已移除 API。ASAR 查询使用宿主分隔符，不能复用 glob 的 POSIX 路径；macOS universal 合包夹具不在 Windows 执行，其纯匹配边界仍跨平台验证。完整 Windows 安装包和 release gate 仍是独立验收，不由离线打包夹具替代。
+
+## 正常 Windows 验收误用失败收尾的短超时（2026-11-05）
+
+**现象：** [run 42050324523](https://github.com/offercontext/offerPilot/actions/runs/42050324523) 通过 Windows 41 项 harness 测试、构建和实际安装，但 `launch-1-preflight` 在首次进程/端口快照的 10 秒上限触发 `owned-command-timeout`，尚未启动 Electron。
+
+**根因：** 为有界失败收尾新增的短超时误施加到所有非 install 的 PowerShell 调用。正常 CIM/TCP 观测耗时与收尾预算不同；本地 Linux 测试没有执行实际 Windows 快照，未暴露这一回归。
+
+**修复：** 普通验收恢复既有 240 秒命令预算，只在失败收尾显式传入 20 秒；安全断言、进程所有权、请求阻断与 workflow 不变。超时先拒绝 Promise 再结束自有子进程，关闭事件不能将超时变为成功。回归执行实际命令适配器的预算传递和模拟子进程超时/关闭顺序，旧失败包和报告保留。
+
+**教训：** 不将异常收尾时限全局套用正常验证，模拟测试通过不等于真实平台可用；超时诊断应区分未启动、失败与未执行阶段。
+
+## 实装只读检查遗漏 Settings 路由并在失败后继续等待（2026-11-05）
+
+**现象：** [run 42030588664](https://github.com/offercontext/offerPilot/actions/runs/42030588664) 的真实 Electron 44.10.2 安装身份、双窗口安全和初始语言检查通过，但邮件预览阶段拒绝 presence，最终任务超时。报告保留 `aborted=2 / validated=2 / rejected=true`，未记录首拒绝原因；清理未确认进程退出。
+
+**根因：** `pushWorkspaceView('settings')` 将 owner 地址改为 `/?view=settings`，presence helper 的请求来源及上下文校验仅接受 `/`，这是可独立复现的契约缺陷，不能据此排除旧运行并发的其他异常。失败收尾复用带安全前置断言的 `quitNormally()`，已失败 guard 阻止了生产退出菜单执行；Node 连接存活又延长到 job timeout。PowerShell 的 JSON 日期反序列化还可能使原字符串创建时间比较失败，此兼容路径须在真实 runner 验证。
+
+**修复：** 仅接受相同已验证 owner/frame 的精确 `/` 或 `/?view=settings`，其他 query/hash/path、client/sequence/flags 异常仍失败，所有 POST 仍先阻断。首拒绝保存固定代码，不保存请求或身份值。失败收尾独立尝试生产退出、有界等待，必要时按 PID/父 PID/路径/创建时间四项重验清理，不生成通过 stage；创建时间统一 UTC 精确格式。保留清理未确认状态并在落盘后退出非零，不再依赖长任务超时。新增真实 PowerShell JSON 往返的模拟进程测试，在既有 Windows 测试步骤执行。
+
+**教训：** 只读拦截也须跟踪合法页面导航；验收断言失败不能阻止失败收尾。单元测试和部分实装安全通过均不等于完整 UI 验收，旧包及失败证据不得改写。
+
+## 新 profile 的桌面实装测试仍等待旧角色名（2026-11-05）
+
+**现象：** Electron 升级的 [Windows run 41983234656](https://github.com/offercontext/offerPilot/actions/runs/41983234656) 安装及资源身份核对通过，但初始本地化 landmark 超时；报告另记录三次已阻断的 presence POST，安全断言尚未执行。
+
+**根因：** 主线 `54c7cc66` 已将未开启陪伴的新 profile 显示为 Pilot，实装 helper 的 main/expand/pin/close 仍精确等待 Haru；同阶段没有拆开 owner/companion 诊断，无法仅凭旧报告确定首先超时的 locator。当前产品默认关闭时仍尝试持久化 presence，旧只读 helper 对所有已阻断请求均报失败。这些契约差异不能当作 Electron 回归证据。
+
+**修复：** renderer 精确使用默认关闭后的 Pilot 文案，native tray 保持 Haru。presence 仍必须先 abort，仅精确同源 owner main frame、已读回关闭状态及真实身份、完整有界 schema、单 client 递增 sequence 的已确认阻断单列计数；未知状态、Haru/子 frame/worker、额外字段或任何其他写入继续失败。早期请求不能在身份核验前算通过；报告明确这是主动阻断背景写入后的限定 UI 验证。
+
+**教训：** 生产默认状态变化应同步真实实装契约，不能恢复默认开启、放宽角色正则、允许写入或伪造响应来让测试变绿。旧失败包及证据保持原状；修复 helper 后手动新构建的结果只能证明新产物，不能追认旧包通过。
+
+## Electron 受损中间证书信任与升级验证版本绑定（2026-11-05）
+
+**现象：** 桌面运行时 Electron 44.5.1 命中 [GHSA-jr5w-w6x2-84p9](https://github.com/electron/electron/security/advisories/GHSA-jr5w-w6x2-84p9)。攻击者须持有相关受损中间 CA 签发证书并可拦截 TLS；离线语音模型下载存在 Electron 外连路径，不能仅因依赖在 devDependencies 就忽略。
+
+**根因：** 旧 Electron 未阻止这些证书公钥；44.x 最低修复版为 44.9.1。同时本地化实装 helper 把 devTools getter 缺失证据硬编码为 44.5.1，直接升级会错误拒绝新运行时。
+
+**修复：** package 与 lock 精确升级至 44.10.2。helper 独立核对运行时与产品源码锁定版本，仅为经官方源码审查的 44.5.1/44.10.2 接受 getter 缺失，并保留 ASAR/源码身份、构造策略和双窗口禁用行为探针；不重写旧安装器 PIN 或关闭安全策略。新包 Windows 实装通过与否以本次运行证据为准。
+
+**教训：** 打包运行时依赖不等于纯构建依赖；上游证书修复须通过新包交付。版本特例应精确绑定审查证据，不能以放宽 undefined 或复用旧包验收解决升级失败。
 
 ## 默认陪伴事实被历史挤出与来源超限静默降级（2026-11-04）
 
