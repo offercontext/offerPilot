@@ -118,3 +118,43 @@ describe('TrainingEvidencePanel', () => {
     expect(container.textContent).toContain('cannot be inferred from answer quality'); expect(container.textContent).not.toContain('中文');
   });
 });
+
+describe('active training evidence capacity', () => {
+  const full = () => ({ ...state(), revision: 12, records: Array.from({ length: 12 }, (_, index) => ({ ...record, id: index + 1, scenario_id: 'retry_timeout' as const })) });
+  it('shows capacity before input, blocks new records, and still permits correction', async () => {
+    service.get.mockResolvedValue(full()); render(); await open();
+    expect(container.textContent).toContain('有效训练记录：12/12；剩余容量 0 条。');
+    expect(container.textContent).toContain('可先撤回一条再新增');
+    expect(container.querySelector('fieldset')!.disabled).toBe(true);
+    await click('确认保存训练证据'); expect(service.change).not.toHaveBeenCalled();
+    await click('更正记录');
+    expect(container.querySelector('fieldset')!.disabled).toBe(false);
+    service.change.mockResolvedValue({ ...full(), revision: 13 });
+    await click('确认保存更正');
+    expect(service.change.mock.calls[0][1]).toMatchObject({ action: 'correct', record_id: 1 });
+  });
+  it('shows neutral capacity when the source is paused without promising correction or creation', async () => {
+    service.get.mockResolvedValue({ ...full(), available: false, reason: 'source_changed' }); render(); await open();
+    expect(container.textContent).toContain('有效训练记录：12/12；剩余容量 0 条。');
+    expect(container.textContent).toContain('已暂停新增、修改和建议');
+    expect(container.textContent).not.toContain('更正和撤回仍可用');
+    expect(container.textContent).not.toContain('可先撤回一条再新增');
+    expect(button('更正记录').disabled).toBe(true);
+    expect(button('撤回训练记录').disabled).toBe(false);
+    expect(container.querySelector('fieldset')).toBeNull();
+  });
+  it('withdrawal releases a slot while retaining tombstones and enables a new record', async () => {
+    service.get.mockResolvedValue(full()); render(); await open();
+    const released = { ...full(), revision: 13, records: full().records.map((item, index) => index === 0 ? { ...item, answer: '', withdrawn: true } : item) };
+    service.change.mockResolvedValueOnce(released);
+    await click('撤回训练记录'); await click('确认撤回训练记录');
+    expect(container.textContent).toContain('有效训练记录：11/12；剩余容量 1 条。');
+    expect(container.querySelector('fieldset')!.disabled).toBe(false);
+    expect(container.textContent).toContain('已撤回，不再用于建议');
+    await select('练习情境', 'original');
+    service.change.mockResolvedValueOnce({ ...released, revision: 14, records: [...released.records, { ...record, id: 13 }] });
+    await click('确认保存训练证据');
+    expect(service.change.mock.calls[1][1]).toMatchObject({ action: 'record', expected_revision: 13 });
+    expect(container.textContent).toContain('有效训练记录：12/12；剩余容量 0 条。');
+  });
+});

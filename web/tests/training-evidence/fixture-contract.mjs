@@ -70,3 +70,18 @@ test('a second active original record conflicts; explicit withdrawal allows a ne
   assert.equal(post(api, { ...record(4), expected_revision: 2 }).status, 200);
   assert.equal(api.state().records.filter(item => !item.withdrawn).length, 1);
 });
+
+test('12 active slots allow correction and withdrawal releases capacity without erasing receipts', () => {
+  const api = createTrainingFixture();
+  for (let i = 1; i <= 12; i++) assert.equal(post(api, { ...record(i), expected_revision: i - 1, scenario_id: 'retry_timeout', answer: 'Synthetic answer' }).status, 200);
+  assert.equal(post(api, { ...record(13), expected_revision: 12 }).status, 409);
+  assert.equal(post(api, { action: 'correct', expected_revision: 12, idempotency_key: key(14), record_id: 1, answer: 'Corrected synthetic answer', assistance: 'hinted' }).status, 200);
+  assert.equal(post(api, { action: 'withdraw', expected_revision: 13, idempotency_key: key(15), record_id: 1 }).status, 200);
+  assert.equal(post(api, { ...record(16), expected_revision: 14 }).status, 200);
+  assert.equal(api.state().records.length, 13);
+  assert.equal(api.state().records.filter(item => !item.withdrawn).length, 12);
+  const replay = post(api, { ...record(1), expected_revision: 0, scenario_id: 'retry_timeout', answer: 'Synthetic answer' });
+  assert.equal(replay.status, 200);
+  assert.equal(replay.data.records[0].withdrawn, true);
+  assert.equal(replay.data.records[0].answer, '');
+});

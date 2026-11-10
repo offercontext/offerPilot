@@ -112,6 +112,8 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
     }
   };
   const identity = () => ({ expected_revision: state!.revision, idempotency_key: crypto.randomUUID() });
+  const activeCount = state?.records.filter((record) => !record.withdrawn).length ?? 0;
+  const atCapacity = activeCount >= 12;
   const frozen = busy || pending !== null || error === 'conflict' || error === 'load';
   const beginEdit = (record: TrainingEvidenceRecord) => {
     setEditing(record.id); onDraftChange({ scenario: record.scenario_id, answer: record.answer, assistance: record.assistance, editingId: record.id, command: null }); setScenario(record.scenario_id); setAnswer(record.answer); setAssistance(record.assistance); setWithdrawTarget(null);
@@ -133,12 +135,14 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
       {pending ? <div role="alert"><p>{t('保存结果待确认，输入已冻结。请使用原操作重试，不要重复新建记录。')}</p><button type="button" disabled={busy} onClick={() => void submit(pending)}>{t('使用原操作重试')}</button></div> : null}
       <button type="button" disabled={busy || pending !== null} onClick={() => void load()}>{t('重新读取')}</button>
       {state ? <>
+        <p role="status">{t('有效训练记录：{used}/12；剩余容量 {remaining} 条。', { used: activeCount, remaining: Math.max(0, 12 - activeCount) })}</p>
+        {state.available && atCapacity ? <p role="status">{t('已达到 12 条有效记录上限。可先撤回一条再新增；更正和撤回仍可用。')}</p> : null}
         {!state.available ? <p role="status">{t('来源或目标已变化，已暂停新增、修改和建议。仍可查看历史并撤回训练记录。')}</p> : null}
         {state.available && state.recommendation ? <aside className={styles.advice}>
           <strong>{t('下一次怎么练')}</strong>
           <p>{recommendationCopy(state).reason}</p><p>{recommendationCopy(state).comparison}</p><p>{scenarioPrompt(state.recommendation.scenario_id)}</p>
           <p>{t('依据记录：')}{state.recommendation.evidence_record_ids.map((id) => <a key={id} href={`#training-${planId}-${id}`}> #{id}</a>)}</p>
-          <button type="button" disabled={frozen} onClick={() => selectScenario(state.recommendation!.scenario_id)}>{t('换个场景试一次')}</button>
+          <button type="button" disabled={frozen || atCapacity} onClick={() => selectScenario(state.recommendation!.scenario_id)}>{t('换个场景试一次')}</button>
         </aside> : null}
         <ul className={styles.records}>{state.records.map((record) => <li id={`training-${planId}-${record.id}`} key={record.id}>
           <strong>#{record.id} · {scenarioLabel(record.scenario_id)}</strong><p><time>{record.created_at}</time>{record.updated_at !== record.created_at ? <> · {t('已更正：')}{record.updated_at}</> : null}</p>
@@ -149,7 +153,7 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
             {withdrawTarget === record.id ? <div role="group" aria-label={t('确认撤回训练记录')}><p>{t('撤回后清除这条训练记录的回答，不再用于建议。原计划的完成回答仍保留。')}</p><button type="button" disabled={frozen} onClick={() => void submit({ ...identity(), action: 'withdraw', record_id: record.id })}>{t('确认撤回训练记录')}</button>{' '}<button type="button" disabled={frozen} onClick={() => setWithdrawTarget(null)}>{t('取消')}</button></div> : null}
           </>}
         </li>)}</ul>
-        {state.available ? <fieldset disabled={frozen} className={styles.form}>
+        {state.available ? <fieldset disabled={frozen || (editing === null && atCapacity)} className={styles.form}>
           <legend>{editing ? t('更正训练记录') : t('显式保存一次练习证据')}</legend>
           <label>{t('练习情境')}<select aria-label={t('练习情境')} value={scenario} disabled={editing !== null} onChange={(event) => selectScenario(event.target.value as TrainingScenario)}>{state.scenarios.map((item) => <option key={item.id} value={item.id}>{scenarioLabel(item.id)}</option>)}</select></label>
           <p>{scenarioPrompt(scenario)}</p>
@@ -157,9 +161,8 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
           {scenario === 'original' ? <small>{t('原回答仅引用已完成计划；这里可以更正辅助情况，不改写原回答。')}</small> : null}
           <label>{t('这次如何完成回答')}<select aria-label={t('这次如何完成回答')} value={assistance} onChange={(event) => { const value = event.target.value as TrainingAssistance; setAssistance(value); onDraftChange({ scenario, answer, assistance: value, editingId: editing, command: null }); }}>{(['unknown', 'independent', 'hinted', 'reference'] as const).map((value) => <option key={value} value={value}>{assistanceLabel(value)}</option>)}</select></label>
           <p>{t('以下保存是你的记录，不是 AI 对能力的判定。')}</p>
-          <button type="button" disabled={!answer.trim() || (!editing && state.records.length >= 12)} onClick={() => void submit(editing ? { ...identity(), action: 'correct', record_id: editing, answer, assistance } : { ...identity(), action: 'record', skill_id: 'idempotency_retry', scenario_id: scenario, answer, assistance })}>{editing ? t('确认保存更正') : t('确认保存训练证据')}</button>
+          <button type="button" disabled={!answer.trim() || (editing === null && atCapacity)} onClick={() => void submit(editing ? { ...identity(), action: 'correct', record_id: editing, answer, assistance } : { ...identity(), action: 'record', skill_id: 'idempotency_retry', scenario_id: scenario, answer, assistance })}>{editing ? t('确认保存更正') : t('确认保存训练证据')}</button>
           {editing ? <button type="button" onClick={clearForm}>{t('取消更正')}</button> : null}
-          {state.records.length >= 12 ? <p>{t('本计划最多保存 12 条训练记录，现有记录仍可更正或撤回。')}</p> : null}
         </fieldset> : null}
       </> : null}
     </>}

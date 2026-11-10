@@ -194,7 +194,7 @@ def test_concurrent_same_key_has_one_record(setup):  # type: ignore[no-untyped-d
     assert len(results[0]["records"]) == 1
 
 
-def test_record_limit_includes_withdrawn_and_comparison_cites_current_records(setup):  # type: ignore[no-untyped-def]
+def test_active_record_limit_and_comparison_cites_current_records(setup):  # type: ignore[no-untyped-def]
     _, _, plan, repo = setup
     for revision in range(12):
         state = repo.mutate(plan["id"], record(revision))
@@ -348,3 +348,76 @@ def test_replay_after_source_missing_is_history_only(setup):  # type: ignore[no-
     assert state["reason"] == "target_missing"
     state = repo.mutate(plan["id"], change("withdraw", state, state["records"][0]["id"]))
     assert state["records"][0]["answer"] == ""
+
+
+def test_withdrawal_releases_capacity_without_reusing_identity_or_replaying_old_answer(setup):  # type: ignore[no-untyped-def]
+    factory, _, plan, repo = setup
+    commands = [record(revision, answer=f"回答 {revision}") for revision in range(12)]
+    for command in commands:
+        state = repo.mutate(plan["id"], command)
+    assert len(state["records"]) == 12
+    first_id = state["records"][0]["id"]
+    corrected = repo.mutate(plan["id"], change(
+        "correct", state, first_id, answer="已更正回答", assistance="hinted",
+    ))
+    assert corrected["records"][0]["answer"] == "已更正回答"
+    withdrawal = change("withdraw", corrected, first_id)
+    withdrawn = repo.mutate(plan["id"], withdrawal)
+    new_command = record(withdrawn["revision"], answer="使用释放的有效名额")
+    final = repo.mutate(plan["id"], new_command)
+    assert len(final["records"]) == 13
+    assert sum(not item["withdrawn"] for item in final["records"]) == 12
+    assert final["records"][-1]["id"] > first_id
+    tombstone = final["records"][0]
+    assert tombstone["withdrawn"] and tombstone["answer"] == ""
+    # Replay at full capacity must return current state without recreating the
+    # original answer, consuming another slot or repeating the withdrawal.
+    assert repo.mutate(plan["id"], commands[0]) == final
+    assert repo.mutate(plan["id"], withdrawal) == final
+    assert repo.mutate(plan["id"], new_command) == final
+    with pytest.raises(TrainingEvidenceError, match="training_evidence_conflict"):
+        repo.mutate(plan["id"], record(final["revision"]))
+    with factory() as session:
+        assert len(session.scalars(select(TrainingEvidenceCommand)).all()) == 15
+        assert session.get(TrainingEvidenceRecord, first_id).answer == ""
+
+
+def test_last_active_slot_concurrent_creation_preserves_limit(setup):  # type: ignore[no-untyped-def]
+    _, _, plan, repo = setup
+    for revision in range(11):
+        state = repo.mutate(plan["id"], record(revision))
+    commands = [record(state["revision"]), record(state["revision"])]
+    def write(command):
+        try:
+            repo.mutate(plan["id"], command)
+            return "saved"
+        except TrainingEvidenceError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write, commands))
+    assert sorted(results) == ["saved", "training_evidence_conflict"]
+    final = repo.get(plan["id"])
+    assert final["revision"] == 12
+    assert sum(not item["withdrawn"] for item in final["records"]) == 12
+    # Two fresh commands against a full quota both fail; neither leaves a
+    # receipt or increments the revision, even when racing.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write, [record(12), record(12)]))
+    assert results == ["training_evidence_conflict", "training_evidence_conflict"]
+    assert repo.get(plan["id"]) == final
+
+
+def test_withdrawn_original_can_be_explicitly_saved_again_as_new_record(setup):  # type: ignore[no-untyped-def]
+    _, _, plan, repo = setup
+    original = record(scenario_id="original", answer=plan["response_text"], assistance="unknown")
+    first = repo.mutate(plan["id"], original)
+    first_id = first["records"][0]["id"]
+    withdrawn = repo.mutate(plan["id"], change("withdraw", first, first_id))
+    second = repo.mutate(plan["id"], record(
+        withdrawn["revision"], scenario_id="original", answer=plan["response_text"], assistance="hinted",
+    ))
+    assert second["records"][0]["withdrawn"]
+    assert second["records"][0]["answer"] == ""
+    assert second["records"][1]["id"] != first_id
+    assert second["records"][1]["assistance"] == "hinted"
+    assert repo.mutate(plan["id"], original) == second

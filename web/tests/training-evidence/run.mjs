@@ -138,6 +138,30 @@ async function exercise(locale, width) {
     check(`${locale}: no duplicate evidence on unknown-result retry`, api.state().revision === 3 && api.state().records.length === 2);
     check(`${locale}: comparison links both evidence records`, await panel.locator('a[href="#training-808-1"]').count() === 1 && await panel.locator('a[href="#training-808-2"]').count() === 1);
     await capture(page, panel, `${locale}-03-comparison`);
+    // Fill every remaining slot through the rendered UI, not direct fixture writes.
+    for (let count = 2; count < 12; count += 1) {
+      await button(panel, 'next').click();
+      await panel.getByRole('textbox', { name: labels.answer }).fill(`SYNTHETIC capacity exercise ${count + 1}: replay the receipt using the same key.`);
+      await button(panel, 'save').click();
+      await until(`${locale}: UI saves active record ${count + 1}`, () => api.state().records.filter(record => !record.withdrawn).length === count + 1);
+      await until(`${locale}: capacity save ${count + 1} settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
+    }
+    check(`${locale}: full capacity disables new input before answering`, await panel.locator('fieldset').evaluate(element => element.disabled));
+    check(`${locale}: full capacity disables next exercise`, await button(panel, 'next').isDisabled());
+    check(`${locale}: full capacity still permits correction`, await button(panel.locator('#training-808-1'), 'correct').isEnabled());
+    await capture(page, panel, `${locale}-04-capacity-full`);
+    await button(panel.locator('#training-808-12'), 'withdraw').click();
+    await button(panel.locator('#training-808-12'), 'confirmWithdrawal').click();
+    await until(`${locale}: UI withdrawal frees one active slot`, () => api.state().records.filter(record => !record.withdrawn).length === 11);
+    await until(`${locale}: capacity withdrawal settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
+    check(`${locale}: freed slot enables next exercise`, await button(panel, 'next').isEnabled());
+    await button(panel, 'next').click();
+    await panel.getByRole('textbox', { name: labels.answer }).fill('SYNTHETIC replacement exercise after withdrawal: replay the original receipt.');
+    await button(panel, 'save').click();
+    await until(`${locale}: UI can save after 12 total historical records`, () => api.state().records.length === 13 && api.state().records.filter(record => !record.withdrawn).length === 12);
+    await until(`${locale}: replacement save settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
+    check(`${locale}: old capacity tombstone remains cleared`, api.state().records[11].withdrawn && api.state().records[11].answer === '');
+    await capture(page, panel, `${locale}-05-capacity-reused`);
     api.pauseSource();
     await button(panel, 'reload').click();
     await until(`${locale}: source pause removes recording and advice`, async () => await panel.locator('fieldset').count() === 0 && await button(panel, 'next').count() === 0);
@@ -147,7 +171,7 @@ async function exercise(locale, width) {
     await until(`${locale}: withdrawal remains available after source pause`, () => api.state().records[1].withdrawn && api.state().records[1].answer === '');
     await until(`${locale}: withdrawn record UI no longer contains the answer`, async () => !(await panel.locator('#training-808-2').innerText()).includes('SYNTHETIC retest:'));
     check(`${locale}: original completed plan answer is unchanged`, ORIGINAL_ANSWER === api.handle('GET', `${ORIGIN}/api/interview-practice/plans`).data[0].response_text);
-    await capture(page, panel, `${locale}-04-source-paused-withdrawn`);
+    await capture(page, panel, `${locale}-06-source-paused-withdrawn`);
     if (locale === 'en-US') check('English authored panel text is localized', !/\p{Script=Han}/u.test(await panel.innerText()));
     const bounds = await panel.evaluate(node => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, width: innerWidth }));
     check(`${locale}: panel fits desktop viewport horizontally`, bounds.left >= -1 && bounds.right <= bounds.width + 1);

@@ -69,7 +69,8 @@ export function createTrainingFixture() {
     if (body.action !== 'withdraw' && !available) return reject('training_evidence_source_unavailable', 409);
     let record;
     if (body.action === 'record') {
-      if (body.skill_id !== 'idempotency_retry' || !scenarios.some(item => item.id === body.scenario_id) || records.length >= 12) return reject('training_evidence_invalid');
+      if (body.skill_id !== 'idempotency_retry' || !scenarios.some(item => item.id === body.scenario_id)) return reject('training_evidence_invalid');
+      if (records.filter(item => !item.withdrawn).length >= 12) return reject('training_evidence_conflict', 409);
       if (body.scenario_id === 'original' && records.some(item => item.scenario_id === 'original' && !item.withdrawn)) return reject('training_evidence_conflict', 409);
       record = { id: nextId, scenario_id: body.scenario_id, withdrawn: false };
     } else {

@@ -158,8 +158,12 @@ class TrainingEvidenceRepository:
                     session.flush()
                 now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 if isinstance(command, RecordCommand):
+                    # Bound the evidence used by this plan, not its lifetime
+                    # history. Withdrawal releases one active slot but keeps
+                    # tombstones and receipts so old retries cannot recreate it.
                     records = list(session.scalars(select(TrainingEvidenceRecord).where(
                         TrainingEvidenceRecord.plan_id == plan_id,
+                        TrainingEvidenceRecord.withdrawn.is_(False),
                     )))
                     if len(records) >= 12:
                         raise TrainingEvidenceError("training_evidence_conflict", 409)

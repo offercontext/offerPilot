@@ -18,8 +18,15 @@ It does not change the existing full-gate routing.
 
 The bilingual browser flow checks explicit selection, unknown historical
 assistance, recording, correction, another scenario, lost-response retry with the
-original command, source suspension and withdrawal. Output includes source/tree
+original command, filling all 12 active slots through the UI, withdrawing and
+reusing capacity, source suspension and withdrawal. Output includes source/tree
 and production-asset hashes, browser version, request/assertion logs, DOM,
 accessibility snapshots and PNG screenshots. A passing report proves these UI
 flows against the synthetic transport only, not backend persistence, model
 quality, complete product coverage or installed Electron acceptance.
+
+Capacity is 12 active (not withdrawn) records per plan. Withdrawal clears the
+training answer and releases one active slot, while retaining its tombstone and
+idempotency receipt so a retried old command cannot resurrect withdrawn content.
+Corrections remain available at capacity. The original completed plan answer is
+unchanged; a duplicate plan for the same signal/target is not a capacity workaround.
