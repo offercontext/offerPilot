@@ -29,8 +29,11 @@ export function createTrainingFixture() {
   const records = [];
   function state() {
     const active = records.filter(record => !record.withdrawn), latest = active.at(-1);
+    const previous = active.at(-2);
+    const labels = { unknown: '帮助情况未知', independent: '独立作答', hinted: '提示后作答', reference: '看过参考答案后作答' };
+    const comparison = previous && latest ? `记录 #${previous.id} 标注为“${labels[previous.assistance]}”，记录 #${latest.id} 标注为“${labels[latest.assistance]}”。这是用户标注的作答条件对照，不是能力评分。` : '目前只有一条可用记录，尚不能对照作答条件。';
     return copy({ revision, skill_id: 'idempotency_retry', available, reason: available ? 'current' : 'source_changed', records, scenarios,
-      recommendation: available && latest ? { scenario_id: latest.scenario_id === 'retry_timeout' ? 'concurrent_retry' : 'retry_timeout', prompt: 'Synthetic prompt (UI localizes by scenario)', reason: 'Synthetic reason', comparison: 'Synthetic comparison', evidence_record_ids: active.slice(-2).map(record => record.id) } : null });
+      recommendation: available && latest ? { scenario_id: latest.scenario_id === 'retry_timeout' ? 'concurrent_retry' : 'retry_timeout', prompt: 'Synthetic prompt (UI localizes by scenario)', reason: 'Synthetic reason', comparison, evidence_record_ids: active.slice(-2).map(record => record.id) } : null });
   }
   const answer = (data, status = 200) => ({ status, data: copy(data) });
   const reject = (reason, status = 422, violation = false) => {

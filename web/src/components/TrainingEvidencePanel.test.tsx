@@ -32,6 +32,15 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); setLocale('zh-CN'); });
 
 describe('TrainingEvidencePanel', () => {
+  it.each(['unknown', 'independent', 'hinted', 'reference'] as const)('describes matching %s assistance as comparison without implying change', async (assistance) => {
+    service.get.mockResolvedValue({ ...state(), records: [{ ...record, assistance }, { ...record, id: 11, assistance }], recommendation: { scenario_id: 'retry_timeout', prompt: '', reason: '', comparison: '', evidence_record_ids: [10, 11] } });
+    render(); await open();
+    expect(container.textContent).toContain('作答条件对照');
+    expect(container.textContent).not.toContain('条件变化');
+    expect(container.textContent).toContain('不是能力评分');
+    expect(container.querySelector('a[href="#training-1-10"]')).not.toBeNull();
+    expect(container.querySelector('a[href="#training-1-11"]')).not.toBeNull();
+  });
   it('loads only after explicit skill selection and saves original answer with unknown assistance', async () => {
     render(); expect(service.get).not.toHaveBeenCalled(); expect(service.change).not.toHaveBeenCalled();
     await open(); expect(service.get).toHaveBeenCalledWith(1);

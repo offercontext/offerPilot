@@ -85,3 +85,11 @@ test('12 active slots allow correction and withdrawal releases capacity without 
   assert.equal(replay.data.records[0].withdrawn, true);
   assert.equal(replay.data.records[0].answer, '');
 });
+
+test('matching assistance is a neutral conditions comparison, not a change claim', () => {
+  const api = createTrainingFixture(); post(api, record());
+  post(api, { ...record(2), expected_revision: 1, scenario_id: 'retry_timeout', answer: 'Synthetic comparison answer' });
+  assert.match(api.state().recommendation.comparison, /作答条件对照/);
+  assert.doesNotMatch(api.state().recommendation.comparison, /条件变化/);
+  assert.deepEqual(api.state().recommendation.evidence_record_ids, [1, 2]);
+});

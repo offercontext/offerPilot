@@ -88,14 +88,14 @@ def _recommendation(records: list[TrainingEvidenceRecord]) -> dict[str, Any] | N
     reason = f"你将记录 #{latest.id} 标注为“{label}”。建议换一个情境独立尝试，再核对推理依据；此标注不证明已经掌握。"
     if latest.assistance == "unknown":
         reason = f"记录 #{latest.id} 的帮助情况未知，不能由回答质量倒推。建议换情境作答并如实标注帮助情况。"
-    comparison = "目前只有一条可用记录，尚不能比较变化。"
+    comparison = "目前只有一条可用记录，尚不能对照作答条件。"
     ids = [latest.id]
     if len(active) > 1:
         previous = active[-2]
         ids.insert(0, previous.id)
         comparison = (
             f"记录 #{previous.id} 标注为“{ASSISTANCE_LABELS[previous.assistance]}”，"
-            f"记录 #{latest.id} 标注为“{label}”。这是用户标注的作答条件变化，不是能力评分。"
+            f"记录 #{latest.id} 标注为“{label}”。这是用户标注的作答条件对照，不是能力评分。"
         )
     return {
         "scenario_id": scenario_id, "prompt": prompt, "reason": reason,

@@ -203,6 +203,18 @@ def test_active_record_limit_and_comparison_cites_current_records(setup):  # typ
         repo.mutate(plan["id"], record(12))
 
 
+@pytest.mark.parametrize("assistance", ["unknown", "independent", "hinted", "reference"])
+def test_same_assistance_comparison_does_not_imply_change(setup, assistance):  # type: ignore[no-untyped-def]
+    _, _, plan, repo = setup
+    repo.mutate(plan["id"], record(assistance=assistance))
+    state = repo.mutate(plan["id"], record(1, assistance=assistance))
+    comparison = state["recommendation"]["comparison"]
+    assert "作答条件对照" in comparison
+    assert "条件变化" not in comparison
+    assert "不是能力评分" in comparison
+    assert state["recommendation"]["evidence_record_ids"] == [item["id"] for item in state["records"]]
+
+
 @pytest.mark.parametrize("changes", [
     {"expected_revision": True}, {"expected_revision": -1}, {"expected_revision": "0"},
     {"idempotency_key": "not-a-key"}, {"skill_id": "other"}, {"extra": 1},

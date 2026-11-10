@@ -24,7 +24,7 @@ function recommendationCopy(state: TrainingEvidenceState) {
     reason: !latest ? t('没有可用的训练依据。') : latest.assistance === 'unknown'
       ? t('记录 #{id} 的帮助情况未知，不能由回答质量倒推。建议换情境作答并如实标注帮助情况。', { id: latest.id })
       : t('你将记录 #{id} 标注为“{assistance}”。建议换一个情境独立尝试，再核对推理依据；此标注不证明已经掌握。', { id: latest.id, assistance: assistanceLabel(latest.assistance) }),
-    comparison: previous && latest ? t('记录 #{previous} 标注为“{before}”，记录 #{latest} 标注为“{after}”。这是用户标注的作答条件变化，不是能力评分。', { previous: previous.id, before: assistanceLabel(previous.assistance), latest: latest.id, after: assistanceLabel(latest.assistance) }) : t('目前只有一条可用记录，尚不能比较变化。'),
+    comparison: previous && latest ? t('记录 #{previous} 标注为“{before}”，记录 #{latest} 标注为“{after}”。这是用户标注的作答条件对照，不是能力评分。', { previous: previous.id, before: assistanceLabel(previous.assistance), latest: latest.id, after: assistanceLabel(latest.assistance) }) : t('目前只有一条可用记录，尚不能对照作答条件。'),
   };
 }
 
