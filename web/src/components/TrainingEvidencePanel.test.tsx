@@ -167,3 +167,125 @@ describe('active training evidence capacity', () => {
     expect(container.textContent).toContain('有效训练记录：12/12；剩余容量 0 条。');
   });
 });
+
+describe('versioned decisions and scenario coverage', () => {
+  const ids = ['retry_timeout', 'concurrent_retry', 'payload_conflict', 'transaction_gap', 'expired_receipt', 'stale_revision'] as const;
+  const decision = { rubric_version: 'idempotency_retry.v1' as const, question_id: 'retry_timeout.v1', choice_id: 'new_key_retry' };
+  const decisionState = (used: readonly string[] = []): TrainingEvidenceState => ({ ...state(),
+    pool: { version: 'idempotency_retry_v1', total: 6, practiced_scenario_ids: ids.filter(id => used.includes(id)), remaining_scenario_ids: ids.filter(id => !used.includes(id)), exhausted: used.length === 6 },
+    scenarios: [{ id: 'original', prompt: 'original', decision_question: null }, ...ids.map(id => ({ id, prompt: 'Synthetic free text prompt', decision_question: { rubric_version: 'idempotency_retry.v1' as const, question_id: `${id}.v1`, prompt: 'Synthetic explicit assumptions', choices: [{ id: 'query_same_key', text: 'Query same key' }, { id: 'new_key_retry', text: 'Retry new key' }, { id: 'uncertain', text: 'Uncertain' }] } }))],
+  });
+  const evidence = (choice: string | null, outcome: 'supported' | 'contradicted' | 'abstain') => ({ ...record, scenario_id: 'retry_timeout' as const,
+    decision_answer: choice ? { ...decision, choice_id: choice } : null,
+    feedback: { scope: 'selected_option_only' as const, text_assessment: 'not_evaluated' as const, outcome, record_id: record.id, rubric_version: choice ? decision.rubric_version : null, question_id: choice ? decision.question_id : null, choice_id: choice, rule_id: choice ? `retry_timeout.v1:${choice}` : null, reason: 'Synthetic rule explanation', next_step: outcome === 'contradicted' ? 'Use the original key to query the receipt.' : null },
+  });
+  async function fillAnswer(value: string) {
+    const field = container.querySelector('textarea')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })); });
+  }
+  it('shows returned option feedback and never judges identical free text as a whole', async () => {
+    service.get.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [evidence('new_key_retry', 'contradicted')] });
+    render(); await open();
+    expect(container.textContent).toContain('所选方案不符合本题规则');
+    expect(container.textContent).toContain('未评价自由文本或掌握程度');
+    expect(container.textContent).toContain('Retry new key');
+    await click('更正记录');
+    expect((container.querySelector('select[aria-label="在本题假设下，你选择哪种方案？"]') as HTMLSelectElement).value).toBe('new_key_retry');
+    await select('在本题假设下，你选择哪种方案？', 'query_same_key');
+    service.change.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [evidence('query_same_key', 'supported')] });
+    await click('确认保存更正');
+    expect(service.change.mock.calls[0][1]).toMatchObject({ action: 'correct', answer: record.answer, decision_answer: { ...decision, choice_id: 'query_same_key' } });
+    expect(container.textContent).toContain('所选方案符合本题规则');
+    expect(container.textContent).not.toContain('所选方案不符合本题规则');
+  });
+  it('does not infer a choice from free text and clearing a correction sends null', async () => {
+    service.get.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [evidence('new_key_retry', 'contradicted')] }); render(); await open();
+    await click('更正记录'); await select('在本题假设下，你选择哪种方案？', '');
+    service.change.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [evidence(null, 'abstain')] });
+    await click('确认保存更正');
+    expect(service.change.mock.calls[0][1].decision_answer).toBeNull();
+    expect(container.textContent).toContain('未作方案判断');
+    expect(container.textContent).not.toContain('Retry new key');
+  });
+  it('requires an explicit retest and scenario selection after exhaustion, including withdrawn history', async () => {
+    service.get.mockResolvedValue({ ...decisionState(ids), records: [{ ...evidence(null, 'abstain'), withdrawn: true, answer: '' }] }); render(); await open();
+    expect(container.textContent).toContain('6 个情境均已记录过作答');
+    expect(container.querySelector('fieldset')).toBeNull();
+    await click('选择旧情境复测');
+    expect(container.querySelector('textarea')!.disabled).toBe(true);
+    expect(button('确认保存训练证据').disabled).toBe(true);
+    await select('练习情境', 'retry_timeout');
+    expect(container.querySelector('textarea')!.value).toBe('');
+    expect(retained).toMatchObject({ retest: true, retestScenarioChosen: true, decisionAnswer: null });
+    await fillAnswer('Synthetic retest answer');
+    expect(button('确认保存训练证据').disabled).toBe(false);
+  });
+  it('retains the exact structured choice during uncertain save and owned remount', async () => {
+    service.get.mockResolvedValue(decisionState()); render(); await open();
+    await select('练习情境', 'retry_timeout'); await fillAnswer('Synthetic answer');
+    await select('在本题假设下，你选择哪种方案？', 'new_key_retry');
+    service.change.mockRejectedValueOnce(new TrainingEvidenceError(503)); await click('确认保存训练证据');
+    const command = service.change.mock.calls[0][1]; const draft = retained!;
+    expect(command.decision_answer).toEqual(decision); expect(draft.decisionAnswer).toEqual(decision);
+    act(() => root.unmount()); root = createRoot(container); await act(async () => render(1, draft));
+    expect(container.querySelector('fieldset')!.disabled).toBe(true);
+    service.change.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [evidence('new_key_retry', 'contradicted')] });
+    await click('使用原操作重试'); expect(service.change.mock.calls[1][1]).toEqual(command);
+  });
+  it('cancels retest back to unpracticed scenarios even with no active evidence or recommendation', async () => {
+    service.get.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [{ ...evidence(null, 'abstain'), withdrawn: true, answer: '' }] }); render(); await open();
+    await click('选择旧情境复测'); await select('练习情境', 'retry_timeout');
+    await fillAnswer('Discard this ordinary draft'); await select('在本题假设下，你选择哪种方案？', 'new_key_retry');
+    await click('取消复测');
+    expect(retained).toBeNull();
+    expect(container.querySelector('textarea')!.value).toBe('');
+    const scenarios = container.querySelector('select[aria-label="练习情境"]') as HTMLSelectElement;
+    expect(scenarios.value).toBe('concurrent_retry');
+    expect(scenarios.querySelector('option[value="retry_timeout"]')).toBeNull();
+    expect((container.querySelector('select[aria-label="在本题假设下，你选择哪种方案？"]') as HTMLSelectElement).value).toBe('');
+  });
+  it('cancels exhausted retest without reopening new questions and cannot discard an uncertain command', async () => {
+    service.get.mockResolvedValue(decisionState(ids)); render(); await open();
+    await click('选择旧情境复测'); await click('取消复测');
+    expect(container.querySelector('fieldset')).toBeNull();
+    await click('选择旧情境复测'); await select('练习情境', 'retry_timeout'); await fillAnswer('Frozen retest');
+    service.change.mockRejectedValueOnce(new TrainingEvidenceError(503)); await click('确认保存训练证据');
+    const frozenCommand = retained?.command;
+    expect(button('取消复测').disabled).toBe(true); await click('取消复测');
+    expect(retained?.command).toEqual(frozenCommand);
+  });
+  it('keeps the last-scenario unknown command visible after recovered GET reports exhaustion', async () => {
+    const command = { action: 'record' as const, expected_revision: 5, idempotency_key: 'frozen-last-key', skill_id: 'idempotency_retry' as const, scenario_id: 'retry_timeout' as const, answer: 'Synthetic last answer', assistance: 'unknown' as const, decision_answer: decision };
+    const draft: TrainingEvidenceDraft = { scenario: 'retry_timeout', answer: command.answer, assistance: 'unknown', editingId: null, command };
+    service.get.mockResolvedValue({ ...decisionState(ids), records: [evidence('new_key_retry', 'contradicted')] });
+    await act(async () => render(1, draft));
+    expect(container.querySelector('fieldset')!.disabled).toBe(true);
+    expect((container.querySelector('select[aria-label="在本题假设下，你选择哪种方案？"]') as HTMLSelectElement).value).toBe('new_key_retry');
+    service.change.mockResolvedValue({ ...decisionState(ids), records: [evidence('new_key_retry', 'contradicted')] });
+    await click('使用原操作重试'); expect(service.change.mock.calls[0][1]).toEqual(command);
+    expect(container.querySelector('fieldset')).toBeNull();
+  });
+  it('clears the decision when changing scenarios, and blocks all new inputs at capacity', async () => {
+    service.get.mockResolvedValue(decisionState()); render(); await open();
+    await select('练习情境', 'retry_timeout'); await select('在本题假设下，你选择哪种方案？', 'new_key_retry');
+    await select('练习情境', 'concurrent_retry');
+    expect(retained?.decisionAnswer).toBeNull();
+    expect((container.querySelector('select[aria-label="在本题假设下，你选择哪种方案？"]') as HTMLSelectElement).value).toBe('');
+    service.get.mockResolvedValue({ ...decisionState(['retry_timeout']), records: Array.from({ length: 12 }, (_, index) => ({ ...evidence(null, 'abstain'), id: index + 1 })) });
+    await click('重新读取');
+    expect(container.querySelector('fieldset')!.disabled).toBe(true);
+    expect(container.querySelector('textarea')!.matches(':disabled')).toBe(true);
+    expect(container.querySelector('select[aria-label="在本题假设下，你选择哪种方案？"]')!.matches(':disabled')).toBe(true);
+    expect(button('选择旧情境复测').disabled).toBe(true);
+  });
+  it('withdraws structured content without refilling the form or reintroducing the scenario to the pool', async () => {
+    service.get.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [evidence('new_key_retry', 'contradicted')] }); render(); await open();
+    service.change.mockResolvedValue({ ...decisionState(['retry_timeout']), records: [{ ...evidence(null, 'abstain'), withdrawn: true, answer: '' }] });
+    await click('撤回训练记录'); await click('确认撤回训练记录');
+    expect(container.textContent).not.toContain('Retry new key');
+    expect(container.textContent).not.toContain('所选方案不符合本题规则');
+    expect(container.querySelector('textarea')!.value).toBe('');
+    expect((container.querySelector('select[aria-label="练习情境"]') as HTMLSelectElement).querySelector('option[value="retry_timeout"]')).toBeNull();
+    expect(retained).toBeNull();
+  });
+});

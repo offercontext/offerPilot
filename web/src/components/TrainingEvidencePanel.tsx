@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { t, useLocale } from '@/i18n';
 import { changeTrainingEvidence, getTrainingEvidence, TrainingEvidenceError } from '@/services/trainingEvidence';
-import type { TrainingAssistance, TrainingEvidenceCommand, TrainingEvidenceDraft, TrainingEvidenceRecord, TrainingEvidenceState, TrainingScenario } from '@/types/trainingEvidence';
+import type { TrainingAssistance, TrainingDecisionAnswer, TrainingEvidenceCommand, TrainingEvidenceDraft, TrainingEvidenceRecord, TrainingEvidenceState, TrainingScenario } from '@/types/trainingEvidence';
 import styles from './TrainingEvidencePanel.module.css';
 
 const assistanceLabel = (value: TrainingAssistance) => ({
@@ -9,23 +9,45 @@ const assistanceLabel = (value: TrainingAssistance) => ({
 })[value];
 const scenarioLabel = (value: TrainingScenario) => ({
   original: t('原练习回答'), retry_timeout: t('写入成功但响应超时'), concurrent_retry: t('并发重复请求'),
+  payload_conflict: t('同键不同请求内容'), transaction_gap: t('业务与回执事务缺口'), expired_receipt: t('回执过期后的重试'), stale_revision: t('旧请求与当前状态'),
 })[value];
 
 const scenarioPrompt = (value: TrainingScenario) => ({
   original: t('回看这次已保存的练习回答，并如实标注作答时的帮助情况。'),
   retry_timeout: t('投递已成功写入，但客户端等待响应超时。用户点击重试：如何判断是否已成功，并避免重复写入？请说明依据和恢复步骤。'),
   concurrent_retry: t('同一份投递请求被两个客户端同时重试。如何保证只写入一次，并让两个请求都获得可核对的结果？请说明唯一约束和回执处理。'),
+  payload_conflict: t('同一幂等键携带不同请求内容时，如何处理冲突？'),
+  transaction_gap: t('业务写入与回执保存之间存在失败窗口，如何改进后续设计？'),
+  expired_receipt: t('幂等回执已过期，如何核对业务结果并决定是否重试？'),
+  stale_revision: t('旧请求已成功执行，随后记录发生变化，如何处理旧请求重放？'),
 })[value];
 function recommendationCopy(state: TrainingEvidenceState) {
   const records = state.recommendation?.evidence_record_ids.map((id) => state.records.find((record) => record.id === id && !record.withdrawn)).filter((record): record is TrainingEvidenceRecord => Boolean(record)) ?? [];
   const latest = records[records.length - 1];
   const previous = records[records.length - 2];
   return {
-    reason: !latest ? t('没有可用的训练依据。') : latest.assistance === 'unknown'
+    reason: state.pool ? t('优先练习本计划尚未记录过作答的情境；已有记录不代表掌握程度。') : !latest ? t('没有可用的训练依据。') : latest.assistance === 'unknown'
       ? t('记录 #{id} 的帮助情况未知，不能由回答质量倒推。建议换情境作答并如实标注帮助情况。', { id: latest.id })
       : t('你将记录 #{id} 标注为“{assistance}”。建议换一个情境独立尝试，再核对推理依据；此标注不证明已经掌握。', { id: latest.id, assistance: assistanceLabel(latest.assistance) }),
     comparison: previous && latest ? t('记录 #{previous} 标注为“{before}”，记录 #{latest} 标注为“{after}”。这是用户标注的作答条件对照，不是能力评分。', { previous: previous.id, before: assistanceLabel(previous.assistance), latest: latest.id, after: assistanceLabel(latest.assistance) }) : t('目前只有一条可用记录，尚不能对照作答条件。'),
   };
+}
+
+function DecisionFeedback({ record, state }: { record: TrainingEvidenceRecord; state: TrainingEvidenceState }) {
+  if (!state.available || record.withdrawn) return null;
+  const feedback = record.feedback;
+  const question = state.scenarios.find((item) => item.id === record.scenario_id)?.decision_question;
+  const selected = question?.choices.find((choice) => choice.id === record.decision_answer?.choice_id);
+  const outcome = feedback?.outcome ?? 'abstain';
+  return <div className={styles.feedback} data-feedback-outcome={outcome}>
+    <strong>{outcome === 'supported' ? t('所选方案符合本题规则') : outcome === 'contradicted' ? t('所选方案不符合本题规则') : t('未作方案判断')}</strong>
+    <p>{t('仅核对所选方案，未评价自由文本或掌握程度。')}</p>
+    {selected ? <p>{t('所选方案：{choice}', { choice: t(selected.text) })}</p> : null}
+    {record.decision_answer && question ? <details><summary>{t('本题假设与问题')}</summary><p>{t(question.prompt)}</p></details> : null}
+    <p>{t(feedback?.reason ?? '未提供可评估的方案选择；自由文本未评估。')}</p>
+    {feedback?.rule_id ? <small>{t('依据规则：{rule}；题目：{question}；版本：{version}', { rule: feedback.rule_id, question: feedback.question_id ?? '', version: feedback.rubric_version ?? '' })}</small> : null}
+    {feedback?.next_step ? <p>{t('针对所选方案的下一步：')}{t(feedback.next_step)}</p> : null}
+  </div>;
 }
 
 export default function TrainingEvidencePanel({ planId, originalAnswer, draft, onDraftChange }: {
@@ -43,6 +65,9 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
   const [scenario, setScenario] = useState<TrainingScenario>(draft?.scenario ?? 'original');
   const [answer, setAnswer] = useState(draft?.answer ?? originalAnswer);
   const [assistance, setAssistance] = useState<TrainingAssistance>(draft?.assistance ?? 'unknown');
+  const [decisionAnswer, setDecisionAnswer] = useState<TrainingDecisionAnswer | null>(draft?.command && 'decision_answer' in draft.command ? draft.command.decision_answer ?? null : draft?.decisionAnswer ?? null);
+  const [retest, setRetest] = useState(draft?.retest ?? false);
+  const [retestScenarioChosen, setRetestScenarioChosen] = useState(draft?.retestScenarioChosen ?? false);
   const [editing, setEditing] = useState<number | null>(draft?.editingId ?? null);
   const [withdrawTarget, setWithdrawTarget] = useState<number | null>(null);
   const mounted = useRef(true);
@@ -86,15 +111,14 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
   const submit = async (command: TrainingEvidenceCommand) => {
     if (inFlight.current) return;
     const ticket = ++generation.current;
-    if (!onDraftChange({ scenario, answer, assistance, editingId: editing, command })) { setError('conflict'); return; }
+    if (!onDraftChange({ scenario, answer, assistance, decisionAnswer, retest, retestScenarioChosen, editingId: editing, command })) { setError('conflict'); return; }
     inFlight.current = true; setBusy(true); setPending(command);
     try {
       const next = await changeTrainingEvidence(planId, command);
       if (!mounted.current || ticket !== generation.current) return;
       setState(next); setPending(null); setError(null); setEditing(null); setWithdrawTarget(null); onDraftChange(null);
-      setScenario(command.action === 'withdraw' ? 'retry_timeout' : next.recommendation?.scenario_id ?? 'original');
-      setAnswer(command.action === 'withdraw' ? '' : next.recommendation?.scenario_id === 'original' || !next.recommendation ? originalAnswer : '');
-      setAssistance('unknown');
+      setScenario(next.recommendation?.scenario_id ?? 'retry_timeout');
+      setAnswer(''); setAssistance('unknown'); setDecisionAnswer(null); setRetest(false); setRetestScenarioChosen(false);
     } catch (cause) {
       const definitive = cause instanceof TrainingEvidenceError && (
         (cause.status === 422 && cause.code === 'training_evidence_invalid')
@@ -103,7 +127,7 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
       );
       if (!mounted.current || ticket !== generation.current) return;
       setError(definitive ? 'conflict' : 'unknown');
-      if (definitive) { setPending(null); onDraftChange({ scenario, answer, assistance, editingId: editing, command: null }); }
+      if (definitive) { setPending(null); onDraftChange({ scenario, answer, assistance, decisionAnswer, retest, retestScenarioChosen, editingId: editing, command: null }); }
     } finally {
       if (ticket === generation.current) {
         inFlight.current = false;
@@ -116,12 +140,26 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
   const atCapacity = activeCount >= 12;
   const frozen = busy || pending !== null || error === 'conflict' || error === 'load';
   const beginEdit = (record: TrainingEvidenceRecord) => {
-    setEditing(record.id); onDraftChange({ scenario: record.scenario_id, answer: record.answer, assistance: record.assistance, editingId: record.id, command: null }); setScenario(record.scenario_id); setAnswer(record.answer); setAssistance(record.assistance); setWithdrawTarget(null);
+    setDecisionAnswer(record.decision_answer ?? null);
+    setEditing(record.id); onDraftChange({ decisionAnswer: record.decision_answer ?? null, retest, retestScenarioChosen, scenario: record.scenario_id, answer: record.answer, assistance: record.assistance, editingId: record.id, command: null }); setScenario(record.scenario_id); setAnswer(record.answer); setAssistance(record.assistance); setWithdrawTarget(null);
   };
-  const clearForm = () => { setEditing(null); setScenario('retry_timeout'); setAnswer(''); setAssistance('unknown'); onDraftChange(null); };
-  const selectScenario = (value: TrainingScenario) => {
-    onDraftChange({ scenario: value, answer: value === 'original' ? originalAnswer : '', assistance: 'unknown', editingId: null, command: null });
-    setScenario(value); setAnswer(value === 'original' ? originalAnswer : ''); setAssistance('unknown'); setEditing(null);
+  const clearForm = () => { setEditing(null); setScenario(state?.recommendation?.scenario_id ?? state?.pool?.remaining_scenario_ids[0] ?? 'retry_timeout'); setAnswer(''); setAssistance('unknown'); setDecisionAnswer(null); setRetest(false); setRetestScenarioChosen(false); onDraftChange(null); };
+  const selectScenario = (value: TrainingScenario, isRetest = retest) => {
+    onDraftChange({ decisionAnswer: null, retest: isRetest, retestScenarioChosen: isRetest, scenario: value, answer: value === 'original' ? originalAnswer : '', assistance: 'unknown', editingId: null, command: null });
+    setDecisionAnswer(null); setRetest(isRetest); setRetestScenarioChosen(isRetest); setScenario(value); setAnswer(value === 'original' ? originalAnswer : ''); setAssistance('unknown'); setEditing(null);
+  };
+
+  const remaining = state?.pool?.remaining_scenario_ids;
+  const exhausted = state?.pool?.exhausted ?? false;
+  const choices = state?.scenarios.filter((item) => editing !== null || pending !== null || !state.pool
+    || (retest ? state.pool.practiced_scenario_ids.includes(item.id) : item.id === 'original'
+      ? !state.records.some((record) => record.scenario_id === 'original' && !record.withdrawn)
+      : remaining?.includes(item.id))) ?? [];
+  const question = state?.scenarios.find((item) => item.id === scenario)?.decision_question;
+  const canSelectCurrent = editing !== null || pending !== null || (!retest || retestScenarioChosen) && choices.some((item) => item.id === scenario);
+  const beginRetest = () => {
+    setRetest(true); setRetestScenarioChosen(false); setEditing(null); setAnswer(''); setAssistance('unknown'); setDecisionAnswer(null);
+    onDraftChange({ scenario, answer: '', assistance: 'unknown', decisionAnswer: null, retest: true, retestScenarioChosen: false, editingId: null, command: null });
   };
 
   return <section className={styles.panel} aria-label={t('训练证据')} aria-busy={busy}>
@@ -137,31 +175,44 @@ export default function TrainingEvidencePanel({ planId, originalAnswer, draft, o
       {state ? <>
         <p role="status">{t('有效训练记录：{used}/12；剩余容量 {remaining} 条。', { used: activeCount, remaining: Math.max(0, 12 - activeCount) })}</p>
         {state.available && atCapacity ? <p role="status">{t('已达到 12 条有效记录上限。可先撤回一条再新增；更正和撤回仍可用。')}</p> : null}
+        {state.pool ? <p>{t('已记录作答情境：{used}/{total}；未记录过作答的情境优先。', { used: state.pool.practiced_scenario_ids.length, total: state.pool.total })}</p> : null}
+        {state.available && exhausted ? <p role="status">{t('本计划的 6 个情境均已记录过作答。你可以主动选择旧情境复测；这不表示已掌握。')}</p> : null}
+        {state.available && state.pool && state.pool.practiced_scenario_ids.length > 0 ? <button type="button" disabled={frozen || atCapacity} onClick={beginRetest}>{t('选择旧情境复测')}</button> : null}
+        {state.available && retest ? <button type="button" disabled={frozen} onClick={clearForm}>{t('取消复测')}</button> : null}
         {!state.available ? <p role="status">{t('来源或目标已变化，已暂停新增、修改和建议。仍可查看历史并撤回训练记录。')}</p> : null}
         {state.available && state.recommendation ? <aside className={styles.advice}>
           <strong>{t('下一次怎么练')}</strong>
-          <p>{recommendationCopy(state).reason}</p><p>{recommendationCopy(state).comparison}</p><p>{scenarioPrompt(state.recommendation.scenario_id)}</p>
+          <p>{recommendationCopy(state).reason}</p><p>{recommendationCopy(state).comparison}</p><p>{t(state.scenarios.find((item) => item.id === state.recommendation!.scenario_id)?.prompt ?? scenarioPrompt(state.recommendation.scenario_id))}</p>
           <p>{t('依据记录：')}{state.recommendation.evidence_record_ids.map((id) => <a key={id} href={`#training-${planId}-${id}`}> #{id}</a>)}</p>
-          <button type="button" disabled={frozen || atCapacity} onClick={() => selectScenario(state.recommendation!.scenario_id)}>{t('换个场景试一次')}</button>
+          <button type="button" disabled={frozen || atCapacity} onClick={() => selectScenario(state.recommendation!.scenario_id, false)}>{t('换个场景试一次')}</button>
         </aside> : null}
         <ul className={styles.records}>{state.records.map((record) => <li id={`training-${planId}-${record.id}`} key={record.id}>
           <strong>#{record.id} · {scenarioLabel(record.scenario_id)}</strong><p><time>{record.created_at}</time>{record.updated_at !== record.created_at ? <> · {t('已更正：')}{record.updated_at}</> : null}</p>
           {record.withdrawn ? <p>{t('已撤回，不再用于建议；训练记录中的回答已清除。')}</p> : <>
             <p>{t('用户记录的作答条件：')}{assistanceLabel(record.assistance)}</p><p className={styles.answer}>{record.answer}</p>
+            <DecisionFeedback record={record} state={state} />
             <button type="button" disabled={frozen || !state.available} onClick={() => beginEdit(record)}>{t('更正记录')}</button>{' '}
             <button type="button" disabled={frozen} onClick={() => setWithdrawTarget(record.id)}>{t('撤回训练记录')}</button>
             {withdrawTarget === record.id ? <div role="group" aria-label={t('确认撤回训练记录')}><p>{t('撤回后清除这条训练记录的回答，不再用于建议。原计划的完成回答仍保留。')}</p><button type="button" disabled={frozen} onClick={() => void submit({ ...identity(), action: 'withdraw', record_id: record.id })}>{t('确认撤回训练记录')}</button>{' '}<button type="button" disabled={frozen} onClick={() => setWithdrawTarget(null)}>{t('取消')}</button></div> : null}
           </>}
         </li>)}</ul>
-        {state.available ? <fieldset disabled={frozen || (editing === null && atCapacity)} className={styles.form}>
+        {state.available && (editing !== null || pending !== null || !exhausted || retest) ? <fieldset disabled={frozen || (editing === null && atCapacity)} className={styles.form}>
           <legend>{editing ? t('更正训练记录') : t('显式保存一次练习证据')}</legend>
-          <label>{t('练习情境')}<select aria-label={t('练习情境')} value={scenario} disabled={editing !== null} onChange={(event) => selectScenario(event.target.value as TrainingScenario)}>{state.scenarios.map((item) => <option key={item.id} value={item.id}>{scenarioLabel(item.id)}</option>)}</select></label>
-          <p>{scenarioPrompt(scenario)}</p>
-          <label>{t('本次回答')}<textarea aria-label={t('本次回答')} value={answer} readOnly={scenario === 'original'} maxLength={8000} rows={5} onChange={(event) => { setAnswer(event.target.value); onDraftChange({ scenario, answer: event.target.value, assistance, editingId: editing, command: null }); }} /></label>
+          <label>{t('练习情境')}<select aria-label={t('练习情境')} value={canSelectCurrent ? scenario : ''} disabled={editing !== null} onChange={(event) => selectScenario(event.target.value as TrainingScenario)}>{!canSelectCurrent ? <option value="">{t('请选择练习情境')}</option> : null}{choices.map((item) => <option key={item.id} value={item.id}>{scenarioLabel(item.id)}</option>)}</select></label>
+          {canSelectCurrent ? <p>{t(state.scenarios.find((item) => item.id === scenario)?.prompt ?? scenarioPrompt(scenario))}</p> : null}
+          <label>{t('本次回答')}<textarea disabled={!canSelectCurrent} aria-label={t('本次回答')} value={answer} readOnly={scenario === 'original'} maxLength={8000} rows={5} onChange={(event) => { setAnswer(event.target.value); onDraftChange({ scenario, answer: event.target.value, assistance, decisionAnswer, retest, retestScenarioChosen, editingId: editing, command: null }); }} /></label>
+          {canSelectCurrent && question ? <div className={styles.decision}>
+            <strong>{t('方案选择题（可选）')}</strong><p>{t(question.prompt)}</p>
+            <p>{t('仅核对所选方案，未评价自由文本或掌握程度。')}</p>
+            <label>{t('在本题假设下，你选择哪种方案？')}<select aria-label={t('在本题假设下，你选择哪种方案？')} value={decisionAnswer?.choice_id ?? ''} onChange={(event) => {
+              const value: TrainingDecisionAnswer | null = event.target.value ? { rubric_version: question.rubric_version, question_id: question.question_id, choice_id: event.target.value } : null;
+              setDecisionAnswer(value); onDraftChange({ scenario, answer, assistance, decisionAnswer: value, retest, retestScenarioChosen, editingId: editing, command: null });
+            }}><option value="">{t('未选择方案')}</option>{question.choices.map((choice) => <option key={choice.id} value={choice.id}>{t(choice.text)}</option>)}</select></label>
+          </div> : null}
           {scenario === 'original' ? <small>{t('原回答仅引用已完成计划；这里可以更正辅助情况，不改写原回答。')}</small> : null}
-          <label>{t('这次如何完成回答')}<select aria-label={t('这次如何完成回答')} value={assistance} onChange={(event) => { const value = event.target.value as TrainingAssistance; setAssistance(value); onDraftChange({ scenario, answer, assistance: value, editingId: editing, command: null }); }}>{(['unknown', 'independent', 'hinted', 'reference'] as const).map((value) => <option key={value} value={value}>{assistanceLabel(value)}</option>)}</select></label>
+          <label>{t('这次如何完成回答')}<select disabled={!canSelectCurrent} aria-label={t('这次如何完成回答')} value={assistance} onChange={(event) => { const value = event.target.value as TrainingAssistance; setAssistance(value); onDraftChange({ scenario, answer, assistance: value, decisionAnswer, retest, retestScenarioChosen, editingId: editing, command: null }); }}>{(['unknown', 'independent', 'hinted', 'reference'] as const).map((value) => <option key={value} value={value}>{assistanceLabel(value)}</option>)}</select></label>
           <p>{t('以下保存是你的记录，不是 AI 对能力的判定。')}</p>
-          <button type="button" disabled={!answer.trim() || (editing === null && atCapacity)} onClick={() => void submit(editing ? { ...identity(), action: 'correct', record_id: editing, answer, assistance } : { ...identity(), action: 'record', skill_id: 'idempotency_retry', scenario_id: scenario, answer, assistance })}>{editing ? t('确认保存更正') : t('确认保存训练证据')}</button>
+          <button type="button" disabled={!canSelectCurrent || !answer.trim() || (editing === null && atCapacity)} onClick={() => void submit(editing ? { ...identity(), action: 'correct', record_id: editing, answer, assistance, decision_answer: decisionAnswer } : { ...identity(), action: 'record', skill_id: 'idempotency_retry', scenario_id: scenario, answer, assistance, decision_answer: decisionAnswer })}>{editing ? t('确认保存更正') : t('确认保存训练证据')}</button>
           {editing ? <button type="button" onClick={clearForm}>{t('取消更正')}</button> : null}
         </fieldset> : null}
       </> : null}

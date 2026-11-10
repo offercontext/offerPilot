@@ -18,8 +18,10 @@ It does not change the existing full-gate routing.
 
 The bilingual browser flow checks explicit selection, unknown historical
 assistance, recording, correction, another scenario, lost-response retry with the
-original command, filling all 12 active slots through the UI, withdrawing and
-reusing capacity, source suspension and withdrawal. Output includes source/tree
+original command with the frozen structured choice, opposite-option feedback with
+identical free text, six distinct scenarios, pool exhaustion and explicit retest
+selection, filling all 12 active slots through the UI, withdrawing and reusing
+capacity, source suspension and withdrawal. Output includes source/tree
 and production-asset hashes, browser version, request/assertion logs, DOM,
 accessibility snapshots and PNG screenshots. A passing report proves these UI
 flows against the synthetic transport only, not backend persistence, model
@@ -30,3 +32,11 @@ training answer and releases one active slot, while retaining its tombstone and
 idempotency receipt so a retried old command cannot resurrect withdrawn content.
 Corrections remain available at capacity. The original completed plan answer is
 unchanged; a duplicate plan for the same signal/target is not a capacity workaround.
+
+The six-question snapshot in `questions.json` is generated from the backend's
+`training_evidence/scenarios.py` (`SCENARIOS`, `POOL_IDS`, `RULES`, `GUIDANCE`).
+Its source hash is checked by the fixture contract; regenerate it when that
+versioned content changes. Withdrawn scenario identities remain in pool coverage.
+Only explicit option IDs are checked against the versioned rule. Free text is
+always `not_evaluated`; missing/uncertain choices abstain. This is not a learning
+improvement or free-text understanding claim.

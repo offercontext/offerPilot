@@ -30,6 +30,8 @@ const labels = {
   assistance: /^(这次如何完成回答|How you answered this time)$/,
   answer: /^(本次回答|This answer)$/,
   next: /^(换个场景试一次|Try another scenario)$/,
+  retest: /^(选择旧情境复测|Choose an earlier scenario for a retest)$/,
+  decision: /^(在本题假设下，你选择哪种方案？|Under this question’s assumptions, which option do you choose\?)$/,
   retry: /^(使用原操作重试|Retry the original action)$/,
   withdraw: /^(撤回训练记录|Withdraw training record)$/,
   confirmWithdrawal: /^(确认撤回训练记录|Confirm withdrawal)$/,
@@ -124,6 +126,7 @@ async function exercise(locale, width) {
     check(`${locale}: next exercise changes the scenario`, await panel.getByRole('combobox', { name: labels.scenario }).inputValue() === 'retry_timeout');
     await panel.getByRole('textbox', { name: labels.answer }).fill('SYNTHETIC retest: read the committed receipt and replay the same request key without writing again.');
     await panel.getByRole('combobox', { name: labels.assistance }).selectOption('independent');
+    await panel.getByRole('combobox', { name: labels.decision }).selectOption('new_key_retry');
     api.dropNextResponse();
     await button(panel, 'save').click();
     await button(panel, 'retry').waitFor();
@@ -138,30 +141,62 @@ async function exercise(locale, width) {
     check(`${locale}: no duplicate evidence on unknown-result retry`, api.state().revision === 3 && api.state().records.length === 2);
     check(`${locale}: comparison links both evidence records`, await panel.locator('a[href="#training-808-1"]').count() === 1 && await panel.locator('a[href="#training-808-2"]').count() === 1);
     await capture(page, panel, `${locale}-03-comparison`);
-    // Fill every remaining slot through the rendered UI, not direct fixture writes.
-    for (let count = 2; count < 12; count += 1) {
+    check(`${locale}: incorrect option is contradicted without evaluating text`, api.state().records[1].feedback.outcome === 'contradicted' && api.state().records[1].feedback.text_assessment === 'not_evaluated');
+    await panel.locator('#training-808-2 [data-feedback-outcome="contradicted"]').waitFor();
+    const incorrectStep = api.state().records[1].feedback.next_step;
+    const unchangedAnswer = api.state().records[1].answer;
+    await button(panel.locator('#training-808-2'), 'correct').click();
+    check(`${locale}: correction restores the prior structured choice`, await panel.getByRole('combobox', { name: labels.decision }).inputValue() === 'new_key_retry');
+    await panel.getByRole('combobox', { name: labels.decision }).selectOption('query_same_key');
+    await button(panel, 'saveCorrection').click();
+    await panel.locator('#training-808-2 [data-feedback-outcome="supported"]').waitFor();
+    check(`${locale}: opposite option changes feedback with identical free text`, api.state().records[1].answer === unchangedAnswer && api.state().records[1].feedback.next_step !== incorrectStep);
+    await capture(page, panel, `${locale}-04-option-feedback`);
+    // Finish the six-scenario pool through the UI before explicitly retesting.
+    for (let count = 2; count < 7; count += 1) {
       await button(panel, 'next').click();
-      await panel.getByRole('textbox', { name: labels.answer }).fill(`SYNTHETIC capacity exercise ${count + 1}: replay the receipt using the same key.`);
+      await panel.getByRole('textbox', { name: labels.answer }).fill(`SYNTHETIC pool exercise ${count}: explain the assumptions without inferring a choice.`);
+      if (count === 2) await panel.getByRole('combobox', { name: labels.decision }).selectOption('uncertain');
       await button(panel, 'save').click();
-      await until(`${locale}: UI saves active record ${count + 1}`, () => api.state().records.filter(record => !record.withdrawn).length === count + 1);
-      await until(`${locale}: capacity save ${count + 1} settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
+      await until(`${locale}: UI saves pool record ${count + 1}`, () => api.state().records.length === count + 1);
+      await until(`${locale}: pool save ${count + 1} settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
+      check(`${locale}: uncertainty or free text abstains for record ${count + 1}`, api.state().records[count].feedback.outcome === 'abstain' && api.state().records[count].feedback.text_assessment === 'not_evaluated');
     }
-    check(`${locale}: full capacity disables new input before answering`, await panel.locator('fieldset').evaluate(element => element.disabled));
-    check(`${locale}: full capacity disables next exercise`, await button(panel, 'next').isDisabled());
+    check(`${locale}: six pool scenarios never repeat`, new Set(api.state().records.slice(1).map(record => record.scenario_id)).size === 6);
+    check(`${locale}: exhausted pool has no automatic recommendation`, api.state().pool.exhausted && api.state().recommendation === null && await button(panel, 'next').count() === 0);
+    check(`${locale}: exhausted pool does not auto-open repeat input`, await panel.locator('fieldset').count() === 0);
+    await capture(page, panel, `${locale}-05-pool-exhausted`);
+    for (let count = 7; count < 12; count += 1) {
+      await button(panel, 'retest').click();
+      check(`${locale}: retest ${count} requires selecting an earlier scenario`, await panel.getByRole('textbox', { name: labels.answer }).isDisabled());
+      await panel.getByRole('combobox', { name: labels.scenario }).selectOption('retry_timeout');
+      check(`${locale}: retest ${count} starts without an old choice`, await panel.getByRole('combobox', { name: labels.decision }).inputValue() === '');
+      await panel.getByRole('textbox', { name: labels.answer }).fill(`SYNTHETIC explicit retest ${count + 1}: use the receipt.`);
+      await button(panel, 'save').click();
+      await until(`${locale}: UI saves active retest ${count + 1}`, () => api.state().records.filter(record => !record.withdrawn).length === count + 1);
+      await until(`${locale}: capacity retest ${count + 1} settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
+    }
+    check(`${locale}: full capacity blocks retest entry`, await button(panel, 'retest').isDisabled());
     check(`${locale}: full capacity still permits correction`, await button(panel.locator('#training-808-1'), 'correct').isEnabled());
-    await capture(page, panel, `${locale}-04-capacity-full`);
+    await button(panel.locator('#training-808-1'), 'correct').click();
+    check(`${locale}: full capacity correction remains editable`, !(await panel.locator('fieldset').evaluate(element => element.disabled)));
+    // Cancel the correction before freeing capacity through withdrawal.
+    await panel.getByRole('button', { name: /^(取消更正|Cancel correction)$/ }).click();
+    await capture(page, panel, `${locale}-06-capacity-full`);
     await button(panel.locator('#training-808-12'), 'withdraw').click();
     await button(panel.locator('#training-808-12'), 'confirmWithdrawal').click();
     await until(`${locale}: UI withdrawal frees one active slot`, () => api.state().records.filter(record => !record.withdrawn).length === 11);
     await until(`${locale}: capacity withdrawal settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
-    check(`${locale}: freed slot enables next exercise`, await button(panel, 'next').isEnabled());
-    await button(panel, 'next').click();
+    check(`${locale}: withdrawal does not replenish exhausted pool`, api.state().pool.exhausted && api.state().recommendation === null);
+    await button(panel, 'retest').click();
+    await panel.getByRole('combobox', { name: labels.scenario }).selectOption('retry_timeout');
+    check(`${locale}: withdrawal does not refill choice or answer`, await panel.getByRole('textbox', { name: labels.answer }).inputValue() === '' && await panel.getByRole('combobox', { name: labels.decision }).inputValue() === '');
     await panel.getByRole('textbox', { name: labels.answer }).fill('SYNTHETIC replacement exercise after withdrawal: replay the original receipt.');
     await button(panel, 'save').click();
     await until(`${locale}: UI can save after 12 total historical records`, () => api.state().records.length === 13 && api.state().records.filter(record => !record.withdrawn).length === 12);
     await until(`${locale}: replacement save settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
-    check(`${locale}: old capacity tombstone remains cleared`, api.state().records[11].withdrawn && api.state().records[11].answer === '');
-    await capture(page, panel, `${locale}-05-capacity-reused`);
+    check(`${locale}: old capacity tombstone remains cleared`, api.state().records[11].withdrawn && api.state().records[11].answer === '' && api.state().records[11].decision_answer === null);
+    await capture(page, panel, `${locale}-07-capacity-reused`);
     api.pauseSource();
     await button(panel, 'reload').click();
     await until(`${locale}: source pause removes recording and advice`, async () => await panel.locator('fieldset').count() === 0 && await button(panel, 'next').count() === 0);
@@ -170,8 +205,9 @@ async function exercise(locale, width) {
     await button(panel.locator('#training-808-2'), 'confirmWithdrawal').click();
     await until(`${locale}: withdrawal remains available after source pause`, () => api.state().records[1].withdrawn && api.state().records[1].answer === '');
     await until(`${locale}: withdrawn record UI no longer contains the answer`, async () => !(await panel.locator('#training-808-2').innerText()).includes('SYNTHETIC retest:'));
+    check(`${locale}: withdrawal clears structured decision and feedback`, api.state().records[1].decision_answer === null && api.state().records[1].feedback.outcome === 'abstain');
     check(`${locale}: original completed plan answer is unchanged`, ORIGINAL_ANSWER === api.handle('GET', `${ORIGIN}/api/interview-practice/plans`).data[0].response_text);
-    await capture(page, panel, `${locale}-06-source-paused-withdrawn`);
+    await capture(page, panel, `${locale}-08-source-paused-withdrawn`);
     if (locale === 'en-US') check('English authored panel text is localized', !/\p{Script=Han}/u.test(await panel.innerText()));
     const bounds = await panel.evaluate(node => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, width: innerWidth }));
     check(`${locale}: panel fits desktop viewport horizontally`, bounds.left >= -1 && bounds.right <= bounds.width + 1);

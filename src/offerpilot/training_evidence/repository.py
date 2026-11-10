@@ -5,6 +5,7 @@ consumption but never prevent a user withdrawing their own visible evidence.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any
 
@@ -16,17 +17,14 @@ from offerpilot.models import AdaptivePracticePlan, Application
 from offerpilot.repositories.json_contract import canonical_json, sha256_text
 from offerpilot.review_readiness.projection import project_practice_focus
 from offerpilot.training_evidence.contracts import (
-    Command, CorrectCommand, RecordCommand, WithdrawCommand,
+    Command, CorrectCommand, DecisionAnswer, RecordCommand, WithdrawCommand,
 )
 from offerpilot.training_evidence.models import (
     TrainingEvidenceCommand, TrainingEvidenceRecord, TrainingEvidenceState,
 )
 
-SCENARIOS = (
-    {"id": "original", "prompt": "回看这次已保存的练习回答，并如实标注作答时的帮助情况。"},
-    {"id": "retry_timeout", "prompt": "投递已成功写入，但客户端等待响应超时。用户点击重试：如何判断是否已成功，并避免重复写入？请说明依据和恢复步骤。"},
-    {"id": "concurrent_retry", "prompt": "同一份投递请求被两个客户端同时重试。如何保证只写入一次，并让两个请求都获得可核对的结果？请说明唯一约束和回执处理。"},
-)
+from offerpilot.training_evidence.scenarios import GUIDANCE, POOL_IDS, POOL_VERSION, RULES, SCENARIOS
+
 ASSISTANCE_LABELS = {
     "unknown": "帮助情况未知", "independent": "独立作答",
     "hinted": "提示后作答", "reference": "看过参考答案后作答",
@@ -68,26 +66,76 @@ def _availability(session: Session, plan: AdaptivePracticePlan) -> str:
     return "current"
 
 
-def _record_json(record: TrainingEvidenceRecord) -> dict[str, Any]:
+def _validate_decision(scenario_id: str, decision: DecisionAnswer | None) -> str | None:
+    if decision is None:
+        return None
+    rule = RULES.get(scenario_id)
+    if (rule is None or decision.question_id != f"{scenario_id}.v1"
+            or decision.choice_id not in {*rule["choices"], "uncertain"}):
+        raise TrainingEvidenceError("training_evidence_invalid", 422)
+    return canonical_json(decision.model_dump())
+
+
+def _feedback(record: TrainingEvidenceRecord, available: bool) -> dict[str, Any]:
+    decision = json.loads(record.decision_json) if record.decision_json else None
+    result: dict[str, Any] = {
+        "scope": "selected_option_only", "text_assessment": "not_evaluated",
+        "outcome": "abstain", "record_id": record.id,
+        "rubric_version": decision["rubric_version"] if decision else None,
+        "question_id": decision["question_id"] if decision else None,
+        "choice_id": decision["choice_id"] if decision else None,
+        "rule_id": None, "reason": "未提供可评估的方案选择；自由文本未评估。", "next_step": None,
+    }
+    if not available or record.withdrawn:
+        result["reason"] = "来源不可用或记录已撤回，暂停反馈。"
+        return result
+    if decision is None:
+        return result
+    if decision["choice_id"] == "uncertain":
+        result["reason"] = "你选择了不确定，尚不判断方案是否符合本题规则。"
+        result["next_step"] = "先核对本题前提和参考依据，再比较各方案的恢复后果。"
+        return result
+    rule = RULES[record.scenario_id]
+    supported = decision["choice_id"] == rule["supported"]
+    result.update(
+        outcome="supported" if supported else "contradicted",
+        rule_id=f"{rule['rule_id']}:{decision['choice_id']}",
+        **GUIDANCE[record.scenario_id][decision["choice_id"]],
+    )
+    return result
+
+
+def _pool(records: list[TrainingEvidenceRecord]) -> dict[str, Any]:
+    practiced = {record.scenario_id for record in records}
+    remaining = [sid for sid in POOL_IDS if sid not in practiced]
+    return {"version": POOL_VERSION, "total": len(POOL_IDS),
+            "practiced_scenario_ids": [sid for sid in POOL_IDS if sid in practiced],
+            "remaining_scenario_ids": remaining, "exhausted": not remaining}
+
+
+def _record_json(record: TrainingEvidenceRecord, available: bool) -> dict[str, Any]:
     return {
         "id": record.id, "scenario_id": record.scenario_id,
         "answer": record.answer, "assistance": record.assistance,
         "created_at": record.created_at, "updated_at": record.updated_at,
         "withdrawn": record.withdrawn,
+        "decision_answer": json.loads(record.decision_json) if record.decision_json else None,
+        "feedback": _feedback(record, available),
     }
 
 
 def _recommendation(records: list[TrainingEvidenceRecord]) -> dict[str, Any] | None:
     active = [record for record in records if not record.withdrawn]
-    if not active:
+    remaining = _pool(records)["remaining_scenario_ids"]
+    if not active or not remaining:
         return None
     latest = active[-1]
-    scenario_id = "concurrent_retry" if latest.scenario_id == "retry_timeout" else "retry_timeout"
+    scenario_id = remaining[0]
     prompt = next(item["prompt"] for item in SCENARIOS if item["id"] == scenario_id)
     label = ASSISTANCE_LABELS[latest.assistance]
-    reason = f"你将记录 #{latest.id} 标注为“{label}”。建议换一个情境独立尝试，再核对推理依据；此标注不证明已经掌握。"
+    reason = f"你将记录 #{latest.id} 标注为“{label}”。未记录过作答的情境优先；建议独立尝试，再核对推理依据；此标注不证明已经掌握。"
     if latest.assistance == "unknown":
-        reason = f"记录 #{latest.id} 的帮助情况未知，不能由回答质量倒推。建议换情境作答并如实标注帮助情况。"
+        reason = f"记录 #{latest.id} 的帮助情况未知，不能由回答质量倒推。未记录过作答的情境优先；请作答并如实标注帮助情况。"
     comparison = "目前只有一条可用记录，尚不能对照作答条件。"
     ids = [latest.id]
     if len(active) > 1:
@@ -113,7 +161,8 @@ def _state(session: Session, plan: AdaptivePracticePlan) -> dict[str, Any]:
     return {
         "revision": state.revision if state else 0,
         "skill_id": "idempotency_retry", "available": available, "reason": reason,
-        "records": [_record_json(record) for record in records],
+        "records": [_record_json(record, available) for record in records],
+        "pool": _pool(records),
         "scenarios": list(SCENARIOS),
         "recommendation": _recommendation(records) if available else None,
     }
@@ -132,7 +181,11 @@ class TrainingEvidenceRepository:
             raise TrainingEvidenceError("training_evidence_unavailable", 503) from exc
 
     def mutate(self, plan_id: int, command: Command) -> dict[str, Any]:
-        fingerprint = sha256_text(canonical_json({"plan_id": plan_id, **command.model_dump()}))
+        payload = command.model_dump()
+        # Pre-v40 receipts were hashed without this newly optional field.
+        if payload.get("decision_answer") is None:
+            payload.pop("decision_answer", None)
+        fingerprint = sha256_text(canonical_json({"plan_id": plan_id, **payload}))
         try:
             with self._session_factory() as session:
                 # Revision check, source check, mutation and receipt are one SQLite
@@ -175,6 +228,7 @@ class TrainingEvidenceRepository:
                     record = TrainingEvidenceRecord(
                         plan_id=plan_id, scenario_id=command.scenario_id,
                         answer=command.answer, assistance=command.assistance,
+                        decision_json=_validate_decision(command.scenario_id, command.decision_answer),
                         withdrawn=False, created_at=now, updated_at=now,
                     )
                     session.add(record)
@@ -188,11 +242,13 @@ class TrainingEvidenceRepository:
                     if isinstance(command, CorrectCommand):
                         if record.scenario_id == "original" and command.answer != plan.response_text:
                             raise TrainingEvidenceError("training_evidence_invalid", 422)
+                        record.decision_json = _validate_decision(record.scenario_id, command.decision_answer)
                         record.answer = command.answer
                         record.assistance = command.assistance
                     else:
                         # Physical text removal from the live row, not a cosmetic
                         # UI filter. Original plan data remains in its own feature.
+                        record.decision_json = None
                         record.answer = ""
                         record.assistance = "unknown"
                         record.withdrawn = True

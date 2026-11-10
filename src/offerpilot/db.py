@@ -116,6 +116,8 @@ def init_database(db_path: Path) -> SessionFactory:
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
     _record_migration(engine, "0039_training_evidence", "Add opt-in plan-local training evidence and content-free command receipts")
+    from offerpilot.training_evidence.migration import ensure_decision_schema
+    ensure_decision_schema(engine)
     _ensure_chat_image_schema(engine)
     _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
     _record_migration(engine, "0035_external_agent_requests", "Add scoped external Agent grants and scheduling request receipts")

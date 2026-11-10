@@ -6,7 +6,14 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
 
 Assistance = Literal["unknown", "independent", "hinted", "reference"]
-Scenario = Literal["original", "retry_timeout", "concurrent_retry"]
+Scenario = Literal["original", "retry_timeout", "concurrent_retry", "payload_conflict", "transaction_gap", "expired_receipt", "stale_revision"]
+
+
+class DecisionAnswer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    rubric_version: Literal["idempotency_retry.v1"]
+    question_id: StrictStr = Field(min_length=1, max_length=100)
+    choice_id: StrictStr = Field(min_length=1, max_length=100)
 
 
 class CommandBase(BaseModel):
@@ -23,6 +30,7 @@ class CommandBase(BaseModel):
 
 
 class AnswerFields(BaseModel):
+    decision_answer: DecisionAnswer | None = None
     answer: StrictStr = Field(min_length=1, max_length=8000)
     assistance: Assistance
 

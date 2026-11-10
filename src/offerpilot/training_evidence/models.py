@@ -18,7 +18,7 @@ class TrainingEvidenceState(Base):
 class TrainingEvidenceRecord(Base):
     __tablename__ = "training_evidence_records"
     __table_args__ = (
-        CheckConstraint("scenario_id IN ('original','retry_timeout','concurrent_retry')"),
+        CheckConstraint("scenario_id IN ('original','retry_timeout','concurrent_retry','payload_conflict','transaction_gap','expired_receipt','stale_revision')"),
         CheckConstraint("assistance IN ('unknown','independent','hinted','reference')"),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -26,6 +26,7 @@ class TrainingEvidenceRecord(Base):
         ForeignKey("training_evidence_states.plan_id", ondelete="CASCADE"), index=True
     )
     scenario_id: Mapped[str] = mapped_column(String, nullable=False)
+    decision_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     answer: Mapped[str] = mapped_column(Text, nullable=False)
     assistance: Mapped[str] = mapped_column(String, nullable=False)
     withdrawn: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

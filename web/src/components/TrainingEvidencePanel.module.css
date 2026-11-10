@@ -8,3 +8,6 @@
 .records li { padding: .8rem 0; border-bottom: 1px solid var(--border-color, #d8dce2); overflow-wrap: anywhere; }
 .answer { white-space: pre-wrap; }
 .advice { margin-top: 1rem; padding: .8rem; border-left: 3px solid #6177c9; }
+
+.decision, .feedback { padding: .8rem; border: 1px solid var(--border-color, #d8dce2); border-radius: 8px; overflow-wrap: anywhere; }
+.feedback { margin: .7rem 0; }

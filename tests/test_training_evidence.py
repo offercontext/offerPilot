@@ -433,3 +433,287 @@ def test_withdrawn_original_can_be_explicitly_saved_again_as_new_record(setup): 
     assert second["records"][1]["id"] != first_id
     assert second["records"][1]["assistance"] == "hinted"
     assert repo.mutate(plan["id"], original) == second
+
+
+def decision(scenario="retry_timeout", choice="query_same_key"):
+    return {"rubric_version": "idempotency_retry.v1", "question_id": f"{scenario}.v1", "choice_id": choice}
+
+
+@pytest.mark.parametrize("body", ["唯一约束、事务、回执", "我反对事务，也不查询回执", "完全无关的正文"])
+@pytest.mark.parametrize("choice,outcome", [("query_same_key", "supported"), ("new_key_retry", "contradicted"), ("uncertain", "abstain")])
+def test_feedback_only_evaluates_explicit_option_not_text(setup, body, choice, outcome):
+    _, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record(answer=body, assistance="unknown", decision_answer=decision(choice=choice)))
+    feedback = state["records"][0]["feedback"]
+    assert feedback["outcome"] == outcome
+    assert feedback["text_assessment"] == "not_evaluated"
+    assert feedback["scope"] == "selected_option_only"
+    assert feedback["record_id"] == state["records"][0]["id"]
+    if outcome == "contradicted":
+        assert "原键" in feedback["next_step"]
+
+
+@pytest.mark.parametrize("invalid", [decision("concurrent_retry"), decision(choice="atomic_unique_receipt"), decision(choice="missing")])
+def test_decision_must_belong_to_scenario(setup, invalid):
+    _, _, plan, repo = setup
+    with pytest.raises(TrainingEvidenceError, match="invalid"):
+        repo.mutate(plan["id"], record(decision_answer=invalid))
+    assert repo.get(plan["id"])["revision"] == 0
+
+
+def test_decision_version_and_original_rejected(setup):
+    _, _, plan, repo = setup
+    with pytest.raises(ValueError):
+        record(decision_answer={**decision(), "rubric_version": "new"})
+    with pytest.raises(TrainingEvidenceError, match="invalid"):
+        repo.mutate(plan["id"], record(scenario_id="original", answer=plan["response_text"], decision_answer=decision()))
+
+
+def test_six_scenario_pool_exhaustion_withdrawal_and_explicit_retest(setup):
+    from offerpilot.training_evidence.scenarios import POOL_IDS
+    _, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record(scenario_id="original", answer=plan["response_text"]))
+    assert state["pool"]["practiced_scenario_ids"] == []
+    for index, sid in enumerate(POOL_IDS):
+        assert state["recommendation"]["scenario_id"] == sid
+        state = repo.mutate(plan["id"], record(state["revision"], scenario_id=sid))
+        assert state["pool"]["practiced_scenario_ids"] == list(POOL_IDS[:index+1])
+    assert state["pool"]["exhausted"] and state["recommendation"] is None
+    for saved in state["records"]:
+        state = repo.mutate(plan["id"], change("withdraw", state, saved["id"]))
+    assert state["pool"]["exhausted"] and state["recommendation"] is None
+    state = repo.mutate(plan["id"], record(state["revision"]))
+    assert state["pool"]["exhausted"] and state["recommendation"] is None
+
+
+def test_decision_correction_and_withdrawal_do_not_resurrect(setup):
+    _, _, plan, repo = setup
+    old = record(decision_answer=decision())
+    state = repo.mutate(plan["id"], old)
+    correction = change("correct", state, state["records"][0]["id"], answer="same text", assistance="hinted", decision_answer=decision(choice="new_key_retry"))
+    state = repo.mutate(plan["id"], correction)
+    assert state["records"][0]["feedback"]["outcome"] == "contradicted"
+    with pytest.raises(TrainingEvidenceError, match="idempotency_conflict"):
+        repo.mutate(plan["id"], record(idempotency_key=old.idempotency_key, decision_answer=decision(choice="uncertain")))
+    state = repo.mutate(plan["id"], change("withdraw", state, state["records"][0]["id"]))
+    assert state["records"][0]["decision_answer"] is None
+    assert state["records"][0]["feedback"]["outcome"] == "abstain"
+    assert repo.mutate(plan["id"], old) == state
+    assert repo.mutate(plan["id"], correction) == state
+
+
+def test_legacy_receipt_hash_unchanged_by_optional_null(setup):
+    from offerpilot.repositories.json_contract import canonical_json, sha256_text
+    factory, _, plan, repo = setup
+    command = record()
+    state = repo.mutate(plan["id"], command)
+    legacy = command.model_dump()
+    legacy.pop("decision_answer")
+    with factory() as session:
+        receipt = session.get(TrainingEvidenceCommand, command.idempotency_key)
+        assert receipt.fingerprint == sha256_text(canonical_json({"plan_id": plan["id"], **legacy}))
+    assert repo.mutate(plan["id"], parse_command({**legacy, "decision_answer": None})) == state
+    assert state["records"][0]["feedback"]["outcome"] == "abstain"
+
+
+def test_source_change_suspends_feedback_and_preserves_withdrawal(setup):
+    factory, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record(decision_answer=decision()))
+    with factory() as session:
+        session.get(ApplicationEvent, plan["target_application_event_id"]).round += 1
+        session.commit()
+    state = repo.get(plan["id"])
+    assert state["records"][0]["feedback"]["outcome"] == "abstain"
+    state = repo.mutate(plan["id"], change("withdraw", state, state["records"][0]["id"]))
+    assert state["records"][0]["decision_answer"] is None
+
+
+def _downgrade_training_schema(factory):
+    engine = factory.kw["bind"]
+    with engine.begin() as connection:
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        connection.exec_driver_sql("""CREATE TABLE training_evidence_records_old (
+            id INTEGER NOT NULL PRIMARY KEY,
+            plan_id INTEGER NOT NULL REFERENCES training_evidence_states(plan_id) ON DELETE CASCADE,
+            scenario_id VARCHAR NOT NULL CHECK(scenario_id IN ('original','retry_timeout','concurrent_retry')),
+            answer TEXT NOT NULL, assistance VARCHAR NOT NULL CHECK(assistance IN ('unknown','independent','hinted','reference')),
+            withdrawn BOOLEAN NOT NULL, created_at VARCHAR NOT NULL, updated_at VARCHAR NOT NULL)""")
+        connection.exec_driver_sql("INSERT INTO training_evidence_records_old SELECT id,plan_id,scenario_id,answer,assistance,withdrawn,created_at,updated_at FROM training_evidence_records")
+        connection.exec_driver_sql("DROP TABLE training_evidence_records")
+        connection.exec_driver_sql("ALTER TABLE training_evidence_records_old RENAME TO training_evidence_records")
+        connection.exec_driver_sql("CREATE INDEX ix_training_evidence_records_plan_id ON training_evidence_records(plan_id)")
+        connection.exec_driver_sql("DELETE FROM schema_migrations WHERE version='0040_training_evidence_decisions'")
+    return engine
+
+
+def test_real_old_schema_upgrade_preserves_receipts_tombstones_and_fk(setup):
+    from pathlib import Path
+    factory, _, plan, repo = setup
+    command = record()
+    state = repo.mutate(plan["id"], command)
+    state = repo.mutate(plan["id"], change("withdraw", state, state["records"][0]["id"]))
+    old_id = state["records"][0]["id"]
+    engine = _downgrade_training_schema(factory)
+    path = Path(engine.url.database)
+    for _ in range(2):
+        upgraded = init_database(path)
+        try:
+            new_repo = TrainingEvidenceRepository(upgraded)
+            assert new_repo.mutate(plan["id"], command) == state
+        finally:
+            upgraded.kw["bind"].dispose()
+    with engine.connect() as connection:
+        assert not list(connection.exec_driver_sql("PRAGMA foreign_key_check"))
+        assert connection.exec_driver_sql("SELECT count(*) FROM schema_migrations WHERE version='0040_training_evidence_decisions'").scalar() == 1
+        assert connection.exec_driver_sql("SELECT name FROM sqlite_master WHERE name='ix_training_evidence_records_plan_id'").scalar()
+    state = repo.mutate(plan["id"], record(state["revision"], scenario_id="expired_receipt", decision_answer=decision("expired_receipt", "reconcile_business_outcome")))
+    assert state["records"][-1]["id"] > old_id
+    assert state["records"][-1]["feedback"]["outcome"] == "supported"
+
+
+@pytest.mark.parametrize("fail_at", [1, 2])
+def test_old_schema_upgrade_failure_rolls_back_all_ddl_and_marker(setup, monkeypatch, fail_at):
+    import offerpilot.training_evidence.migration as migration
+    factory, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record())
+    engine = _downgrade_training_schema(factory)
+    calls = 0
+    def fail():
+        nonlocal calls
+        calls += 1
+        if calls == fail_at:
+            raise RuntimeError("simulated migration failure")
+    with monkeypatch.context() as patch:
+        patch.setattr(migration, "_checkpoint", fail)
+        with pytest.raises(RuntimeError, match="simulated"):
+            migration.ensure_decision_schema(engine)
+    with engine.connect() as connection:
+        assert "decision_json" not in {row[1] for row in connection.exec_driver_sql("PRAGMA table_info(training_evidence_records)")}
+        assert not connection.exec_driver_sql("SELECT 1 FROM schema_migrations WHERE version='0040_training_evidence_decisions'").scalar()
+        assert not connection.exec_driver_sql("SELECT 1 FROM sqlite_master WHERE name='training_evidence_records_v40'").scalar()
+        assert connection.exec_driver_sql("SELECT answer FROM training_evidence_records").scalar() == state["records"][0]["answer"]
+    migration.ensure_decision_schema(engine)
+    assert repo.get(plan["id"])["revision"] == 1
+
+
+def test_decision_corrections_compete_on_revision_without_partial_update(setup):
+    _, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record(decision_answer=decision()))
+    commands = [change("correct", state, state["records"][0]["id"], answer=choice, assistance="independent", decision_answer=decision(choice=choice))
+                for choice in ["new_key_retry", "assume_failed"]]
+    def apply(command):
+        try:
+            return repo.mutate(plan["id"], command)
+        except TrainingEvidenceError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(apply, commands))
+    assert results.count("training_evidence_conflict") == 1
+    current = repo.get(plan["id"])
+    assert current["revision"] == 2
+    saved = current["records"][0]
+    assert saved["answer"] == saved["decision_answer"]["choice_id"]
+    assert saved["feedback"]["outcome"] == "contradicted"
+
+
+def test_correction_omitting_decision_clears_it_instead_of_inheriting(setup):
+    _, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record(decision_answer=decision()))
+    state = repo.mutate(plan["id"], change("correct", state, state["records"][0]["id"], answer="changed", assistance="reference"))
+    assert state["records"][0]["decision_answer"] is None
+    assert state["records"][0]["feedback"]["outcome"] == "abstain"
+
+
+def test_old_schema_custom_self_referencing_trigger_survives_upgrade(setup):
+    from offerpilot.training_evidence.migration import ensure_decision_schema
+    factory, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record())
+    engine = _downgrade_training_schema(factory)
+    with engine.begin() as connection:
+        connection.exec_driver_sql("""CREATE TRIGGER training_evidence_custom_guard
+            BEFORE UPDATE OF answer ON training_evidence_records
+            WHEN NEW.answer = 'blocked' AND EXISTS (
+                SELECT 1 FROM training_evidence_records WHERE id = OLD.id)
+            BEGIN SELECT RAISE(ABORT, 'custom evidence guard'); END""")
+        old_sql = connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE name='training_evidence_custom_guard'"
+        ).scalar()
+    ensure_decision_schema(engine)
+    ensure_decision_schema(engine)
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql(
+            "SELECT sql FROM sqlite_master WHERE name='training_evidence_custom_guard'"
+        ).scalar() == old_sql
+    from sqlalchemy.exc import IntegrityError
+    with pytest.raises(IntegrityError, match="custom evidence guard"):
+        with engine.begin() as connection:
+            connection.exec_driver_sql("UPDATE training_evidence_records SET answer='blocked'")
+    assert repo.get(plan["id"])["records"][0]["answer"] == state["records"][0]["answer"]
+    state = repo.mutate(plan["id"], change("correct", state, state["records"][0]["id"], answer="allowed", assistance="independent"))
+    assert state["records"][0]["answer"] == "allowed"
+
+
+# Explicit oracle, independent of the production outcome lookup.
+_ALL_DECISION_CASES = [
+    ("retry_timeout", "query_same_key", "supported"),
+    ("retry_timeout", "new_key_retry", "contradicted"),
+    ("retry_timeout", "assume_failed", "contradicted"),
+    ("concurrent_retry", "atomic_unique_receipt", "supported"),
+    ("concurrent_retry", "check_then_insert", "contradicted"),
+    ("concurrent_retry", "client_mutex", "contradicted"),
+    ("payload_conflict", "reject_key_conflict", "supported"),
+    ("payload_conflict", "replay_other_payload", "contradicted"),
+    ("payload_conflict", "overwrite_receipt", "contradicted"),
+    ("transaction_gap", "atomic_business_receipt", "supported"),
+    ("transaction_gap", "receipt_after_commit", "contradicted"),
+    ("transaction_gap", "receipt_before_business", "contradicted"),
+    ("expired_receipt", "reconcile_business_outcome", "supported"),
+    ("expired_receipt", "same_key_guarantees", "contradicted"),
+    ("expired_receipt", "new_key_guarantees", "contradicted"),
+    ("stale_revision", "replay_current_state", "supported"),
+    ("stale_revision", "reexecute_old_write", "contradicted"),
+    ("stale_revision", "return_old_snapshot", "contradicted"),
+    *[(scenario, "uncertain", "abstain") for scenario in [
+        "retry_timeout", "concurrent_retry", "payload_conflict", "transaction_gap", "expired_receipt", "stale_revision",
+    ]],
+]
+
+
+@pytest.mark.parametrize("scenario,choice,outcome", _ALL_DECISION_CASES)
+def test_all_six_scenarios_have_scoped_option_feedback(setup, scenario, choice, outcome):
+    from offerpilot.training_evidence.scenarios import GUIDANCE
+    _, _, plan, repo = setup
+    state = repo.mutate(plan["id"], record(scenario_id=scenario, decision_answer=decision(scenario, choice)))
+    saved = state["records"][0]
+    feedback = saved["feedback"]
+    assert feedback["outcome"] == outcome
+    assert feedback["record_id"] == saved["id"]
+    assert feedback["question_id"] == f"{scenario}.v1"
+    assert feedback["choice_id"] == choice
+    assert feedback["rubric_version"] == "idempotency_retry.v1"
+    assert feedback["text_assessment"] == "not_evaluated"
+    assert feedback["scope"] == "selected_option_only"
+    if choice == "uncertain":
+        assert feedback["rule_id"] is None
+        assert "不确定" in feedback["reason"]
+        assert feedback["next_step"]
+    else:
+        assert feedback["rule_id"] == f"{scenario}.v1:{choice}"
+        assert feedback["reason"] == GUIDANCE[scenario][choice]["reason"]
+        assert feedback["next_step"] == GUIDANCE[scenario][choice]["next_step"]
+        assert len({item["next_step"] for item in GUIDANCE[scenario].values()}) == 3
+        assert len({item["reason"] for item in GUIDANCE[scenario].values()}) == 3
+
+
+def test_choice_display_positions_are_mixed_and_correctness_uses_stable_ids():
+    from offerpilot.training_evidence.scenarios import RULES, SCENARIOS
+    expected_supported = {scenario: choice for scenario, choice, outcome in _ALL_DECISION_CASES if outcome == "supported"}
+    positions = []
+    for scenario in SCENARIOS[1:]:
+        choices = [choice["id"] for choice in scenario["decision_question"]["choices"]]
+        correct_id = expected_supported[scenario["id"]]
+        assert RULES[scenario["id"]]["supported"] == correct_id
+        assert choices[-1] == "uncertain"
+        assert len(choices) == len(set(choices)) == 4
+        positions.append(choices.index(correct_id))
+    assert positions == [1, 2, 0, 2, 1, 0]

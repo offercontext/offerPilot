@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { createTrainingFixture, EVIDENCE_PATH, ORIGINAL_ANSWER, ORIGIN } from './fixture-api.mjs';
 import { classifyRequest } from './network-guard.mjs';
 const key = n => `11111111-1111-4111-8111-${String(n).padStart(12, '0')}`;
@@ -92,4 +94,62 @@ test('matching assistance is a neutral conditions comparison, not a change claim
   assert.match(api.state().recommendation.comparison, /作答条件对照/);
   assert.doesNotMatch(api.state().recommendation.comparison, /条件变化/);
   assert.deepEqual(api.state().recommendation.evidence_record_ids, [1, 2]);
+});
+
+const choose = choice_id => ({ rubric_version: 'idempotency_retry.v1', question_id: 'retry_timeout.v1', choice_id });
+test('six historical scenarios are recommended once, withdrawal does not reset exhausted coverage', () => {
+  const api = createTrainingFixture(); post(api, record());
+  const visited = [];
+  for (let i = 0; i < 6; i++) {
+    const next = api.state().recommendation.scenario_id;
+    assert.ok(!visited.includes(next)); visited.push(next);
+    assert.equal(post(api, { ...record(i + 2), expected_revision: i + 1, scenario_id: next, answer: 'Synthetic pool answer' }).status, 200);
+  }
+  assert.equal(api.state().pool.exhausted, true); assert.equal(api.state().recommendation, null);
+  assert.equal(post(api, { action: 'withdraw', expected_revision: 7, idempotency_key: key(8), record_id: 2 }).status, 200);
+  assert.equal(api.state().pool.exhausted, true); assert.equal(api.state().pool.practiced_scenario_ids.length, 6);
+  assert.equal(post(api, { ...record(9), expected_revision: 8, scenario_id: visited[0], answer: 'Synthetic explicit retest' }).status, 200);
+});
+test('opposite choices change selected-option feedback, never assess identical text', () => {
+  const api = createTrainingFixture();
+  const command = { ...record(), scenario_id: 'retry_timeout', answer: 'Definitely wrong free text, ignored by the option rule.', decision_answer: choose('new_key_retry') };
+  assert.equal(post(api, command).data.records[0].feedback.outcome, 'contradicted');
+  const incorrectStep = api.state().records[0].feedback.next_step;
+  const corrected = post(api, { action: 'correct', expected_revision: 1, idempotency_key: key(2), record_id: 1, answer: command.answer, assistance: 'unknown', decision_answer: choose('query_same_key') });
+  assert.equal(corrected.data.records[0].feedback.outcome, 'supported');
+  assert.equal(corrected.data.records[0].feedback.text_assessment, 'not_evaluated');
+  assert.notEqual(corrected.data.records[0].feedback.next_step, incorrectStep);
+  const cleared = post(api, { action: 'correct', expected_revision: 2, idempotency_key: key(3), record_id: 1, answer: command.answer, assistance: 'unknown', decision_answer: null });
+  assert.equal(cleared.data.records[0].feedback.outcome, 'abstain');
+  assert.equal(cleared.data.records[0].decision_answer, null);
+});
+test('missing and uncertain choices abstain; invalid rubric/question/choice never writes', () => {
+  for (const decision_answer of [undefined, null, choose('uncertain')]) {
+    const api = createTrainingFixture(); const result = post(api, { ...record(), scenario_id: 'retry_timeout', answer: 'Synthetic free text', ...(decision_answer === undefined ? {} : { decision_answer }) });
+    assert.equal(result.status, 200); assert.equal(result.data.records[0].feedback.outcome, 'abstain');
+  }
+  for (const decision_answer of [{ ...choose('query_same_key'), rubric_version: 'v999' }, { ...choose('query_same_key'), question_id: 'concurrent_retry.v1' }, choose('bogus')]) {
+    const api = createTrainingFixture(); assert.equal(post(api, { ...record(), scenario_id: 'retry_timeout', decision_answer }).status, 422); assert.equal(api.state().revision, 0);
+  }
+  assert.equal(post(createTrainingFixture(), { ...record(), decision_answer: choose('query_same_key') }).status, 422);
+});
+test('structured unknown-result replay remains identical and withdrawal clears choice without resurrection', () => {
+  const api = createTrainingFixture(), command = { ...record(), scenario_id: 'retry_timeout', decision_answer: choose('new_key_retry') };
+  api.dropNextResponse(); assert.equal(post(api, command).dropResponse, true);
+  assert.equal(post(api, command).data.records.length, 1);
+  assert.equal(post(api, { ...command, decision_answer: choose('query_same_key') }).status, 409);
+  assert.equal(post(api, { action: 'withdraw', expected_revision: 1, idempotency_key: key(2), record_id: 1 }).status, 200);
+  const replay = post(api, command).data.records[0];
+  assert.equal(replay.decision_answer, null); assert.equal(replay.answer, ''); assert.equal(replay.feedback.outcome, 'abstain');
+});
+test('legacy omitted decision and explicit null have the same idempotency fingerprint', () => {
+  const api = createTrainingFixture(), command = record(); post(api, command);
+  assert.equal(post(api, { ...command, decision_answer: null }).status, 200);
+  assert.equal(api.state().revision, 1);
+});
+
+test('synthetic questions are pinned to the backend scenario definition', () => {
+  const snapshot = JSON.parse(readFileSync(new URL('./questions.json', import.meta.url), 'utf8'));
+  const source = readFileSync(new URL('../../../src/offerpilot/training_evidence/scenarios.py', import.meta.url));
+  assert.equal(snapshot.source_sha256, createHash('sha256').update(source).digest('hex'));
 });

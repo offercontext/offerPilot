@@ -79,9 +79,11 @@
 `training_evidence/api.py` → `TrainingEvidenceRepository`。用户主动选择“幂等与重试”，
 记录原回答条件或固定换场景复测；不重复创建同一 Signal/target 的 Plan。
 
-- `training_evidence/contracts.py`：显式命令、辅助程度与幂等字段。
-- `training_evidence/repository.py`：计划级 CAS、当前来源/目标指纹、撤回正文清除和本地建议。
-- `training_evidence/models.py`：计划子记录及不保存正文的命令回执；加法迁移 0039。
+- `training_evidence/contracts.py`：显式命令、辅助程度、可选版本化决策选择与幂等字段。
+- `training_evidence/repository.py`：计划级 CAS、来源/目标指纹、撤回正文/决策清除、六情境去重和选项规则反馈。
+- `training_evidence/models.py`：计划子记录及不保存正文的命令回执；0039 新增表。
+- `training_evidence/scenarios.py`：六情境及版本化决策规则；不评价自由文本。
+- `training_evidence/migration.py`：0040 原子保留数据迁移，扩大旧情境约束并增加 nullable 决策字段。
 - 现有 Plan 回答、确认 Signal 和 Preparation 模型输入均不改变。
 - 旧历史辅助条件未知，不自动生成能力标签；来源失效暂停新建议但仍允许撤回。
 
