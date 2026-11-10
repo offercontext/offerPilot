@@ -40,3 +40,12 @@ versioned content changes. Withdrawn scenario identities remain in pool coverage
 Only explicit option IDs are checked against the versioned rule. Free text is
 always `not_evaluated`; missing/uncertain choices abstain. This is not a learning
 improvement or free-text understanding claim.
+
+Screenshots target the relevant feedback record, status, alert or control rather
+than the full training panel. Each target is scrolled to the viewport center;
+its viewport screenshot and visible target crop are named by phase and purpose.
+The report records target text and geometry. A capture fails if less than 95% of
+the target fits through its ancestor scrollports. This prevents a tall panel
+clipped by the app shell from being presented as a complete evidence screenshot.
+Failure diagnostics still preserve page HTML, accessibility text and the current
+viewport independently of whether the intended target remains visible.

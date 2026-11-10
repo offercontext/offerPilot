@@ -47,18 +47,44 @@ async function until(name, predicate) {
   }
   throw new Error(`Timed out: ${name}`);
 }
-async function capture(page, panel, stem, failure = false) {
-  if (!failure) await panel.scrollIntoViewIfNeeded();
+async function saveScreenshot(page, file, details = {}, clip) {
+  await page.screenshot({ path: path.join(output, file), fullPage: false, animations: 'disabled', ...(clip ? { clip } : {}) });
+  report.screenshots.push({ file, sha256: hash(await readFile(path.join(output, file))), ...details });
+}
+async function capture(page, panel, stem, targets = [], failure = false) {
   await page.evaluate(() => document.fonts.ready);
+  // Preserve diagnostics even when a target is hidden or not mounted after failure.
   await writeFile(path.join(output, `${stem}.html`), await page.content());
   await writeFile(path.join(output, `${stem}.aria.txt`), await page.locator('body').ariaSnapshot());
-  await page.screenshot({ path: path.join(output, `${stem}.png`), fullPage: true, animations: 'disabled' });
-  report.screenshots.push({ file: `${stem}.png`, sha256: hash(await readFile(path.join(output, `${stem}.png`))) });
-  if (!panel || (failure && !(await panel.isVisible()))) return;
-  // Element capture includes the tall panel, not just the shell's internally scrolled viewport.
-  await panel.screenshot({ path: path.join(output, `${stem}-panel.png`), animations: 'disabled' });
-  report.screenshots.push({ file: `${stem}-panel.png`, sha256: hash(await readFile(path.join(output, `${stem}-panel.png`))) });
+  if (failure) return saveScreenshot(page, `${stem}-viewport.png`, { kind: 'failure viewport' });
+  assert.ok(targets.length, `Screenshot phase ${stem} needs explicit evidence targets`);
+  for (const { name, locator } of targets) {
+    await locator.waitFor({ state: 'visible' });
+    await locator.evaluate(node => node.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'instant' }));
+    const geometry = await locator.evaluate(node => {
+      const rect = node.getBoundingClientRect();
+      let left = Math.max(0, rect.left), top = Math.max(0, rect.top);
+      let right = Math.min(innerWidth, rect.right), bottom = Math.min(innerHeight, rect.bottom);
+      // The app shell scrolls internally. Crop only pixels visible through every
+      // ancestor scrollport; element/full-page capture otherwise produces blanks.
+      for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent), box = parent.getBoundingClientRect();
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) { left = Math.max(left, box.left + parent.clientLeft); right = Math.min(right, box.left + parent.clientLeft + parent.clientWidth); }
+        if (/(auto|scroll|hidden|clip)/.test(style.overflowY)) { top = Math.max(top, box.top + parent.clientTop); bottom = Math.min(bottom, box.top + parent.clientTop + parent.clientHeight); }
+      }
+      const x = Math.ceil(left), y = Math.ceil(top), width = Math.floor(right) - x, height = Math.floor(bottom) - y;
+      return { clip: { x, y, width, height }, target: { width: rect.width, height: rect.height }, text: node.textContent?.trim().slice(0, 1000) };
+    });
+    assert.ok(geometry.clip.width > 0 && geometry.clip.height > 0, `${stem}/${name} is actually visible`);
+    check(`${stem}/${name}: evidence target fits its visible scrollport`, geometry.clip.width * geometry.clip.height >= geometry.target.width * geometry.target.height * 0.95);
+    // Named targets are deliberately small: feedback, alerts, status or controls,
+    // not the full, potentially much taller training panel.
+    const details = { target: name, text: geometry.text, geometry, kind: 'target-centered viewport' };
+    await saveScreenshot(page, `${stem}-${name}-viewport.png`, details);
+    await saveScreenshot(page, `${stem}-${name}-target.png`, { ...details, kind: 'visible target crop' }, geometry.clip);
+  }
 }
+
 async function exercise(locale, width) {
   const api = createTrainingFixture(), result = { locale, width, status: 'running', requests: [], fixtureViolations: [] };
   report.cases.push(result);
@@ -112,7 +138,7 @@ async function exercise(locale, width) {
     check(`${locale}: history assistance remains unknown`, await panel.getByRole('combobox', { name: labels.assistance }).inputValue() === 'unknown');
     check(`${locale}: original answer is read-only`, await panel.getByRole('textbox', { name: labels.answer }).evaluate(element => element.readOnly));
     check(`${locale}: explicit selection is read-only`, api.requests.filter(request => request.path === EVIDENCE_PATH && request.method === 'POST').length === 0);
-    await capture(page, panel, `${locale}-01-explicit-selection`);
+    await capture(page, panel, `${locale}-01-explicit-selection`, [{ name: 'consent-and-skill', locator: panel.getByRole('heading') }, { name: 'original-answer', locator: panel.getByRole('textbox', { name: labels.answer }) }]);
     await button(panel, 'save').click();
     await until(`${locale}: first evidence is saved once`, () => api.state().revision === 1 && api.state().records.length === 1);
     await panel.locator('#training-808-1').waitFor();
@@ -132,7 +158,7 @@ async function exercise(locale, width) {
     await button(panel, 'retry').waitFor();
     check(`${locale}: uncertain result freezes editing`, await panel.locator('fieldset').evaluate(element => element.disabled));
     const firstCommand = api.requests.filter(request => request.path === EVIDENCE_PATH && request.method === 'POST').at(-1).body;
-    await capture(page, panel, `${locale}-02-unknown-result`);
+    await capture(page, panel, `${locale}-02-unknown-result`, [{ name: 'frozen-command-alert', locator: panel.getByRole('alert') }]);
     await button(panel, 'retry').click();
     await panel.locator('#training-808-2').waitFor();
     await until(`${locale}: retry UI settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
@@ -140,7 +166,7 @@ async function exercise(locale, width) {
     check(`${locale}: retry preserves exact original command`, JSON.stringify(firstCommand) === JSON.stringify(replayCommand));
     check(`${locale}: no duplicate evidence on unknown-result retry`, api.state().revision === 3 && api.state().records.length === 2);
     check(`${locale}: comparison links both evidence records`, await panel.locator('a[href="#training-808-1"]').count() === 1 && await panel.locator('a[href="#training-808-2"]').count() === 1);
-    await capture(page, panel, `${locale}-03-comparison`);
+    await capture(page, panel, `${locale}-03-comparison`, [{ name: 'evidence-comparison', locator: panel.locator('aside') }, { name: 'incorrect-option-feedback', locator: panel.locator('#training-808-2 [data-feedback-outcome]') }]);
     check(`${locale}: incorrect option is contradicted without evaluating text`, api.state().records[1].feedback.outcome === 'contradicted' && api.state().records[1].feedback.text_assessment === 'not_evaluated');
     await panel.locator('#training-808-2 [data-feedback-outcome="contradicted"]').waitFor();
     const incorrectStep = api.state().records[1].feedback.next_step;
@@ -151,7 +177,7 @@ async function exercise(locale, width) {
     await button(panel, 'saveCorrection').click();
     await panel.locator('#training-808-2 [data-feedback-outcome="supported"]').waitFor();
     check(`${locale}: opposite option changes feedback with identical free text`, api.state().records[1].answer === unchangedAnswer && api.state().records[1].feedback.next_step !== incorrectStep);
-    await capture(page, panel, `${locale}-04-option-feedback`);
+    await capture(page, panel, `${locale}-04-option-feedback`, [{ name: 'corrected-option-feedback', locator: panel.locator('#training-808-2 [data-feedback-outcome]') }]);
     // Finish the six-scenario pool through the UI before explicitly retesting.
     for (let count = 2; count < 7; count += 1) {
       await button(panel, 'next').click();
@@ -165,7 +191,7 @@ async function exercise(locale, width) {
     check(`${locale}: six pool scenarios never repeat`, new Set(api.state().records.slice(1).map(record => record.scenario_id)).size === 6);
     check(`${locale}: exhausted pool has no automatic recommendation`, api.state().pool.exhausted && api.state().recommendation === null && await button(panel, 'next').count() === 0);
     check(`${locale}: exhausted pool does not auto-open repeat input`, await panel.locator('fieldset').count() === 0);
-    await capture(page, panel, `${locale}-05-pool-exhausted`);
+    await capture(page, panel, `${locale}-05-pool-exhausted`, [{ name: 'pool-exhaustion-status', locator: panel.getByRole('status').filter({ hasText: /6 个情境均已记录过作答|All 6 scenarios/ }) }, { name: 'explicit-retest-control', locator: button(panel, 'retest') }]);
     for (let count = 7; count < 12; count += 1) {
       await button(panel, 'retest').click();
       check(`${locale}: retest ${count} requires selecting an earlier scenario`, await panel.getByRole('textbox', { name: labels.answer }).isDisabled());
@@ -182,7 +208,7 @@ async function exercise(locale, width) {
     check(`${locale}: full capacity correction remains editable`, !(await panel.locator('fieldset').evaluate(element => element.disabled)));
     // Cancel the correction before freeing capacity through withdrawal.
     await panel.getByRole('button', { name: /^(取消更正|Cancel correction)$/ }).click();
-    await capture(page, panel, `${locale}-06-capacity-full`);
+    await capture(page, panel, `${locale}-06-capacity-full`, [{ name: 'capacity-status', locator: panel.getByRole('status').filter({ hasText: /已达到 12 条|limit of 12 active/ }) }, { name: 'disabled-retest-control', locator: button(panel, 'retest') }, { name: 'correction-control', locator: button(panel.locator('#training-808-1'), 'correct') }]);
     await button(panel.locator('#training-808-12'), 'withdraw').click();
     await button(panel.locator('#training-808-12'), 'confirmWithdrawal').click();
     await until(`${locale}: UI withdrawal frees one active slot`, () => api.state().records.filter(record => !record.withdrawn).length === 11);
@@ -196,7 +222,7 @@ async function exercise(locale, width) {
     await until(`${locale}: UI can save after 12 total historical records`, () => api.state().records.length === 13 && api.state().records.filter(record => !record.withdrawn).length === 12);
     await until(`${locale}: replacement save settles`, () => panel.getAttribute('aria-busy').then(value => value === 'false'));
     check(`${locale}: old capacity tombstone remains cleared`, api.state().records[11].withdrawn && api.state().records[11].answer === '' && api.state().records[11].decision_answer === null);
-    await capture(page, panel, `${locale}-07-capacity-reused`);
+    await capture(page, panel, `${locale}-07-capacity-reused`, [{ name: 'withdrawn-capacity-record', locator: panel.locator('#training-808-12') }, { name: 'replacement-record', locator: panel.locator('#training-808-13') }]);
     api.pauseSource();
     await button(panel, 'reload').click();
     await until(`${locale}: source pause removes recording and advice`, async () => await panel.locator('fieldset').count() === 0 && await button(panel, 'next').count() === 0);
@@ -207,7 +233,7 @@ async function exercise(locale, width) {
     await until(`${locale}: withdrawn record UI no longer contains the answer`, async () => !(await panel.locator('#training-808-2').innerText()).includes('SYNTHETIC retest:'));
     check(`${locale}: withdrawal clears structured decision and feedback`, api.state().records[1].decision_answer === null && api.state().records[1].feedback.outcome === 'abstain');
     check(`${locale}: original completed plan answer is unchanged`, ORIGINAL_ANSWER === api.handle('GET', `${ORIGIN}/api/interview-practice/plans`).data[0].response_text);
-    await capture(page, panel, `${locale}-08-source-paused-withdrawn`);
+    await capture(page, panel, `${locale}-08-source-paused-withdrawn`, [{ name: 'source-paused-status', locator: panel.getByRole('status').filter({ hasText: /来源或目标已变化|source or target is no longer current/ }) }, { name: 'withdrawn-structured-record', locator: panel.locator('#training-808-2') }]);
     if (locale === 'en-US') check('English authored panel text is localized', !/\p{Script=Han}/u.test(await panel.innerText()));
     const bounds = await panel.evaluate(node => ({ left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right, width: innerWidth }));
     check(`${locale}: panel fits desktop viewport horizontally`, bounds.left >= -1 && bounds.right <= bounds.width + 1);
@@ -215,7 +241,7 @@ async function exercise(locale, width) {
     result.status = 'passed';
   } catch (error) {
     result.status = 'failed'; report.failures.push({ locale, error: error.stack || String(error) });
-    if (page) await capture(page, panel, `${locale}-failure`, true).catch(captureError => report.failures.push({ locale, captureError: String(captureError) }));
+    if (page) await capture(page, panel, `${locale}-failure`, [], true).catch(captureError => report.failures.push({ locale, captureError: String(captureError) }));
   } finally {
     result.requests = api.requests; result.fixtureViolations = api.violations; result.finalState = api.state();
     await context.close();
