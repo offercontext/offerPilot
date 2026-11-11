@@ -19,8 +19,13 @@ $dialog = $null
 while ([DateTime]::UtcNow -lt $deadline) {
   $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition)
   foreach ($window in $windows) {
-    if ($window.Current.ProcessId -eq $OwnerPid -and $window.Current.ClassName -eq '#32770' -and
-        $window.Current.Name -eq $title) { $dialog = $window; break }
+    if ($window.Current.ProcessId -ne $OwnerPid) { continue }
+    # Windows exposes the owned modal underneath its application window in
+    # UIAutomation, not necessarily as a desktop RootElement child.
+    $candidates = @($window) + @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition))
+    $matches = @($candidates | Where-Object { $_.Current.ProcessId -eq $OwnerPid -and $_.Current.ClassName -eq '#32770' -and $_.Current.Name -eq $title })
+    if ($matches.Count -gt 1) { throw 'Verified native dialog identity is ambiguous' }
+    if ($matches.Count -eq 1) { $dialog = $matches[0]; break }
   }
   if ($null -ne $dialog) { break }
   Start-Sleep -Milliseconds 100
