@@ -9816,6 +9816,22 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "tests/test_desktop_resume_export_smoke.py": {
+      "modules": [
+        "resumes",
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "privacy",
+        "snapshot_consistency",
+        "packaging"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "tests/test_resume_export.py": {
       "modules": [
         "resumes"
