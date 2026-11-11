@@ -25,7 +25,23 @@ while ([DateTime]::UtcNow -lt $deadline) {
   if ($null -ne $dialog) { break }
   Start-Sleep -Milliseconds 100
 }
-if ($null -eq $dialog) { throw 'Real Windows Save dialog did not appear for the verified process' }
+if ($null -eq $dialog) {
+  # Diagnostic evidence only: do not relax owner/class/title checks or operate
+  # on any unexpected window. This is a disposable synthetic hosted desktop.
+  $diagnostic = @{ expectedPid=$OwnerPid; expectedTitle=$title; sessionId=(Get-Process -Id $OwnerPid).SessionId }
+  try {
+    $diagnostic.windows = @($root.FindAll([System.Windows.Automation.TreeScope]::Children, [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object {
+      @{ pid=$_.Current.ProcessId; title=$_.Current.Name; class=$_.Current.ClassName; offscreen=$_.Current.IsOffscreen }
+    })
+    $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
+    $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    try { $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size); $bitmap.Save($Screenshot, [System.Drawing.Imaging.ImageFormat]::Png) }
+    finally { $graphics.Dispose(); $bitmap.Dispose() }
+  } catch { $diagnostic.captureError = $_.Exception.Message }
+  $diagnostic | ConvertTo-Json -Depth 5 | Set-Content -Encoding UTF8 -LiteralPath ($Screenshot + '.json')
+  throw 'Real Windows Save dialog did not appear for the verified process'
+}
 $cancel = @()
 try {
 $bounds = [System.Windows.Forms.SystemInformation]::VirtualScreen
