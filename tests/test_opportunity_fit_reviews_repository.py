@@ -208,6 +208,49 @@ def _add_jd_version(factory, application_id: int) -> int:
     ).version.id
 
 
+def _controlled_lease_clock(monkeypatch):
+    class LeaseClock(datetime):
+        current = datetime(2026, 11, 11, 0, 0, 0, 123456, tzinfo=timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return cls.current.astimezone(tz) if tz is not None else cls.current.replace(tzinfo=None)
+
+    # Keep real heartbeat threads and SQLite writes, but do not let setup or
+    # scheduling consume a subsecond test lease before the final fenced write.
+    monkeypatch.setattr("offerpilot.repositories.opportunity_fit_reviews.datetime", LeaseClock)
+    monkeypatch.setattr("offerpilot.repositories.lease_heartbeat.datetime", LeaseClock)
+    return LeaseClock
+
+
+def _advance_past_initial_lease(factory, stage_id, clock):
+    with factory() as session:
+        stage = session.get(OpportunityFitReviewStage, stage_id)
+        assert stage is not None and stage.lease_expires_at is not None
+        initial_expiry = stage.lease_expires_at.replace(tzinfo=timezone.utc)
+        generation, token = stage.stage_generation, stage.provider_call_token
+        assert stage.status == "generating" and token
+
+    clock.current = initial_expiry - timedelta(seconds=0.4)
+    deadline = time.monotonic() + 5
+    while True:
+        with factory() as session:
+            stage = session.get(OpportunityFitReviewStage, stage_id)
+            assert stage is not None and stage.lease_expires_at is not None
+            assert (stage.stage_generation, stage.provider_call_token) == (generation, token)
+            renewed_expiry = stage.lease_expires_at.replace(tzinfo=timezone.utc)
+        if renewed_expiry > initial_expiry:
+            break
+        assert time.monotonic() < deadline, "real heartbeat did not persist a renewed lease"
+        time.sleep(0.02)
+
+    # Replay after the original lease expires, but within the actual extension.
+    # A stopped or no-op heartbeat must fail above rather than pass on frozen time.
+    clock.current = initial_expiry + timedelta(seconds=0.1)
+    assert clock.current < renewed_expiry
+    return generation, token
+
+
 def test_v2_triage_creates_one_root_and_stage_and_replays_same_key(tmp_path) -> None:
     factory, application, resume = _ready(tmp_path)
     repository = OpportunityFitReviewsRepository(factory, confirmation_secret="test-secret")
@@ -343,8 +386,9 @@ def test_v2_expired_provider_lease_is_taken_over_before_the_next_provider_call(t
     assert old_token
 
 
-def test_v2_live_lease_heartbeat_keeps_same_key_replay_pending(tmp_path) -> None:
+def test_v2_live_lease_heartbeat_keeps_same_key_replay_pending(tmp_path, monkeypatch) -> None:
     factory, application, resume = _ready(tmp_path)
+    clock = _controlled_lease_clock(monkeypatch)
     repository = OpportunityFitReviewsRepository(
         factory,
         confirmation_secret="test-secret",
@@ -365,37 +409,39 @@ def test_v2_live_lease_heartbeat_keeps_same_key_replay_pending(tmp_path) -> None
             key,
             model,
         )
-        assert model.entered.wait(timeout=5)
-        time.sleep(1.2)
+        try:
+            assert model.entered.wait(timeout=5)
+            with factory() as session:
+                stage = session.scalar(select(OpportunityFitReviewStage))
+                assert stage is not None
+                stage_id = stage.id
+            generation, token = _advance_past_initial_lease(factory, stage_id, clock)
 
-        replay = repository.create_triage_v2(
-            application.id,
-            resume.id,
-            "Kubernetes preferred",
-            "copy",
-            [],
-            key,
-            model,
-        )
-        assert replay[1].status == "generating"
-        assert replay[2] is False
-        assert model.calls == 1
-        with factory() as session:
-            persisted = session.scalar(select(OpportunityFitReviewStage))
-            assert persisted is not None
-            assert persisted.stage_generation == 1
-            assert persisted.provider_call_token
-            assert persisted.lease_expires_at is not None
-
-        model.release.set()
+            replay = repository.create_triage_v2(
+                application.id,
+                resume.id,
+                "Kubernetes preferred",
+                "copy",
+                [],
+                key,
+                model,
+            )
+            assert replay[1].status == "generating"
+            assert replay[2] is False
+            assert replay[1].stage_generation == generation == 1
+            assert replay[1].provider_call_token == token
+            assert model.calls == 1
+        finally:
+            model.release.set()
         first = first_future.result(timeout=10)
 
     assert first[1].status == "ready"
     assert model.calls == 1
 
 
-def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path) -> None:
+def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path, monkeypatch) -> None:
     factory, application, resume = _ready(tmp_path)
+    clock = _controlled_lease_clock(monkeypatch)
     jd_version_id = _add_jd_version(factory, application.id)
     repository = OpportunityFitReviewsRepository(
         factory,
@@ -414,6 +460,7 @@ def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path) -> None:
         triage_model,
         jd_version_id=jd_version_id,
     )
+    assert triage.status == "ready" and token
     repository.confirm_triage_v2(application.id, root.id, triage.id, token)
     model = BlockingDeepV2ReviewModel()
     key = "deep-heartbeat-key-00000000000000000000000000000001"
@@ -431,25 +478,34 @@ def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path) -> None:
             key,
             model,
         )
-        assert model.entered.wait(timeout=5)
-        time.sleep(1.2)
+        try:
+            assert model.entered.wait(timeout=5)
+            with factory() as session:
+                stage = session.scalar(select(OpportunityFitReviewStage).where(
+                    OpportunityFitReviewStage.stage == "deep_review"
+                ))
+                assert stage is not None
+                stage_id = stage.id
+            generation, token = _advance_past_initial_lease(factory, stage_id, clock)
 
-        replay = repository.create_deep_review_v2(
-            application.id,
-            root.id,
-            triage.id,
-            resume.id,
-            "Kubernetes preferred",
-            "copy",
-            [],
-            key,
-            model,
-        )
-        assert replay[0].status == "generating"
-        assert replay[1] is False
-        assert model.calls == 1
-
-        model.release.set()
+            replay = repository.create_deep_review_v2(
+                application.id,
+                root.id,
+                triage.id,
+                resume.id,
+                "Kubernetes preferred",
+                "copy",
+                [],
+                key,
+                model,
+            )
+            assert replay[0].status == "generating"
+            assert replay[1] is False
+            assert replay[0].stage_generation == generation == 1
+            assert replay[0].provider_call_token == token
+            assert model.calls == 1
+        finally:
+            model.release.set()
         first = first_future.result(timeout=10)
 
     assert first[0].status == "ready"
