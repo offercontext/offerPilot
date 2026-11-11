@@ -347,3 +347,19 @@ describe('AppShell canonical adaptive-practice sub-owner guard', () => {
     expect(appShellSource).toMatch(/trustedEventId === undefined[\s\S]*closeCoreTaskOwnerWithGuard\(coreTaskController, \{ pending: false, unsaved: false \}\)/);
   });
 });
+
+
+it('retains unresolved training evidence as a pending owned operation on close, replacement and recovery', () => {
+  const trainingEvidenceDraft = { scenario: 'original' as const, answer: 'private answer', assistance: 'unknown' as const, editingId: null, command: { action: 'record' as const, skill_id: 'idempotency_retry' as const, scenario_id: 'original' as const, answer: 'private answer', assistance: 'unknown' as const, expected_revision: 0, idempotency_key: 'same-key' } };
+  const owned = draft({ ownerKey: 'practice:7:91:103:plan:8', planId: 8, trainingEvidenceDraft });
+  expect(adaptivePracticeDraftGuard({ [owned.ownerKey]: owned }, 7)).toEqual({ pending: true, unsaved: true });
+  expect(adaptivePracticeDraftGuard({ [owned.ownerKey]: owned }, 8)).toEqual({ pending: false, unsaved: false });
+  expect(adaptivePracticeSubOwnerReplacementDenied({ currentFocus: { ownerGeneration: 7, signalVersionId: 91, targetEventId: 103 }, nextFocus: undefined, drafts: { [owned.ownerKey]: owned }, ownerGeneration: 7, surfaceGuard: { pending: false, unsaved: false } })).toBe(true);
+  expect(adaptivePracticeGuardAfterOwnerLaunch({ launchKind: 'launched', drafts: { [owned.ownerKey]: owned }, ownerGeneration: 8, recoveryOwnerGeneration: 7, nextFocus: { ownerGeneration: 8, signalVersionId: 91, targetEventId: 103 }, surfaceGuard: { pending: false, unsaved: false } })).toEqual({ pending: true, unsaved: true });
+});
+
+
+it.each([undefined, { ownerGeneration: 8, signalVersionId: 91, targetEventId: 103 }])('restores the pending training guard by its host rather than the historical plan pair', (nextFocus) => {
+  const owned = draft({ ownerKey: 'practice:7:201:202:plan:8', planId: 8, signalVersionId: 201, targetEventId: 202, trainingEvidenceHost: { signalVersionId: nextFocus?.signalVersionId ?? null, targetEventId: nextFocus?.targetEventId ?? null }, trainingEvidenceDraft: { scenario: 'original', answer: 'private', assistance: 'unknown', editingId: null, command: { action: 'withdraw', expected_revision: 1, idempotency_key: 'same-key', record_id: 1 } } });
+  expect(adaptivePracticeGuardAfterOwnerLaunch({ launchKind: 'launched', drafts: { [owned.ownerKey]: owned }, ownerGeneration: 8, recoveryOwnerGeneration: 7, nextFocus, surfaceGuard: { pending: false, unsaved: false } })).toEqual({ pending: true, unsaved: true });
+});

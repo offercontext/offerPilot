@@ -73,6 +73,24 @@
 
 业务依据：[复盘建议设计](../../superpowers/specs/2026-07-22-evidence-gated-interview-review-proposal-design.md)是早期设计快照；跨领域闭环继续参照[复盘到准备设计](../../superpowers/specs/2026-08-30-review-to-readiness-feedback-loop-design.md)和当前实现，不能沿用早期“尚无跨领域动作”的范围作为当前结论。
 
+### 训练证据小闭环（首版候选）
+
+已完成 V2 Plan 的历史详情 → `TrainingEvidencePanel` → `trainingEvidence` service →
+`training_evidence/api.py` → `TrainingEvidenceRepository`。用户主动选择“幂等与重试”，
+记录原回答条件或固定换场景复测；不重复创建同一 Signal/target 的 Plan。
+
+- `training_evidence/contracts.py`：显式命令、辅助程度、可选版本化决策选择与幂等字段。
+- `training_evidence/repository.py`：计划级 CAS、来源/目标指纹、撤回正文/决策清除、六情境去重和选项规则反馈。
+- `training_evidence/models.py`：计划子记录及不保存正文的命令回执；0039 新增表。
+- `training_evidence/scenarios.py`：六情境及版本化决策规则；不评价自由文本。
+- `training_evidence/migration.py`：0040 原子保留数据迁移，扩大旧情境约束并增加 nullable 决策字段。
+- 现有 Plan 回答、确认 Signal 和 Preparation 模型输入均不改变。
+- 旧历史辅助条件未知，不自动生成能力标签；来源失效暂停新建议但仍允许撤回。
+
+边界见 [ADR-0017](../decisions/0017-bound-interview-training-evidence.md)，
+回归见 [训练证据测试](../../../tests/test_training_evidence.py)，
+效果验收范围见 [小样本矩阵](../interview-training-evidence-evaluation.md)。
+
 ## 6. 相邻功能
 
 | 功能 | 代码链 | 依据与测试 |

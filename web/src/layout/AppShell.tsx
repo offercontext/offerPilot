@@ -198,9 +198,9 @@ export function adaptivePracticeDraftGuard(
 ): { pending: boolean; unsaved: boolean } {
   const relevant = Object.values(drafts).filter((draft) => draft.ownerGeneration === ownerGeneration);
   return {
-    pending: relevant.some((draft) => draft.pendingOperation !== null || draft.resultUnknown),
+    pending: relevant.some((draft) => draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command)),
     unsaved: relevant.some((draft) => Boolean(
-      draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput,
+      draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput || draft.trainingEvidenceDraft,
     )),
   };
 }
@@ -636,15 +636,18 @@ export function adaptivePracticeGuardAfterOwnerLaunch(input: {
     const recoveryIdentity = adaptivePracticeOwnerIdentity(input.nextFocus);
     const recoverable = Object.values(input.drafts).filter((draft) => (
       draft.ownerGeneration === input.recoveryOwnerGeneration
-      && (draft.pendingOperation !== null || draft.resultUnknown || (draft.planId !== null && Boolean(draft.answer || draft.reflection || draft.assessment)))
-      && (draft.signalVersionId === null && draft.targetEventId === null
-        ? recoveryIdentity === 'three-mode'
-        : recoveryIdentity === `${draft.signalVersionId}:${draft.targetEventId}`)
+      && (draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command) || (draft.planId !== null && Boolean(draft.answer || draft.reflection || draft.assessment || draft.trainingEvidenceDraft)))
+      && (() => {
+        const host = draft.trainingEvidenceDraft && draft.trainingEvidenceHost ? draft.trainingEvidenceHost : draft;
+        return host.signalVersionId === null && host.targetEventId === null
+          ? recoveryIdentity === 'three-mode'
+          : recoveryIdentity === `${host.signalVersionId}:${host.targetEventId}`;
+      })()
     ));
     return {
-      pending: recoverable.some((draft) => draft.pendingOperation !== null || draft.resultUnknown),
+      pending: recoverable.some((draft) => draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command)),
       unsaved: recoverable.some((draft) => Boolean(
-        draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput,
+        draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput || draft.trainingEvidenceDraft,
       )),
     };
   }

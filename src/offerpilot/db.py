@@ -23,6 +23,7 @@ from offerpilot.companion import persona_models as _persona_models  # noqa: F401
 from offerpilot.knowledge import note_lifecycle as _knowledge_note_lifecycle  # noqa: F401
 from offerpilot.external_agents import models as _external_agent_models  # noqa: F401
 from offerpilot.external_agents.migration import ensure_business_schema
+from offerpilot.training_evidence import models as _training_evidence_models  # noqa: F401
 
 SessionFactory = sessionmaker[Session]
 
@@ -114,6 +115,9 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    _record_migration(engine, "0039_training_evidence", "Add opt-in plan-local training evidence and content-free command receipts")
+    from offerpilot.training_evidence.migration import ensure_decision_schema
+    ensure_decision_schema(engine)
     _ensure_chat_image_schema(engine)
     _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
     _record_migration(engine, "0035_external_agent_requests", "Add scoped external Agent grants and scheduling request receipts")
