@@ -1,6 +1,7 @@
 // Test harness only: launch a pinned, unmodified installed Windows package.
 // UIAutomation operates the real native dialog; no dialog/download overrides.
 import assert from 'node:assert/strict';
+import { button } from '../installed-ui/ui-locators.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -89,6 +90,7 @@ try {
   await until('owner page', () => app.windows().some(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru')), 90000);
   page = app.windows().find(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru'));
   page.setDefaultTimeout(30000);
+  page.setDefaultNavigationTimeout(30000);
   page.on('pageerror', error => errors.push(String(error)));
   page.on('response', response => { if (/\/export(?:-preview)?$/.test(new URL(response.url()).pathname)) exports.push(response); });
   await page.exposeBinding('recordNativeExportCsp', (_source, value) => cspViolations.push(value));
@@ -102,8 +104,8 @@ try {
   await page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: '素材库', exact: true }).click();
   await page.locator('.op-module-tabs').getByRole('tab', { name: '简历', exact: true }).click();
   await page.waitForURL(url => url.searchParams.get('view') === 'resumes');
-  await page.screenshot({ path: path.join(output, 'installed-resume-library.png') });
-  await page.locator('[aria-label="创建基础简历入口"]').getByRole('button', { name: '新建空白简历', exact: true }).click();
+  await page.screenshot({ path: path.join(output, 'installed-resume-library.png'), timeout: 5000 });
+  await button(page.locator('[aria-label="创建基础简历入口"]'), '新建空白简历').click();
   const editor = page.getByRole('region', { name: '编辑简历', exact: true }); await editor.waitFor();
   const title = '原生导出验收 合成简历';
   await editor.getByPlaceholder('简历标题', { exact: true }).fill(title);
@@ -111,16 +113,16 @@ try {
   await editor.locator('label').filter({ hasText: /^姓名$/ }).locator('..').locator('input').fill('合成候选人 Native QA');
   await editor.getByRole('navigation', { name: '简历章节', exact: true }).getByRole('button', { name: '技能', exact: true }).click();
   await editor.getByPlaceholder('每行一个技能', { exact: true }).fill('Python\n真实原生窗口验收');
-  await editor.getByRole('button', { name: '保存', exact: true }).click(); await editor.waitFor({ state: 'hidden' });
-  await page.locator('.ant-card').filter({ has: page.getByText(title, { exact: true }) }).getByRole('button', { name: '编辑', exact: true }).click();
+  await button(editor, '保存').click(); await editor.waitFor({ state: 'hidden' });
+  await button(page.locator('.ant-card').filter({ has: page.getByText(title, { exact: true }) }), '编辑').click();
   await until('saved title hydration', () => editor.getByPlaceholder('简历标题', { exact: true }).inputValue().then(value => value === title));
-  await editor.getByRole('button', { name: '导出简历', exact: true }).click();
+  await button(editor, '导出简历').click();
   const modal = page.getByRole('dialog', { name: '导出已保存简历', exact: true }); await modal.waitFor();
-  const pdf = modal.getByRole('button', { name: '下载 PDF', exact: true });
-  const docx = modal.getByRole('button', { name: '下载 DOCX', exact: true });
+  const pdf = button(modal, '下载 PDF');
+  const docx = button(modal, '下载 DOCX');
   check('export initially requires preview', await pdf.isDisabled() && await docx.isDisabled());
   stage = 'native-pdf-preview';
-  await modal.getByRole('button', { name: '生成 PDF 预览', exact: true }).click();
+  await button(modal, '生成 PDF 预览').click();
   const reviewed = modal.getByRole('checkbox');
   await until('real PDF worker rendered', () => reviewed.isEnabled());
   const pixels = await modal.locator('canvas').evaluate(canvas => {
