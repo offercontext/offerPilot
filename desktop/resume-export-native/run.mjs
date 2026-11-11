@@ -24,7 +24,7 @@ const report = { status: 'running', pin, harness: process.env.GITHUB_SHA, checks
   scope: 'Pinned NSIS-installed Electron, real editor and PDF canvas, Windows UIAutomation native save/cancel. Synthetic fresh profile.',
   limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation control invocation, not pointer-based native interaction.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
   dialogMocked: false, downloadBehaviorOverridden: false, productionModified: false };
-let stage = 'environment', app, installed = false, exe, installDir;
+let stage = 'environment', app, page, installed = false, exe, installDir;
 const hash = value => createHash('sha256').update(value).digest('hex');
 const exists = async filename => fs.access(filename).then(() => true, () => false);
 const check = (name, condition) => { assert.ok(condition, name); report.checks.push(name); };
@@ -87,7 +87,7 @@ try {
     if (/\/api\/(chat|ai)\//.test(url.pathname)) unexpected.push(url.pathname);
   });
   await until('owner page', () => app.windows().some(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru')), 90000);
-  const page = app.windows().find(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru'));
+  page = app.windows().find(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru'));
   page.setDefaultTimeout(30000);
   page.on('pageerror', error => errors.push(String(error)));
   page.on('response', response => { if (/\/export(?:-preview)?$/.test(new URL(response.url()).pathname)) exports.push(response); });
@@ -101,6 +101,8 @@ try {
   stage = 'real-editor';
   await page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: '素材库', exact: true }).click();
   await page.locator('.op-module-tabs').getByRole('tab', { name: '简历', exact: true }).click();
+  await page.waitForURL(url => url.searchParams.get('view') === 'resumes');
+  await page.screenshot({ path: path.join(output, 'installed-resume-library.png') });
   await page.locator('[aria-label="创建基础简历入口"]').getByRole('button', { name: '新建空白简历', exact: true }).click();
   const editor = page.getByRole('region', { name: '编辑简历', exact: true }); await editor.waitFor();
   const title = '原生导出验收 合成简历';
@@ -176,7 +178,16 @@ try {
   check('no renderer exception', errors.length === 0);
   check('no installed CSP violation', cspViolations.length === 0);
   report.status = 'passed';
-} catch (error) { report.status = 'failed'; report.failure = { stage, message: String(error) }; process.exitCode = 1; }
+} catch (error) {
+  report.status = 'failed'; report.failure = { stage, message: String(error) }; process.exitCode = 1;
+  await writeReport();
+  if (page) {
+    try {
+      await page.screenshot({ path: path.join(output, 'failure.png'), timeout: 5000 });
+      report.failureSurface = { url: page.url(), text: (await page.locator('body').innerText({ timeout: 5000 })).slice(0, 12000) };
+    } catch { report.failureSurfaceUnavailable = true; }
+  }
+}
 finally {
   // Persist the primary outcome before any cleanup can block on a native modal.
   await writeReport();
