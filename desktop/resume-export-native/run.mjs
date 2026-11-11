@@ -94,10 +94,17 @@ try {
   page.on('pageerror', error => errors.push(String(error)));
   page.on('response', response => { if (/\/export(?:-preview)?$/.test(new URL(response.url()).pathname)) exports.push(response); });
   await page.exposeBinding('recordNativeExportCsp', (_source, value) => cspViolations.push(value));
-  await page.addInitScript(() => document.addEventListener('securitypolicyviolation', event => window.recordNativeExportCsp({ directive: event.violatedDirective, blocked: event.blockedURI })));
-  const navigation = await page.reload({ waitUntil: 'domcontentloaded' });
-  check('actual installed CSP is unchanged', navigation.headers()['content-security-policy'] === require(path.join(here, '../capabilities.cjs')).contentSecurityPolicy);
+  // Do not reload while the installed application's initial navigation is
+  // settling. Observe the real current renderer and independently read its
+  // same-origin document route headers; this is not an initial-response trace.
   await page.getByRole('navigation', { name: '主导航', exact: true }).waitFor();
+  await page.evaluate(() => document.addEventListener('securitypolicyviolation', event => window.recordNativeExportCsp({ directive: event.violatedDirective, blocked: event.blockedURI })));
+  const documentCsp = await page.evaluate(async () => {
+    const response = await fetch(location.href);
+    if (!response.ok) throw new Error('Installed document route unavailable');
+    return response.headers.get('content-security-policy');
+  });
+  check('installed document route CSP is unchanged (separate request)', documentCsp === require(path.join(here, '../capabilities.cjs')).contentSecurityPolicy);
   const security = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(win => !win.webContents.getURL().includes('desktopSurface=haru')).map(win => win.webContents.getLastWebPreferences()));
   check('production renderer isolation remains enabled', security.length === 1 && security[0].sandbox && security[0].contextIsolation && security[0].webSecurity && !security[0].nodeIntegration);
   stage = 'real-editor';
