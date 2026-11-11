@@ -25,13 +25,22 @@ jobs:
           cache: npm
           cache-dependency-path: desktop/installed-ui/package-lock.json
       - run: npm ci --prefix desktop/installed-ui
-      - uses: actions/download-artifact@v4
+      - name: Download exact original-attempt artifact by ID
+        uses: actions/github-script@v7
         with:
-          github-token: ${{ github.token }}
-          run-id: 43070936796
-          artifact-ids: 13882405863
-          path: artifacts/pinned-installer
-          merge-multiple: true
+          script: |
+            const fs = require('node:fs');
+            const crypto = require('node:crypto');
+            const artifact_id = 13882405863;
+            const metadata = await github.rest.actions.getArtifact({ ...context.repo, artifact_id });
+            if (metadata.data.expired || metadata.data.workflow_run.id !== 43070936796) throw new Error('Pinned artifact identity mismatch');
+            const response = await github.rest.actions.downloadArtifact({ ...context.repo, artifact_id, archive_format: 'zip' });
+            const bytes = Buffer.from(response.data);
+            const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+            if (digest !== '26da0cb83ec03ce08841091b9f8a00e6ab524fac7af19ba2e0412d1d9e820072') throw new Error('Pinned ZIP digest mismatch');
+            fs.mkdirSync('artifacts', { recursive: true });
+            fs.writeFileSync('artifacts/pinned.zip', bytes);
+      - run: Expand-Archive artifacts/pinned.zip artifacts/pinned-installer
       - name: Install pinned package and exercise native preview/save/cancel
         run: node desktop/resume-export-native/run.mjs artifacts/pinned-installer artifacts/resume-export-native
       - name: Preserve exact-package evidence even on failure

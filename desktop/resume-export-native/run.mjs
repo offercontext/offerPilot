@@ -95,7 +95,7 @@ try {
   page.on('response', response => { if (/\/export(?:-preview)?$/.test(new URL(response.url()).pathname)) exports.push(response); });
   await page.exposeBinding('recordNativeExportCsp', (_source, value) => cspViolations.push(value));
   await page.addInitScript(() => document.addEventListener('securitypolicyviolation', event => window.recordNativeExportCsp({ directive: event.violatedDirective, blocked: event.blockedURI })));
-  const navigation = await page.reload();
+  const navigation = await page.reload({ waitUntil: 'domcontentloaded' });
   check('actual installed CSP is unchanged', navigation.headers()['content-security-policy'] === require(path.join(here, '../capabilities.cjs')).contentSecurityPolicy);
   await page.getByRole('navigation', { name: '主导航', exact: true }).waitFor();
   const security = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(win => !win.webContents.getURL().includes('desktopSurface=haru')).map(win => win.webContents.getLastWebPreferences()));
@@ -210,3 +210,7 @@ finally {
   await writeReport();
   console.log(JSON.stringify({ status: report.status, stage, checks: report.checks.length, failure: report.failure }));
 }
+// app.close may leave Playwright transport handles after its bounded failure.
+// Evidence is flushed above; only this harness process exits. The disposable
+// runner owns any remaining app descendants and performs final process cleanup.
+process.exit(process.exitCode || 0);
