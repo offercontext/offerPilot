@@ -1,0 +1,64 @@
+name: Resume export desktop CSP regression
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'web/src/components/Resume*'
+      - 'web/src/services/resumeExport*'
+      - 'web/src/i18n/**'
+      - 'web/tests/resume-export/**'
+      - 'web/package*.json'
+      - 'src/offerpilot/resume_export*'
+      - 'src/offerpilot/assets/**'
+      - 'desktop/capabilities.cjs'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/resume-export-browser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: resume-export-browser-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  resume-export-browser:
+    if: >-
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'feat/20261111-resume-document-export') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/20261111-resume-document-export')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: '0.12.19'
+      - run: uv sync --frozen --python 3.12
+      - run: npm ci --prefix web
+      - name: Check production types and build
+        run: npm run build --prefix web
+      - name: Install Chromium and CJK fonts
+        working-directory: web
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Exercise actual PDF worker and HTTP exports under desktop CSP
+        run: node web/tests/resume-export/run.mjs artifacts/resume-export-browser
+      - name: Preserve screenshots, downloads and exact-source report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-export-browser-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/resume-export-browser
+          if-no-files-found: warn
+          retention-days: 14

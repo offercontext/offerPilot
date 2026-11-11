@@ -26,6 +26,13 @@
 | [工作台、提醒与任务](workbench-automation.md) | 9 |
 | [设置、认证与公共入口](settings-desktop.md) | 14 |
 
+2026-11-11 导出增量（上方历史总数未重新全仓扫描）：
+
+| 业务地图 | 新增方法 / 路径 | 注册入口 |
+|---|---|---|
+| [已保存简历导出](materials.md#21-已保存版本-pdfdocx-导出) | `POST /api/resumes/{id}/export-preview` | [register_resume_export_routes](../../../src/offerpilot/resume_export_routes.py) |
+| [已保存简历导出](materials.md#21-已保存版本-pdfdocx-导出) | `POST /api/resumes/{id}/export` | 同上 |
+
 ## 2. 注册位置与下钻
 
 | 业务 | 注册文件 / 前缀 | 数量 | 定位符号示例 |

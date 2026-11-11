@@ -9,6 +9,7 @@
 | 用户说法 | 对象与边界 | 页面 / 请求入口 |
 |---|---|---|
 | 主简历、复制、岗位版本 | `Resume`，通过 parent_resume_id 表示派生关系 | [ResumeLibraryView](../../../web/src/components/ResumeLibraryView.tsx)、[resumes service](../../../web/src/services/resumes.ts) |
+| PDF/DOCX 导出 | 已保存结构化版本的本地文档，不是原件或投递 | [ResumeExportModal](../../../web/src/components/ResumeExportModal.tsx)、下文第 2.1 节 |
 | PDF 导入、原文分类 | 上传与解析；可选模型结构化预览及用户确认是另外两步 | [ResumeUploadModal](../../../web/src/components/ResumeUploadModal.tsx)、[ResumeImportReview](../../../web/src/components/ResumeImportReview.tsx) |
 | 简历体检、补充事实、版本对比 | 前端可观察事实检查、创建副本后写入、只读结构差异 | 下文第 3 节 |
 | JD 分析、简历与 JD 匹配 | `JDAnalysis` / 简历匹配记录；不是岗位匹配 V2 的 triage/deep_review | [ai service](../../../web/src/services/ai.ts)、[ai/workflows.py](../../../src/offerpilot/ai/workflows.py) |
@@ -23,6 +24,16 @@ HTTP 装配在 [api.py](../../../src/offerpilot/api.py)：`upload_resume` 负责
 2026-10-29 外部 MCP：全局简历读取/维护须分别显式授权，入口 [business.prepare/execute](../../../src/offerpilot/external_agents/business.py) → 同事务绑定 `ResumesRepository`。共享[主简历删除规则](../../../src/offerpilot/resume_rules.py)，冻结集合与接任人；标题/结构化更新保留未改正文和解析状态。没有文件上传/下载或自动分类；测试见[外部业务回归](../../../tests/test_external_agent_business.py)，授权见[接入说明](../external-agent-mcp.md)。
 
 `/api/jd/analyze`、`/api/resumes/{resume_id}/match` → [workflows](../../../src/offerpilot/ai/workflows.py) 的 `resolve_jd_input` / `analyze_jd` / `match_resume`。关联投递时使用 JD 版本；[JDAnalysesRepository.create_for_current](../../../src/offerpilot/repositories/jd.py) 在保存前复核当前版本。诊断分别保留原文版本、分析结果和匹配结果，不能互相当作事实源。
+
+## 2.1. 已保存版本 PDF/DOCX 导出
+
+2026-11-11 增量：[ResumeEditorDrawer](../../../web/src/components/ResumeEditorDrawer.tsx) → [ResumeExportModal](../../../web/src/components/ResumeExportModal.tsx) → [ResumePdfPreview](../../../web/src/components/ResumePdfPreview.tsx) / [resumeExport service](../../../web/src/services/resumeExport.ts) → [register_resume_export_routes](../../../src/offerpilot/resume_export_routes.py) → [snapshot / render_pdf / render_docx](../../../src/offerpilot/resume_export.py)。依据：[ADR-0018](../decisions/0018-export-saved-resume-documents.md)。
+
+- `POST /api/resumes/{id}/export-preview` 生成实际 PDF 预览与来源指纹；`POST /api/resumes/{id}/export` 仅接受同一保存版本的指纹，渲染前后重新读取来源，变化返回 409。
+- 白名单投影包含已保存结构字段和 `additional_text`。`raw_text`、`parsed_data`、原文件和导入元数据永不回填或输出；未知结构、超限、空内容、缺字明确失败。其他文本明确保存到 `additional_text`，历史原文只读保留。
+- 草稿/保存中禁止导出，不隐式保存；预览核对后下载。HTTP 鉴权获取 Blob，关闭、版本/语言变化取消旧请求并销毁 PDF.js 文档/渲染任务；不使用含 token 的下载 URL。实际 PDF 在单页 Canvas 预览，不使用桌面 CSP 禁止的 iframe；只有页面渲染成功后可核对下载。
+- PDF 使用随包中文字体，本地生成可选文字及分页；DOCX 使用同一内容投影，可编辑但本机字体和 Word 会影响分页。无 AI、外网转换、数据库写入、投递或已提交副作用。
+- 回归：[后端导出](../../../tests/test_resume_export.py)、[前端状态/清理](../../../web/src/components/ResumeExportModal.test.tsx)、[服务鉴权/文件验证](../../../web/src/services/resumeExport.test.ts)、[真实桌面 CSP 的 PDF.js 渲染回归](../../../web/tests/resume-export/run.mjs)。
 
 ## 3. 不经过独立模型接口的前端业务
 
