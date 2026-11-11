@@ -1,0 +1,44 @@
+name: Pinned installed Electron resume export
+on:
+  push:
+    branches: [test/20261111-native-export-acceptance]
+    paths: ['desktop/resume-export-native/**', '.github/workflows/resume-export-native.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: resume-export-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  installed-export:
+    if: github.ref == 'refs/heads/test/20261111-native-export-acceptance'
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: desktop/installed-ui/package-lock.json
+      - run: npm ci --prefix desktop/installed-ui
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 43070936796
+          artifact-ids: 13882405863
+          path: artifacts/pinned-installer
+          merge-multiple: true
+      - name: Install pinned package and exercise native preview/save/cancel
+        run: node desktop/resume-export-native/run.mjs artifacts/pinned-installer artifacts/resume-export-native
+      - name: Preserve exact-package evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resume-export-native-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/resume-export-native
+          if-no-files-found: error
+          retention-days: 14
