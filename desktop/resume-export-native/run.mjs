@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { appendFileSync } from 'node:fs';
 import { installDownloadObservation } from './observe.mjs';
+import { classifyRequest } from './network.mjs';
 import { button } from '../installed-ui/ui-locators.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -27,6 +28,13 @@ const report = { status: 'running', pin, harness: process.env.GITHUB_SHA, checks
   scope: 'Pinned NSIS-installed Electron, real editor and PDF canvas, Windows UIAutomation identity + verified native HWND save/cancel. Synthetic fresh profile.',
   limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation/Win32 identity checks with actual pointer/keyboard input on the hosted desktop.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
   dialogMocked: false, downloadBehaviorOverridden: false, productionModified: false };
+const network = { scope: 'Playwright renderer-context requests observed after launch; not main-process/backend system network', ownerOrigin: null, records: [], rejected: [] };
+report.network = network;
+const classifyObserved = record => {
+  record.classification = classifyRequest(record, network.ownerOrigin);
+  if (record.classification.startsWith('rejected-')) network.rejected.push(record);
+  diagnostic('network-classification', record);
+};
 let snapshotDirectories = async () => {};
 const observedExports = [];
 const diagnostic = (type, value) => { try { appendFileSync(path.join(output, 'renderer-helper.jsonl'), JSON.stringify({ at: new Date().toISOString(), type, ...value }) + '\n'); } catch {} };
@@ -86,14 +94,20 @@ try {
   app = await _electron.launch({ executablePath: exe, cwd: installDir, chromiumSandbox: true, bypassCSP: false, timeout: 90000 });
   const identity = await app.evaluate(({ app }) => ({ pid: process.pid, path: process.execPath, userData: app.getPath('userData'), packaged: app.isPackaged }));
   check('real installed app and default fresh profile', identity.packaged && identity.path.toLowerCase() === exe.toLowerCase() && identity.userData.toLowerCase() === userData.toLowerCase());
-  const unexpected = [], errors = [], exports = observedExports, cspViolations = [];
+  const errors = [], exports = observedExports, cspViolations = [];
+  report.rendererErrors = errors; report.cspViolations = cspViolations;
   app.context().on('request', request => {
     const url = new URL(request.url());
-    if (['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol) && url.hostname !== '127.0.0.1') unexpected.push(url.origin);
-    if (/\/api\/(chat|ai)\//.test(url.pathname)) unexpected.push(url.pathname);
+    if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) return;
+    const record = { at: new Date().toISOString(), stage, method: request.method(), origin: url.origin, pathname: url.pathname };
+    network.records.push(record);
+    diagnostic('network-observed', { ...record, classification: network.ownerOrigin ? 'classifying' : 'pending-owner-origin' });
+    if (network.ownerOrigin) classifyObserved(record);
   });
   await until('owner page', () => app.windows().some(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru')), 90000);
   page = app.windows().find(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru'));
+  network.ownerOrigin = new URL(page.url()).origin;
+  for (const record of network.records) classifyObserved(record);
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(30000);
   page.on('pageerror', error => { errors.push(String(error)); diagnostic('pageerror', { error: String(error) }); });
@@ -218,7 +232,7 @@ try {
   }
   const after = await resumeSnapshot();
   check('exports did not change saved resumes', JSON.stringify(before) === JSON.stringify(after));
-  check('no unexpected network/provider call', unexpected.length === 0);
+  check('no unexpected observed renderer origin or chat/AI endpoint', network.rejected.length === 0);
   check('no renderer exception', errors.length === 0);
   check('no installed CSP violation', cspViolations.length === 0);
   report.status = 'passed';
