@@ -22,8 +22,8 @@ const pin = {
   installerSha256: '4a83aa184f03ef35b65cd44a09645c7a46f13c51efa400127be55e8d0dea7a46',
 };
 const report = { status: 'running', pin, harness: process.env.GITHUB_SHA, checks: [], downloads: [],
-  scope: 'Pinned NSIS-installed Electron, real editor and PDF canvas, Windows UIAutomation native save/cancel. Synthetic fresh profile.',
-  limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation control invocation, not pointer-based native interaction.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
+  scope: 'Pinned NSIS-installed Electron, real editor and PDF canvas, Windows UIAutomation identity + verified native HWND save/cancel. Synthetic fresh profile.',
+  limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation identity and Win32 HWND control messages, not pointer-based native interaction.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
   dialogMocked: false, downloadBehaviorOverridden: false, productionModified: false };
 let stage = 'environment', app, page, installed = false, exe, installDir;
 const hash = value => createHash('sha256').update(value).digest('hex');
