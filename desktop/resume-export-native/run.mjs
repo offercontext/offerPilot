@@ -25,7 +25,7 @@ const pin = {
 };
 const report = { status: 'running', pin, harness: process.env.GITHUB_SHA, checks: [], downloads: [],
   scope: 'Pinned NSIS-installed Electron, real editor and PDF canvas, Windows UIAutomation identity + verified native HWND save/cancel. Synthetic fresh profile.',
-  limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation identity and Win32 HWND control messages, not pointer-based native interaction.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
+  limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation/Win32 identity checks with actual pointer/keyboard input on the hosted desktop.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
   dialogMocked: false, downloadBehaviorOverridden: false, productionModified: false };
 let snapshotDirectories = async () => {};
 const observedExports = [];

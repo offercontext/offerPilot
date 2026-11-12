@@ -15,6 +15,7 @@ if ((Get-Process -Id $OwnerPid).Path -ine $Executable) { throw 'Unexpected dialo
 Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, System.Drawing, System.Windows.Forms
 # Narrow Win32 adapter for this verified modal only. UIA on this hosted image
 # exposes standard filename/buttons as Pane, so validate actual HWND classes.
+# Use real pointer/keyboard input so the shell dialog commits its filename state.
 Add-Type @'
 using System;
 using System.Text;
@@ -22,6 +23,32 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class ExportNative {
   public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
+  [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
+  [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X,Y; public POINT(int x,int y){X=x;Y=y;} }
+  [StructLayout(LayoutKind.Sequential)] public struct GUIINFO { public uint size, flags; public IntPtr active, focus, capture, menuOwner, moveSize, caret; public RECT caretRect; }
+  [StructLayout(LayoutKind.Sequential)] public struct KEY { public ushort vk, scan; public uint flags, time; public UIntPtr extra; }
+  [StructLayout(LayoutKind.Sequential)] public struct MOUSE { public int x,y; public uint data, flags, time; public UIntPtr extra; }
+  [StructLayout(LayoutKind.Explicit)] public struct UNION { [FieldOffset(0)] public KEY key; [FieldOffset(0)] public MOUSE mouse; }
+  [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public UNION value; }
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h,out RECT r);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT p);
+  [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
+  [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint id,ref GUIINFO info);
+  [DllImport("user32.dll")] static extern uint SendInput(uint n,INPUT[] inputs,int size);
+  static INPUT Key(ushort vk, ushort scan, uint flags) { return new INPUT { type=1, value=new UNION { key=new KEY { vk=vk, scan=scan, flags=flags } } }; }
+  static void Send(INPUT[] inputs) { if(SendInput((uint)inputs.Length,inputs,Marshal.SizeOf(typeof(INPUT)))!=inputs.Length) throw new Exception("Native SendInput incomplete"); }
+  public static IntPtr Focus(IntPtr d) { uint pid; uint thread=GetWindowThreadProcessId(d,out pid); var info=new GUIINFO { size=(uint)Marshal.SizeOf(typeof(GUIINFO)) }; if(!GetGUIThreadInfo(thread,ref info)) throw new Exception("Native focus unavailable"); return info.focus; }
+  static void OwnedPointer(IntPtr d, IntPtr h, uint pid, string cls) {
+    Verify(d,h,pid,cls);
+    if(GetForegroundWindow()!=d) throw new Exception("Verified dialog is not foreground");
+    RECT r; if(!GetWindowRect(h,out r) || r.Right<=r.Left || r.Bottom<=r.Top) throw new Exception("Native control bounds unavailable");
+    var p=new POINT(r.Left+(r.Right-r.Left)/2,r.Top+(r.Bottom-r.Top)/2);
+    if(WindowFromPoint(p)!=h || !SetCursorPos(p.X,p.Y) || WindowFromPoint(p)!=h) throw new Exception("Native control click is occluded");
+    try { Send(new INPUT[] { new INPUT { type=0,value=new UNION { mouse=new MOUSE { flags=2 } } }, new INPUT { type=0,value=new UNION { mouse=new MOUSE { flags=4 } } } }); }
+    finally { SendInput(1,new INPUT[] { new INPUT { type=0,value=new UNION { mouse=new MOUSE { flags=4 } } } },Marshal.SizeOf(typeof(INPUT))); }
+  }
+  static void CheckFocus(IntPtr d,IntPtr h,uint pid) { Verify(d,h,pid,"Edit"); if(GetForegroundWindow()!=d || Focus(d)!=h) throw new Exception("Native filename focus changed"); }
+
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr p, EnumProc f, IntPtr data);
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
@@ -32,9 +59,7 @@ public static class ExportNative {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
   [DllImport("user32.dll")] static extern int GetDlgCtrlID(IntPtr h);
   [DllImport("user32.dll")] static extern bool IsWindowEnabled(IntPtr h);
-  [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageTimeoutW")] static extern IntPtr Write(IntPtr h, uint m, UIntPtr w, string s, uint flags, uint ms, out UIntPtr result);
   [DllImport("user32.dll", CharSet=CharSet.Unicode, EntryPoint="SendMessageTimeoutW")] static extern IntPtr Read(IntPtr h, uint m, UIntPtr w, StringBuilder s, uint flags, uint ms, out UIntPtr result);
-  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);
   public static string Class(IntPtr h) { var s=new StringBuilder(256); GetClassName(h,s,s.Capacity); return s.ToString(); }
   public static string Title(IntPtr h) { var s=new StringBuilder(1024); GetWindowText(h,s,s.Capacity); return s.ToString(); }
   public static uint Pid(IntPtr h) { uint p; GetWindowThreadProcessId(h,out p); return p; }
@@ -44,15 +69,25 @@ public static class ExportNative {
     if (h==IntPtr.Zero || !IsChild(d,h) || Pid(h)!=pid || Class(h)!=cls || !IsWindowEnabled(h)) throw new Exception("Native control identity mismatch");
   }
   public static string SetFilename(IntPtr d, IntPtr h, uint pid, string value) {
-    Verify(d,h,pid,"Edit"); UIntPtr r;
-    if(Write(h,12,UIntPtr.Zero,value,2,5000,out r)==IntPtr.Zero || r==UIntPtr.Zero) throw new Exception("WM_SETTEXT failed");
-    var s=new StringBuilder(32768);
-    if(Read(h,13,(UIntPtr)(uint)s.Capacity,s,2,5000,out r)==IntPtr.Zero || s.ToString()!=value) throw new Exception("Native filename readback mismatch");
-    return s.ToString();
+    OwnedPointer(d,h,pid,"Edit");
+    var deadline=DateTime.UtcNow.AddSeconds(2);
+    while(Focus(d)!=h && DateTime.UtcNow<deadline) System.Threading.Thread.Sleep(25);
+    CheckFocus(d,h,pid);
+    // Standard Ctrl+A then Unicode key events, not WM_SETTEXT or clipboard.
+    try { Send(new INPUT[] { Key(17,0,0),Key(65,0,0),Key(65,0,2),Key(17,0,2) }); }
+    finally { SendInput(2,new INPUT[] { Key(65,0,2),Key(17,0,2) },Marshal.SizeOf(typeof(INPUT))); }
+    foreach(char c in value) { CheckFocus(d,h,pid); try { Send(new INPUT[] { Key(0,c,4),Key(0,c,6) }); } finally { SendInput(1,new INPUT[] { Key(0,c,6) },Marshal.SizeOf(typeof(INPUT))); } }
+    deadline=DateTime.UtcNow.AddSeconds(2);
+    do {
+      CheckFocus(d,h,pid); UIntPtr r; var s=new StringBuilder(32768);
+      if(Read(h,13,(UIntPtr)(uint)s.Capacity,s,2,500,out r)==IntPtr.Zero) throw new Exception("Native filename readback unavailable");
+      if(s.ToString()==value) return s.ToString();
+      System.Threading.Thread.Sleep(25);
+    } while(DateTime.UtcNow<deadline);
+    throw new Exception("Native filename readback mismatch");
   }
   public static void Click(IntPtr d, IntPtr h, uint pid) {
-    Verify(d,h,pid,"Button");
-    if(!PostMessage(h,245,IntPtr.Zero,IntPtr.Zero)) throw new Exception("Native BM_CLICK failed");
+    OwnedPointer(d,h,pid,"Button");
   }
 }
 '@
@@ -118,7 +153,7 @@ if ($Choice -eq 'save') {
   $edits = @(@($handles) + @($handles | ForEach-Object { [ExportNative]::Children($_) }) | Where-Object { [ExportNative]::Class($_) -eq 'Edit' -and [ExportNative]::Pid($_) -eq $OwnerPid } | Sort-Object -Unique)
   if ($edits.Count -ne 1) { throw 'Native filename Edit HWND is not unique' }
   $readback = [ExportNative]::SetFilename($hwnd,$edits[0],$OwnerPid,$Destination)
-  @{ expected=$Destination; readback=$readback; readbackVerified=$true; dialogHwnd=$hwnd.ToInt64(); editHwnd=$edits[0].ToInt64(); saveHwnd=$saveHandles[0].ToInt64(); editClass=[ExportNative]::Class($edits[0]); ownerPid=$OwnerPid } | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath ($Screenshot + '.input.json')
+  @{ expected=$Destination; readback=$readback; readbackVerified=$true; inputMethod='verified pointer focus + SendInput Ctrl+A/Unicode'; focusedHwnd=[ExportNative]::Focus($hwnd).ToInt64(); dialogHwnd=$hwnd.ToInt64(); editHwnd=$edits[0].ToInt64(); saveHwnd=$saveHandles[0].ToInt64(); editClass=[ExportNative]::Class($edits[0]); ownerPid=$OwnerPid } | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath ($Screenshot + '.input.json')
   $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   try { $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size); $bitmap.Save(($Screenshot + '.input.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
@@ -133,7 +168,7 @@ if ($Choice -eq 'save') {
   $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
   try { $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size); $bitmap.Save(($Screenshot + '.post-click.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
   finally { $graphics.Dispose(); $bitmap.Dispose() }
-  @{ postClick=$postClick; choice=$Choice; ownerPid=$OwnerPid; title=$title; nativeClass='#32770'; automation='UIAutomation identity + verified Win32 HWND WM_SETTEXT/readback/BM_CLICK'; dialogReplaced=$false } | ConvertTo-Json -Compress
+  @{ postClick=$postClick; choice=$Choice; ownerPid=$OwnerPid; title=$title; nativeClass='#32770'; automation='UIAutomation/Win32 identity + actual pointer and SendInput keyboard'; dialogReplaced=$false } | ConvertTo-Json -Compress
 } catch {
   if ($cancel.Count -eq 1) { try { $cancel[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() } catch {} }
   else { try { $dialog.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close() } catch {} }
