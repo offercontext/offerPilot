@@ -1,6 +1,8 @@
 // Test harness only: launch a pinned, unmodified installed Windows package.
 // UIAutomation operates the real native dialog; no dialog/download overrides.
 import assert from 'node:assert/strict';
+import { appendFileSync } from 'node:fs';
+import { installDownloadObservation } from './observe.mjs';
 import { button } from '../installed-ui/ui-locators.mjs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -25,6 +27,9 @@ const report = { status: 'running', pin, harness: process.env.GITHUB_SHA, checks
   scope: 'Pinned NSIS-installed Electron, real editor and PDF canvas, Windows UIAutomation identity + verified native HWND save/cancel. Synthetic fresh profile.',
   limitations: ['Unsigned validation package, not a release.', 'Playwright debugging launch; ordinary undebugged launch, UAC and SmartScreen untested.', 'UIAutomation identity and Win32 HWND control messages, not pointer-based native interaction.', 'Chinese single-page resume only; bilingual/multipage coverage belongs to the separate browser run.'],
   dialogMocked: false, downloadBehaviorOverridden: false, productionModified: false };
+let snapshotDirectories = async () => {};
+const observedExports = [];
+const diagnostic = (type, value) => { try { appendFileSync(path.join(output, 'renderer-helper.jsonl'), JSON.stringify({ at: new Date().toISOString(), type, ...value }) + '\n'); } catch {} };
 let stage = 'environment', app, page, installed = false, exe, installDir;
 const hash = value => createHash('sha256').update(value).digest('hex');
 const exists = async filename => fs.access(filename).then(() => true, () => false);
@@ -81,7 +86,7 @@ try {
   app = await _electron.launch({ executablePath: exe, cwd: installDir, chromiumSandbox: true, bypassCSP: false, timeout: 90000 });
   const identity = await app.evaluate(({ app }) => ({ pid: process.pid, path: process.execPath, userData: app.getPath('userData'), packaged: app.isPackaged }));
   check('real installed app and default fresh profile', identity.packaged && identity.path.toLowerCase() === exe.toLowerCase() && identity.userData.toLowerCase() === userData.toLowerCase());
-  const unexpected = [], errors = [], exports = [], cspViolations = [];
+  const unexpected = [], errors = [], exports = observedExports, cspViolations = [];
   app.context().on('request', request => {
     const url = new URL(request.url());
     if (['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol) && url.hostname !== '127.0.0.1') unexpected.push(url.origin);
@@ -91,8 +96,9 @@ try {
   page = app.windows().find(page => /^http:\/\/127\.0\.0\.1:/.test(page.url()) && !page.url().includes('desktopSurface=haru'));
   page.setDefaultTimeout(30000);
   page.setDefaultNavigationTimeout(30000);
-  page.on('pageerror', error => errors.push(String(error)));
-  page.on('response', response => { if (/\/export(?:-preview)?$/.test(new URL(response.url()).pathname)) exports.push(response); });
+  page.on('pageerror', error => { errors.push(String(error)); diagnostic('pageerror', { error: String(error) }); });
+  page.on('requestfailed', request => diagnostic('requestfailed', { url: request.url().split('?')[0], failure: request.failure() }));
+  page.on('response', response => { if (/\/export(?:-preview)?$/.test(new URL(response.url()).pathname)) { exports.push(response); diagnostic('export-response', { url: response.url(), status: response.status(), headers: { contentType: response.headers()['content-type'], contentDisposition: response.headers()['content-disposition'] } }); } });
   await page.exposeBinding('recordNativeExportCsp', (_source, value) => cspViolations.push(value));
   // Do not reload while the installed application's initial navigation is
   // settling. Observe the real current renderer and independently read its
@@ -107,6 +113,7 @@ try {
   check('installed document route CSP is unchanged (separate request)', documentCsp === require(path.join(here, '../capabilities.cjs')).contentSecurityPolicy);
   const security = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().filter(win => !win.webContents.getURL().includes('desktopSurface=haru')).map(win => win.webContents.getLastWebPreferences()));
   check('production renderer isolation remains enabled', security.length === 1 && security[0].sandbox && security[0].contextIsolation && security[0].webSecurity && !security[0].nodeIntegration);
+  report.observer = await app.evaluate(installDownloadObservation, { ownerURL: page.url(), filename: path.join(output, 'download-events.jsonl') });
   stage = 'real-editor';
   await page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: '素材库', exact: true }).click();
   await page.locator('.op-module-tabs').getByRole('tab', { name: '简历', exact: true }).click();
@@ -154,9 +161,34 @@ try {
   const defaultDownloads = await app.evaluate(({ app }) => app.getPath('downloads'));
   const downloadNames = async () => fs.readdir(defaultDownloads).then(names => names.sort(), error => { if (error.code === 'ENOENT') return []; throw error; });
   const defaultNamesBefore = await downloadNames();
+  snapshotDirectories = async label => {
+    const directories = new Set([downloads, defaultDownloads, installDir]);
+    let records = [];
+    try { records = (await fs.readFile(path.join(output, 'download-events.jsonl'), 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)); } catch {}
+    for (const record of records) if (typeof record.getSavePath === 'string' && record.getSavePath) directories.add(path.dirname(record.getSavePath));
+    const values = [];
+    for (const directory of directories) {
+      try {
+        const entries = await fs.readdir(directory, { withFileTypes: true });
+        values.push({ directory, entries: await Promise.all(entries.slice(0, 300).map(async entry => {
+          const file = path.join(directory, entry.name);
+          const stat = await fs.lstat(file).catch(() => null);
+          let sha256;
+          if (entry.isFile() && stat?.isFile() && /\.(pdf|docx)$/i.test(entry.name) && stat.size <= 10 * 1024 * 1024) {
+            try { sha256 = hash(await fs.readFile(file)); } catch (error) { sha256 = { error: String(error) }; }
+          }
+          return { name: entry.name, isFile: entry.isFile(), bytes: stat?.size, modified: stat?.mtime.toISOString(), sha256 };
+        })) });
+      } catch (error) { values.push({ directory, error: String(error) }); }
+    }
+    await fs.writeFile(path.join(output, `directories-${label}.json`), JSON.stringify(values, null, 2));
+  };
+
   for (const [format, choice] of [['pdf','cancel'], ['pdf','save'], ['docx','save']]) {
     stage = `native-${format}-${choice}`;
     const destination = path.join(downloads, `selected-${format}-${choice}.${format}`);
+    await snapshotDirectories(`${format}-${choice}-before`);
+    diagnostic('expected-destination', { format, choice, destination });
     const dialogResult = command('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'dialog.ps1'), '-OwnerPid', String(identity.pid), '-Executable', exe, '-Choice', choice, '-Destination', destination, '-Screenshot', path.join(output, `${format}-${choice}-native-dialog.png`)], 45000);
     // Attach rejection handling before UI click: the sync native dialog blocks
     // the Electron main process until the independent UIA helper answers it.
@@ -164,7 +196,10 @@ try {
     await (format === 'pdf' ? pdf : docx).click({ noWaitAfter: true });
     const result = await observed; if (result.error) throw result.error;
     const native = JSON.parse(result.value);
+    diagnostic('helper-completed', { format, choice, destination, native });
+    report.lastHelper = { format, choice, destination, native }; await writeReport();
     await until('export UI settled', () => pdf.isEnabled());
+    await snapshotDirectories(`${format}-${choice}-ui-settled`);
     if (choice === 'save') {
       await until('native-selected file exists', () => exists(destination));
       const response = exports.at(-1); check(`${format} HTTP success`, response.status() === 200);
@@ -190,6 +225,10 @@ try {
 } catch (error) {
   report.status = 'failed'; report.failure = { stage, message: String(error) }; process.exitCode = 1;
   await writeReport();
+  try {
+    const shot = path.join(output, 'failure-desktop.png').replaceAll("'", "''");
+    await powershell(`Add-Type -AssemblyName System.Drawing,System.Windows.Forms; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $i=[System.Drawing.Bitmap]::new($b.Width,$b.Height); $g=[System.Drawing.Graphics]::FromImage($i); try { $g.CopyFromScreen($b.Left,$b.Top,0,0,$i.Size); $i.Save('${shot}',[System.Drawing.Imaging.ImageFormat]::Png) } finally { $g.Dispose(); $i.Dispose() }`, 10000);
+  } catch (captureError) { report.desktopCaptureError = String(captureError); }
   if (page) {
     try {
       await page.screenshot({ path: path.join(output, 'failure.png'), timeout: 5000 });
@@ -200,6 +239,18 @@ try {
 finally {
   // Persist the primary outcome before any cleanup can block on a native modal.
   await writeReport();
+  for (const response of observedExports) {
+    let timer;
+    try {
+      const bytes = await Promise.race([response.body(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Response body observation timed out')), 5000); })]);
+      diagnostic('export-response-bytes', { url: response.url(), status: response.status(), bytes: bytes.length, sha256: hash(bytes) });
+    } catch (error) { diagnostic('export-response-bytes-unavailable', { url: response.url(), error: String(error) }); } finally { clearTimeout(timer); }
+  }
+  try { await snapshotDirectories('before-cleanup'); } catch (error) { report.snapshotError = String(error); }
+  if (app && page && !page.isClosed()) {
+    let timer;
+    try { report.observerHealth = await Promise.race([app.evaluate(({ app }) => app.__resumeExportObservation), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Observer health unavailable')), 3000); })]); } catch (error) { report.observerHealthError = String(error); } finally { clearTimeout(timer); }
+  }
   if (app) {
     let timer;
     try { await Promise.race([app.close(), new Promise((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Electron close exceeded 15 seconds')), 15000); })]); }

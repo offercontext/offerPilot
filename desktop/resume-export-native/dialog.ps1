@@ -23,6 +23,9 @@ using System.Runtime.InteropServices;
 public static class ExportNative {
   public delegate bool EnumProc(IntPtr hwnd, IntPtr data);
   [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr p, EnumProc f, IntPtr data);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool IsChild(IntPtr p, IntPtr c);
   [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassName(IntPtr h, StringBuilder s, int n);
@@ -40,11 +43,12 @@ public static class ExportNative {
   public static void Verify(IntPtr d, IntPtr h, uint pid, string cls) {
     if (h==IntPtr.Zero || !IsChild(d,h) || Pid(h)!=pid || Class(h)!=cls || !IsWindowEnabled(h)) throw new Exception("Native control identity mismatch");
   }
-  public static void SetFilename(IntPtr d, IntPtr h, uint pid, string value) {
+  public static string SetFilename(IntPtr d, IntPtr h, uint pid, string value) {
     Verify(d,h,pid,"Edit"); UIntPtr r;
     if(Write(h,12,UIntPtr.Zero,value,2,5000,out r)==IntPtr.Zero || r==UIntPtr.Zero) throw new Exception("WM_SETTEXT failed");
     var s=new StringBuilder(32768);
     if(Read(h,13,(UIntPtr)(uint)s.Capacity,s,2,5000,out r)==IntPtr.Zero || s.ToString()!=value) throw new Exception("Native filename readback mismatch");
+    return s.ToString();
   }
   public static void Click(IntPtr d, IntPtr h, uint pid) {
     Verify(d,h,pid,"Button");
@@ -113,10 +117,23 @@ if ($Choice -eq 'save') {
   $handles = @($nested | ForEach-Object { [IntPtr]$_.Current.NativeWindowHandle } | Where-Object { $_ -ne [IntPtr]::Zero -and [ExportNative]::IsChild($hwnd,$_) })
   $edits = @(@($handles) + @($handles | ForEach-Object { [ExportNative]::Children($_) }) | Where-Object { [ExportNative]::Class($_) -eq 'Edit' -and [ExportNative]::Pid($_) -eq $OwnerPid } | Sort-Object -Unique)
   if ($edits.Count -ne 1) { throw 'Native filename Edit HWND is not unique' }
-  [ExportNative]::SetFilename($hwnd,$edits[0],$OwnerPid,$Destination)
+  $readback = [ExportNative]::SetFilename($hwnd,$edits[0],$OwnerPid,$Destination)
+  @{ expected=$Destination; readback=$readback; readbackVerified=$true; dialogHwnd=$hwnd.ToInt64(); editHwnd=$edits[0].ToInt64(); saveHwnd=$saveHandles[0].ToInt64(); editClass=[ExportNative]::Class($edits[0]); ownerPid=$OwnerPid } | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath ($Screenshot + '.input.json')
+  $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try { $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size); $bitmap.Save(($Screenshot + '.input.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
+  finally { $graphics.Dispose(); $bitmap.Dispose() }
   [ExportNative]::Click($hwnd,$saveHandles[0],$OwnerPid)
 } else { [ExportNative]::Click($hwnd,$cancelHandles[0],$OwnerPid) }
-  @{ choice=$Choice; ownerPid=$OwnerPid; title=$title; nativeClass='#32770'; automation='UIAutomation identity + verified Win32 HWND WM_SETTEXT/readback/BM_CLICK'; dialogReplaced=$false } | ConvertTo-Json -Compress
+  Start-Sleep -Milliseconds 500
+  $foreground = [ExportNative]::GetForegroundWindow()
+  $postClick = @{ dialogHwnd=$hwnd.ToInt64(); exists=[ExportNative]::IsWindow($hwnd); visible=[ExportNative]::IsWindowVisible($hwnd); foregroundHwnd=$foreground.ToInt64(); foregroundPid=[ExportNative]::Pid($foreground); foregroundClass=[ExportNative]::Class($foreground); foregroundTitle=[ExportNative]::Title($foreground) }
+  $postClick | ConvertTo-Json | Set-Content -Encoding UTF8 -LiteralPath ($Screenshot + '.post-click.json')
+  $bitmap = [System.Drawing.Bitmap]::new($bounds.Width, $bounds.Height)
+  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+  try { $graphics.CopyFromScreen($bounds.Left, $bounds.Top, 0, 0, $bitmap.Size); $bitmap.Save(($Screenshot + '.post-click.png'), [System.Drawing.Imaging.ImageFormat]::Png) }
+  finally { $graphics.Dispose(); $bitmap.Dispose() }
+  @{ postClick=$postClick; choice=$Choice; ownerPid=$OwnerPid; title=$title; nativeClass='#32770'; automation='UIAutomation identity + verified Win32 HWND WM_SETTEXT/readback/BM_CLICK'; dialogReplaced=$false } | ConvertTo-Json -Compress
 } catch {
   if ($cancel.Count -eq 1) { try { $cancel[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke() } catch {} }
   else { try { $dialog.GetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern).Close() } catch {} }
