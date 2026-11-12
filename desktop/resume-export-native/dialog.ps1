@@ -57,7 +57,8 @@ try {
   $bitmap.Save($Screenshot, [System.Drawing.Imaging.ImageFormat]::Png)
 } finally { $graphics.Dispose(); $bitmap.Dispose() }
 $controls = $dialog.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-$cancel = @($controls | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.AutomationId -eq '2' })
+@($controls | ForEach-Object { @{ name=$_.Current.Name; id=$_.Current.AutomationId; type=$_.Current.ControlType.ProgrammaticName } }) | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 -LiteralPath ($Screenshot + '.controls.json')
+$cancel = @($controls | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and ($_.Current.AutomationId -eq '2' -or $_.Current.Name -eq 'Cancel') })
   if ($Choice -eq 'save') {
     if (Test-Path -LiteralPath $Destination) { throw 'Native save destination must be fresh' }
     $edits = @($controls | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and
@@ -67,7 +68,7 @@ $cancel = @($controls | Where-Object { $_.Current.ControlType -eq [System.Window
     $value = $edits[0].GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
     $value.SetValue($Destination)
     if ($value.Current.Value -ne $Destination) { throw 'Native filename field did not retain selected path' }
-    $save = @($controls | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $_.Current.AutomationId -eq '1' })
+    $save = @($controls | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and ($_.Current.AutomationId -eq '1' -or $_.Current.Name -eq 'Save' -or $_.Current.Name -eq [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('5L+d5a2Y'))) })
     if ($save.Count -ne 1) { throw 'Native Save button is ambiguous' }
     $save[0].GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
   } else {
