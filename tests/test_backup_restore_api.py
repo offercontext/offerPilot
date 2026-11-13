@@ -93,3 +93,76 @@ with TestClient(app):
     assert cold(root).returncode == 0
     assert status(root)['state'] == 'rolled_back'
     assert workspace_files(root) == before
+
+
+def test_cold_restore_knowledge_bundle_through_real_api(tmp_path: Path):
+    """Actual upload/export/confirm, process exit, install and API byte reads."""
+    seed = r'''
+import base64, io, json, sys, time
+from pathlib import Path
+from PIL import Image
+from fastapi.testclient import TestClient
+from offerpilot.api import create_app
+root=Path(sys.argv[1])
+main=b'# Synthetic bundle\n\n![diagram](pic.png)\n'
+buffer=io.BytesIO()
+Image.new('RGB',(12,12),(12,34,56)).save(buffer,format='PNG')
+picture=buffer.getvalue()
+with TestClient(create_app(data_dir=root/'source')) as client:
+    response=client.post('/api/knowledge/sources',files=[('file',('source.md',main)),('files',('pic.png',picture,'image/png'))])
+    assert response.status_code==202,response.text
+    source_id=response.json()['source']['id']
+    for _ in range(250):
+        state=client.get(f'/api/knowledge/sources/{source_id}').json()
+        if state['extraction_status']=='extracted': break
+        assert state['extraction_status']!='failed',state
+        time.sleep(.02)
+    else: raise AssertionError('extraction did not complete')
+    assets=client.get(f'/api/knowledge/sources/{source_id}/assets').json()['items']
+    asset_id=assets[0]['id']
+    evidence=client.get(f'/api/knowledge/sources/{source_id}/evidence').json()['items']
+    assert any(item.get('asset_id')==asset_id for item in evidence)
+    exported=client.get('/api/backups/export')
+    assert exported.status_code==200,exported.text
+with TestClient(create_app(data_dir=root/'target')) as client:
+    (root/'target/original-marker').write_text('retained')
+    preview=client.post('/api/backups/restore/preview',content=exported.content)
+    assert preview.status_code==200,preview.text
+    record=preview.json()
+    confirmed=client.post('/api/backups/restore/confirm',json={'id':record['id'],'sha256':record['sha256'],'confirmation':'REPLACE WORKSPACE'})
+    assert confirmed.status_code==200,confirmed.text
+    assert confirmed.json()['state']=='queued'
+(root/'expected.json').write_text(json.dumps({'source':source_id,'asset':asset_id,'main':base64.b64encode(main).decode(),'image':base64.b64encode(picture).decode()}))
+'''
+    read = r'''
+import base64,json,sys
+from pathlib import Path
+from fastapi.testclient import TestClient
+from offerpilot.api import create_app
+from offerpilot.backup_restore import read_record,operation_paths
+root=Path(sys.argv[1]); expected=json.loads((root/'expected.json').read_text())
+with TestClient(create_app(data_dir=root/'target')) as client:
+    assert client.get('/api/backups/restore').json()['state']=='completed'
+    sid=expected['source']; aid=expected['asset']
+    source=client.get(f'/api/knowledge/sources/{sid}')
+    assert source.status_code==200 and source.json()['id']==sid
+    assets=client.get(f'/api/knowledge/sources/{sid}/assets').json()['items']
+    assert len(assets)==1 and assets[0]['id']==aid
+    evidence=client.get(f'/api/knowledge/sources/{sid}/evidence').json()['items']
+    assert any(item.get('asset_id')==aid for item in evidence)
+    for suffix,key in [('content','main'),(f'assets/{aid}/content','image')]:
+        response=client.get(f'/api/knowledge/sources/{sid}/{suffix}')
+        assert response.status_code==200,response.text
+        assert response.content==base64.b64decode(expected[key])
+    assert client.get(f'/api/knowledge/sources/{sid+100}/assets/{aid}/content').status_code==404
+'''
+    for code in (seed, read):
+        result = subprocess.run([sys.executable, '-c', code, str(tmp_path)],
+                                capture_output=True, text=True, timeout=60)
+        assert result.returncode == 0, result.stdout + result.stderr
+        if code == seed:
+            (tmp_path / 'source').rename(tmp_path / 'source-unavailable')
+    assert not (tmp_path / 'target/original-marker').exists()
+    from offerpilot.backup_restore import operation_paths, read_record
+    _, original, _ = operation_paths(tmp_path / 'target', read_record(tmp_path / 'target'))
+    assert (original / 'original-marker').read_text() == 'retained'

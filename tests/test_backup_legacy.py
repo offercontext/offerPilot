@@ -28,3 +28,23 @@ def test_actual_historical_export_is_rejected_without_changing_current_workspace
     assert not candidate.exists()
     assert workspace_files(current) == before
     assert archive.read_bytes() == content
+
+
+def test_historical_zip_api_rejection_preserves_live_workspace(tmp_path: Path) -> None:
+    from fastapi.testclient import TestClient
+    from offerpilot.api import create_app
+
+    fixture = json.loads((Path(__file__).parent / 'fixtures/backups/legacy-d0cd4068.json').read_text(encoding='utf-8'))
+    content = base64.b64decode(fixture['archive_base64'], validate=True)
+    assert hashlib.sha256(content).hexdigest() == fixture['archive_sha256']
+    current = tmp_path / 'current'
+    # No lifespan workers: only the real authenticated routing stack and disk state.
+    client = TestClient(create_app(data_dir=current))
+    (current / 'original-marker').write_bytes(b'original user work - synthetic')
+    before = workspace_files(current)
+    response = client.post('/api/backups/restore/preview', content=content)
+    assert response.status_code == 409
+    assert response.json() == {'error': 'archive_schema_mismatch'}
+    assert client.get('/api/backups/restore').json()['state'] == 'none'
+    assert workspace_files(current) == before
+    assert client.get('/api/health').status_code == 200
