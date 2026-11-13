@@ -63,7 +63,7 @@ async function saveExport(p,savePath){
  try{
   await run('arm',{active:{mode:'save',urlPolicy:'owner-settings-export-blob',filename:'offerpilot-backup.zip',savePath}});
   const response=p.waitForResponse(r=>new URL(r.url()).pathname==='/api/backups/export'&&r.request().method()==='GET');
-  await p.getByRole('button',{name:'导出完整数据',exact:true}).click();const r=await response;assert.equal(r.status(),200);const bytes=await r.body();
+  response.catch(()=>{});await p.getByRole('button',{name:'导出完整数据',exact:true}).click({timeout:10000});const r=await response;assert.equal(r.status(),200);const bytes=await r.body();
   let snapshot;await until(async()=>{snapshot=await run('snapshot');assert.deepEqual(snapshot.failures,[]);return snapshot.downloads.some(d=>d.terminal);});
   assert.equal(snapshot.downloads.length,1);assertNativeDownload(snapshot.downloads[0],'save',bytes.length);
   assert.deepEqual(snapshot.dialogs,[{mode:'save',expected:true,choice:'controlled-synthetic-path'}]);assert.equal(snapshot.externalLaunchAttempts,0);assert.equal(snapshot.ownerURLUnchanged,true);assert.deepEqual(snapshot.messages,[]);assert.deepEqual(snapshot.navigations,[]);
@@ -89,7 +89,7 @@ try{
  assert.notEqual(report.launches[0].mainPid,report.launches[1].mainPid);assert.notEqual(report.launches[0].created,report.launches[1].created);
  await stop();assert.equal(await hash(exe),report.installedExeSha256);assert.deepEqual(report.pageErrors,[]);assert.deepEqual(report.externalRequests,[]);
 }catch(error){
- report.failures.push({stage,type:error.name,code:error.code??null,message:String(error.message).split('\n')[0].replace(/https?:\/\/\S+/g,'[URL]').slice(0,500)});
+ report.failures.push({stage,type:error.name,code:error.code??null,message:String(error.message).replace(/https?:\/\/\S+/g,'[URL]').slice(0,3000)});
  if(page&&!page.isClosed())try{await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});report.screenshots.push({file:'failure.png',sha256:await hash(path.join(output,'failure.png'))});}catch{/* Preserve the original failure. */}
 }
 finally{

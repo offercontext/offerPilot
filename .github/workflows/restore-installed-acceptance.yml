@@ -34,6 +34,8 @@ jobs:
       - run: npm ci --prefix product/web --ignore-scripts
       - run: npm run build --prefix product/web
       - run: npm ci --prefix helper/desktop/installed-ui --ignore-scripts
+      - name: Install CJK fonts for readable synthetic screenshots
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
       - name: Locate system Chrome with its existing sandbox support
         run: |
           chrome=$(command -v google-chrome)

@@ -31,7 +31,7 @@ try{
  const context=await browser.newContext({viewport:{width:1280,height:1100}});
  await context.route('**/*',route=>{const url=new URL(route.request().url());if(['http:','https:'].includes(url.protocol)&&url.origin!==origin){report.externalRequests.push(url.origin);return route.abort();}return route.continue();});
  page=await context.newPage();page.on('pageerror',()=>report.pageErrors.push('page-error'));await page.goto(origin);
- await restoreFlow({page,dataDirectory:data,scratch,output,report,saveExport:async(p,file)=>{const pending=p.waitForEvent('download');await p.getByRole('button',{name:'导出完整数据',exact:true}).click();await(await pending).saveAs(file);},restart:async()=>{await stop();await start();await page.reload();return page;}});
+ await restoreFlow({page,dataDirectory:data,scratch,output,report,saveExport:async(p,file)=>{const pending=p.waitForEvent('download');pending.catch(()=>{});await p.getByRole('button',{name:'导出完整数据',exact:true}).click({timeout:10000});await(await pending).saveAs(file);},restart:async()=>{await stop();await start();await page.reload();return page;}});
  assert.deepEqual(report.pageErrors,[]);assert.deepEqual(report.externalRequests,[]);
-}catch(error){report.failures.push(String(error));}
+}catch(error){report.failures.push(String(error));if(page&&!page.isClosed())await page.screenshot({path:path.join(output,'failure.png'),fullPage:true}).catch(()=>{});}
 finally{await browser?.close();await stop().catch(e=>report.failures.push(String(e)));report.status=report.failures.length?'failed':'passed';await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));if(report.failures.length)process.exitCode=1;}
