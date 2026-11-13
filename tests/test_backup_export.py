@@ -94,3 +94,26 @@ def test_unreadable_directory_cannot_be_silently_omitted(source: Path, monkeypat
         with pytest.raises(PermissionError, match="synthetic"):
             export_archive(source, '{}')
     assert workspace_files(source) == before
+
+
+def test_export_validates_serialized_windows_zip_names(source: Path, monkeypatch) -> None:
+    from zipfile import ZipInfo
+
+    nested = source / 'attachments/subdir/file.txt'
+    nested.parent.mkdir(parents=True)
+    nested.write_bytes(b'synthetic nested bytes')
+    original = ZipInfo.from_file
+
+    def windows_from_file(filename, arcname=None, *, strict_timestamps=True):
+        info = original(filename, arcname, strict_timestamps=strict_timestamps)
+        # CPython on Windows normalizes arcname to backslashes before ZipInfo
+        # records orig_filename and canonicalizes filename to ZIP forward slashes.
+        info.orig_filename = info.filename.replace('/', '\\')
+        return info
+
+    monkeypatch.setattr(ZipInfo, 'from_file', windows_from_file)
+    content = export_archive(source, '{}')
+    with ZipFile(BytesIO(content)) as archive:
+        assert archive.read('attachments/subdir/file.txt') == nested.read_bytes()
+        from offerpilot.backup_paths import validate_archive_index
+        validate_archive_index(archive.infolist())

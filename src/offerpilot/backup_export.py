@@ -13,7 +13,7 @@ from offerpilot.backup_archive import (
     FORMAT, MANIFEST, MAX_COMPRESSED, MAX_EXPANDED, MAX_MANIFEST,
     stage_archive, validate_database, workspace_files,
 )
-from offerpilot.backup_paths import archive_parts, validate_archive_index
+from offerpilot.backup_paths import archive_parts
 
 _EXCLUDED = {MANIFEST, "data.db", "data.db-wal", "data.db-shm", "data.db-journal",
              "agent-journal-key.json", "config.json"}
@@ -66,9 +66,10 @@ def export_archive(root: Path, redacted_config: str) -> bytes:
             for name in files:
                 stream.write(stage / name, name)
             stream.writestr(MANIFEST, manifest)
-            validate_archive_index(stream.infolist())
         if archive.stat().st_size > MAX_COMPRESSED:
             raise ValueError("archive_size_limit")
+        # Validate serialized names: Windows ZipInfo.from_file retains native separators
+        # in orig_filename in memory, while the actual ZIP stores canonical slashes.
         # File writes are outside SQLite transactions; validate the actual frozen ZIP.
         stage_archive(archive, Path(directory) / "verification", stage / "data.db")
         return archive.read_bytes()

@@ -227,3 +227,24 @@ def test_linked_stage_does_not_modify_external_target(queued):
     assert cold(root).returncode != 0
     assert workspace_files(root) == before
     assert workspace_files(outside) == outside_before
+
+
+def test_staged_file_flush_uses_writable_handles_without_changing_bytes(queued, monkeypatch):
+    import stat
+    from offerpilot.backup_install import ensure_workspace_lease, complete_startup
+
+    root, _ = queued
+    real_fsync = os.fsync
+
+    def windows_commit(fd):
+        if stat.S_ISREG(os.fstat(fd).st_mode):
+            # POSIX fsync accepts readonly files; Windows _commit does not.
+            # A zero-byte write checks the descriptor access without changing data.
+            os.write(fd, b'')
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, 'fsync', windows_commit)
+    ensure_workspace_lease(root, apply_restore=True)
+    complete_startup(root)
+    assert restore.status(root)['state'] == 'completed'
+    assert (root / '中文.txt').read_text(encoding='utf-8') == 'backup'

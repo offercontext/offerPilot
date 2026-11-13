@@ -93,7 +93,8 @@ def _install(root: Path, record: dict[str, Any]) -> None:
         _reset_authority(root, candidate)
         for path in candidate.rglob("*"):
             if path.is_file():
-                with path.open("rb") as stream:
+                # Windows _commit requires a writable descriptor; never truncate staged bytes.
+                with path.open("r+b") as stream:
                     os.fsync(stream.fileno())
         for path in sorted((p for p in candidate.rglob("*") if p.is_dir()), reverse=True):
             sync_directory(path)
