@@ -61,7 +61,7 @@ function eligible(c, p, now, enabledAt) {
 function select(candidates, p, history, now, enabledAt) {
   const budget = Math.max(0,HOUR_LIMIT - Object.values(history).filter(n => n >= now - 3600000).length);
   return candidates.filter(c => eligible(c,p,now,enabledAt) && !Object.hasOwn(history,c.key))
-    .sort((a,b) => b.due-a.due || a.id.localeCompare(b.id)).slice(0,Math.min(BATCH_LIMIT,budget));
+    .sort((a,b) => b.due-a.due || a.id.localeCompare(b.id)).slice(0,Math.min(BATCH_LIMIT,budget,Math.max(0,HISTORY_LIMIT-Object.keys(history).length)));
 }
 function advanceClock(highWater, now) {
   if (!Number.isFinite(now) || now <= 0 || !Number.isFinite(highWater) || highWater < 0
@@ -71,7 +71,7 @@ function advanceClock(highWater, now) {
 function prune(history, now) {
   const entries = Object.entries(history).filter(([,v]) => Number.isFinite(v) && v >= now-HISTORY_MS);
   // Never evict live dedupe entries to make room: rate-limit until they expire.
-  if (entries.length >= HISTORY_LIMIT) throw new Error('history_full');
+  if (entries.length > HISTORY_LIMIT) throw new Error('history_full');
   return Object.fromEntries(entries);
 }
 module.exports = { REASONS,CATCHUP_MS,BATCH_LIMIT,HOUR_LIMIT,HISTORY_LIMIT,HISTORY_MS,

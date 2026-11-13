@@ -26,10 +26,12 @@ function createReminderService({ipcMain,Notification,powerMonitor,window,origin,
   },
  };
  for(const [name,handler] of Object.entries(handlers))ipcMain.handle(CHANNEL+name,(event,value)=>{assertOwner(event);return handler(value);});
- const suspend=()=>{pending=null;testNotice?.close();controller.suspend();};
- const resume=()=>{if(!isQuitting())void controller.resume();};
- powerMonitor.on('suspend',suspend);powerMonitor.on('resume',resume);powerMonitor.on('lock-screen',suspend);powerMonitor.on('unlock-screen',resume);
+ const pauses=new Set();
+ const suspend=(reason='update')=>{pauses.add(reason);pending=null;testNotice?.close();controller.suspend();};
+ const resume=(reason='update')=>{pauses.delete(reason);if(!pauses.size&&!isQuitting())void controller.resume();};
+ const powerEvents=[['suspend',()=>suspend('sleep')],['resume',()=>resume('sleep')],['lock-screen',()=>suspend('locked')],['unlock-screen',()=>resume('locked')]];
+ for(const [event,handler] of powerEvents)powerMonitor.on(event,handler);
  const timer=setInterval(()=>{if(!isQuitting())void controller.tick();},60000);timer.unref?.();void controller.tick();
- return {suspend,resume,dispose(){disposed=true;pending=null;clearInterval(timer);testNotice?.close();controller.dispose();for(const name of Object.keys(handlers))ipcMain.removeHandler(CHANNEL+name);for(const [event,handler] of [['suspend',suspend],['resume',resume],['lock-screen',suspend],['unlock-screen',resume]])powerMonitor.removeListener(event,handler);}};
+ return {suspend,resume,dispose(){disposed=true;pending=null;clearInterval(timer);testNotice?.close();controller.dispose();for(const name of Object.keys(handlers))ipcMain.removeHandler(CHANNEL+name);for(const [event,handler] of powerEvents)powerMonitor.removeListener(event,handler);}};
 }
 module.exports={createReminderService};

@@ -55,7 +55,7 @@ test('contradictory or oversized reads reject instead of partially dispatching',
 });
 test('dedupe pruning never evicts live entries to allow duplicates',()=>{
  assert.deepEqual(p.prune({expired:now-p.HISTORY_MS-1,current:now},now),{current:now});
- assert.throws(()=>p.prune(Object.fromEntries(Array.from({length:1000},(_,i)=>[String(i),now])),now),/history_full/);
+ assert.throws(()=>p.prune(Object.fromEntries(Array.from({length:1001},(_,i)=>[String(i),now])),now),/history_full/);
 });
 
 test('persisted clock high-water blocks replay after forward cleanup and backward restart',()=>{
@@ -67,4 +67,12 @@ test('persisted clock high-water blocks replay after forward cleanup and backwar
  // Explicit re-enable starts a fresh eligibility baseline, never old backlog.
  assert.deepEqual(p.select([c],options,restarted.history,now+300000,now+300000),[]);
  assert.equal(p.advanceClock(now,now-1000),now);
+});
+
+test('remaining dedupe capacity bounds a batch without erasing live history',()=>{
+ const history=Object.fromEntries(Array.from({length:999},(_,i)=>[String(i),now-3600001]));
+ const prefs={...p.defaults(),enabled:true,scopes:['deadline'],quietEnabled:false};
+ const c={id:'application_event:1:deadline',reason:'deadline',due:now,expires:now+1000,key:'fresh'};
+ assert.equal(p.select([c,{...c,id:'second',key:'second'},{...c,id:'third',key:'third'}],prefs,history,now,0).length,1);
+ history.fresh=now;assert.equal(p.select([c],prefs,history,now,0).length,0);assert.equal(Object.keys(p.prune(history,now)).length,1000);
 });

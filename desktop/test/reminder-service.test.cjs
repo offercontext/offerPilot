@@ -9,5 +9,7 @@ test('reminder IPC rejects foreign windows and child frames and removes all hand
  assert.throws(()=>state({sender:contents,senderFrame:{url:frame.url}}));assert.throws(()=>state({sender:{},senderFrame:frame}));
  const owner={sender:contents,senderFrame:frame};assert.equal(state(owner).preferences.enabled,false);
  assert.equal(handlers.get('offerpilot:reminders:consume')(owner),null);assert.throws(()=>handlers.get('offerpilot:reminders:test')(owner));
+ powerMonitor.emit('lock-screen');powerMonitor.emit('suspend');powerMonitor.emit('resume');assert.equal(state(owner).status,'suspended');
+ service.suspend();service.resume();assert.equal(state(owner).status,'suspended');powerMonitor.emit('unlock-screen');assert.equal(state(owner).status,'disabled');
  service.dispose();assert.equal(handlers.size,0);assert.equal(powerMonitor.eventNames().length,0);
 });

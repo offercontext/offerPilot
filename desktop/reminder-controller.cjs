@@ -29,7 +29,7 @@ function createReminderController({store, readCandidates, createNotification, na
     try{
       if(!valid(epoch))return;
       const current=policy.snapshot(await readCandidates()).find(c=>c.id===entry.c.id);
-      if(!valid(epoch)||!current||current.key!==entry.c.key||current.revision!==entry.c.revision||!allowed(current,now()))return;
+      if(!valid(epoch)||!current||current.key!==entry.c.key||current.revision!==entry.c.revision||now()>=current.expires||!state.preferences.scopes.includes(current.reason))return;
       // Only native click invokes navigation; consumer must validate its fixed item route.
       navigate({applicationId:current.applicationId,eventId:current.eventId});
     }catch{if(valid(epoch)){error='connection_failed';publish();}}

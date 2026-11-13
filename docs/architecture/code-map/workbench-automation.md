@@ -39,3 +39,5 @@ Offer 日期截止按请求 IANA 展示时区解释；Offer 和部分日程候�
 | 关设置后仍显示结果 / 重启重复花费 | policy revision、job state、预算、owner/lease/turn/generation、来源变化 | [队列](../../../tests/test_proactive_queue.py)、[设置页面](../../../web/src/components/ProactiveSettings.test.ts) |
 | 推荐了错误下一步 | known/unknown/known-null、目标投递、读取完整性与草稿 owner | [建议规则](../../../web/src/lib/nextStepSuggestions.test.ts)、[投递交互](../../../web/src/components/ApplicationDetail.nextStepSuggestions.test.tsx) |
 | Wakeup 标记完成但未收到通知 | 实际调用是否只有 dispatch_due，是否存在独立消费者 | [Wakeup API](../../../tests/test_wakeups_api.py)；不能从 dispatched 推导外部发送成功 |
+
+桌面本地通知消费同一候选接口，但拥有独立的设备 opt-in、勿扰和去重；仅支持存在 delivery 窗口的 deadline/interview_preparation/review/stale_application。Offer 和其他仅展示候选不擅自升级为通知。执行链与系统边界见[桌面本地提醒](settings-desktop.md#5-桌面本地提醒)。
