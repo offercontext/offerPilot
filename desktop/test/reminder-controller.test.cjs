@@ -39,6 +39,6 @@ test('late failure of invalidated notification cannot override disabled or stora
 });
 
 test('a user click after catch-up window can open a still-valid item without another delivery',async()=>{
- const f=fixture();f.enable();f.due();await f.controller.tick();f.time=100000000+16*60000;
+ const f=fixture();f.enable();f.due();await f.controller.tick();f.time=100000000+16*60000;await f.controller.tick();
  f.notices[0].emit('click');await new Promise(setImmediate);assert.equal(f.routes.length,1);assert.equal(f.notices.length,1);
 });

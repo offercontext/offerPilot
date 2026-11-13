@@ -45,7 +45,7 @@ function createReminderController({store, readCandidates, createNotification, na
       if(policy.quiet(state.preferences,time)){closeAll();publish();return;}
       const candidates=policy.snapshot(await readCandidates());
       if(!valid(epoch))return;
-      for(const [id,entry] of visible){const current=candidates.find(c=>c.id===id);if(!current||current.key!==entry.c.key||current.revision!==entry.c.revision||!allowed(current,now())){entry.active=false;entry.notification.close();visible.delete(id);}}
+      for(const [id,entry] of visible){const current=candidates.find(c=>c.id===id);if(!current||current.key!==entry.c.key||current.revision!==entry.c.revision||now()>=current.expires||!state.preferences.scopes.includes(current.reason)){entry.active=false;entry.notification.close();visible.delete(id);}}
       const selected=policy.select(candidates.filter(c=>allowed(c,now())),state.preferences,state.history,now(),state.enabledAt);
       for(const original of selected){
         const current=policy.snapshot(await readCandidates()).find(c=>c.id===original.id);
