@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import stat
@@ -36,13 +37,21 @@ def workspace_files(root: Path) -> dict[str, str]:
     if not stat.S_ISDIR(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
         raise ValueError("unsafe_workspace_root")
     result = {}
-    for path in sorted(root.rglob("*")):
-        if path.is_symlink():
-            raise ValueError("unsafe_workspace_file")
-        if path.is_file():
-            result[path.relative_to(root).as_posix()] = file_digest(path)
-        elif not path.is_dir():
-            raise ValueError("unsafe_workspace_file")
+    def fail_walk(error: OSError) -> None:
+        raise error
+
+    # Inspect directories before descending; rglob can traverse Windows junctions.
+    for parent, directories, filenames in os.walk(root, followlinks=False, onerror=fail_walk):
+        for name in sorted(directories + filenames):
+            path = Path(parent) / name
+            metadata = path.lstat()
+            if stat.S_ISLNK(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+                raise ValueError("unsafe_workspace_file")
+            if stat.S_ISREG(metadata.st_mode):
+                result[path.relative_to(root).as_posix()] = file_digest(path)
+            elif not stat.S_ISDIR(metadata.st_mode):
+                raise ValueError("unsafe_workspace_file")
+
     return result
 
 
