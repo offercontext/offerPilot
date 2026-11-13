@@ -1,3 +1,4 @@
+# Fixture correction: positive event duration verified against the real product API.
 name: Pinned Windows native reminder acceptance
 on:
   push:

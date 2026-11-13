@@ -44,7 +44,7 @@ export async function reminderFlow({page,app,exe,userData,output,report,command,
  const ownerWindow=await app.browserWindow(page);await ownerWindow.evaluate(w=>w.minimize());
  report.native.backgroundBeforeDelivery=await ownerWindow.evaluate(w=>w.isMinimized());assert.ok(report.native.backgroundBeforeDelivery,'owner must actually be minimized before native delivery');
  const item=await api(page,'/api/applications','POST',{company_name:'Reminder QA Synthetic',position_name:'Native notification acceptance',status:'pending',notes:'synthetic-only'});
- const now=Date.now();const event=await api(page,'/api/application-events','POST',{application_id:item.id,event_type:'deadline',scheduled_at:new Date(now+3600000).toISOString(),remind_at:new Date(now+3000).toISOString(),duration_minutes:0,notes:'synthetic reminder detail',status:'todo'});
+ const now=Date.now();const event=await api(page,'/api/application-events','POST',{application_id:item.id,event_type:'deadline',scheduled_at:new Date(now+3600000).toISOString(),remind_at:new Date(now+3000).toISOString(),duration_minutes:30,notes:'synthetic reminder detail',status:'todo'});
  const evidence=()=>app.evaluate(()=>globalThis.__reminderEvidence);
  await until(async()=>(await evidence()).calls.length>0,90000);
  const first=await evidence();report.native.productionCalls=first.calls;
