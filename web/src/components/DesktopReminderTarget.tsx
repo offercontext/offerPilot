@@ -29,6 +29,8 @@ export default function DesktopReminderTarget() {
   const off=bridge.onNavigation(()=>{void consume();});void consume();
   return()=>{live=false;sequence++;off();};
  },[]);
+ // Keep the ordinary web shell free of a dormant desktop-only drawer.
+ if(!open)return null;
  return <Drawer title={t('提醒对应事项')} open={open} onClose={()=>setOpen(false)} width={520}>
   {loading&&<Spin/>}
   {error&&<Alert type="warning" message={t('事项已变化、不可见或连接失败，请在提醒列表中核对。')}/>}
