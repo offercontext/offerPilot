@@ -22,7 +22,9 @@ export async function reminderFlow({page,app,exe,userData,output,report,command,
  await settings(page);const section=page.getByRole('region',{name:'桌面本地提醒',exact:true});
  const state=()=>page.evaluate(()=>window.offerpilotReminders.getState());
  assertStage('fresh installed profile remains opted out',(await state()).preferences.enabled===false);await shot('native-default-off');
- await section.getByRole('checkbox',{name:'截止日期',exact:true}).check();
+ await section.getByRole('checkbox',{name:'截止日期',exact:true}).click();
+ await until(async()=>(await state()).preferences.scopes.includes('deadline'));
+ await until(()=>section.getByRole('checkbox',{name:'截止日期',exact:true}).isChecked());
  assertStage('scope selection alone does not opt in',(await state()).preferences.enabled===false);
  await section.getByRole('switch',{name:'开启桌面本地提醒',exact:true}).click();
  if((await state()).preferences.quietEnabled)await section.getByRole('switch',{name:'勿扰时间（此设备本地时间）',exact:true}).click();
