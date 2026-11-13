@@ -63,7 +63,7 @@ async function saveExport(p,savePath){
  try{
   await run('arm',{active:{mode:'save',urlPolicy:'owner-settings-export-blob',filename:'offerpilot-backup.zip',savePath}});
   const response=p.waitForResponse(r=>new URL(r.url()).pathname==='/api/backups/export'&&r.request().method()==='GET');
-  response.catch(()=>{});await p.getByRole('button',{name:'导出完整数据',exact:true}).click({timeout:10000});const r=await response;assert.equal(r.status(),200);const bytes=await r.body();
+  response.catch(()=>{});await p.getByRole('button').filter({has:p.getByText('导出完整数据',{exact:true})}).click({timeout:10000});const r=await response;assert.equal(r.status(),200);const bytes=await r.body();
   let snapshot;await until(async()=>{snapshot=await run('snapshot');assert.deepEqual(snapshot.failures,[]);return snapshot.downloads.some(d=>d.terminal);});
   assert.equal(snapshot.downloads.length,1);assertNativeDownload(snapshot.downloads[0],'save',bytes.length);
   assert.deepEqual(snapshot.dialogs,[{mode:'save',expected:true,choice:'controlled-synthetic-path'}]);assert.equal(snapshot.externalLaunchAttempts,0);assert.equal(snapshot.ownerURLUnchanged,true);assert.deepEqual(snapshot.messages,[]);assert.deepEqual(snapshot.navigations,[]);
