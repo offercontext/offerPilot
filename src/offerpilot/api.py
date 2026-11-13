@@ -393,6 +393,7 @@ from offerpilot.repositories.offer_negotiation import (
 from offerpilot.repositories.json_contract import canonical_json, sha256_text
 from offerpilot.repositories.questions import QuestionCreate, QuestionsRepository
 from offerpilot.repositories.resumes import ResumeCreate, ResumesRepository
+from offerpilot.resume_export_routes import register_resume_export_routes
 from offerpilot.repositories.wakeups import WakeupCreate, WakeupsRepository, wakeup_payload
 from offerpilot.resume_structured_import import (
     ResumeStructureError,
@@ -1310,6 +1311,7 @@ def create_app(
         brief_worker,
     )
     app = FastAPI(title="OfferPilot")
+    register_resume_export_routes(app, resumes)
     app.include_router(image_router(chat_images, lambda: load_config(resolved_data_dir),
                                     _provider_for_connection_test))
     knowledge_runtime = KnowledgeWorkerRuntime(

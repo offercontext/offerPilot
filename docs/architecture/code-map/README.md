@@ -19,7 +19,7 @@
 | 用户说法 / 业务域 | 首个入口与下钻方向 | 规则、测试或深层地图 |
 |---|---|---|
 | 投递、岗位、JD、创建重复、历史材料、结果、沟通草稿 | [投递与日程地图](applications.md) → 创建回执、版本、生命周期、提交快照及结果 | [原子录入 ADR](../decisions/0006-reliable-single-application-intake.md)、[创建测试](../../../tests/test_application_creation.py) |
-| 简历导入、体检、事实补充、版本比较、材料包、改写建议 | [简历与材料地图](materials.md) → 原文分类、派生版本、模型分析、改写与提交证据 | [结构化导入测试](../../../tests/test_resume_structured_import.py)、[改写测试](../../../tests/test_material_revision_proposals_api.py) |
+| 简历导入、PDF/DOCX 导出、体检、事实补充、版本比较、材料包、改写建议 | [简历与材料地图](materials.md) → 原文分类、派生版本、模型分析、改写与提交证据 | [结构化导入测试](../../../tests/test_resume_structured_import.py)、[改写测试](../../../tests/test_material_revision_proposals_api.py) |
 | 岗位匹配、初筛、深入分析、证据不足 | [匹配与 Offer 地图](opportunity-offers.md#2-岗位匹配-v2-执行与恢复) → 初筛生成、一次性确认、继承快照深入分析 | [匹配 API](../../../tests/test_opportunity_fit_reviews_api.py)、[AI 契约](../../../tests/test_opportunity_fit_reviews_ai.py) |
 | 日程、事件、日历、提醒 | [投递日程](applications.md#3-生命周期与关联写入)；有日历事项却无待办时进入[提醒地图](workbench-automation.md) | [事件测试](../../../tests/test_events_api.py)、[日历测试](../../../tests/test_calendar_api.py)；事件语义见 [AGENTS §6](../../../AGENTS.md#6-领域红线) |
 | 面试准备、模拟、追问、复盘、专项练习、经历故事 | [面试地图](interview.md) → 按功能和症状分流 | [模拟问答排查链](interview-mock.md) |

@@ -45,3 +45,15 @@ it('keeps malformed raw text in recovery instead of replacing it with parsed tex
   expect(host.querySelector('textarea')?.value).toContain('"raw_text": 1');
   expect(update).not.toHaveBeenCalled();
 });
+it('keeps copied upload raw text out of manual supplements and requires save before export', async () => {
+  await act(async () => root.render(<QueryClientProvider client={client}><ResumeEditorDrawer resume={{ ...resume, source: 'manual' }} open onClose={() => {}} /></QueryClientProvider>));
+  await click('历史原文');
+  const original = host.querySelector('textarea') as HTMLTextAreaElement;
+  expect(original.readOnly).toBe(true); expect(original.value).toBe(resume.parsed_data);
+  await click('其他'); const other = host.querySelector('textarea') as HTMLTextAreaElement;
+  expect(other.value).toBe('');
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(other, '明确补充'); other.dispatchEvent(new Event('input', { bubbles: true })); });
+  await click('导出简历'); expect(document.querySelector('iframe')).toBeNull();
+  expect(document.body.textContent).toContain('请先保存当前编辑');
+  await click('保存'); expect(update.mock.calls[0][1].content_json).toMatchObject({ raw_text: resume.parsed_data, additional_text: '明确补充' });
+});
