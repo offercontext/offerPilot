@@ -1,0 +1,126 @@
+name: Pinned Windows native reminder acceptance
+on:
+  push:
+    branches: [feat/20261113-reminder-installed-acceptance]
+    paths: [.github/workflows/reminder-installed-acceptance.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    outputs:
+      artifact: ${{ steps.pin.outputs.artifact }}
+      digest: ${{ steps.pin.outputs.digest }}
+    steps:
+      - name: Await only the pinned original installer job, without rerunning it
+        id: pin
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const assert=require('assert/strict');
+            const runId=43451522704,head='11dc76fab569fc44a9ab199670fa4066c1f0184c',build='0d7588a9962cb01081777ae0f0d663eff929ef34';
+            for(let n=0;n<45;n++){
+              const run=(await github.rest.actions.getWorkflowRun({...context.repo,run_id:runId})).data;
+              assert.equal(run.run_attempt,1);assert.equal(run.head_sha,head);assert.equal(run.path,'.github/workflows/desktop-windows.yml');
+              assert.equal(run.head_repository.full_name,'offercontext/offerPilot');assert.equal(run.event,'pull_request');
+              const jobs=await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,{...context.repo,run_id:runId,attempt_number:1});
+              const job=jobs.find(j=>j.name==='Experimental installer and desktop smoke');
+              if(job?.status==='completed'){
+                assert.equal(job.conclusion,'success','pinned installer job must succeed before native acceptance');
+                const artifacts=await github.paginate(github.rest.actions.listWorkflowRunArtifacts,{...context.repo,run_id:runId});
+                const matches=artifacts.filter(a=>a.name===`offerpilot-windows-experimental-validation-${build}`&&!a.expired);
+                assert.equal(matches.length,1);const a=matches[0];assert.match(a.digest,/^sha256:[a-f0-9]{64}$/);
+                assert.equal(a.workflow_run.head_sha,head);assert.equal(a.workflow_run.id,runId);
+                for(const sha of [head,build])assert.equal((await github.rest.git.getCommit({...context.repo,commit_sha:sha})).data.tree.sha,'39e3f0b66837b1f5cec6d1782a33cb2201643090');
+                core.setOutput('artifact',String(a.id));core.setOutput('digest',a.digest);return;
+              }
+              if(['cancelled','failure','timed_out'].includes(run.conclusion))throw Error('original run cannot supply an accepted installer');
+              await new Promise(resolve=>setTimeout(resolve,60000));
+            }
+            throw Error('bounded original installer wait expired; native acceptance not run');
+  native:
+    needs: package
+    runs-on: windows-2022
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: helper
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 0d7588a9962cb01081777ae0f0d663eff929ef34
+          path: product
+          persist-credentials: false
+      - name: Download and strictly verify the original artifact ZIP digest
+        uses: actions/github-script@v7
+        env:
+          PIN_ARTIFACT: ${{ needs.package.outputs.artifact }}
+          PIN_DIGEST: ${{ needs.package.outputs.digest }}
+        with:
+          script: |
+            const fs=require('fs'),crypto=require('crypto'),assert=require('assert/strict');
+            const id=Number(process.env.PIN_ARTIFACT);
+            const meta=(await github.rest.actions.getArtifact({...context.repo,artifact_id:id})).data;
+            assert.equal(meta.digest,process.env.PIN_DIGEST);assert.equal(meta.expired,false);
+            assert.equal(meta.workflow_run.id,43451522704);assert.equal(meta.workflow_run.head_sha,'11dc76fab569fc44a9ab199670fa4066c1f0184c');
+            const response=await github.rest.actions.downloadArtifact({...context.repo,artifact_id:id,archive_format:'zip'});
+            assert.notEqual(typeof response.data,'string','raw ZIP bytes required');
+            const bytes=Buffer.from(response.data);
+            const digest='sha256:'+crypto.createHash('sha256').update(bytes).digest('hex');
+            assert.equal(digest,process.env.PIN_DIGEST,'artifact ZIP digest mismatch is fatal');
+            fs.writeFileSync('verified-installer.zip',bytes,{flag:'wx'});
+            fs.mkdirSync('reminder-evidence',{recursive:true});
+            fs.writeFileSync('reminder-evidence/artifact-digest.json',JSON.stringify({artifact:id,expected:process.env.PIN_DIGEST,actual:digest,matched:true},null,2));
+      - name: Extract only the verified flat installer artifact
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip=[IO.Compression.ZipFile]::OpenRead((Resolve-Path verified-installer.zip))
+          try {
+            foreach($entry in $zip.Entries){
+              if($entry.FullName -notmatch '^[A-Za-z0-9._ -]+$' -or $entry.FullName -match '^\.'){throw 'Unexpected artifact entry path'}
+            }
+          } finally {$zip.Dispose()}
+          Expand-Archive -LiteralPath verified-installer.zip -DestinationPath installer
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm.cmd ci --prefix helper/desktop/installed-ui --ignore-scripts
+      - name: Bind installer bytes to the original artifact and source tree
+        env:
+          PIN_ARTIFACT: ${{ needs.package.outputs.artifact }}
+          PIN_DIGEST: ${{ needs.package.outputs.digest }}
+        run: |
+          $files=@(Get-ChildItem installer -Filter '*-setup.exe')
+          if($files.Count -ne 1){throw 'Exactly one pinned installer required'}
+          $file=$files[0];$actual=(Get-FileHash -Algorithm SHA256 $file.FullName).Hash.ToLowerInvariant()
+          $sidecar=(Get-Content -Raw ($file.FullName+'.sha256')).Trim()
+          if(($sidecar -split '\s+')[0] -ne $actual){throw 'Original installer checksum mismatch'}
+          $notes=Get-Content -Raw installer/VALIDATION-NOTES.txt
+          if($notes -notmatch 'Commit: 0d7588a9962cb01081777ae0f0d663eff929ef34' -or $notes -notmatch 'Attempt: 1'){throw 'Original build provenance mismatch'}
+          $pin=@{repository='offercontext/offerPilot';productCommit='11dc76fab569fc44a9ab199670fa4066c1f0184c';buildCommit='0d7588a9962cb01081777ae0f0d663eff929ef34';tree='39e3f0b66837b1f5cec6d1782a33cb2201643090';runId=43451522704;attempt=1;artifactId=$env:PIN_ARTIFACT;artifactDigest=$env:PIN_DIGEST;installer=$file.Name;installerSha256=$actual;helperCommit=$env:GITHUB_SHA}
+          New-Item -ItemType Directory -Force reminder-evidence | Out-Null
+          $pin | ConvertTo-Json | Set-Content -Encoding utf8 helper/desktop/installed-ui/reminder-pin.json
+          Copy-Item helper/desktop/installed-ui/reminder-pin.json reminder-evidence/pin.json
+      - name: Deterministic lifecycle matrix against the pinned product modules
+        run: node --test helper/desktop/installed-ui/reminder-matrix.test.cjs
+        env:
+          REMINDER_PRODUCT_SOURCE: ${{ github.workspace }}/product
+      - name: Installed native notification observation without permission changes
+        run: node helper/desktop/installed-ui/reminder-installed.mjs
+        env:
+          REMINDER_PRODUCT_SOURCE: ${{ github.workspace }}/product
+          REMINDER_INSTALLER_DIR: ${{ github.workspace }}/installer
+          REMINDER_EVIDENCE: ${{ github.workspace }}/reminder-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: reminder-native-${{ github.sha }}-${{ github.run_attempt }}
+          path: reminder-evidence/
+          if-no-files-found: warn
+          retention-days: 14

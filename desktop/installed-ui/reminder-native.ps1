@@ -28,6 +28,8 @@ while($clock.Elapsed.TotalSeconds -lt 85){
   try{
    $process=Get-Process -Id $window.Current.ProcessId -ErrorAction Stop
    if($process.ProcessName -notin @('ShellExperienceHost','ShellHost')){continue}
+   $titleCondition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,'OfferPilot')
+   if($null -eq $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$titleCondition)){continue}
    $condition=[System.Windows.Automation.PropertyCondition]::new([System.Windows.Automation.AutomationElement]::NameProperty,$body)
    $node=$window.FindFirst([System.Windows.Automation.TreeScope]::Descendants,$condition)
    if($null -eq $node -or $node.Current.IsOffscreen){continue}
