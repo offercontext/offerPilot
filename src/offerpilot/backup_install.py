@@ -20,6 +20,8 @@ from offerpilot.workspace_lock import (
 )
 
 
+_installed_here: set[Path] = set()
+
 def _reset_authority(root: Path, candidate: Path) -> None:
     from offerpilot.config import Config
 
@@ -129,6 +131,7 @@ def ensure_workspace_lease(root: Path, *, apply_restore: bool = False) -> None:
                 _rollback(root, record)
             elif record["state"] == "queued":
                 _install(root, record)
+                _installed_here.add(root)
             retain_shared(root, fd)
         except BaseException:
             os.close(fd)
@@ -140,5 +143,7 @@ def complete_startup(root: Path) -> None:
     with exclusive_control(root):
         record = read_record(root)
         if record["state"] == "installed":
+            if root not in _installed_here or not has_lease(root):
+                raise ValueError("restore_startup_owner_required")
             record["state"] = "completed"
             write_record(root, record)

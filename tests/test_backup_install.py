@@ -189,3 +189,41 @@ install.ensure_workspace_lease(Path({str(root)!r}), apply_restore=True)
     assert cold(root).returncode == 0
     assert restore.status(root)["state"] == "rolled_back"
     assert workspace_files(root) == before
+
+
+def test_other_process_cannot_complete_install(queued):
+    root, _ = queued
+    assert cold(root, complete=False).returncode == 0
+    result = subprocess.run([sys.executable, "-c", "from pathlib import Path; "
+                             "from offerpilot.backup_install import complete_startup; "
+                             f"complete_startup(Path({str(root)!r}))"], capture_output=True, timeout=20)
+    assert result.returncode != 0
+    assert restore.status(root)["state"] == "installed"
+    assert cold(root).returncode == 0
+    assert restore.status(root)["state"] == "rolled_back"
+
+
+def test_missing_original_fails_closed(queued):
+    root, record = queued
+    assert cold(root, complete=False).returncode == 0
+    _, original, _ = restore.operation_paths(root, record)
+    original.rename(root.parent / "original-kept-aside")
+    before = workspace_files(root)
+    assert cold(root).returncode != 0
+    assert restore.status(root)["state"] == "installed"
+    assert workspace_files(root) == before
+
+
+def test_linked_stage_does_not_modify_external_target(queued):
+    from tests.conftest import symlink_or_skip
+
+    root, record = queued
+    before = workspace_files(root)
+    candidate, _, _ = restore.operation_paths(root, record)
+    outside = root.parent / "outside"
+    candidate.rename(outside)
+    outside_before = workspace_files(outside)
+    symlink_or_skip(candidate, outside, target_is_directory=True)
+    assert cold(root).returncode != 0
+    assert workspace_files(root) == before
+    assert workspace_files(outside) == outside_before
