@@ -5,6 +5,10 @@
 
 ## 当前记录
 
+### 简历与材料
+
+- [ADR-0018: 导出已保存的简历文档](0018-export-saved-resume-documents.md) — Implementation candidate
+
 ### 面试训练证据
 
 - [ADR-0017: 将训练证据限定在用户选择的练习计划](0017-bound-interview-training-evidence.md) — Implementation candidate

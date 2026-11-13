@@ -165,7 +165,10 @@
     {
       "id": "resumes",
       "production": [
-        "src/offerpilot/repositories/resumes.py"
+        "src/offerpilot/repositories/resumes.py",
+        "src/offerpilot/resume_export.py",
+        "src/offerpilot/resume_export_routes.py",
+        "src/offerpilot/assets/fonts/**"
       ],
       "tests": [
         "tests/test_resume*.py"
@@ -9809,6 +9812,38 @@
       "requires": [],
       "risk_tags": [
         "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_desktop_resume_export_smoke.py": {
+      "modules": [
+        "resumes",
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "privacy",
+        "snapshot_consistency",
+        "packaging"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_resume_export.py": {
+      "modules": [
+        "resumes"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "auth",
+        "privacy",
+        "snapshot_consistency",
+        "packaging"
       ],
       "level": "test",
       "estimated_seconds": null

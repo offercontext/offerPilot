@@ -15,6 +15,7 @@ import ResumeEvidenceAuditPanel from './ResumeEvidenceAuditPanel';
 import ResumeFactSupplementWorkspace from './ResumeFactSupplementWorkspace';
 import type { ResumeAuditFinding } from '@/lib/resumeEvidenceAudit';
 import ResumeImportReview from './ResumeImportReview';
+import ResumeExportModal from './ResumeExportModal';
 
 interface Props {
   resume: Resume | null;
@@ -73,6 +74,7 @@ export default function ResumeEditorDrawer({
   const [advancedBaseline, setAdvancedBaseline] = useState('');
   const [auditOpen, setAuditOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [importReviewed, setImportReviewed] = useState(false);
   const [supplementFinding, setSupplementFinding] = useState<ResumeAuditFinding | null>(null);
   const lineageResumes = useMemo(() => {
@@ -95,6 +97,7 @@ export default function ResumeEditorDrawer({
     setAdvancedOpen(false);
     setAuditOpen(false);
     setImportOpen(false);
+    setExportOpen(false);
     setSupplementFinding(null);
   }, [open, parsed, resume]);
 
@@ -212,6 +215,10 @@ export default function ResumeEditorDrawer({
           <Button aria-expanded={auditOpen} aria-controls="resume-evidence-audit-panel" onClick={() => setAuditOpen((value) => !value)}>
             {t("简历事实体检")}</Button>
           <Button aria-expanded={advancedOpen} onClick={toggleAdvancedEditor}>{t("高级 JSON")}</Button>
+          <Button onClick={() => {
+            if (editorDirty || saveMut.isPending) { message.warning(liveText(() => t("请先保存当前编辑，保存完成后再导出。"))); return; }
+            setExportOpen(true);
+          }}>{t("导出简历")}</Button>
           <Button onClick={requestClose}>{t("取消")}</Button>
           <Button type="primary" disabled={parsed.mode === 'recovery' && !advancedOpen} loading={saveMut.isPending} onClick={handleSave}>{t("保存")}</Button>
         </Space>
@@ -264,7 +271,7 @@ export default function ResumeEditorDrawer({
       ) : (
         <div className={styles.editorGrid}>
           <nav className={styles.sectionNav} aria-label={t("简历章节")}>
-            {(resume.source === 'upload' ? [...SECTIONS, { key: 'original' as const, label: t("PDF 提取原文") }] : SECTIONS).map((section) => (
+            {(resume.source === 'upload' || draft.rawText ? [...SECTIONS, { key: 'original' as const, label: resume.source === 'upload' ? t("PDF 提取原文") : t("历史原文") }] : SECTIONS).map((section) => (
               <button key={section.key} type="button" className={activeSection === section.key ? styles.sectionNavActive : undefined} onClick={() => setActiveSection(section.key)}>
                 {section.label}
               </button>
@@ -275,6 +282,8 @@ export default function ResumeEditorDrawer({
           </section>
         </div>
       )}
+
+      {exportOpen && <ResumeExportModal key={`${resume.id}-${locale}`} resume={resume} blocked={editorDirty || saveMut.isPending} onClose={() => setExportOpen(false)} />}
 
       {importOpen && <ResumeImportReview key={resume.id} resume={resume} onClose={() => setImportOpen(false)} onSaved={(updated) => {
         setImportOpen(false);
@@ -297,12 +306,12 @@ export default function ResumeEditorDrawer({
   );
 }
 
-function StructuredSection({ section, draft, onChange, imported = false }: { section: SectionKey; draft: StructuredResumeDraft; onChange: (draft: StructuredResumeDraft) => void; imported?: boolean }) {
+function StructuredSection({ section, draft, onChange, imported }: { section: SectionKey; draft: StructuredResumeDraft; onChange: (draft: StructuredResumeDraft) => void; imported: boolean }) {
   useLocale();
   if (section === 'original') return <>
-    <div className={styles.sectionTitle}>{t("PDF 提取原文")}</div>
-    <p>{t("这是上传文件提取的文字，分类和填写“其他”不会修改它。需要重新提取时请重新上传文件。")}</p>
-    <Input.TextArea rows={18} value={draft.rawText} readOnly aria-label={t("PDF 提取原文")} />
+    <div className={styles.sectionTitle}>{imported ? t("PDF 提取原文") : t("历史原文")}</div>
+    <p>{imported ? t("这是上传文件提取的文字，分类和填写“其他”不会修改它。需要重新提取时请重新上传文件。") : t("历史原文只读保留，不参与导出。需要导出的内容请明确填写到结构化章节或“其他”。")}</p>
+    <Input.TextArea rows={18} value={draft.rawText} readOnly aria-label={imported ? t("PDF 提取原文") : t("历史原文")} />
   </>;
   if (section === 'intent') {
     return <>
@@ -328,7 +337,8 @@ function StructuredSection({ section, draft, onChange, imported = false }: { sec
   if (section === 'other') {
     return <>
       <div className={styles.sectionTitle}>{t("其他")}</div>
-      <Input.TextArea rows={14} value={imported ? draft.additionalText ?? '' : draft.rawText} placeholder={t("补充现有简历中的其他文本")} onChange={(event) => onChange(imported ? { ...draft, additionalText: event.target.value } : { ...draft, rawText: event.target.value })} />
+      <p>{t("此处只填写明确补充的文本。历史原文单独保留，不会自动加入导出。")}</p>
+      <Input.TextArea rows={14} value={draft.additionalText ?? ''} placeholder={t("补充现有简历中的其他文本")} onChange={(event) => onChange({ ...draft, additionalText: event.target.value })} />
     </>;
   }
   const meta = {
