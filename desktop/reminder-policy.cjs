@@ -63,6 +63,11 @@ function select(candidates, p, history, now, enabledAt) {
   return candidates.filter(c => eligible(c,p,now,enabledAt) && !Object.hasOwn(history,c.key))
     .sort((a,b) => b.due-a.due || a.id.localeCompare(b.id)).slice(0,Math.min(BATCH_LIMIT,budget));
 }
+function advanceClock(highWater, now) {
+  if (!Number.isFinite(now) || now <= 0 || !Number.isFinite(highWater) || highWater < 0
+    || now < highWater - 2000) throw new Error('clock_changed');
+  return Math.max(highWater,now);
+}
 function prune(history, now) {
   const entries = Object.entries(history).filter(([,v]) => Number.isFinite(v) && v >= now-HISTORY_MS);
   // Never evict live dedupe entries to make room: rate-limit until they expire.
@@ -70,4 +75,4 @@ function prune(history, now) {
   return Object.fromEntries(entries);
 }
 module.exports = { REASONS,CATCHUP_MS,BATCH_LIMIT,HOUR_LIMIT,HISTORY_LIMIT,HISTORY_MS,
-  preferences,defaults,quiet,candidate,snapshot,eligible,select,prune };
+  preferences,defaults,quiet,candidate,snapshot,eligible,select,prune,advanceClock };

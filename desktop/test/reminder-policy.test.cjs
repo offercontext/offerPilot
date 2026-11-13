@@ -57,3 +57,14 @@ test('dedupe pruning never evicts live entries to allow duplicates',()=>{
  assert.deepEqual(p.prune({expired:now-p.HISTORY_MS-1,current:now},now),{current:now});
  assert.throws(()=>p.prune(Object.fromEntries(Array.from({length:1000},(_,i)=>[String(i),now])),now),/history_full/);
 });
+
+test('persisted clock high-water blocks replay after forward cleanup and backward restart',()=>{
+ const c=p.candidate(raw());let saved={highWater:now,history:{[c.key]:now}};
+ const forward=now+9*86400000;
+ saved={highWater:p.advanceClock(saved.highWater,forward),history:p.prune(saved.history,forward)};
+ const restarted=JSON.parse(JSON.stringify(saved));
+ assert.throws(()=>p.advanceClock(restarted.highWater,now+300000),/clock_changed/);
+ // Explicit re-enable starts a fresh eligibility baseline, never old backlog.
+ assert.deepEqual(p.select([c],options,restarted.history,now+300000,now+300000),[]);
+ assert.equal(p.advanceClock(now,now-1000),now);
+});
