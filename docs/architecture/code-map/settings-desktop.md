@@ -41,3 +41,7 @@
 模型与表定义从 [models.py](../../../src/offerpilot/models.py)、[db.py](../../../src/offerpilot/db.py) 下钻；数据库初始化/迁移和正在运行进程使用的 data_dir 要分开检查。不要因另一 worktree 的文件已改就推断当前进程或本地库已升级。
 
 [Python rewrite 契约](../../python-rewrite-contract.md)、[P0 清单](../../p0-release-checklist.md)保留各自适用范围；完整发布验证入口与风险矩阵见 [AGENTS §7](../../../AGENTS.md#7-验证与-code-review)。文档静态检查、局部测试、真实模型调用、桌面安装和 release gate 是不同证据层级。
+
+## 5. 恢复模块施工边界
+
+独立快照导出、预检、图片往返和历史 schema 拒绝的实现/测试及明确未接入部分见[备份恢复边界](../backup-restore.md)。用户恢复 API/UI 和冷启动安装尚未接入，不能把独立模块通过当作产品恢复可用。
