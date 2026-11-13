@@ -1,6 +1,6 @@
 # 工作区备份与恢复边界
 
-本页描述恢复模块的当前边界。导出、恢复 API、冷启动安装及回滚已接入；设置页入口尚待接入。预检成功不等于恢复完成。
+本页描述恢复模块的当前边界。导出、恢复 API、冷启动安装及回滚已接入；设置页入口已接入。预检成功不等于恢复完成。
 
 ## 格式与兼容
 
@@ -27,3 +27,9 @@
 DB、配置读取/写入、日志写入、MCP 和 Knowledge reset 持进程级共享租约；普通入口不消费待恢复队列。配置读取也必须先持租约，防止恢复后写回旧确认密钥。恢复保留目标安装登录/模型配置及 Journal key，轮换 confirmation_secret，关闭自动写入、proactive 任务、外部连接授权、邮件连接/AI 和排队中的 Knowledge 工作。
 
 API 为 GET /api/backups/restore 与 POST preview/confirm/cancel，沿用应用认证，突变操作另做同源检查。网页刷新不等于重启；用户确认后到重启前新增的工作也会被替换。
+
+## 验证范围
+
+[冷启动 API 测试](../../tests/test_backup_restore_api.py)以合成 Knowledge bundle 贯通上传、导出、确认、进程退出、冷启动安装，在源路径不可用后核对主文件、PNG 字节、附件/evidence 关联和原目录保留。[历史包测试](../../tests/test_backup_legacy.py)另经预检 API 验证 schema 拒绝后工作区文件摘要不变，不代表所有旧版本兼容。
+
+[云端回归](../../.github/workflows/backup-restore.yml)在 Linux/Windows 运行恢复专项，并使用真实恢复组件、HTTP 路由与进程重启检查双语 UI。测试宿主不是已安装 Electron，也不代表完整设置页导航验收；仅构建宿主不能算浏览器通过。完整 release gate 仍须独立通过。
