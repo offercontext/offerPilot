@@ -88,7 +88,10 @@ try{
  await restoreFlow({page,dataDirectory,scratch,output,report,saveExport,restart:async()=>{await stop();return launch();}});
  assert.notEqual(report.launches[0].mainPid,report.launches[1].mainPid);assert.notEqual(report.launches[0].created,report.launches[1].created);
  await stop();assert.equal(await hash(exe),report.installedExeSha256);assert.deepEqual(report.pageErrors,[]);assert.deepEqual(report.externalRequests,[]);
-}catch(error){report.failures.push({stage,type:error.name,code:error.code??null});}
+}catch(error){
+ report.failures.push({stage,type:error.name,code:error.code??null,message:String(error.message).split('\n')[0].replace(/https?:\/\/\S+/g,'[URL]').slice(0,500)});
+ if(page&&!page.isClosed())try{await page.screenshot({path:path.join(output,'failure.png'),fullPage:true});report.screenshots.push({file:'failure.png',sha256:await hash(path.join(output,'failure.png'))});}catch{/* Preserve the original failure. */}
+}
 finally{
  if(app){try{await stop();}catch{report.failures.push({stage:'normal-cleanup',type:'Failed'});if(owned.length)try{report.cleanup=await windows('cleanup',{UI_OWNED_IDENTITIES:JSON.stringify(owned.slice().reverse())});}catch{report.failures.push({stage:'owned-cleanup',type:'Failed'});}}}
  report.status=report.failures.length?'failed':'passed';await fs.writeFile(path.join(output,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify({status:report.status,assertions:report.assertions,failures:report.failures}));if(report.failures.length)process.exitCode=1;

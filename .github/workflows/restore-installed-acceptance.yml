@@ -34,8 +34,12 @@ jobs:
       - run: npm ci --prefix product/web --ignore-scripts
       - run: npm run build --prefix product/web
       - run: npm ci --prefix helper/desktop/installed-ui --ignore-scripts
-      - run: npx --no-install playwright-core install --with-deps chromium
-        working-directory: helper/desktop/installed-ui
+      - name: Locate system Chrome with its existing sandbox support
+        run: |
+          chrome=$(command -v google-chrome)
+          test -n "$chrome"
+          "$chrome" --version
+          echo "RESTORE_CHROMIUM=$chrome" >> "$GITHUB_ENV"
       - name: Full production Settings navigation and cold restore
         run: node helper/desktop/installed-ui/restore-web.mjs
         env:
