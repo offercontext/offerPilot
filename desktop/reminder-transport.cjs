@@ -14,6 +14,8 @@ function readReminderCandidates(origin,token){
    response.on('error',()=>reject(new Error('candidate_read_failed')));
    response.on('end',()=>{try{resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));}catch{reject(new Error('candidate_read_failed'));}});
   });
+  const deadline=setTimeout(()=>request.destroy(new Error('candidate_read_failed')),5000);
+  request.on('close',()=>clearTimeout(deadline));
   request.on('timeout',()=>request.destroy(new Error('candidate_read_failed')));
   request.on('error',()=>reject(new Error('candidate_read_failed')));
  });

@@ -489,7 +489,7 @@ const applications: Record<string, string> = {
   "面试准备建议": "Interview preparation suggestions",
   "尚未添加日程。收到笔试或面试通知后，可在这里记录时间与地点。": "No events yet. Record the time and location here when you receive a test or interview invitation.",
   "收起日程": "Collapse events",
-  "提醒时间仅作记录，不会自动向你或招聘方发送通知。": "Reminder times are recorded only. No notification is sent automatically to you or the recruiter.",
+  "网页提醒不发送系统通知；桌面端可在设置中主动开启支持范围内的本地提醒，不会向招聘方发送消息。": "Web reminders do not send system notifications. Enable supported desktop reminders in Settings. No messages are sent to recruiters.",
   "选择面试并开始复盘": "Select interview and start review",
   "面试复盘暂时无法读取": "Interview reviews are temporarily unavailable",
   "面试复盘数据格式异常，请重试": "Invalid interview review data format. Retry.",

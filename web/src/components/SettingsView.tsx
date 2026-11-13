@@ -7,6 +7,7 @@ import JobMailSettings from '@/features/jobMail/JobMailSettings';
 import ContextPolicySettings from './ContextPolicySettings';
 import ConfirmedMemorySettings from './ConfirmedMemorySettings';
 import ProactiveSettings from './ProactiveSettings';
+import DesktopRemindersCard from './DesktopRemindersCard';
 import DesktopUpdatesCard from './DesktopUpdatesCard';
 import { ApiOutlined, CopyOutlined, DownloadOutlined, FileSearchOutlined, ReloadOutlined, RobotOutlined, SettingOutlined } from '@ant-design/icons';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -296,6 +297,8 @@ export default function SettingsView({
       <Typography.Title id="settings-connections" level={3}>{t("连接与自动任务")}</Typography.Title>
       <Typography.Paragraph type="secondary">{t("这里只管理连接、权限和自动任务范围；提醒、邮件待审与任务结果统一在今日待办处理。")}</Typography.Paragraph>
       <JobMailSettings />
+      <DesktopRemindersCard />
+      <Divider />
       <ProactiveSettings />
 
       <section style={panelStyle} aria-labelledby="data-backup-settings-title">

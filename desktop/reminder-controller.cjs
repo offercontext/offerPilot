@@ -57,7 +57,7 @@ function createReminderController({store, readCandidates, createNotification, na
         visible.set(current.id,entry);
         notification.on('click',()=>{void click(entry);});
         notification.on('close',()=>{entry.active=false;if(visible.get(current.id)===entry)visible.delete(current.id);});
-        notification.on('failed',()=>{entry.active=false;visible.delete(current.id);error='notification_failed';publish();});
+        notification.on('failed',()=>{if(!entry.active||epoch!==generation||disposed||suspended||visible.get(current.id)!==entry)return;entry.active=false;visible.delete(current.id);error='notification_failed';publish();});
         notification.show(); // Attempt recorded; OS acceptance is not proof of delivery.
       }
       publish();

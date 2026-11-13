@@ -29,3 +29,11 @@ test('storage failure fails closed before any show and cannot silently reset opt
 test('backward clock blocks dispatch and requires explicit disable and re-enable',async()=>{
  const f=fixture();f.enable();f.due();await f.controller.tick();f.time=90000000;await f.controller.tick();assert.equal(f.controller.status().error,'clock_changed');f.controller.configure({...f.controller.status().preferences,enabled:false});f.enable();assert.equal(f.controller.status().error,null);
 });
+
+test('late failure of invalidated notification cannot override disabled or storage failure',async()=>{
+ for(const failure of [false,true]){
+  const f=fixture();f.enable();f.due();await f.controller.tick();
+  if(failure){f.failSave=true;await f.controller.tick();}else f.controller.configure({...f.controller.status().preferences,enabled:false});
+  const before=f.controller.status();f.notices[0].emit('failed');assert.deepEqual(f.controller.status(),before);
+ }
+});
