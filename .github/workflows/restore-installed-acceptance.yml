@@ -1,0 +1,115 @@
+name: Pinned backup restore full Settings and installed Electron
+on:
+  push:
+    branches: [feat/20261113-restore-installed-acceptance]
+    paths: [desktop/installed-ui/restore-*, .github/workflows/restore-installed-acceptance.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: helper
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 2c08061a1b97edced4b113c8ad7ae1198f0e3ce9
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+      - run: uv sync --frozen --group dev
+        working-directory: product
+      - run: npm ci --prefix product/web --ignore-scripts
+      - run: npm run build --prefix product/web
+      - run: npm ci --prefix helper/desktop/installed-ui --ignore-scripts
+      - run: npx --no-install playwright-core install --with-deps chromium
+        working-directory: helper/desktop/installed-ui
+      - name: Full production Settings navigation and cold restore
+        run: node helper/desktop/installed-ui/restore-web.mjs
+        env:
+          RESTORE_PRODUCT_SOURCE: ${{ github.workspace }}/product
+          RESTORE_EVIDENCE: ${{ github.workspace }}/web-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: restore-full-settings-${{ github.sha }}
+          path: |
+            web-evidence/report.json
+            web-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14
+  installed:
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: helper
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 2c08061a1b97edced4b113c8ad7ae1198f0e3ce9
+          path: product
+          persist-credentials: false
+      - name: Verify exact original build attempt and artifact identity
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs=require('fs'),assert=require('assert/strict');
+            const p=JSON.parse(fs.readFileSync('helper/desktop/installed-ui/restore-pin.json'));
+            assert.equal(`${context.repo.owner}/${context.repo.repo}`,p.repository);
+            const run=(await github.rest.actions.getWorkflowRun({...context.repo,run_id:p.runId})).data;
+            assert.equal(run.run_attempt,p.attempt);assert.equal(run.head_sha,p.productCommit);
+            assert.equal(run.event,'pull_request');assert.equal(run.path,'.github/workflows/desktop-windows.yml');
+            assert.equal(run.head_repository.full_name,p.repository);
+            const jobs=await github.paginate(github.rest.actions.listJobsForWorkflowRunAttempt,{...context.repo,run_id:p.runId,attempt_number:p.attempt});
+            const job=jobs.find(j=>j.id===p.installerJobId);
+            assert.equal(job?.name,'Experimental installer and desktop smoke');assert.equal(job.status,'completed');assert.equal(job.conclusion,'success');
+            const a=(await github.rest.actions.getArtifact({...context.repo,artifact_id:p.artifactId})).data;
+            assert.equal(a.name,p.artifactName);assert.equal(a.digest,p.artifactDigest);assert.equal(a.expired,false);
+            assert.equal(a.workflow_run.id,p.runId);assert.equal(a.workflow_run.head_sha,p.productCommit);
+            for(const sha of [p.productCommit,p.buildCommit])assert.equal((await github.rest.git.getCommit({...context.repo,commit_sha:sha})).data.tree.sha,p.tree);
+            fs.mkdirSync('installed-evidence',{recursive:true});
+            fs.writeFileSync('installed-evidence/source.json',JSON.stringify({pin:p,helperCommit:context.sha,installerJob:'success',fullGate:'independent-not-certified'},null,2));
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: '14013625029'
+          run-id: '43370394986'
+          github-token: ${{ github.token }}
+          path: installer
+          merge-multiple: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm.cmd ci --prefix helper/desktop/installed-ui --ignore-scripts
+      - name: Actual installed Electron Settings recovery and normal restart
+        run: node helper/desktop/installed-ui/restore-installed.mjs
+        env:
+          RESTORE_PRODUCT_SOURCE: ${{ github.workspace }}/product
+          RESTORE_INSTALLER_DIR: ${{ github.workspace }}/installer
+          RESTORE_EVIDENCE: ${{ github.workspace }}/installed-evidence
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: restore-installed-electron-${{ github.sha }}
+          path: |
+            installed-evidence/source.json
+            installed-evidence/report.json
+            installed-evidence/*.png
+          if-no-files-found: warn
+          retention-days: 14

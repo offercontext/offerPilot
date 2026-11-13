@@ -1,0 +1,14 @@
+{
+ "repository":"offercontext/offerPilot",
+ "productCommit":"2387d3c1c576f2eca79d1e1058018c630e9f3702",
+ "buildCommit":"2c08061a1b97edced4b113c8ad7ae1198f0e3ce9",
+ "tree":"3e829224e9082f8b13891474d1dcc8af84322ce2",
+ "runId":43370394986,
+ "attempt":1,
+ "installerJobId":131705672713,
+ "artifactId":14013625029,
+ "artifactName":"offerpilot-windows-experimental-validation-2c08061a1b97edced4b113c8ad7ae1198f0e3ce9",
+ "artifactDigest":"sha256:f1a254e0e80525bafc43d746e7fcafeefe741fde0ed7ccb3914fc3252db61c92",
+ "installer":"OfferPilot-Desktop-0.1.0-desktop.1-win-x64-setup.exe",
+ "installerSha256":"6c7fde3e7cf4c16368f10eb3dfb80db5d68de2ba538153d43e3adb32dacd34d6"
+}
