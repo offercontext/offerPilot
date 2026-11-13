@@ -16,7 +16,8 @@ export async function reminderFlow({page,app,exe,userData,output,report,command,
  assertStage('native AppUserModelID and installed shortcut match',identity.shortcut.appUserModelId==='org.offerpilot.desktop'&&report.native.identity.shortcutTargetMatches);
  const nativeScript=path.join(path.dirname(fileURLToPath(import.meta.url)),'reminder-native.ps1');
  const readyFile=path.join(output,'native-observer-ready');
- const native=async mode=>JSON.parse(await command('pwsh.exe',['-NoProfile','-NonInteractive','-File',nativeScript,'-Mode',mode],{...process.env,REMINDER_NATIVE_SCREENSHOT:path.join(output,'native-toast.png'),REMINDER_NATIVE_READY:readyFile},100000));
+ const nativeAbort=new AbortController();
+ const native=async mode=>JSON.parse(await command('pwsh.exe',['-NoProfile','-NonInteractive','-File',nativeScript,'-Mode',mode],{...process.env,REMINDER_NATIVE_SCREENSHOT:path.join(output,'native-toast.png'),REMINDER_NATIVE_READY:readyFile},100000,nativeAbort.signal));
  report.native.conditions=await native('conditions');
  await settings(page);const section=page.getByRole('region',{name:'桌面本地提醒',exact:true});
  const state=()=>page.evaluate(()=>window.offerpilotReminders.getState());
@@ -38,9 +39,10 @@ export async function reminderFlow({page,app,exe,userData,output,report,command,
   };
  });
  const nativePending=native('observe-and-click');nativePending.catch(()=>{});
+ try {
  await until(()=>fs.access(readyFile).then(()=>true,()=>false),15000);
  const ownerWindow=await app.browserWindow(page);await ownerWindow.evaluate(w=>w.minimize());
- report.native.backgroundBeforeDelivery=await ownerWindow.evaluate(w=>w.isMinimized());
+ report.native.backgroundBeforeDelivery=await ownerWindow.evaluate(w=>w.isMinimized());assert.ok(report.native.backgroundBeforeDelivery,'owner must actually be minimized before native delivery');
  const item=await api(page,'/api/applications','POST',{company_name:'Reminder QA Synthetic',position_name:'Native notification acceptance',status:'pending',notes:'synthetic-only'});
  const now=Date.now();const event=await api(page,'/api/application-events','POST',{application_id:item.id,event_type:'deadline',scheduled_at:new Date(now+3600000).toISOString(),remind_at:new Date(now+3000).toISOString(),duration_minutes:0,notes:'synthetic reminder detail',status:'todo'});
  const evidence=()=>app.evaluate(()=>globalThis.__reminderEvidence);
@@ -51,7 +53,7 @@ export async function reminderFlow({page,app,exe,userData,output,report,command,
  report.native.observation=await nativePending;
  report.native.visible=report.native.observation.visible===true;
  if(report.native.observation.pointerClick){
-  try{await until(async()=>(await evidence()).events.some(e=>e.event==='click'),10000);await page.getByRole('heading',{name:'提醒对应事项',exact:true}).waitFor({timeout:10000});await page.getByText('synthetic reminder detail',{exact:true}).waitFor();report.native.clicked=true;report.native.foregroundAfterClick=await ownerWindow.evaluate(w=>w.isVisible()&&!w.isMinimized());assert.ok(report.native.foregroundAfterClick);await shot('native-click-real-item');}catch{report.native.clickOutcome='native pointer attempted but application click/readback not confirmed';}
+  try{await until(async()=>(await evidence()).events.some(e=>e.event==='click'),10000);await page.getByRole('dialog',{name:'提醒对应事项',exact:true}).waitFor({timeout:10000});await page.getByText('synthetic reminder detail',{exact:true}).waitFor();report.native.foregroundAfterClick=await ownerWindow.evaluate(w=>w.isVisible()&&!w.isMinimized());assert.ok(report.native.foregroundAfterClick);await shot('native-click-real-item');report.native.clicked=true;}catch{report.native.clicked=false;report.native.clickOutcome='native pointer attempted but application click/readback not confirmed';}
  }
  report.native.events=(await evidence()).events;
  const saved=JSON.parse(await fs.readFile(path.join(userData,'desktop-reminders.json'),'utf8'));
@@ -66,4 +68,5 @@ export async function reminderFlow({page,app,exe,userData,output,report,command,
  assertStage('acceptance closes its explicit opt-in',(await state()).preferences.enabled===false);
  await shot('native-final-disabled');
  if(!report.native.visible||!report.native.clicked)throw Error('native-toast-visibility-or-real-click-not-observed');
+ } finally {nativeAbort.abort();await nativePending.catch(()=>{});}
 }

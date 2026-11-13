@@ -22,8 +22,8 @@ const report={scope:'Pinned NSIS-installed Electron: real reminder settings, nat
 let app,page,exe,backend,installDir,userData,scratch,environment,owned=[],stage='environment';
 await fs.mkdir(output,{recursive:true});
 const exists=f=>fs.access(f).then(()=>true,()=>false);
-async function command(executable,args,env=environment,timeout=180000){
- return new Promise((resolve,reject)=>{const child=spawn(executable,args,{env,windowsHide:true,stdio:['ignore','pipe','pipe']});let chunks=[],bytes=0;const timer=setTimeout(()=>{child.kill();reject(new Error('owned command timed out'));},timeout);
+async function command(executable,args,env=environment,timeout=180000,signal){
+ return new Promise((resolve,reject)=>{const child=spawn(executable,args,{env,windowsHide:true,stdio:['ignore','pipe','pipe'],signal});let chunks=[],bytes=0;const timer=setTimeout(()=>{child.kill();reject(new Error('owned command timed out'));},timeout);
  child.stdout.on('data',b=>{bytes+=b.length;if(bytes<8*1024*1024)chunks.push(b);});child.stderr.resume();child.once('error',()=>{clearTimeout(timer);reject(new Error('command spawn failed'));});child.once('exit',code=>{clearTimeout(timer);if(code!==0||bytes>=8*1024*1024)reject(new Error(`command failed: ${code}`));else resolve(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/,''));});});
 }
 async function windows(mode,extra={}){return JSON.parse(await command('pwsh.exe',['-NoProfile','-NonInteractive','-File',path.join(here,'windows.ps1'),'-Mode',mode],{...environment,...extra},mode==='install'?210000:30000));}
