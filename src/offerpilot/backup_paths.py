@@ -16,9 +16,12 @@ def archive_parts(name: str, *, directory: bool = False) -> tuple[str, ...]:
     if directory and name.endswith("/"):
         name = name[:-1]
     parts = tuple(name.split("/"))
+    if len(name.encode("utf-8")) > 2048 or len(parts) > 32:
+        raise ValueError("unsafe_archive_path")
     for part in parts:
         if (
             not part
+            or len(part.encode("utf-8")) > 240
             or part in {".", ".."}
             or part.endswith((" ", "."))
             or any(ord(char) < 32 or ord(char) == 127 or char in '\\:*?"<>|' for char in part)

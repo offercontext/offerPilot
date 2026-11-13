@@ -38,6 +38,13 @@ class BackupPathTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_archive_index([ZipInfo("file\x00hidden")])
 
+    def test_path_resource_limits(self):
+        for name in ("/".join(["x"] * 33), "x" * 241, "简" * 81,
+                     "/".join(["x" * 240] * 9)):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                archive_parts(name)
+        self.assertEqual(len(archive_parts("/".join(["x"] * 32))), 32)
+
     def test_entry_limit(self):
         with self.assertRaises(ValueError):
             validate_archive_index([ZipInfo("a"), ZipInfo("b")], max_entries=1)

@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import shutil
+import stat
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -30,6 +31,10 @@ def file_digest(path: Path) -> str:
 
 
 def workspace_files(root: Path) -> dict[str, str]:
+    # lstat also rejects Windows junctions/reparse points before traversal.
+    metadata = root.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or getattr(metadata, "st_file_attributes", 0) & 0x400:
+        raise ValueError("unsafe_workspace_root")
     result = {}
     for path in sorted(root.rglob("*")):
         if path.is_symlink():

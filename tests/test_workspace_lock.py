@@ -60,3 +60,19 @@ def test_control_is_exclusive(tmp_path: Path) -> None:
         with pytest.raises(OSError):
             with exclusive_control(tmp_path):
                 pass
+
+
+def test_alias_uses_same_lock_identity(tmp_path: Path) -> None:
+    from tests.conftest import symlink_or_skip
+
+    root = tmp_path / "workspace"
+    root.mkdir()
+    alias = tmp_path / "alias"
+    symlink_or_skip(alias, root, target_is_directory=True)
+    fd = acquire_workspace(alias)
+    try:
+        assert child(root, False).returncode == 0
+        assert child(root, True).returncode != 0
+    finally:
+        os.close(fd)
+    assert child(root, True).returncode == 0

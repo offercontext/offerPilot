@@ -120,3 +120,26 @@ def test_manifest_has_separate_limit(workspace: Path, monkeypatch: pytest.Monkey
     monkeypatch.setattr("offerpilot.backup_archive.MAX_MANIFEST", 20)
     with pytest.raises(ValueError, match="manifest_limit"):
         stage_archive(package(workspace), workspace.parent / "stage", workspace / "data.db")
+
+
+def test_workspace_root_link_is_rejected_without_touching_target(workspace: Path) -> None:
+    from tests.conftest import symlink_or_skip
+
+    before = workspace_files(workspace)
+    alias = workspace.parent / "candidate"
+    symlink_or_skip(alias, workspace, target_is_directory=True)
+    with pytest.raises(ValueError, match="unsafe_workspace_root"):
+        workspace_files(alias)
+    assert workspace_files(workspace) == before
+
+
+def test_existing_stage_link_is_not_removed(workspace: Path) -> None:
+    from tests.conftest import symlink_or_skip
+
+    before = workspace_files(workspace)
+    alias = workspace.parent / "candidate"
+    symlink_or_skip(alias, workspace, target_is_directory=True)
+    with pytest.raises(FileExistsError):
+        stage_archive(package(workspace), alias, workspace / "data.db")
+    assert alias.is_symlink()
+    assert workspace_files(workspace) == before

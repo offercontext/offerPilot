@@ -82,6 +82,7 @@ def exclusive_control(root: Path) -> Iterator[None]:
 
 def acquire_workspace(root: Path, *, exclusive: bool = False) -> int:
     """Caller holds admission lock; close returned descriptor to release ownership."""
+    root = root.resolve()
     fd = _open(root.parent / f".{root.name}.workspace.lock")
     try:
         _lock(fd, exclusive=exclusive)
