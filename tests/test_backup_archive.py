@@ -143,3 +143,38 @@ def test_existing_stage_link_is_not_removed(workspace: Path) -> None:
         stage_archive(package(workspace), alias, workspace / "data.db")
     assert alias.is_symlink()
     assert workspace_files(workspace) == before
+
+
+def test_knowledge_bundle_bytes_and_relations(workspace: Path) -> None:
+    directory = workspace / 'knowledge/sources/1'
+    (directory / 'assets').mkdir(parents=True)
+    main = b'# Synthetic source\n![asset](assets/image.png)'
+    asset = b'synthetic image bytes'
+    (directory / 'source.md').write_bytes(main)
+    (directory / 'assets/image.png').write_bytes(asset)
+    with closing(sqlite3.connect(workspace / 'data.db')) as db:
+        db.execute("INSERT INTO knowledge_sources (id,source_hash,main_filename,main_relative_path,total_bytes) "
+                   "VALUES (1,'synthetic','source.md','knowledge/sources/1/source.md',?)", (len(main)+len(asset),))
+        db.execute("INSERT INTO knowledge_source_assets "
+                   "(source_id,logical_name,media_type,relative_path,bytes,sha256) "
+                   "VALUES (1,'image.png','image/png','knowledge/sources/1/assets/image.png',?,?)",
+                   (len(asset), hashlib.sha256(asset).hexdigest()))
+        db.commit()
+    destination = workspace.parent / 'independent'
+    stage_archive(package(workspace), destination, workspace / 'data.db')
+    assert (destination / 'knowledge/sources/1/source.md').read_bytes() == main
+    assert (destination / 'knowledge/sources/1/assets/image.png').read_bytes() == asset
+    with closing(sqlite3.connect(destination / 'data.db')) as db:
+        assert db.execute('SELECT a.logical_name,s.main_filename FROM knowledge_source_assets a '
+                          'JOIN knowledge_sources s ON s.id=a.source_id').fetchall() == [('image.png','source.md')]
+    (directory / 'assets/image.png').write_bytes(b'corrupted')
+    with pytest.raises(ValueError, match='attachment_mismatch'):
+        stage_archive(package(workspace), workspace.parent / 'bad-bytes', workspace / 'data.db')
+    (directory / 'assets/image.png').write_bytes(asset)
+    with closing(sqlite3.connect(workspace / 'data.db')) as db:
+        db.execute('UPDATE knowledge_source_assets SET source_id=999')
+        db.commit()
+    before = workspace_files(workspace)
+    with pytest.raises(ValueError, match='database_integrity'):
+        stage_archive(package(workspace), workspace.parent / 'bad-relation', workspace / 'data.db')
+    assert workspace_files(workspace) == before
