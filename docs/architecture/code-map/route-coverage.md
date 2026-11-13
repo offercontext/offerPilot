@@ -68,7 +68,7 @@
 | [Pilot、上下文和确认](pilot-runtime.md) | [summary_api.py](../../../src/offerpilot/context_sources/summary_api.py) `/api/conversations` | 2 | `generate_summary` |
 | [题库与复习](questions.md) | [api.py](../../../src/offerpilot/api.py) `/api/questions` | 9 | `list_questions` |
 | [设置、认证与公共入口](settings-desktop.md) | [api.py](../../../src/offerpilot/api.py) `/api/auth` | 1 | `auth_status` |
-| [设置、认证与公共入口](settings-desktop.md) | [api.py](../../../src/offerpilot/api.py) `/api/backups` | 1 | `export_backup` |
+| [设置、认证与公共入口](settings-desktop.md) | [api.py](../../../src/offerpilot/api.py) `/api/backups` | 5 | `export_backup`、`backup_routes.register_backup_routes` |
 | [设置、认证与公共入口](settings-desktop.md) | [api.py](../../../src/offerpilot/api.py) `/api/health` | 1 | `health` |
 | [设置、认证与公共入口](settings-desktop.md) | [api.py](../../../src/offerpilot/api.py) `/api/logs` | 1 | `get_logs` |
 | [设置、认证与公共入口](settings-desktop.md) | [api.py](../../../src/offerpilot/api.py) `/api/onboarding` | 2 | `get_onboarding` |
