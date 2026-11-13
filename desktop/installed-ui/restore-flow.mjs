@@ -18,7 +18,7 @@ export async function api(page, url, method='GET', body) {
 }
 export async function navigateSettings(page) {
  await page.getByRole('navigation',{name:'主导航',exact:true}).waitFor();
- await page.getByRole('button',{name:'设置',exact:true}).click();
+ await page.getByRole('navigation',{name:'主导航',exact:true}).getByRole('button',{name:'设置',exact:true}).click();
  await page.getByRole('button',{name:'数据与备份',exact:true}).click();
  await page.getByRole('heading',{name:'从工作区 ZIP 恢复',exact:true}).waitFor();
 }
