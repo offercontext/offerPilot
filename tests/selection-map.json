@@ -9981,6 +9981,123 @@
       ],
       "level": "test",
       "estimated_seconds": null
+    },
+    "tests/evaluation/test_p0_diagnostics.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_windows_owner.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_evidence_budget.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_read_api.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_read_atomic.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_read_parser.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_training_evidence.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_private_paths.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/TrainingEvidencePanel.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
     }
   },
   "safety_baseline": "tests/selection-safety-integrated-v1.json"
