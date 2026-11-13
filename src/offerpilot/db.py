@@ -96,6 +96,9 @@ def _ensure_chat_image_schema(engine: Engine) -> None:
 
 
 def init_database(db_path: Path) -> SessionFactory:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(db_path.parent)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         f"sqlite:///{db_path}",
