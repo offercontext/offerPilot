@@ -21,6 +21,7 @@ export const DESKTOP_SOURCE_FILES = Object.freeze(Object.keys(AUDITED_DESKTOP_MO
 // immutable historical installer hashes above: localization adds modules but
 // must not relabel new source as the previously audited product.
 export const CURRENT_DESKTOP_SOURCE_FILES = Object.freeze([
+  "reminder-policy.cjs", "reminder-store.cjs", "reminder-controller.cjs", "reminder-transport.cjs", "reminder-service.cjs",
   ...DESKTOP_SOURCE_FILES,
   'locale.cjs',
   'locale-catalog.cjs',

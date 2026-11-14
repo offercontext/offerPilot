@@ -19,7 +19,7 @@ export default {
   '知识来源记录': 'Knowledge source records',
   '从工作区 ZIP 恢复': 'Restore from workspace ZIP',
   '恢复会替换当前工作区': 'Restoring replaces the current workspace',
-  '覆盖数据库、简历、会话图片和知识附件。保留本机模型及登录设置；关闭自动写入、主动任务和外部授权，取消待处理知识任务，邮箱需重新连接。当前版本备份不含 Journal 指纹密钥，跨工作区不保证续记旧运行；桌面和浏览器偏好不在恢复范围内。': 'Replaces the database, resumes, chat images and knowledge attachments. Keeps local model and login settings. Disables automatic writes, proactive jobs and external grants, and cancels pending knowledge tasks; mail must be reconnected. Current-version backups exclude the Journal fingerprint key, so continuing old runs across workspaces is not guaranteed. Desktop and browser preferences are excluded.',
+  '覆盖数据库、简历、会话图片和知识附件。保留本机模型及登录设置；关闭自动写入、主动任务和外部授权，取消待处理知识任务，邮箱需重新连接。当前版本备份不含 Journal 指纹密钥，跨工作区不保证续记旧运行；桌面和浏览器偏好不从备份导入；桌面提醒会关闭，需重新开启。': 'Replaces the database, resumes, chat images and knowledge attachments. Keeps local model and login settings. Disables automatic writes, proactive jobs and external grants, and cancels pending knowledge tasks; mail must be reconnected. Current-version backups exclude the Journal fingerprint key, so continuing old runs across workspaces is not guaranteed. Desktop and browser preferences are not imported. Desktop reminders are turned off and require enabling again.',
   '刷新恢复状态': 'Refresh restore status',
   '选择 ZIP 并预检': 'Choose ZIP and validate',
   '恢复备份文件': 'Restore backup file',

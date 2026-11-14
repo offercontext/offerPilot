@@ -2752,10 +2752,8 @@ def _ensure_review_to_readiness_feedback_schema(
         )
 
         create_offer_compensation_pair = (
-            """
-                OR (parent.tool_name = 'create_offer'
-                    AND NEW.tool_name = 'undo:create_offer')
-            """
+            " OR\n"
+            "                (parent.tool_name = 'create_offer' AND NEW.tool_name = 'undo:create_offer')"
             if create_offer_migration_exists
             else ""
         )
@@ -2776,8 +2774,7 @@ def _ensure_review_to_readiness_feedback_schema(
                  AND NEW.tool_name = 'undo:create_application') OR
                 (parent.tool_name = 'create_application_event'
                  AND NEW.tool_name = 'undo:create_application_event') OR
-                (parent.tool_name = 'add_note' AND NEW.tool_name = 'undo:add_note')
-                {create_offer_compensation_pair}
+                (parent.tool_name = 'add_note' AND NEW.tool_name = 'undo:add_note'){create_offer_compensation_pair}
               )) OR
               (parent.adapter_kind = 'product_action' AND (
                 (parent.tool_name = 'confirm_interview_story'

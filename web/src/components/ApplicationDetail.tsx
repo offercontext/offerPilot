@@ -2199,7 +2199,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
             {expandedScheduleApplicationId === application.id ? t("收起日程") : t("查看全部 {length} 条日程", { length: allEvents.length })}
           </Button>
         ) : null}
-        <Text type="secondary" className={styles.reminderNote}>{t("提醒时间仅作记录，不会自动向你或招聘方发送通知。")}</Text>
+        <Text type="secondary" className={styles.reminderNote}>{t("网页提醒不发送系统通知；桌面端可在设置中主动开启支持范围内的本地提醒，不会向招聘方发送消息。")}</Text>
         </section>
         <section className={styles.preparationCard} aria-labelledby="application-interview-heading">
         <Title id="application-interview-heading" level={4} className={styles.cardTitle}>{t("面试复盘")}</Title>

@@ -213,7 +213,10 @@ test('reviewed desktop module manifest covers every packaged local CJS and relat
       assert.ok(DESKTOP_SOURCE_FILES.includes(match[1].slice(2)), 'relative historical import missing from reviewed closure');
     }
   }
-  assert.equal(CURRENT_DESKTOP_SOURCE_FILES.length, 14);
+  assert.equal(CURRENT_DESKTOP_SOURCE_FILES.length, 19);
+  for (const name of ['reminder-policy.cjs', 'reminder-store.cjs', 'reminder-controller.cjs', 'reminder-transport.cjs', 'reminder-service.cjs']) {
+    assert.ok(CURRENT_DESKTOP_SOURCE_FILES.includes(name), 'reviewed reminder module missing from current closure');
+  }
   assert.ok(CURRENT_DESKTOP_SOURCE_FILES.includes('locale.cjs'));
   assert.ok(CURRENT_DESKTOP_SOURCE_FILES.includes('locale-catalog.cjs'));
   for (const filename of CURRENT_DESKTOP_SOURCE_FILES) {

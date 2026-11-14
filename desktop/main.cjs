@@ -1,10 +1,12 @@
 'use strict';
-const { app, BrowserWindow, dialog, session, shell, Tray, Menu, nativeImage, screen, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, session, shell, Tray, Menu, nativeImage, screen, ipcMain, Notification, powerMonitor } = require('electron');
 const { spawn } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { allowHaruResource, authenticatedHeaders } = require('./haru-protocol.cjs');
+const { readReminderContext } = require('./reminder-transport.cjs');
+const { createReminderService } = require('./reminder-service.cjs');
 const { createHaruShell } = require('./haru.cjs');
 const { createLocaleStore, registerLocaleIPC, applicationMenu, startupErrorText } = require('./locale.cjs');
 const { createCapabilities } = require('./capabilities.cjs');
@@ -16,10 +18,12 @@ const { stopBackendForUpdate } = require('./update-install.cjs');
 const { isSameOrigin, waitForReady, checkHealth, stopBackend } = require('./lifecycle.cjs');
 
 app.setName('OfferPilot Desktop');
+if (process.platform === 'win32') app.setAppUserModelId('org.offerpilot.desktop');
 app.setPath('userData', path.join(app.getPath('appData'), 'OfferPilot Desktop'));
 const localeStore = createLocaleStore(app.getPath('userData'));
 const t = localeStore.t;
 let disposeLocale = () => {};
+let reminders;
 let child;
 let window;
 let haruShell;
@@ -82,6 +86,7 @@ async function start() {
     allowPythonRedirector: !app.isPackaged && process.platform === 'win32',
   });
   await checkHealth(ready.origin, token);
+  const workspaceId = await readReminderContext(ready.origin, token);
   if (quitting) return;
   if (port && Number(new URL(ready.origin).port) !== port) throw new Error('Backend changed the saved port unexpectedly.');
   if (!port) {
@@ -147,8 +152,11 @@ async function start() {
   const unsubscribeMenuLocale = localeStore.subscribe(refreshApplicationMenu);
   const removeLocaleIPC = disposeLocale;
   disposeLocale = () => { unsubscribeMenuLocale(); removeLocaleIPC(); };
+  reminders = createReminderService({ ipcMain, Notification, powerMonitor, window, origin: ready.origin, token, userData, workspaceId,
+    isQuitting: () => quitting || updateLock, locale: localeStore.getLocale });
   const lockUpdates = value => {
     updateLock = value;
+    if (value) reminders.suspend(); else reminders.resume();
     for (const win of BrowserWindow.getAllWindows()) if (!win.isDestroyed()) win.setEnabled(!value);
   };
   const installSafety = createInstallSafety({ ipcMain, window, origin: ready.origin, dialog, t,
@@ -226,6 +234,7 @@ if (!app.requestSingleInstanceLock()) {
     event.preventDefault();
     if (quitting) return;
     quitting = true;
+    reminders?.dispose();
     disposeUpdates();
     disposeLocale();
     haruShell?.dispose();

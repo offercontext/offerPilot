@@ -1,3 +1,4 @@
+import DesktopReminderTarget from '@/components/DesktopReminderTarget';
 import { CompanionLifeSignals } from '@/features/companionLife/useCompanionLife';
 import { liveText } from '@/i18n/liveText';
 import { t, useLocale, getLocale } from '@/i18n';
@@ -2635,6 +2636,7 @@ function AppShellContent() {
 
   return (
     <DndContext sensors={kanbanSensors}>
+      <DesktopReminderTarget />
       <Layout
       className="op-app-shell"
       style={{ minHeight: '100dvh', background: 'var(--op-layout-bg)' }}

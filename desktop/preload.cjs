@@ -63,3 +63,23 @@ contextBridge.exposeInMainWorld('offerpilotLocale', Object.freeze({
   },
   ...(role === 'owner' ? { setLocale: value => ipcRenderer.invoke(localeChannel + 'set', value) } : {}),
 }));
+
+// Owner-only local reminder preferences and native-click targets.
+if (role === 'owner') {
+  const channel = 'offerpilot:reminders:';
+  const listen = (name, listener) => {
+    if (typeof listener !== 'function') return () => {};
+    const handler = (_event, value) => listener(value);
+    ipcRenderer.on(channel + name, handler);
+    return () => ipcRenderer.removeListener(channel + name, handler);
+  };
+  contextBridge.exposeInMainWorld('offerpilotReminders', Object.freeze({
+    getState: () => ipcRenderer.invoke(channel + 'state'),
+    configure: value => ipcRenderer.invoke(channel + 'configure', value),
+    test: () => ipcRenderer.invoke(channel + 'test'),
+    consumeNavigation: () => ipcRenderer.invoke(channel + 'consume'),
+    onState: listener => listen('state', listener),
+    onNavigation: listener => listen('navigation', listener),
+    onTestResult: listener => listen('test-result', listener),
+  }));
+}

@@ -42,6 +42,16 @@
 
 [Python rewrite 契约](../../python-rewrite-contract.md)、[P0 清单](../../p0-release-checklist.md)保留各自适用范围；完整发布验证入口与风险矩阵见 [AGENTS §7](../../../AGENTS.md#7-验证与-code-review)。文档静态检查、局部测试、真实模型调用、桌面安装和 release gate 是不同证据层级。
 
-## 5. 工作区恢复
+## 5. 桌面本地提醒
+
+2026-11-13 桌面提醒分支补充：设置中的 [DesktopRemindersCard](../../../web/src/components/DesktopRemindersCard.tsx) 通过 owner-only preload → [reminder-service](../../../desktop/reminder-service.cjs) → [reminder-controller](../../../desktop/reminder-controller.cjs)。固定鉴权 GET 复用 `/api/reminders/candidates` 的 delivery 窗口；不启动主动任务、不调用模型、不写业务记录。
+
+- 启动先鉴权读取 `/api/reminders/desktop-context` 的工作区身份。恢复轮换身份后原子关闭提醒并清除旧去重，需重新开启；失败回滚保留原身份。旧设备状态首次升级也关闭提醒。身份读取或保存失败不发送。
+- 默认关闭，范围单独选择；新增范围只接纳启用后到期的事项。勿扰和暂停是设备本地偏好，不改陪伴/主动提醒设置。
+- [reminder-policy](../../../desktop/reminder-policy.cjs) 限定最近 15 分钟补发、每批 3 条、每小时 10 条。尝试前先在 [reminder-store](../../../desktop/reminder-store.cjs) 保存去重记录；失败不自动重试同一条。时钟回拨或存储错误阻止发送。
+- 休眠、锁屏、安装更新分别持有暂停原因，全部解除才恢复。关闭应用后不保证提醒；OS 接受请求不等于用户可见，勿扰/权限可能屏蔽。
+- native click 重新读取候选后只传投递/日程 ID；[DesktopReminderTarget](../../../web/src/components/DesktopReminderTarget.tsx) 重新读真实记录并验证关联，打开只读抽屉，保留当前页面和草稿。不接受任意 URL 或 renderer 路由。
+- 测试入口：`desktop/test/reminder-*.test.cjs`、[组件交互](../../../web/src/components/DesktopReminders.test.tsx)。单元测试不替代安装后系统通知的可见性/点击验证。
+## 6. 工作区恢复
 
 [backup_routes](../../../src/offerpilot/backup_routes.py) 注册状态、预检、确认和取消；[backup_install](../../../src/offerpilot/backup_install.py) 在 create_app 开库前取得独占权，启动成功后完成回执。普通 CLI、DB/config、MCP/reset 只参与租约，不消费恢复。设置页 [BackupRestore](../../../web/src/components/BackupRestore.tsx) 提供 ZIP 预检、覆盖范围确认、取消及重启指引；失联后先刷新回执，刷新清除旧确认。格式、覆盖范围、Journal/ledger 区别和测试证据见[备份恢复边界](../backup-restore.md)。
