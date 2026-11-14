@@ -34,6 +34,9 @@ class _SnapshotChanged(Exception):
 
 
 def append_log_entry(data_dir: Path, level: str, message: str) -> None:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     path = _log_path(data_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     entry = {"level": level.upper(), "message": message}

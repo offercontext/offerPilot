@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import json
+from io import BytesIO
 import os
 from pathlib import Path
 import queue
@@ -19,6 +20,8 @@ from typing import Any, Iterator
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import ProxyHandler, Request, build_opener
+from zipfile import ZipFile
+import xml.etree.ElementTree as ET
 
 
 HEADER = "X-OfferPilot-Desktop-Token"
@@ -30,10 +33,10 @@ def check(condition: bool, message: str) -> None:
         raise RuntimeError(message)
 
 
-def request(
+def request_details(
     origin: str, path: str, token: str | None, *, method: str = "GET",
-    payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None,
-) -> tuple[int, bytes]:
+    payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: float = 5,
+) -> tuple[int, bytes, dict[str, str]]:
     values = {HEADER: token} if token is not None else {}
     values.update(headers or {})
     data = None if payload is None else json.dumps(payload).encode()
@@ -41,10 +44,100 @@ def request(
         values["Content-Type"] = "application/json"
     req = Request(origin + path, data=data, headers=values, method=method)
     try:
-        with HTTP.open(req, timeout=5) as response:
-            return response.status, response.read()
+        with HTTP.open(req, timeout=timeout) as response:
+            return response.status, response.read(), dict(response.headers.items())
     except HTTPError as error:
-        return error.code, error.read()
+        return error.code, error.read(), dict(error.headers.items())
+
+
+def request(
+    origin: str, path: str, token: str | None, *, method: str = "GET",
+    payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None,
+) -> tuple[int, bytes]:
+    status, body, _ = request_details(origin, path, token, method=method,
+                                      payload=payload, headers=headers)
+    return status, body
+
+
+def smoke_resume_exports(origin: str, token: str) -> None:
+    """Exercise frozen renderers and resource files, without host Python packages.
+
+    Compare equal public projections with/without private source fields. Comparing
+    complete PDF bytes and unzipped DOCX parts detects leaks even inside compressed
+    streams; searching raw PDF bytes for a secret would not prove its absence.
+    """
+    public = {"contact": {"name": "张小明", "email": "demo@example.test"},
+              "skills": ["Python", "中文排版"], "additional_text": "明确保存的补充事实"}
+    exports: list[tuple[bytes, dict[str, bytes]]] = []
+    for private in (False, True):
+        content = dict(public)
+        payload: dict[str, Any] = {"title": "中文冻结导出验证", "source": "manual",
+                                   "content_json": content}
+        if private:
+            payload["parsed_data"] = "PRIVATE_SOURCE_MUST_NOT_EXPORT"
+            content["import_review"] = {"version": 1, "raw_text_sha256": "PRIVATE_REVIEW"}
+        status, body = request(origin, "/api/resumes", token, method="POST", payload=payload)
+        check(status == 201, f"Frozen resume fixture creation failed ({status})")
+        identifier = json.loads(body)["id"]
+        path = f"/api/resumes/{identifier}"
+        status, before = request(origin, path, token)
+        check(status == 200, "Frozen resume fixture cannot be read")
+        if private:
+            saved = json.loads(before)
+            check(saved["parsed_data"] == payload["parsed_data"]
+                  and saved["content_json"]["raw_text"] == payload["parsed_data"],
+                  "Private source fixture was not saved")
+        status, preview, headers = request_details(
+            origin, path + "/export-preview", token, method="POST", payload={"locale": "zh-CN"}, timeout=90)
+        headers = {key.lower(): value for key, value in headers.items()}
+        check(status == 200 and headers.get("content-type") == "application/pdf"
+              and preview.startswith(b"%PDF-"), "Frozen Chinese PDF preview failed")
+        fingerprint = headers.get("x-resume-export-fingerprint", "")
+        check(bool(re.fullmatch(r"[a-f0-9]{64}", fingerprint)), "Missing preview fingerprint")
+        check(headers.get("cache-control") == "no-store", "Preview caching must be disabled")
+        docx_parts: dict[str, bytes] = {}
+        for fmt in ("pdf", "docx"):
+            status, data, headers = request_details(origin, path + "/export", token,
+                method="POST", payload={"locale": "zh-CN", "format": fmt,
+                                        "source_fingerprint": fingerprint}, timeout=90)
+            headers = {key.lower(): value for key, value in headers.items()}
+            expected = ("application/pdf" if fmt == "pdf" else
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+            check(status == 200 and headers.get("content-type") == expected,
+                  f"Frozen {fmt} download failed ({status})")
+            check(headers.get("content-disposition", "").startswith("attachment;")
+                  and headers.get("cache-control") == "no-store",
+                  f"Frozen {fmt} download headers invalid")
+            check(headers.get("x-resume-export-fingerprint") == fingerprint,
+                  f"Frozen {fmt} fingerprint differs from reviewed preview")
+            if fmt == "pdf":
+                check(data == preview, "Frozen PDF download differs from reviewed preview")
+            else:
+                with ZipFile(BytesIO(data)) as archive:
+                    check(archive.testzip() is None, "Frozen DOCX archive is corrupt")
+                    docx_parts = {name: archive.read(name) for name in archive.namelist()}
+                document = ET.fromstring(docx_parts["word/document.xml"])
+                text = "".join(document.itertext())
+                check(all(value in text for value in ("张小明", "中文排版", "明确保存的补充事实")),
+                      "Frozen DOCX lacks saved Chinese fields")
+                check("PRIVATE_SOURCE" not in text and "PRIVATE_REVIEW" not in text,
+                      "Frozen DOCX exposed private source text")
+        status, after = request(origin, path, token)
+        check(status == 200 and json.loads(after) == json.loads(before),
+              "Frozen export mutated its saved resume")
+        exports.append((preview, docx_parts))
+        changed = {**json.loads(before)["content_json"], "additional_text": "已修改的保存内容"}
+        status, _ = request(origin, path, token, method="PATCH", payload={"content_json": changed})
+        check(status == 200, "Frozen stale-preview fixture update failed")
+        for fmt in ("pdf", "docx"):
+            status, body, _ = request_details(origin, path + "/export", token, method="POST",
+                payload={"locale": "zh-CN", "format": fmt, "source_fingerprint": fingerprint},
+                timeout=90)
+            check(status == 409 and json.loads(body).get("error_code")
+                  == "resume_export_source_conflict", "Frozen export accepted a stale preview")
+    check(exports[0] == exports[1], "Private source fields changed exported PDF or DOCX")
+    print("Frozen Chinese PDF preview/download, DOCX, source privacy and read-only exports passed",
+          flush=True)
 
 
 def offline_environment(token: str) -> dict[str, str]:
@@ -235,6 +328,7 @@ def main() -> int:
                       f"Built frontend asset missing: {path}")
                 status, _ = request(origin, path, None)
                 check(status in (401, 403), f"Unauthenticated asset accepted: {path}")
+            smoke_resume_exports(origin, token)
             status, body = request(origin, "/api/applications", token, method="POST",
                                    payload=payload, headers={"Origin": origin})
             check(status == 201, f"Application save failed ({status}): {body!r}")

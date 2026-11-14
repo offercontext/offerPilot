@@ -1,3 +1,4 @@
+import { BackupRestore } from "./BackupRestore";
 import CompanionPersonaSettings from '@/features/companionPersona/CompanionPersonaSettings';
 import CompanionLifeSettings from '@/features/companionLife/CompanionLifeSettings';
 import { liveText } from '@/i18n/liveText';
@@ -332,6 +333,8 @@ export default function SettingsView({
           </Space>
         </div>
       </section>
+
+      <section style={panelStyle}><BackupRestore /></section>
 
       <section style={panelStyle} aria-labelledby="voice-settings-title">
         <Typography.Title id="voice-settings-title" level={4} style={panelTitleStyle}>{t("语音")}</Typography.Title>

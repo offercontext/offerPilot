@@ -7,6 +7,8 @@ requires-python = ">=3.10"
 dependencies = [
   "charset-normalizer>=3.3.0",
   "fastapi>=0.115.0",
+  "fonttools>=4.61,<5",
+  "fpdf2>=2.8.5,<3",
   "httpx>=0.27.0",
   "jsonschema==4.26.0",
   "litellm>=1.91.0",
@@ -15,6 +17,7 @@ dependencies = [
   "pydantic>=2.8.0",
   "pypdf>=5.0.0",
   "python-multipart>=0.0.20",
+  "python-docx>=1.2,<2",
   "sqlalchemy>=2.0.0",
   "tiktoken>=0.7.0",
   "typer>=0.12.0",

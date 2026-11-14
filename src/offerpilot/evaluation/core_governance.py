@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import json
 import importlib
 import os
+import sys
 from pathlib import Path
 import re
 from typing import Any, Iterator, Literal, TYPE_CHECKING
@@ -805,7 +806,7 @@ def store_lock(store: Path) -> Iterator[None]:
             stream.flush()
         stream.seek(0)
         try:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 import msvcrt
 
                 msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
@@ -818,7 +819,7 @@ def store_lock(store: Path) -> Iterator[None]:
             yield
         finally:
             stream.seek(0)
-            if os.name == "nt":
+            if sys.platform == "win32":
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 posix_lock.flock(stream.fileno(), posix_lock.LOCK_UN)

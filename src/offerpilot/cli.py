@@ -223,16 +223,16 @@ def start(
     if enable_local_mail_setup and host not in {"127.0.0.1", "::1"}:
         raise typer.BadParameter("--enable-local-mail-setup requires --host 127.0.0.1 or ::1; reverse proxies are unsupported")
     data_dir = resolve_data_dir()
+    server_app = create_app(data_dir=data_dir, job_mail_local_setup_enabled=enable_local_mail_setup)
     cfg = load_config(data_dir)
     resolved_port = port if port is not None else cfg.local_port
-    session_factory_for_data_dir(data_dir)
     append_log_entry(data_dir, "INFO", f"server starting on port {resolved_port}")
     typer.echo(f"OfferPilot running at http://localhost:{resolved_port}")
     if enable_local_mail_setup:
-        uvicorn.run(create_app(data_dir=data_dir, job_mail_local_setup_enabled=True),
+        uvicorn.run(server_app,
                     host=host, port=resolved_port, proxy_headers=False)
     else:
-        uvicorn.run(create_app(data_dir=data_dir), host=host, port=resolved_port)
+        uvicorn.run(server_app, host=host, port=resolved_port)
 
 
 @app.command()

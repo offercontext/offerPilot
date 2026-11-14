@@ -15,7 +15,7 @@ os.environ["TIKTOKEN_CACHE_DIR"] = str(ROOT / "desktop" / "build" / "tiktoken-ca
 # tokenizer and provider JSON. SQLAlchemy resolves sqlite and uvicorn its worker
 # implementations dynamically; tiktoken discovers its namespace extension.
 data = copy_metadata("offerpilot", recursive=True)
-for package in ("litellm", "tiktoken", "tzdata", "certifi", "jsonschema_specifications"):
+for package in ("litellm", "tiktoken", "tzdata", "certifi", "jsonschema_specifications", "offerpilot", "docx"):
     data += collect_data_files(package)
 data += [(str(ROOT / "desktop" / "build" / "tiktoken-cache"), "tiktoken-cache")]
 hidden = [
@@ -27,6 +27,8 @@ hidden = [
     "uvicorn.lifespan.on", "uvicorn.lifespan.off",
 ]
 hidden += collect_submodules("tiktoken_ext")
+# fpdf2 dynamically loads font tables/subsetters for the bundled Unicode font.
+hidden += collect_submodules("fontTools")
 # Compiled charset_normalizer 3.4.x modules dynamically import their helpers.
 hidden += collect_submodules("charset_normalizer")
 # Recent wheels put a hashed mypyc support extension at site-packages root,

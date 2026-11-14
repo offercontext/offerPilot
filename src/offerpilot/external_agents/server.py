@@ -49,6 +49,9 @@ DESCRIPTIONS.update(
 
 def open_sessions(data_dir: Path) -> sessionmaker[Session]:
     """Serving never initializes or resets a workspace. The owner runs connect first."""
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     database = data_dir / "data.db"
     if not database.is_file():
         raise ExternalAgentError("service_unavailable", retryable=True)
