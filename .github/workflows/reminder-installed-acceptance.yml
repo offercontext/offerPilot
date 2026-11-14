@@ -23,7 +23,7 @@ jobs:
         with:
           script: |
             const assert=require('assert/strict');
-            const runId=43630189918,head='5e99b33836995640e9c8b510fb921addad8bceb8',build='402481591620839f679bc30ba98e96214ccbd2b6';
+            const runId=43634300673,head='171f9a3ef7dcc6b81684299cef493b10092267c2',build='98b775f719c1bfac921fc73e4198bbcb5f4c645b';
             for(let n=0;n<45;n++){
               const run=(await github.rest.actions.getWorkflowRun({...context.repo,run_id:runId})).data;
               assert.equal(run.run_attempt,1);assert.equal(run.head_sha,head);assert.equal(run.path,'.github/workflows/desktop-windows.yml');
@@ -36,7 +36,7 @@ jobs:
                 const matches=artifacts.filter(a=>a.name===`offerpilot-windows-experimental-validation-${build}`&&!a.expired);
                 assert.equal(matches.length,1);const a=matches[0];assert.match(a.digest,/^sha256:[a-f0-9]{64}$/);
                 assert.equal(a.workflow_run.head_sha,head);assert.equal(a.workflow_run.id,runId);
-                for(const sha of [head,build])assert.equal((await github.rest.git.getCommit({...context.repo,commit_sha:sha})).data.tree.sha,'088c39e0aa0f8a7e51799bd83709937b4c05cc03');
+                for(const sha of [head,build])assert.equal((await github.rest.git.getCommit({...context.repo,commit_sha:sha})).data.tree.sha,'cb4c8495d42305b595937a3c3e7a4e9bccdec24f');
                 core.setOutput('artifact',String(a.id));core.setOutput('digest',a.digest);return;
               }
               if(['cancelled','failure','timed_out'].includes(run.conclusion))throw Error('original run cannot supply an accepted installer');
@@ -57,7 +57,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 402481591620839f679bc30ba98e96214ccbd2b6
+          ref: 98b775f719c1bfac921fc73e4198bbcb5f4c645b
           path: product
           persist-credentials: false
       - name: Download and strictly verify the original artifact ZIP digest
@@ -71,7 +71,7 @@ jobs:
             const id=Number(process.env.PIN_ARTIFACT);
             const meta=(await github.rest.actions.getArtifact({...context.repo,artifact_id:id})).data;
             assert.equal(meta.digest,process.env.PIN_DIGEST);assert.equal(meta.expired,false);
-            assert.equal(meta.workflow_run.id,43630189918);assert.equal(meta.workflow_run.head_sha,'5e99b33836995640e9c8b510fb921addad8bceb8');
+            assert.equal(meta.workflow_run.id,43634300673);assert.equal(meta.workflow_run.head_sha,'171f9a3ef7dcc6b81684299cef493b10092267c2');
             const response=await github.rest.actions.downloadArtifact({...context.repo,artifact_id:id,archive_format:'zip'});
             assert.notEqual(typeof response.data,'string','raw ZIP bytes required');
             const bytes=Buffer.from(response.data);
@@ -105,8 +105,8 @@ jobs:
           $sidecar=(Get-Content -Raw ($file.FullName+'.sha256')).Trim()
           if(($sidecar -split '\s+')[0] -ne $actual){throw 'Original installer checksum mismatch'}
           $notes=Get-Content -Raw installer/VALIDATION-NOTES.txt
-          if($notes -notmatch 'Commit: 402481591620839f679bc30ba98e96214ccbd2b6' -or $notes -notmatch 'Attempt: 1'){throw 'Original build provenance mismatch'}
-          $pin=@{repository='offercontext/offerPilot';productCommit='5e99b33836995640e9c8b510fb921addad8bceb8';buildCommit='402481591620839f679bc30ba98e96214ccbd2b6';tree='088c39e0aa0f8a7e51799bd83709937b4c05cc03';runId=43630189918;attempt=1;artifactId=$env:PIN_ARTIFACT;artifactDigest=$env:PIN_DIGEST;installer=$file.Name;installerSha256=$actual;helperCommit=$env:GITHUB_SHA}
+          if($notes -notmatch 'Commit: 98b775f719c1bfac921fc73e4198bbcb5f4c645b' -or $notes -notmatch 'Attempt: 1'){throw 'Original build provenance mismatch'}
+          $pin=@{repository='offercontext/offerPilot';productCommit='171f9a3ef7dcc6b81684299cef493b10092267c2';buildCommit='98b775f719c1bfac921fc73e4198bbcb5f4c645b';tree='cb4c8495d42305b595937a3c3e7a4e9bccdec24f';runId=43634300673;attempt=1;artifactId=$env:PIN_ARTIFACT;artifactDigest=$env:PIN_DIGEST;installer=$file.Name;installerSha256=$actual;helperCommit=$env:GITHUB_SHA}
           New-Item -ItemType Directory -Force reminder-evidence | Out-Null
           $pin | ConvertTo-Json | Set-Content -Encoding utf8 helper/desktop/installed-ui/reminder-pin.json
           Copy-Item helper/desktop/installed-ui/reminder-pin.json reminder-evidence/pin.json
