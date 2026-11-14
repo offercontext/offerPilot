@@ -2,6 +2,8 @@ from io import BytesIO
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
+import sys
 from types import SimpleNamespace
 from zipfile import ZipFile
 
@@ -261,3 +263,95 @@ def test_title_must_be_nonblank_single_line(title):
                                content_json=json.dumps(CONTENT)), 'zh-CN')
     assert exc.value.code == 'resume_export_invalid_source'
     assert '标题' in exc.value.message
+
+
+def test_cold_restore_exports_restored_resume_and_rejects_old_preview(tmp_path):
+    """The shared app must bind exports to the restored database after restart."""
+    seed = r'''
+import json, sys
+from pathlib import Path
+from fastapi.testclient import TestClient
+from offerpilot.api import create_app
+from offerpilot.config import Config, save_config
+from sqlalchemy.orm import sessionmaker
+from offerpilot.repositories.resumes import ResumeCreate, ResumesRepository
+from tests.test_resume_export import preview, download
+root = Path(sys.argv[1])
+def save_resume(client, content):
+    return ResumesRepository(sessionmaker(bind=client.app.state.db_engine)).create(
+        ResumeCreate(title='中文简历', source='manual', content_json=content,
+                     parsed_data='PARSED_SECRET_NEVER_EXPORT')).id
+for name, token in [('source', 'source-token'), ('target', 'target-token')]:
+    save_config(root / name, Config(auth_enabled=True, auth_token=token))
+with TestClient(create_app(data_dir=root / 'source')) as client:
+    client.headers['X-OfferPilot-Token'] = 'source-token'
+    rid = save_resume(client, {'contact': {'name': '恢复后的中文简历'},
+                         'skills': ['Python'], 'raw_text': 'EXCLUDED_SOURCE_RAW'})
+    exported = client.get('/api/backups/export')
+    assert exported.status_code == 200, exported.text
+with TestClient(create_app(data_dir=root / 'target')) as client:
+    client.headers['X-OfferPilot-Token'] = 'target-token'
+    old_id = save_resume(client, {'contact': {'name': '替换前的中文简历'}, 'skills': ['Rust']})
+    assert old_id == rid
+    old_preview = preview(client, rid)
+    assert old_preview.status_code == 200, old_preview.text
+    old_fp = old_preview.headers['X-Resume-Export-Fingerprint']
+    (root / 'target' / 'original-marker').write_text('retained')
+    staged = client.post('/api/backups/restore/preview', content=exported.content)
+    assert staged.status_code == 200, staged.text
+    record = staged.json()
+    confirmed = client.post('/api/backups/restore/confirm', json={
+        'id': record['id'], 'sha256': record['sha256'], 'confirmation': 'REPLACE WORKSPACE'})
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()['state'] == 'queued'
+    assert download(client, rid, old_fp).status_code == 200
+    assert client.get('/api/backups/restore').json()['state'] == 'queued'
+(root / 'expected.json').write_text(json.dumps({'id': rid, 'old_fp': old_fp}))
+'''
+    restored = r'''
+import json, sys
+from io import BytesIO
+from pathlib import Path
+from zipfile import ZipFile
+from fastapi.testclient import TestClient
+from offerpilot.api import create_app
+from offerpilot.backup_restore import operation_paths, read_record
+from tests.test_resume_export import preview, download, pdf_text
+root = Path(sys.argv[1])
+expected = json.loads((root / 'expected.json').read_text())
+rid = expected['id']
+with TestClient(create_app(data_dir=root / 'target')) as client:
+    assert preview(client, rid).status_code == 401
+    client.headers['X-OfferPilot-Token'] = 'source-token'
+    assert preview(client, rid).status_code == 401
+    client.headers['X-OfferPilot-Token'] = 'target-token'
+    assert client.get('/api/backups/restore').json()['state'] == 'completed'
+    for fmt in ['pdf', 'docx']:
+        stale = download(client, rid, expected['old_fp'], fmt)
+        assert stale.status_code == 409, stale.text
+        assert stale.json()['error_code'] == 'resume_export_source_conflict'
+    fresh = preview(client, rid)
+    assert fresh.status_code == 200, fresh.text
+    fp = fresh.headers['X-Resume-Export-Fingerprint']
+    assert fp != expected['old_fp']
+    pdf = download(client, rid, fp)
+    assert pdf.status_code == 200 and pdf.content == fresh.content
+    docx = download(client, rid, fp, 'docx')
+    assert docx.status_code == 200, docx.text
+    with ZipFile(BytesIO(docx.content)) as archive:
+        xml = archive.read('word/document.xml').decode('utf-8')
+    for text in [pdf_text(pdf.content), xml]:
+        assert '恢复后的中文简历' in text
+        assert '替换前的中文简历' not in text
+        assert 'EXCLUDED_SOURCE_RAW' not in text
+        assert 'PARSED_SECRET' not in text
+    _, original, _ = operation_paths(root / 'target', read_record(root / 'target'))
+    assert (original / 'original-marker').read_text() == 'retained'
+    assert not (root / 'target' / 'original-marker').exists()
+'''
+    for code in (seed, restored):
+        result = subprocess.run([sys.executable, '-c', code, str(tmp_path)],
+                                capture_output=True, text=True, timeout=90)
+        assert result.returncode == 0, result.stdout + result.stderr
+        if code == seed:
+            (tmp_path / 'source').rename(tmp_path / 'source-unavailable')

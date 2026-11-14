@@ -41,3 +41,7 @@
 模型与表定义从 [models.py](../../../src/offerpilot/models.py)、[db.py](../../../src/offerpilot/db.py) 下钻；数据库初始化/迁移和正在运行进程使用的 data_dir 要分开检查。不要因另一 worktree 的文件已改就推断当前进程或本地库已升级。
 
 [Python rewrite 契约](../../python-rewrite-contract.md)、[P0 清单](../../p0-release-checklist.md)保留各自适用范围；完整发布验证入口与风险矩阵见 [AGENTS §7](../../../AGENTS.md#7-验证与-code-review)。文档静态检查、局部测试、真实模型调用、桌面安装和 release gate 是不同证据层级。
+
+## 5. 工作区恢复
+
+[backup_routes](../../../src/offerpilot/backup_routes.py) 注册状态、预检、确认和取消；[backup_install](../../../src/offerpilot/backup_install.py) 在 create_app 开库前取得独占权，启动成功后完成回执。普通 CLI、DB/config、MCP/reset 只参与租约，不消费恢复。设置页 [BackupRestore](../../../web/src/components/BackupRestore.tsx) 提供 ZIP 预检、覆盖范围确认、取消及重启指引；失联后先刷新回执，刷新清除旧确认。格式、覆盖范围、Journal/ledger 区别和测试证据见[备份恢复边界](../backup-restore.md)。

@@ -10,6 +10,7 @@ from decimal import Decimal
 import json
 import importlib
 import os
+import sys
 from pathlib import Path
 import re
 from typing import Any, Callable, Iterator
@@ -74,7 +75,7 @@ def paid_lock(path: Path) -> Iterator[None]:
             stream.write(b"0")
             stream.flush()
         stream.seek(0)
-        if os.name == "nt":
+        if sys.platform == "win32":
             import msvcrt
             msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
         else:
@@ -84,7 +85,7 @@ def paid_lock(path: Path) -> Iterator[None]:
             yield
         finally:
             stream.seek(0)
-            if os.name == "nt":
+            if sys.platform == "win32":
                 msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)

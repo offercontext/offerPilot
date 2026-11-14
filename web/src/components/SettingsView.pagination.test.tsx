@@ -30,6 +30,8 @@ vi.mock('@/services/chat', () => ({
   getSettingsBackup: mocks.getSettingsBackup,
 }));
 
+vi.mock('../services/backupRestore', () => ({ getRestoreStatus: vi.fn().mockResolvedValue({ state: 'none' }) }));
+
 const { default: SettingsView } = await import('./SettingsView');
 
 type LogsQueryConfig = {

@@ -296,7 +296,11 @@
         "scripts/select_tests.py",
         "scripts/evaluation_subject/process_tree.py",
         "scripts/windows-pytest-groups.ps1",
-        "scripts/windows-vitest-groups.ps1"
+        "scripts/windows-vitest-groups.ps1",
+        "src/offerpilot/backup_*.py",
+        "src/offerpilot/workspace_lock.py",
+        "web/src/components/BackupRestore.tsx",
+        "web/src/services/backupRestore.ts"
       ],
       "expand": "full"
     }
@@ -9812,6 +9816,288 @@
       "requires": [],
       "risk_tags": [
         "evaluation_safety"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_archive.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_config_concurrency.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_export.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_image_roundtrip.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_install.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_legacy.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_paths.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_restore_api.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_backup_restore_control.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_workspace_lock.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/BackupRestore.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "persistence",
+        "recovery",
+        "authorization"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_p0_diagnostics.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/evaluation/test_windows_owner.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_evidence_budget.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_read_api.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_read_atomic.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_companion_fact_read_parser.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/test_training_evidence.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "tests/verification_control/test_private_paths.py": {
+      "modules": [
+        "backend_misc"
+      ],
+      "priority": "p0",
+      "surface": "backend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
+    "web/src/components/TrainingEvidencePanel.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
       ],
       "level": "test",
       "estimated_seconds": null

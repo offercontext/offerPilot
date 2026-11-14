@@ -7,7 +7,6 @@ import logging
 import os
 import re
 import sqlite3
-import zipfile
 from datetime import datetime, timezone
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -114,7 +113,7 @@ from offerpilot.agent_runtime.journal import (
     NullRunRecorderFactory,
     RunRecorderFactory,
 )
-from offerpilot.agent_runtime.keyring import JOURNAL_KEY_FILENAME, load_or_create_journal_key
+from offerpilot.agent_runtime.keyring import load_or_create_journal_key
 from offerpilot.application_status import application_status_options, normalize_application_status
 from offerpilot.config import (
     AIProviderProfile,
@@ -1123,6 +1122,10 @@ def create_app(
     transport_authenticator: Callable[[Request], bool] | None = None,
 ) -> FastAPI:
     resolved_data_dir = data_dir or resolve_data_dir()
+    from offerpilot.backup_install import ensure_workspace_lease, complete_startup
+    from offerpilot.backup_routes import register_backup_routes
+
+    ensure_workspace_lease(resolved_data_dir, apply_restore=True)
     resolved_static_dir = static_dir or _find_static_dir()
     session_factory = session_factory_for_data_dir(resolved_data_dir)
     chat_images = ChatImageStore(session_factory, resolved_data_dir)
@@ -1606,6 +1609,7 @@ def create_app(
         knowledge_runtime.start()
         proactive_runtime.start()
         job_mail_runtime.start()
+        complete_startup(resolved_data_dir)
 
     @app.on_event("shutdown")
     def _stop_knowledge_worker() -> None:
@@ -7714,9 +7718,14 @@ def create_app(
             ),
         )
 
+    register_backup_routes(app, resolved_data_dir)
+
     @app.get("/api/backups/export")
     def export_backup() -> Response:
-        archive = _build_backup_archive(resolved_data_dir)
+        try:
+            archive = _build_backup_archive(resolved_data_dir)
+        except (ValueError, OSError, sqlite3.Error):
+            return JSONResponse({"error": "backup_export_validation_failed"}, status_code=409)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         filename = f"offerpilot-backup-{stamp}.zip"
         return Response(
@@ -10495,22 +10504,9 @@ def _safe_provider_error(error: Exception, providers: list[AIProviderProfile]) -
 
 
 def _build_backup_archive(data_dir: Path) -> bytes:
-    buffer = BytesIO()
-    data_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(data_dir.rglob("*")):
-            if not path.is_file() or path.is_symlink():
-                continue
-            archive_path = path.relative_to(data_dir).as_posix()
-            if archive_path == JOURNAL_KEY_FILENAME or archive_path.startswith(
-                f".{JOURNAL_KEY_FILENAME}."
-            ):
-                continue
-            if archive_path == "config.json":
-                archive.writestr(archive_path, _redacted_backup_config(data_dir))
-                continue
-            archive.write(path, archive_path)
-    return buffer.getvalue()
+    from offerpilot.backup_export import export_archive
+
+    return export_archive(data_dir, _redacted_backup_config(data_dir))
 
 
 def _redacted_backup_config(data_dir: Path) -> str:

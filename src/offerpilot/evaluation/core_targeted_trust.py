@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 
 def require_owned(path: Path) -> None:
-    if os.name != "nt":
+    if sys.platform != "win32":
         info = path.stat()
         if info.st_uid != getattr(os, "getuid")() or info.st_mode & 0o022:
             raise ValueError("authority must be OS-account-owned and not writable by others")

@@ -5,6 +5,16 @@
 
 ## 当前记录
 
+## Windows 备份导出与恢复落盘兼容（2026-11-13）
+
+**现象：** 恢复专项 run `43364222596` 在 Linux 通过；Windows 出现候选文件 `fsync` 的 EBADF，以及含嵌套附件的导出误报 `unsafe_archive_entry`。
+
+**根因：** Windows `_commit` 不接受只读文件句柄；Windows `ZipInfo.from_file` 的内存 `orig_filename` 保留本机分隔符，序列化后的 ZIP 名称则已使用正斜杠。
+
+**修复：** 仅对已校验的候选文件使用不截断的 `r+b` 句柄落盘。移除写入器内存索引的重复校验，保留最终 ZIP 经 `stage_archive` 的路径、条目、大小、摘要、schema 与附件完整校验。
+
+**教训：** POSIX 静态/单测通过不能证明 Windows 文件 API 兼容；归档信任边界应检查实际序列化字节。回归模拟只读句柄失败与 Windows 内存名称，最终仍以重新运行的原生 Windows CI 为准。
+
 ## 终态重放持有外层写事务导致连接池等待（2026-11-09）
 
 **现象：** Windows run `42514387406` 的故事并发确认测试出现 SQLite 写锁超时。原 CI 没有记录所有线程栈，不能据此认定唯一原因。

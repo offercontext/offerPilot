@@ -10,6 +10,9 @@ on:
       - 'web/tests/resume-export/**'
       - 'web/package*.json'
       - 'src/offerpilot/resume_export*'
+      - 'src/offerpilot/backup_*.py'
+      - 'src/offerpilot/workspace_lock.py'
+      - 'src/offerpilot/api.py'
       - 'src/offerpilot/assets/**'
       - 'desktop/capabilities.cjs'
       - 'pyproject.toml'
@@ -26,8 +29,11 @@ jobs:
     if: >-
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name == github.repository &&
-       github.event.pull_request.head.ref == 'feat/20261111-resume-document-export') ||
-      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/20261111-resume-document-export')
+       (github.event.pull_request.head.ref == 'feat/20261111-resume-document-export' ||
+        github.event.pull_request.head.ref == 'feat/20261112-backup-complete-restore')) ||
+      (github.event_name == 'workflow_dispatch' &&
+       (github.ref == 'refs/heads/feat/20261111-resume-document-export' ||
+        github.ref == 'refs/heads/feat/20261112-backup-complete-restore'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

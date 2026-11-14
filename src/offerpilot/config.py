@@ -136,6 +136,9 @@ def resolve_data_dir() -> Path:
 
 
 def load_config(data_dir: Path) -> Config:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     path = data_dir / "config.json"
     if not path.exists():
         cfg = Config(confirmation_secret=secrets.token_urlsafe(32))
@@ -162,6 +165,9 @@ def load_config(data_dir: Path) -> Config:
 
 
 def save_config(data_dir: Path, config: Config) -> None:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / "config.json"
     path.write_text(config.model_dump_json(indent=2) + "\n", encoding="utf-8")
