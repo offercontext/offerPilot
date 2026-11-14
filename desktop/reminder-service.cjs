@@ -4,11 +4,12 @@ const {createReminderStore}=require('./reminder-store.cjs');
 const {createReminderController}=require('./reminder-controller.cjs');
 const {readReminderCandidates}=require('./reminder-transport.cjs');
 const CHANNEL='offerpilot:reminders:';
-function createReminderService({ipcMain,Notification,powerMonitor,window,origin,token,userData,isQuitting,locale}){
+function createReminderService({ipcMain,Notification,powerMonitor,window,origin,token,userData,workspaceId,isQuitting,locale}){
+ if(typeof workspaceId!=='string'||!/^[a-f0-9]{64}$/.test(workspaceId))throw new Error('invalid_workspace_context');
  let pending=null,disposed=false,lastTest=0,testNotice=null;
  const send=(name,value)=>{if(!disposed&&!isQuitting()&&!window.isDestroyed())window.webContents.send(CHANNEL+name,value);};
  const text=()=>({title:'OfferPilot',body:locale()==='en-US'?'You have a reminder. Open OfferPilot to view it.':'你有一条提醒。打开 OfferPilot 查看。'});
- const controller=createReminderController({store:createReminderStore(userData),readCandidates:()=>readReminderCandidates(origin,token),
+ const controller=createReminderController({store:createReminderStore(userData,workspaceId),readCandidates:()=>readReminderCandidates(origin,token),
   supported:()=>Notification.isSupported(),createNotification:options=>new Notification(options),text,
   changed:state=>send('state',state),navigate:target=>{if(isQuitting()||disposed)return;pending={...target,expires:Date.now()+30000};if(window.isMinimized())window.restore();window.show();window.focus();send('navigation',null);}});
  const assertOwner=event=>{if(disposed||isQuitting()||!isTrustedFrame(event,window.webContents,origin))throw new Error('unavailable');};

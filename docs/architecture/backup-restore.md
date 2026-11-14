@@ -26,6 +26,8 @@
 
 DB、配置读取/写入、日志写入、MCP 和 Knowledge reset 持进程级共享租约；普通入口不消费待恢复队列。配置读取也必须先持租约，防止恢复后写回旧确认密钥。恢复保留目标安装登录/模型配置及 Journal key，轮换 confirmation_secret，关闭自动写入、proactive 任务、外部连接授权、邮件连接/AI 和排队中的 Knowledge 工作。
 
+桌面提醒以域隔离的工作区身份区分去重。成功恢复后关闭提醒并清理旧身份去重，需显式重新开启；回滚保留原身份与去重。桌面和浏览器偏好不从 ZIP 导入。
+
 API 为 GET /api/backups/restore 与 POST preview/confirm/cancel，沿用应用认证，突变操作另做同源检查。网页刷新不等于重启；用户确认后到重启前新增的工作也会被替换。
 
 ## 验证范围

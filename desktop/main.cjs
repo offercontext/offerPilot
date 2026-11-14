@@ -5,6 +5,7 @@ const { randomBytes } = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { allowHaruResource, authenticatedHeaders } = require('./haru-protocol.cjs');
+const { readReminderContext } = require('./reminder-transport.cjs');
 const { createReminderService } = require('./reminder-service.cjs');
 const { createHaruShell } = require('./haru.cjs');
 const { createLocaleStore, registerLocaleIPC, applicationMenu, startupErrorText } = require('./locale.cjs');
@@ -85,6 +86,7 @@ async function start() {
     allowPythonRedirector: !app.isPackaged && process.platform === 'win32',
   });
   await checkHealth(ready.origin, token);
+  const workspaceId = await readReminderContext(ready.origin, token);
   if (quitting) return;
   if (port && Number(new URL(ready.origin).port) !== port) throw new Error('Backend changed the saved port unexpectedly.');
   if (!port) {
@@ -150,7 +152,7 @@ async function start() {
   const unsubscribeMenuLocale = localeStore.subscribe(refreshApplicationMenu);
   const removeLocaleIPC = disposeLocale;
   disposeLocale = () => { unsubscribeMenuLocale(); removeLocaleIPC(); };
-  reminders = createReminderService({ ipcMain, Notification, powerMonitor, window, origin: ready.origin, token, userData,
+  reminders = createReminderService({ ipcMain, Notification, powerMonitor, window, origin: ready.origin, token, userData, workspaceId,
     isQuitting: () => quitting || updateLock, locale: localeStore.getLocale });
   const lockUpdates = value => {
     updateLock = value;

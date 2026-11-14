@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 import time
+import hmac
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, HTTPException, Query
@@ -27,6 +28,17 @@ def register_proactive_routes(app: FastAPI, sessions: sessionmaker[Session],
         return {"item": repository.take_companion_bid(
             str(command.identity), command.expected_revision, str(command.client_id),
         )}
+
+    @app.get("/api/reminders/desktop-context")
+    def desktop_context() -> dict[str, str]:
+        # Domain-separated identifier only: never accepted as an authorization token.
+        # Restore rotates this secret; rollback restores the original domain.
+        secret = config_loader().confirmation_secret
+        if not secret:
+            raise HTTPException(status_code=503, detail="desktop context unavailable")
+        return {"workspace_id": hmac.digest(
+            secret.encode(), b"offerpilot.desktop-reminders.workspace.v1", "sha256",
+        ).hex()}
 
     @app.get("/api/reminders/candidates")
     def reminder_candidates(timezone: str = Query(default="UTC", min_length=1, max_length=80)) -> dict[str, Any]:

@@ -46,6 +46,7 @@
 
 2026-11-13 桌面提醒分支补充：设置中的 [DesktopRemindersCard](../../../web/src/components/DesktopRemindersCard.tsx) 通过 owner-only preload → [reminder-service](../../../desktop/reminder-service.cjs) → [reminder-controller](../../../desktop/reminder-controller.cjs)。固定鉴权 GET 复用 `/api/reminders/candidates` 的 delivery 窗口；不启动主动任务、不调用模型、不写业务记录。
 
+- 启动先鉴权读取 `/api/reminders/desktop-context` 的工作区身份。恢复轮换身份后原子关闭提醒并清除旧去重，需重新开启；失败回滚保留原身份。旧设备状态首次升级也关闭提醒。身份读取或保存失败不发送。
 - 默认关闭，范围单独选择；新增范围只接纳启用后到期的事项。勿扰和暂停是设备本地偏好，不改陪伴/主动提醒设置。
 - [reminder-policy](../../../desktop/reminder-policy.cjs) 限定最近 15 分钟补发、每批 3 条、每小时 10 条。尝试前先在 [reminder-store](../../../desktop/reminder-store.cjs) 保存去重记录；失败不自动重试同一条。时钟回拨或存储错误阻止发送。
 - 休眠、锁屏、安装更新分别持有暂停原因，全部解除才恢复。关闭应用后不保证提醒；OS 接受请求不等于用户可见，勿扰/权限可能屏蔽。

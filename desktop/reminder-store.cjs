@@ -13,18 +13,19 @@ function validateState(s) {
     || !s.history || typeof s.history !== 'object' || Array.isArray(s.history)
     || Object.keys(s.history).length > HISTORY_LIMIT
     || Object.entries(s.history).some(([k,v]) => !historyKey.test(k) || !finite(v))) throw new Error('invalid_store');
-  return {version:1,preferences:preferences(s.preferences),enabledAt:s.enabledAt,highWater:s.highWater,
+  if (s.workspaceId !== undefined && (typeof s.workspaceId !== 'string' || !/^[a-f0-9]{64}$/.test(s.workspaceId)))throw new Error('invalid_store');
+  return {...(s.workspaceId === undefined ? {} : {workspaceId:s.workspaceId}),version:1,preferences:preferences(s.preferences),enabledAt:s.enabledAt,highWater:s.highWater,
     scopeSince:{...s.scopeSince},history:{...s.history}};
 }
-function createReminderStore(userData) {
+function createReminderStore(userData,workspaceId) {
   const filename=path.join(userData,'desktop-reminders.json');
   function root() { const s=fs.lstatSync(userData);if (!s.isDirectory() || s.isSymbolicLink()) throw new Error('invalid_store'); }
-  return {
+  const store = {
     load() {
       root();let st;
-      try { st=fs.lstatSync(filename); } catch(e) { if(e.code==='ENOENT')return emptyState();throw e; }
+      try { st=fs.lstatSync(filename); } catch(e) { if(e.code==='ENOENT')return reconcile(emptyState());throw e; }
       if (!st.isFile() || st.isSymbolicLink() || st.size>256*1024)throw new Error('invalid_store');
-      return validateState(JSON.parse(fs.readFileSync(filename,'utf8')));
+      return reconcile(validateState(JSON.parse(fs.readFileSync(filename,'utf8'))));
     },
     save(value) {
       root();const state=validateState(value);
@@ -38,5 +39,15 @@ function createReminderStore(userData) {
       }finally{try{fs.unlinkSync(temporary);}catch(e){if(e.code!=='ENOENT')throw e;}}
     },
   };
+  function reconcile(state){
+    if(workspaceId === undefined)return state; // Standalone store callers do not dispatch.
+    if(typeof workspaceId!=='string'||!/^[a-f0-9]{64}$/.test(workspaceId))throw new Error('invalid_workspace_context');
+    if(state.workspaceId===workspaceId)return state;
+    // New/imported workspace must not inherit delivery consent or dedupe identities.
+    const next={...emptyState(),workspaceId,preferences:{...state.preferences,enabled:false}};
+    store.save(next);
+    return next;
+  }
+  return store;
 }
 module.exports={emptyState,validateState,createReminderStore};
