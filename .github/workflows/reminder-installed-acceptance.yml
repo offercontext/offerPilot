@@ -1,9 +1,9 @@
 # Wait for asynchronous owner IPC preference persistence after the real scope click.
 # Fixture correction: positive event duration verified against the real product API.
-name: Pinned Windows native reminder acceptance
+name: Pinned Windows installed restore and reminder settings
 on:
   push:
-    branches: [feat/20261113-reminder-installed-acceptance]
+    branches: [test/20261114-reminder-restore-installed]
     paths: [.github/workflows/reminder-installed-acceptance.yml]
 permissions:
   contents: read
@@ -22,7 +22,7 @@ jobs:
         with:
           script: |
             const assert=require('assert/strict');
-            const runId=43451522704,head='11dc76fab569fc44a9ab199670fa4066c1f0184c',build='0d7588a9962cb01081777ae0f0d663eff929ef34';
+            const runId=43630189918,head='5e99b33836995640e9c8b510fb921addad8bceb8',build='402481591620839f679bc30ba98e96214ccbd2b6';
             for(let n=0;n<45;n++){
               const run=(await github.rest.actions.getWorkflowRun({...context.repo,run_id:runId})).data;
               assert.equal(run.run_attempt,1);assert.equal(run.head_sha,head);assert.equal(run.path,'.github/workflows/desktop-windows.yml');
@@ -35,7 +35,7 @@ jobs:
                 const matches=artifacts.filter(a=>a.name===`offerpilot-windows-experimental-validation-${build}`&&!a.expired);
                 assert.equal(matches.length,1);const a=matches[0];assert.match(a.digest,/^sha256:[a-f0-9]{64}$/);
                 assert.equal(a.workflow_run.head_sha,head);assert.equal(a.workflow_run.id,runId);
-                for(const sha of [head,build])assert.equal((await github.rest.git.getCommit({...context.repo,commit_sha:sha})).data.tree.sha,'39e3f0b66837b1f5cec6d1782a33cb2201643090');
+                for(const sha of [head,build])assert.equal((await github.rest.git.getCommit({...context.repo,commit_sha:sha})).data.tree.sha,'088c39e0aa0f8a7e51799bd83709937b4c05cc03');
                 core.setOutput('artifact',String(a.id));core.setOutput('digest',a.digest);return;
               }
               if(['cancelled','failure','timed_out'].includes(run.conclusion))throw Error('original run cannot supply an accepted installer');
@@ -56,7 +56,7 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
-          ref: 0d7588a9962cb01081777ae0f0d663eff929ef34
+          ref: 402481591620839f679bc30ba98e96214ccbd2b6
           path: product
           persist-credentials: false
       - name: Download and strictly verify the original artifact ZIP digest
@@ -70,7 +70,7 @@ jobs:
             const id=Number(process.env.PIN_ARTIFACT);
             const meta=(await github.rest.actions.getArtifact({...context.repo,artifact_id:id})).data;
             assert.equal(meta.digest,process.env.PIN_DIGEST);assert.equal(meta.expired,false);
-            assert.equal(meta.workflow_run.id,43451522704);assert.equal(meta.workflow_run.head_sha,'11dc76fab569fc44a9ab199670fa4066c1f0184c');
+            assert.equal(meta.workflow_run.id,43630189918);assert.equal(meta.workflow_run.head_sha,'5e99b33836995640e9c8b510fb921addad8bceb8');
             const response=await github.rest.actions.downloadArtifact({...context.repo,artifact_id:id,archive_format:'zip'});
             assert.notEqual(typeof response.data,'string','raw ZIP bytes required');
             const bytes=Buffer.from(response.data);
@@ -104,8 +104,8 @@ jobs:
           $sidecar=(Get-Content -Raw ($file.FullName+'.sha256')).Trim()
           if(($sidecar -split '\s+')[0] -ne $actual){throw 'Original installer checksum mismatch'}
           $notes=Get-Content -Raw installer/VALIDATION-NOTES.txt
-          if($notes -notmatch 'Commit: 0d7588a9962cb01081777ae0f0d663eff929ef34' -or $notes -notmatch 'Attempt: 1'){throw 'Original build provenance mismatch'}
-          $pin=@{repository='offercontext/offerPilot';productCommit='11dc76fab569fc44a9ab199670fa4066c1f0184c';buildCommit='0d7588a9962cb01081777ae0f0d663eff929ef34';tree='39e3f0b66837b1f5cec6d1782a33cb2201643090';runId=43451522704;attempt=1;artifactId=$env:PIN_ARTIFACT;artifactDigest=$env:PIN_DIGEST;installer=$file.Name;installerSha256=$actual;helperCommit=$env:GITHUB_SHA}
+          if($notes -notmatch 'Commit: 402481591620839f679bc30ba98e96214ccbd2b6' -or $notes -notmatch 'Attempt: 1'){throw 'Original build provenance mismatch'}
+          $pin=@{repository='offercontext/offerPilot';productCommit='5e99b33836995640e9c8b510fb921addad8bceb8';buildCommit='402481591620839f679bc30ba98e96214ccbd2b6';tree='088c39e0aa0f8a7e51799bd83709937b4c05cc03';runId=43630189918;attempt=1;artifactId=$env:PIN_ARTIFACT;artifactDigest=$env:PIN_DIGEST;installer=$file.Name;installerSha256=$actual;helperCommit=$env:GITHUB_SHA}
           New-Item -ItemType Directory -Force reminder-evidence | Out-Null
           $pin | ConvertTo-Json | Set-Content -Encoding utf8 helper/desktop/installed-ui/reminder-pin.json
           Copy-Item helper/desktop/installed-ui/reminder-pin.json reminder-evidence/pin.json
@@ -113,7 +113,7 @@ jobs:
         run: node --test helper/desktop/installed-ui/reminder-matrix.test.cjs
         env:
           REMINDER_PRODUCT_SOURCE: ${{ github.workspace }}/product
-      - name: Installed native notification observation without permission changes
+      - name: Installed Settings restore with notification delivery paused
         run: node helper/desktop/installed-ui/reminder-installed.mjs
         env:
           REMINDER_PRODUCT_SOURCE: ${{ github.workspace }}/product
@@ -122,7 +122,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: reminder-native-${{ github.sha }}-${{ github.run_attempt }}
+          name: reminder-restore-installed-${{ github.sha }}-${{ github.run_attempt }}
           path: reminder-evidence/
           if-no-files-found: warn
           retention-days: 14

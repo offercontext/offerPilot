@@ -18,7 +18,7 @@ const pin=JSON.parse(await fs.readFile(path.join(here,'reminder-pin.json'),'utf8
 const source=path.resolve(process.env.REMINDER_PRODUCT_SOURCE||'product');
 const artifact=path.resolve(process.env.REMINDER_INSTALLER_DIR||'installer');
 const output=path.resolve(process.env.REMINDER_EVIDENCE||'reminder-evidence');
-const report={scope:'Pinned NSIS-installed Electron: real reminder settings, native notification attempt, bounded OS visibility and click observation; no permission or safety changes',pin,assertions:[],screenshots:[],failures:[],pageErrors:[],externalRequests:[],launches:[],fullGate:'independent-not-certified',nativeDialogPointerValidated:false,ordinaryUserUacSmartScreenValidated:false};
+const report={scope:'Pinned NSIS-installed Electron: Settings, actual restore and restart, disabled subscription preservation. No native notification display/click/sleep claim; no permission or safety changes',pin,assertions:[],screenshots:[],failures:[],pageErrors:[],externalRequests:[],launches:[],fullGate:'independent-not-certified',nativeDialogPointerValidated:false,ordinaryUserUacSmartScreenValidated:false};
 let app,page,exe,backend,installDir,userData,scratch,environment,owned=[],stage='environment';
 await fs.mkdir(output,{recursive:true});
 const exists=f=>fs.access(f).then(()=>true,()=>false);
