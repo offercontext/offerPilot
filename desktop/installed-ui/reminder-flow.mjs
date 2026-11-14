@@ -8,6 +8,9 @@ async function api(page,url,method='GET',body){return page.evaluate(async({url,m
 async function settings(page){await page.getByRole('navigation',{name:'主导航',exact:true}).getByRole('button',{name:'设置',exact:true}).click();await page.getByRole('button',{name:'连接与自动任务',exact:true}).click();await page.getByRole('heading',{name:'桌面本地提醒',exact:true}).waitFor();}
 export async function reminderFlow({page,app,userData,output,report,restart}){
  const check=(name,value)=>{assert.ok(value,name);report.assertions.push(name);};
+ report.restoreResponses=[];
+ const observe=page=>page.on('response',async response=>{if(new URL(response.url()).pathname.startsWith('/api/backups/restore')){try{const body=await response.json();report.restoreResponses.push({path:new URL(response.url()).pathname,status:response.status(),state:body.state??null,error:body.error??null});}catch{report.restoreResponses.push({status:response.status(),unreadable:true});}}});
+ observe(page);
  const state=()=>page.evaluate(()=>window.offerpilotReminders.getState());
  const durable=async()=>JSON.parse(await fs.readFile(path.join(userData,'desktop-reminders.json'),'utf8'));
  const shot=async name=>{const file=`${name}.png`;await page.screenshot({path:path.join(output,file),fullPage:true});report.screenshots.push({file,sha256:await hash(path.join(output,file))});};
@@ -31,7 +34,9 @@ export async function reminderFlow({page,app,userData,output,report,restart}){
  await shot('settings-before-restore');
  let previous=before.workspaceId;
  for(const stage of ['enabled-paused','disabled']){
-  await page.getByLabel('恢复备份文件',{exact:true}).setInputFiles(archive);
+  const choose=page.getByRole('button',{name:'选择 ZIP 并预检',exact:true});
+  await until(()=>choose.isEnabled());
+  const chooser=page.waitForEvent('filechooser');await choose.click();await (await chooser).setFiles(archive);
   await page.getByText('预检通过，等待确认',{exact:true}).waitFor();
   check(`${stage}: preview preserves workspace identity`,(await api(page,'/api/reminders/desktop-context')).workspace_id===previous);
   await page.getByRole('checkbox',{name:'我已保存当前工作，并理解覆盖范围及授权失效。',exact:true}).check();
@@ -39,7 +44,7 @@ export async function reminderFlow({page,app,userData,output,report,restart}){
   await page.getByRole('button',{name:'确认恢复并等待重启',exact:true}).click();
   await page.getByText('已确认，等待完整重启',{exact:true}).waitFor();
   await shot(`queued-${stage}`);
-  ({page,app}=await restart());await settings(page);
+  ({page,app}=await restart());observe(page);await settings(page);
   await page.getByText('恢复已完成',{exact:true}).waitFor();
   const current=await durable(),publicState=await state(),context=await api(page,'/api/reminders/desktop-context');
   check(`${stage}: successful restore rotates identity`,current.workspaceId!==previous&&context.workspace_id===current.workspaceId);
@@ -50,7 +55,7 @@ export async function reminderFlow({page,app,userData,output,report,restart}){
   check(`${stage}: post-backup application actually replaced`,await page.evaluate(async id=>(await fetch(`/api/applications/${id}`)).status===404,later.id));
   await shot(`completed-${stage}`);previous=current.workspaceId;
  }
- ({page,app}=await restart());await settings(page);
+ ({page,app}=await restart());observe(page);await settings(page);
  const after=await durable();check('ordinary restart retains final identity and disabled preference',after.workspaceId===previous&&!after.preferences.enabled);
  await shot('settings-final-disabled');
 }
