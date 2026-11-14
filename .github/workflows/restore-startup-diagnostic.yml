@@ -44,7 +44,7 @@ jobs:
           from pathlib import Path
           evidence=Path('diagnostic-evidence');evidence.mkdir()
           refs={'baseline':'5fb4f2437bfb4d05d8f1b14fc504d1f4806e527f','product':'402481591620839f679bc30ba98e96214ccbd2b6'}
-          results={'scope':'Diagnostic only. Focused file runs retain the original 20s fixture deadline; profiles have a separate 90s observation bound. No native notifications. Not a full gate.','versions':{}}
+          results={'scope':'Diagnostic only. Full collection with -k test_backup_install retains the original 20s fixture deadline; profiles have a separate 90s observation bound. No native notifications. Not a full gate.','versions':{}}
           profile="""import faulthandler,time,tempfile
           from pathlib import Path
           faulthandler.dump_traceback_later(10,repeat=True)
@@ -74,7 +74,7 @@ jobs:
               actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
               assert actual==ref
               result={'commit':actual,'fixture_sha256':hashlib.sha256((root/'tests/test_backup_install.py').read_bytes()).hexdigest()}
-              for phase,args,limit in [('profile',[str(py),'-c',profile],90),('original-tests',[str(py),'-m','pytest','-q','tests/test_backup_install.py'],480)]:
+              for phase,args,limit in [('profile',[str(py),'-c',profile],90),('original-tests',[str(py),'-m','pytest','-q','-k','test_backup_install'],600)]:
                   begin=time.monotonic()
                   try:
                       run=subprocess.run(args,cwd=root,capture_output=True,text=True,timeout=limit)
