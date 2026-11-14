@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
+from offerpilot.backup_schema import canonical_schema_row
 from offerpilot.backup_paths import archive_parts, validate_archive_index
 
 MAX_COMPRESSED = 256 * 1024 * 1024
@@ -120,8 +121,9 @@ def _open_readonly(path: Path, *, immutable: bool = True) -> sqlite3.Connection:
 
 
 def _schema(db: sqlite3.Connection) -> list[tuple[Any, ...]]:
-    return db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master "
+    rows = db.execute("SELECT type,name,tbl_name,sql FROM sqlite_master "
                       "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
+    return [canonical_schema_row(row) for row in rows]
 
 
 def _attachment(root: Path, name: str, prefix: tuple[str, ...], *,

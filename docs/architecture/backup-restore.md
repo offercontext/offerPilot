@@ -6,7 +6,7 @@
 
 `backup_export.export_archive` 使用 SQLite backup 快照，并将最终 ZIP 交给 `backup_archive.stage_archive` 再校验。二者使用同一预检约束：压缩包 256 MiB、展开总量 1 GiB、20,000 条目、单条压缩比 1000、manifest 8 MiB。路径限 32 层、总 UTF-8 长度 2048 字节、单段 240 字节。目录读取失败会使导出失败，不能静默遗漏。
 
-新包含 `offerpilot-backup.json` 文件摘要清单；旧包无清单时只能验证现有结构、schema 和附件，不能证明原始备份完整。预检要求数据库 schema 与当前工作区完全一致，不对上传库执行迁移；SQLite WAL/SHM/journal sidecar 包被拒绝。
+新包含 `offerpilot-backup.json` 文件摘要清单；旧包无清单时只能验证现有结构、schema 和附件，不能证明原始备份完整。预检要求数据库 schema 与当前工作区一致，不对上传库执行迁移。唯一文本兼容例外是 0029/0030 两个补偿触发器的完整已知旧 SQL 布局：精确白名单映射保留相同条件，任何条件、工具组合或其他 schema 变化仍拒绝；不是通用 SQL/空白归一化。新库与重启使用统一生成文本，避免同一 ZIP 二次恢复被格式漂移误拒；SQLite WAL/SHM/journal sidecar 包被拒绝。
 
 真实历史样本来自 `d0cd40688f9ec4802c760d7ae8e868516ca3ba9f`（首次 ZIP 导出实现）。[生成脚本](../../scripts/generate_legacy_backup_fixture.py)执行该提交原始 db/models 模块及 AST 提取的原始导出函数，仅写入合成记录；[fixture](../../tests/fixtures/backups/legacy-d0cd4068.json)保留源代码摘要、ZIP 摘要及内容。[测试](../../tests/test_backup_legacy.py)验证旧 schema 被拒绝、原工作区和 ZIP 不变。它不证明支持该版本迁移，也不代表所有历史版本已测试。
 
