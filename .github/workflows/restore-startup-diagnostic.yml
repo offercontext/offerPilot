@@ -1,0 +1,100 @@
+name: Diagnose pinned restore startup
+on:
+  push:
+    branches: [test/20261114-restore-startup-diagnostic]
+    paths: [.github/workflows/restore-startup-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONUTF8: '1'
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 5fb4f2437bfb4d05d8f1b14fc504d1f4806e527f
+          path: baseline
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: 402481591620839f679bc30ba98e96214ccbd2b6
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+      - name: Install each pinned environment
+        shell: pwsh
+        run: |
+          uv sync --frozen --project baseline
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline dependencies failed' }
+          uv sync --frozen --project product
+          if ($LASTEXITCODE -ne 0) { throw 'Product dependencies failed' }
+      - name: Preserve original deadlines and profile separate synthetic initialization
+        shell: python
+        run: |
+          import os,json,subprocess,time,hashlib,tempfile
+          from pathlib import Path
+          evidence=Path('diagnostic-evidence');evidence.mkdir()
+          refs={'baseline':'5fb4f2437bfb4d05d8f1b14fc504d1f4806e527f','product':'402481591620839f679bc30ba98e96214ccbd2b6'}
+          results={'scope':'Diagnostic only. Focused file runs retain the original 20s fixture deadline; profiles have a separate 90s observation bound. No native notifications. Not a full gate.','versions':{}}
+          profile="""import faulthandler,time,tempfile
+          from pathlib import Path
+          faulthandler.dump_traceback_later(10,repeat=True)
+          start=time.perf_counter()
+          def mark(label): print(label,round(time.perf_counter()-start,4),flush=True)
+          mark('process-entry')
+          from offerpilot import db
+          mark('imports-complete')
+          from offerpilot import backup_install
+          original=backup_install.ensure_workspace_lease
+          def lease(*a,**k):
+              mark('lease-start');r=original(*a,**k);mark('lease-end');return r
+          backup_install.ensure_workspace_lease=lease
+          original_create=db.Base.metadata.create_all
+          def create(*a,**k):
+              mark('create-all-start');r=original_create(*a,**k);mark('create-all-end');return r
+          db.Base.metadata.create_all=create
+          root=Path(tempfile.mkdtemp(prefix='restore-startup-diagnostic-'))
+          factory=db.init_database(root/'data.db')
+          mark('init-complete')
+          factory.kw['bind'].dispose()
+          mark('dispose-complete')
+          faulthandler.cancel_dump_traceback_later()
+          """
+          for label,ref in refs.items():
+              root=Path(label).resolve();py=root/'.venv/Scripts/python.exe'
+              actual=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
+              assert actual==ref
+              result={'commit':actual,'fixture_sha256':hashlib.sha256((root/'tests/test_backup_install.py').read_bytes()).hexdigest()}
+              for phase,args,limit in [('profile',[str(py),'-c',profile],90),('original-tests',[str(py),'-m','pytest','-q','tests/test_backup_install.py'],480)]:
+                  begin=time.monotonic()
+                  try:
+                      run=subprocess.run(args,cwd=root,capture_output=True,text=True,timeout=limit)
+                      stdout,stderr=run.stdout,run.stderr
+                      receipt={'exit_code':run.returncode,'seconds':time.monotonic()-begin,'timed_out':False}
+                  except subprocess.TimeoutExpired as error:
+                      stdout,stderr=error.stdout or b'',error.stderr or b''
+                      receipt={'exit_code':None,'seconds':time.monotonic()-begin,'timed_out':True}
+                  for stream,value in [('stdout',stdout),('stderr',stderr)]:
+                      if isinstance(value,bytes):value=value.decode('utf-8',errors='replace')
+                      (evidence/f'{label}-{phase}-{stream}.txt').write_text(value,encoding='utf-8')
+                  result[phase]=receipt
+              results['versions'][label]=result
+              (evidence/'results.json').write_text(json.dumps(results,indent=2),encoding='utf-8')
+          assert results['versions']['baseline']['fixture_sha256']==results['versions']['product']['fixture_sha256']
+          print(json.dumps(results,indent=2))
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: restore-startup-diagnostic-${{ github.sha }}-${{ github.run_attempt }}
+          path: diagnostic-evidence/
+          if-no-files-found: error
+          retention-days: 14
