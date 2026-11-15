@@ -57,7 +57,7 @@ try {
  await shot('deleted-after-refresh');
  await api('POST','/api/confirmed-memory',{mutation_id:randomUUID(),expected_version:0,confirmed:true,action:'confirm',content:'希望从事 Agent 开发'});
  for(const [locale,theme,width,height] of [['zh-CN','light',1672,941],['en-US','dark',1672,941],['en-US','light',1672,941],['zh-CN','dark',390,844],['en-US','light',390,844]]){
-  page=await context(locale,theme,width,height);await page.goto(origin+'/?view=memory');await page.getByRole('heading',{name:locale==='zh-CN'?'我的记忆画像':'My memory profile'}).waitFor();await page.getByRole('button',{name:/希望从事 Agent 开发/}).click();await shot(`${locale}-${theme}-${width}`);
+  page=await context(locale,theme,width,height);await page.goto(origin+'/?view=memory');await page.getByRole('heading',{name:locale==='zh-CN'?'我的记忆画像':'My memory profile'}).waitFor();if(width<600)await shot(`${locale}-${theme}-${width}-overview`);await page.getByRole('button',{name:/希望从事 Agent 开发/}).click();await shot(`${locale}-${theme}-${width}`);
   const dims=await page.evaluate(()=>({width:innerWidth,scroll:document.documentElement.scrollWidth}));check(`${locale}-${theme}-${width} has no document horizontal overflow`,dims.scroll<=dims.width);if(width<600){await page.getByRole('complementary',{name:locale==='zh-CN'?'记忆详情':'Memory details'}).scrollIntoViewIfNeeded();await shot(`${locale}-${theme}-${width}-detail`);}
  }
  check('no page errors',report.pageErrors.length===0);check('no console errors',report.consoleErrors.length===0);check('no external requests',report.unexpectedNetwork.length===0);report.status='passed';
