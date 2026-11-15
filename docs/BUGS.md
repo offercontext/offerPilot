@@ -5,6 +5,17 @@
 
 ## 当前记录
 
+## 记忆确认校验错误无法序列化（2026-11-15）
+
+**现象：** 真实 HTTP 提交未确认记忆时，写入被拒绝，但返回 500 而不是 422。
+
+**根因：** Pydantic 模型校验器的 errors ctx 包含 ValueError，通用 JSONResponse 无法序列化。
+
+**修复：** 记忆接口返回固定 422 / memory_invalid_payload，不回显私人正文或异常对象；不放宽确认、字段或版本校验。
+
+**教训：** repository 校验测试不足以证明 HTTP 错误路径可用；增加两条记忆路由的错误响应及无写入回归。
+
+
 ## Windows 备份导出与恢复落盘兼容（2026-11-13）
 
 **现象：** 恢复专项 run `43364222596` 在 Linux 通过；Windows 出现候选文件 `fsync` 的 EBADF，以及含嵌套附件的导出误报 `unsafe_archive_entry`。

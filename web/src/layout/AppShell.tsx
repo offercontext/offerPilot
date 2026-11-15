@@ -751,6 +751,7 @@ const InterviewV01View = lazy(() => import('@/components/InterviewV01View'));
 const InterviewReadinessCenter = lazy(() => import('@/features/interviewReadiness/InterviewReadinessCenter'));
 const VoiceCoachingGrowthView = lazy(() => import('@/components/VoiceCoachingGrowthView'));
 const ResumeLibraryView = lazy(() => import('@/components/ResumeLibraryView'));
+const MemoryProfile = lazy(() => import('@/components/MemoryProfile'));
 const SettingsView = lazy(() => import('@/components/SettingsView'));
 
 
@@ -2444,6 +2445,7 @@ function AppShellContent() {
               onEvidenceFocusConsumed={offerEvidenceFocus ? () => clearEvidenceFocus(offerEvidenceFocus) : undefined}
             />
           )}
+          {view === 'memory' && <MemoryProfile />}
           {view === 'knowledge' && <KnowledgeSourcesView />}
           {view === 'reviews' && (
             <ExperienceMaterialsView

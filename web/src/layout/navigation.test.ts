@@ -15,6 +15,7 @@ describe('module navigation contract', () => {
       '面试',
       'Offer',
       '素材库',
+      '记忆画像',
       '设置',
     ]);
     expect(NAVIGATION_GROUPS).toEqual([
@@ -28,7 +29,7 @@ describe('module navigation contract', () => {
       '面试',
       'Offer',
     ]);
-    expect(MODULE_NAV.filter((item) => item.group === 'resources').map((item) => item.label)).toEqual(['素材库']);
+    expect(MODULE_NAV.filter((item) => item.group === 'resources').map((item) => item.label)).toEqual(['素材库', '记忆画像']);
     expect(MODULE_NAV.filter((item) => item.group === 'utility').map((item) => item.label)).toEqual(['设置']);
 
     expect(MODULE_NAV.some((item) => item.label === 'Pilot')).toBe(false);

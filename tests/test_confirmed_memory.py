@@ -82,3 +82,19 @@ def test_repeated_withdraw_does_not_consume_confirmed_version_capacity(repositor
     result = repository.mutate(item["id"], command(2, content="重新确认"))
     assert result["state"] == "active"
     assert result["current_version"] == 3
+
+
+def test_http_validation_rejects_unconfirmed_without_echoing_private_content(tmp_path):
+    from fastapi.testclient import TestClient
+    from offerpilot.api import create_app
+
+    with TestClient(create_app(data_dir=tmp_path)) as client:
+        payload = dict(mutation_id=str(uuid4()), action="confirm", expected_version=0,
+                       confirmed=False, content="private-memory-sentinel")
+        for path in ("/api/confirmed-memory", "/api/confirmed-memory/missing"):
+            for changes in ({}, {"confirmed": "true"}, {"confirmed": True, "content": " "}):
+                response = client.post(path, json=payload | changes)
+                assert response.status_code == 422
+                assert response.json()["error_code"] == "memory_invalid_payload"
+                assert "private-memory-sentinel" not in response.text
+        assert client.get("/api/confirmed-memory").json() == []

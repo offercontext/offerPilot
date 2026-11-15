@@ -6,6 +6,7 @@ import {
 
 describe('workspace view deep links', () => {
   it.each([
+    ['http://localhost/?view=memory', 'memory'],
     ['http://localhost/?view=board', 'board'],
     ['http://localhost/?view=list', 'applications-list'],
     ['http://localhost/?view=applications-list', 'applications-list'],
