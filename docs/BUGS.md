@@ -2030,3 +2030,16 @@ MockTransport 和 owned loopback。实现见 [ADR-0014](architecture/decisions/0
 - 其余边界：首轮另有一个 P0 负对照及两个 PowerShell 编排失败，同一未修改提交的 3 项定向复验通过；原 pytest 临时私有证据恢复时已不存在，具体首轮原因仍未知，不能据此归因负载或宣称已修复。为编排断言附带实际子进程输出，帮助未来失败定位，不改其成功条件。
 - 验证范围：预算拒绝与失败观测两个模块、上述三个失败节点、ruff，以及最终冻结快照的完整正式 gate。首轮 9,551 通过、32 跳过、16 失败和 aggregate 非零全部保留；后续结果另建目录，不能把局部复验拼成首轮通过。
 - 教训：隔离 I/O 的测试夹具仍须跟随活动用例身份与驱动入口；排查必须确认已进入目标异常路径，不能放宽版本检查或异常归因来迎合旧 stub。
+
+
+## 2026-11-15：记忆页面参数新增后遗漏分片隔离复审摘要
+
+- 现象：PR #70 head `567de946981c90f9eb1e8ee3a5aae5cc6f624c37` 的 Windows run [43682202894](https://github.com/offercontext/offerPilot/actions/runs/43682202894) 终态失败。19 个分片成功，shard 14 job `132716177091` 为 901 passed / 1 failed，唯一失败是 `test_node_split_source_change_requires_a_new_isolation_review`；最终 release regression 被依赖检查阻断。
+- 根因：`test_chat_api.py` 新增 supported-view 参数 `memory` 后，仍绑定旧隔离审查摘要 `8f0aa82abb4cea49106c76456fdb46c2f6347156bc9dd72cf66b33978c85c0b9`。门禁正确要求重新审查，不能以重跑代替。
+- 独立复审：恢复工作树对比 master `5fb4f2437bfb4d05d8f1b14fc504d1f4806e527f`，该文件仅增加上述一行。每个参数创建独立 CapturingScriptedModel、TestClient/create_app，使用 function-scoped tmp_path。未改 globals、动态 fixture、setup/teardown 或 fixture 生命周期；conftest.app_client、timeout helper 与 selection plugin 均无差异。保持摘要断言、真实分片精确覆盖及共享状态拒绝检查。
+- 修复：记录以上审查并绑定实际 SHA256 `ecf048a62fda059debb2b572ede4b52ecc769bf51c69ab660f22663b049506ae`。本次不改变产品代码或门禁行为。
+- 原失败证据：artifact `14153272620`，ZIP SHA256 `27b5a9d974bea451da3d4950a24306d07fca1c087cbc05a5f8fe989c3948b10a`；保留原 run，不改写为成功。新 head 必须单独完成完整 CI 和真实 UI/召回验收。
+- 平台边界：旧 Linux 官方 gate 因缺 PowerShell 失败，不能宣称其成功。旧 Windows shard 19 artifact `14156420902`（ZIP SHA256 `0e4e6b930075f009f3b4883c06da3d62ae5ee3ac5375cd6e48ef00067c455487`）仅作为旧轮平台覆盖证据，新轮仍须重新验证。
+- 本地验证：独立恢复树修复前 21 passed / 1 failed（仅摘要）/ 118 deselected；修复后运行全部 14 个 supported-view 参数，加 node_split、reviewed_split、shared_fixture、split_fixture、shared_parameter、dynamic_or_cached、xunit_module、indirect_parametrization 相关 guards，25 passed / 115 deselected。包括真实两分片执行与共享 fixture 拒绝。目标 ruff 与 diff --check 通过；不计作完整 gate。
+- 旧 Windows 的具体替代覆盖：`tests/test_application_jd_browser_harness.py::test_application_jd_harness_parses_and_uses_explicit_stage_contract` 的 setup/call/teardown 全部 passed、xfail=false，call 3.8876 秒，shard exit_code=0。
+- 教训：改变可按 node 拆分的测试源时，先审查状态所有权和 fixture 生命周期，再同步审查说明与摘要；摘要更新本身不等于隔离审查。

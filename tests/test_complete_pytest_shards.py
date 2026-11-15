@@ -344,10 +344,17 @@ def test_node_split_source_change_requires_a_new_isolation_review():
     # nodes create their own model, client, context and application under the
     # function-scoped tmp_path. No globals or fixture scopes changed; a real
     # two-shard probe passed both nodes with exact coverage and no skips.
+    # Independently re-reviewed PR #70 at 567de946 against master 5fb4f243:
+    # the sole chat-test change adds "memory" to the supported-view parameters.
+    # Each parameter owns function-scoped tmp_path, a new CapturingScriptedModel
+    # and TestClient/create_app; globals, dynamic fixtures and setup/teardown
+    # are unchanged. app_client, timeout helper and selection plugin are unchanged.
+    # Keep exact execution and shared-fixture rejection guards; see docs/BUGS.md
+    # (2026-11-15) for the original failed run and review evidence.
     # Normalize only checkout CRLF so the same reviewed source works on Windows.
     reviewed = {
         "tests/test_chat_api.py":
-            "8f0aa82abb4cea49106c76456fdb46c2f6347156bc9dd72cf66b33978c85c0b9",
+            "ecf048a62fda059debb2b572ede4b52ecc769bf51c69ab660f22663b049506ae",
         "tests/_agent_timeout.py":
             "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735",
         "tests/conftest.py":
