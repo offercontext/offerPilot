@@ -104,6 +104,7 @@ async function navigate(page, view) {
     questions: () => page.getByRole('heading', exact('题库刷题')), offers: () => page.locator('[data-offer-workspace-mode]'),
     resumes: () => page.getByPlaceholder('搜索简历', { exact: true }), reviews: () => page.getByTestId('experience-materials-view'),
     knowledge: () => page.getByPlaceholder('搜索资料内容（中文/英文关键词）', { exact: true }),
+    memory: () => region(page, '记忆画像'),
     settings: () => page.getByRole('heading', { name: '设置', exact: true, level: 2 }),
     interview: () => page.getByRole('tab', exact('即将进行')),
   };
@@ -1215,15 +1216,15 @@ async function pilotSettingsFlows(qa, page, record) {
     await btn(page, '配置 AI').waitFor();
     qa.observed('advanced runtime expand/collapse; fresh blank key confirmed; AI settings opens and returns without save');
   });
-  await qa.run('S27', 'settings-preference-cancel', ['设置', '添加偏好'], async () => {
+  await qa.run('S27', 'settings-preference-cancel', ['设置', '添加记忆'], async () => {
     await navigate(page, 'settings');
-    await btn(page, '添加偏好').click();
-    const form = dialog(page, '确认个人偏好');
+    await btn(page, '添加记忆').click();
+    const form = dialog(page, '编辑并确认记忆');
     await form.waitFor();
     assert.equal(await btn(form, '确认保存').isDisabled(), true);
     await qa.capture('settings-preference-empty-confirmation');
     await btn(form, '取消').click(); await form.waitFor({ state: 'hidden' });
-    qa.observed('empty preference confirmation disabled; cancel; no preference/proactive/access settings changed');
+    qa.observed('empty memory confirmation disabled; cancel; no memory/proactive/access settings changed');
   });
   await qa.run('R13', 'settings-safe-sections', ['设置'], async () => {
     await navigate(page, 'settings');
