@@ -1,4 +1,4 @@
-.profile { display:grid; gap:16px; color:var(--op-ink); padding:24px; }
+.profile { display:grid; gap:12px; color:var(--op-ink); padding:16px 24px; }
 .header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
 .header h1 { font-size:28px; margin:0 0 8px; } .header p { margin:0; color:var(--op-muted); }
 .explanation { color:var(--op-muted); font-size:13px; margin:0; line-height:1.6; }
@@ -23,15 +23,20 @@
 @media (max-width:600px) { .profile { padding:12px; } .header { align-items:flex-start; } .header h1 { font-size:23px; } .graph { grid-template-columns:1fr; gap:20px; } .cluster4,.me { grid-column:auto; } .canvas,.detail { padding:14px; } }
 
 @media (min-width:1400px) {
- .graph { display:block; height:660px; }
- .me { position:absolute; left:50%; top:51%; transform:translate(-50%,-50%); width:130px; height:130px; }
- .cluster { position:absolute; width:29%; z-index:1; background:var(--op-surface); }
- .cluster0 { left:35.5%; top:25px; }
- .cluster1 { right:0; top:225px; }
- .cluster2 { right:5%; bottom:10px; }
- .cluster3 { left:5%; bottom:10px; }
- .cluster4 { left:0; top:225px; }
- .leaves { max-height:135px; }
+ .graph { display:block; height:480px; min-height:480px; padding:0; margin-top:16px; }
+ .me { position:absolute; left:50%; top:51%; transform:translate(-50%,-50%); width:112px; height:112px; background:radial-gradient(circle at 35% 25%, #8174fa, #342d86 75%); color:white; box-shadow:0 0 28px #7668ec55; }
+ .cluster { position:absolute; width:29%; z-index:1; border:0; --cluster-color:#8c83fa; }
+ .cluster h2 { width:max-content; max-width:100%; margin:0 auto 8px; padding:10px 16px; border:1px solid var(--cluster-color); border-radius:32px; background:var(--op-surface); box-shadow:inset 0 0 20px color-mix(in srgb, var(--cluster-color) 20%, transparent); }
+ .cluster h2 small { margin-left:6px; }
+ .cluster1 { --cluster-color:#4fa6df; } .cluster2 { --cluster-color:#a382ef; } .cluster3 { --cluster-color:#46b68c; } .cluster4 { --cluster-color:#31b7bc; }
+ .node { border-radius:20px; padding:9px 12px; }
+ .noData { display:block; text-align:center; }
+ .cluster0 { left:35.5%; top:0; }
+ .cluster1 { right:0; top:145px; }
+ .cluster2 { right:5%; bottom:0; }
+ .cluster3 { left:5%; bottom:0; }
+ .cluster4 { left:0; top:145px; }
+ .leaves { max-height:90px; }
  .connections { position:absolute; inset:0; width:100%; height:100%; pointer-events:none; }
 }
 .connections { display:none; }
