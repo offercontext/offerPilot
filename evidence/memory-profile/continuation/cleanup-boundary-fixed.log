@@ -1,0 +1,4 @@
+/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/tests/_offline_network_guard.py:126: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import _TestClientTransport  # noqa: E402
+...............                                                          [100%]
+15 passed in 0.09s

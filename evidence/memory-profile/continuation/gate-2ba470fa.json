@@ -1,0 +1,177 @@
+{
+  "passed": false,
+  "exit_code": 1,
+  "groups": [
+    {
+      "name": "group-001",
+      "command": [
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-rs",
+        "tests/agent_loop/test_baseline_golden.py",
+        "tests/agent_loop/test_confirmation.py",
+        "tests/agent_loop/test_contracts.py",
+        "tests/agent_loop/test_deletion_gates.py",
+        "tests/agent_loop/test_runner.py",
+        "tests/evaluation/test_async_transport.py",
+        "tests/evaluation/test_budget_denial_attribution.py",
+        "tests/evaluation/test_business_policy_consumers.py",
+        "tests/evaluation/test_cleanup_failures.py",
+        "tests/evaluation/test_cli.py",
+        "tests/evaluation/test_commit_observer.py",
+        "tests/evaluation/test_compare.py",
+        "tests/evaluation/test_context_observer.py",
+        "tests/evaluation/test_contracts.py",
+        "tests/evaluation/test_control_exit_drain.py",
+        "tests/evaluation/test_core_acceptance.py",
+        "tests/evaluation/test_core_adjudication.py",
+        "tests/evaluation/test_core_baselines.py",
+        "tests/evaluation/test_core_contracts.py",
+        "tests/evaluation/test_core_extensions.py",
+        "tests/evaluation/test_core_governance.py",
+        "--selection-ids",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-001.ids.json",
+        "--selection-report",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-001.report.json"
+      ],
+      "native_exit": 0,
+      "counts": {
+        "passed": 367,
+        "skipped": 0
+      },
+      "evidence": {
+        "ids.json": "e89599f4f37ae91b7301acc233669828361de347f9ae69a715ae628d44d38da5",
+        "report.json": "487eef433b48476ecdb2c2892c2f4e6042415d699332c488aa2f97d6db826035",
+        "stdout.log": "e1b36f8e92971256be1ebe764f70fb27b77d15febe2a346db21d518247bd59ae",
+        "stderr.log": "3e92c0857af59ddcfd0d060b78854ee8077e8fc20df36e535dc6a42d63e47f75"
+      }
+    },
+    {
+      "name": "group-002",
+      "command": [
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-rs",
+        "tests/evaluation/test_core_integrity.py",
+        "tests/evaluation/test_core_origin_reads.py",
+        "tests/evaluation/test_core_planning.py",
+        "tests/evaluation/test_core_planning_targets.py",
+        "tests/evaluation/test_core_refresh.py",
+        "tests/evaluation/test_core_refresh_history.py",
+        "tests/evaluation/test_core_refresh_parallel.py",
+        "tests/evaluation/test_core_refresh_paths.py",
+        "tests/evaluation/test_core_refresh_sources.py",
+        "tests/evaluation/test_core_release.py",
+        "tests/evaluation/test_core_release_capture.py",
+        "tests/evaluation/test_core_release_reads.py",
+        "tests/evaluation/test_core_review.py",
+        "tests/evaluation/test_core_review_evidence.py",
+        "tests/evaluation/test_current_goal_migration.py",
+        "tests/evaluation/test_external_reports.py",
+        "--selection-ids",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-002.ids.json",
+        "--selection-report",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-002.report.json"
+      ],
+      "native_exit": 0,
+      "counts": {
+        "passed": 361,
+        "skipped": 4
+      },
+      "evidence": {
+        "ids.json": "b8c41531d0459675e3a86e9b5a9d419a97cc364768e500231673f1249106772a",
+        "report.json": "0f0f98487671cacff954765913b2e28ab4e9c8d5dabeea22f0c95bf87e0c16da",
+        "stdout.log": "adc880f6d10acfc336609922dc31c9e213b2512ee59544d231ae07f0dd2211c4",
+        "stderr.log": "3e92c0857af59ddcfd0d060b78854ee8077e8fc20df36e535dc6a42d63e47f75"
+      }
+    },
+    {
+      "name": "group-003",
+      "command": [
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-rs",
+        "tests/evaluation/test_failure_observations.py",
+        "tests/evaluation/test_final_input.py",
+        "tests/evaluation/test_legacy_http_deadline.py",
+        "tests/evaluation/test_local_http_cancellation.py",
+        "tests/evaluation/test_observer_crash.py",
+        "tests/evaluation/test_p0_cases.py",
+        "tests/evaluation/test_p0_diagnostics.py",
+        "tests/evaluation/test_pretrial_failure_diagnostics.py",
+        "tests/evaluation/test_process_signals.py",
+        "tests/evaluation/test_product_budget_probe.py",
+        "tests/evaluation/test_provider_network.py",
+        "tests/evaluation/test_quality_output_inventory.py",
+        "tests/evaluation/test_read_normalization.py",
+        "tests/evaluation/test_read_run.py",
+        "tests/evaluation/test_redaction.py",
+        "tests/evaluation/test_run_budget.py",
+        "tests/evaluation/test_runner.py",
+        "tests/evaluation/test_snapshot_workers.py",
+        "tests/evaluation/test_source_functional_goals.py",
+        "tests/evaluation/test_stream_consumption.py",
+        "tests/evaluation/test_subject_shutdown.py",
+        "tests/evaluation/test_subject_source_loading.py",
+        "tests/evaluation/test_targeted_authorized.py",
+        "--selection-ids",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-003.ids.json",
+        "--selection-report",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-003.report.json"
+      ],
+      "native_exit": 0,
+      "counts": {
+        "passed": 361,
+        "skipped": 0
+      },
+      "evidence": {
+        "ids.json": "6e71e6609afd8461d9b49c5efe5d3fa7e7375079e6a84417f5b99958eb29af47",
+        "report.json": "6125ab58e85e83795a855803da465637f7602c2a29afbe3ad52bb595622486a0",
+        "stdout.log": "ad49d3336a9a0a678cbc0fb15237d4c35adbac91eb8789057d318fefb852983f",
+        "stderr.log": "3e92c0857af59ddcfd0d060b78854ee8077e8fc20df36e535dc6a42d63e47f75"
+      }
+    },
+    {
+      "name": "group-004",
+      "command": [
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/.venv/bin/python",
+        "-m",
+        "pytest",
+        "-q",
+        "-rs",
+        "tests/evaluation/test_targeted_offline.py",
+        "tests/evaluation/test_targeted_paths.py",
+        "tests/evaluation/test_task_quality_decisions.py",
+        "tests/evaluation/test_task_review_workflow.py",
+        "tests/evaluation/test_unknown_cleanup_boundary.py",
+        "tests/evaluation/test_verdicts.py",
+        "tests/evaluation/test_windows_owner.py",
+        "tests/pilot_runtime/test_baseline_golden.py",
+        "tests/pilot_runtime/test_confirmation.py",
+        "tests/pilot_runtime/test_confirmation_cutover.py",
+        "tests/pilot_runtime/test_contracts.py",
+        "tests/pilot_runtime/test_deterministic.py",
+        "tests/pilot_runtime/test_event_sink.py",
+        "tests/pilot_runtime/test_execution_budget.py",
+        "tests/pilot_runtime/test_execution_host.py",
+        "--selection-ids",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-004.ids.json",
+        "--selection-report",
+        "/workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa-evidence/backend/group-004.report.json"
+      ],
+      "native_exit": 1
+    }
+  ],
+  "counts": {
+    "passed": 1089,
+    "skipped": 4
+  },
+  "plan_hash": "eddb5ce41434a910e1eccd2aa8e2a20b2ab68ce8974e5790b374ef8c29560c3d",
+  "reason": "backend group failed; remaining groups were not executed"
+}
