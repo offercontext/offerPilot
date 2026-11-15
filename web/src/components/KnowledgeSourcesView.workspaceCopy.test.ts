@@ -14,9 +14,9 @@ describe('KnowledgeSourcesView user language', () => {
     expect(source).toContain('搜索资料内容');
     expect(source).not.toContain('高级信息');
     expect(source).toContain('资料处理未完成，请稍后重试');
-    expect(source).toContain("message.error('取消失败，请稍后重试。')");
+    expect(source).toContain('message.error(liveText(() => t("取消失败，请稍后重试。")))');
     expect(source).not.toContain('error instanceof Error ? error.message');
-    expect(source).toContain("item.kind === 'delete' ? '删除任务' : '资料处理任务'");
+    expect(source).toContain("item.kind === 'delete' ? t(\"删除任务\") : t(\"资料处理任务\")");
     expect(source).not.toContain('上传图文 Bundle');
     expect(source).not.toContain('搜索来源依据');
     expect(source).not.toContain('选择左侧的 Source');

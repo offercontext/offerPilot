@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, join, posix, relative } from 'node:path';
+import { join, posix, relative } from 'node:path';
 import ts from 'typescript';
 import { describe, expect, it } from 'vitest';
 
@@ -99,14 +99,46 @@ function repositoryRoot(): string {
   return execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
 }
 
+let storyAuditParseCache: Map<string, ts.SourceFile> | null = null;
+let storyAuditExportContextCache: WeakMap<Map<string, string>, Map<string, AbstractValue>> | null = null;
+let storyAuditTopExportCache: WeakMap<Map<string, string>, Map<string, AbstractValue>> | null = null;
+type StoryDependencyIndex = {
+  edges: Map<string, Set<string> | null>;
+  reachable: Map<string, Set<string> | null>;
+};
+let storyAuditDependencyIndexes: WeakMap<Map<string, string>, StoryDependencyIndex> | null = null;
+
+function withStoryAuditParseCache<T>(scan: () => T): T {
+  const previousCache = storyAuditParseCache;
+  const previousExportCache = storyAuditExportContextCache;
+  const previousTopExportCache = storyAuditTopExportCache;
+  const previousDependencyIndexes = storyAuditDependencyIndexes;
+  storyAuditParseCache = new Map();
+  storyAuditExportContextCache = new WeakMap();
+  storyAuditTopExportCache = new WeakMap();
+  storyAuditDependencyIndexes = new WeakMap();
+  try {
+    return scan();
+  } finally {
+    storyAuditParseCache = previousCache;
+    storyAuditExportContextCache = previousExportCache;
+    storyAuditTopExportCache = previousTopExportCache;
+    storyAuditDependencyIndexes = previousDependencyIndexes;
+  }
+}
+
 function parse(path: string, source: string): ts.SourceFile {
-  return ts.createSourceFile(
+  const cached = storyAuditParseCache?.get(path);
+  if (cached?.text === source) return cached;
+  const parsed = ts.createSourceFile(
     path,
     source,
     ts.ScriptTarget.Latest,
     true,
     path.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
+  storyAuditParseCache?.set(path, parsed);
+  return parsed;
 }
 
 function propertyName(node: ts.PropertyName): string | null {
@@ -864,15 +896,90 @@ function resolveSourceModule(
 
 const storyExportCache = new WeakMap<Map<string, string>, Map<string, AbstractValue>>();
 
+function storyReachableSources(sources: Map<string, string>, sourcePath: string): Set<string> | null {
+  if (!storyAuditDependencyIndexes) return null;
+  const index = storyAuditDependencyIndexes.get(sources) ?? {
+    edges: new Map<string, Set<string> | null>(),
+    reachable: new Map<string, Set<string> | null>(),
+  };
+  storyAuditDependencyIndexes.set(sources, index);
+  if (index.reachable.has(sourcePath)) return index.reachable.get(sourcePath)!;
+  const reachable = new Set<string>();
+  const pending = [sourcePath];
+  while (pending.length > 0) {
+    const path = pending.pop()!;
+    if (reachable.has(path)) continue;
+    reachable.add(path);
+    if (!index.edges.has(path)) {
+      const source = [...sources.entries()].find(([candidate]) => candidate.replace(/\\/g, '/') === path)?.[1];
+      let edges: Set<string> | null = new Set();
+      if (source !== undefined) {
+        try {
+          for (const statement of parse(path, source).statements) {
+            if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+            if (!statement.moduleSpecifier) continue;
+            if (!ts.isStringLiteral(statement.moduleSpecifier)) { edges = null; break; }
+            // Overapproximate all named/type/default/namespace edges with the
+            // exact resolver, including missing canonical service endpoints.
+            const target = resolveSourceModule(sources, path, statement.moduleSpecifier.text);
+            if (target) edges.add(target);
+          }
+        } catch {
+          edges = null;
+        }
+      }
+      index.edges.set(path, edges);
+    }
+    const edges = index.edges.get(path)!;
+    if (edges === null) {
+      index.reachable.set(sourcePath, null);
+      return null;
+    }
+    for (const target of edges) pending.push(target);
+  }
+  // Cache only this completed root traversal; a partial result at a cycle is
+  // not a complete closure for any other root.
+  index.reachable.set(sourcePath, reachable);
+  return reachable;
+}
+
+function storyActiveContext(sources: Map<string, string>, sourcePath: string, active: Set<string>): string[] {
+  const reachable = storyReachableSources(sources, sourcePath);
+  return [...active].filter((key) => {
+    if (reachable === null) return true;
+    // Do not split keys on ':'; an export name (or a path) can contain it.
+    for (const path of reachable) if (key.startsWith(`${path}:`)) return true;
+    return false;
+  }).sort();
+}
+
 function resolveStoryExport(
   sources: Map<string, string>,
   sourcePath: string,
   exportName: string,
   active = new Set<string>(),
 ): AbstractValue {
-  if (active.size > 0) return resolveStoryExportUncached(sources, sourcePath, exportName, active);
-  const cache = storyExportCache.get(sources) ?? new Map<string, AbstractValue>();
-  storyExportCache.set(sources, cache);
+  if (active.size > 0) {
+    if (!storyAuditExportContextCache) {
+      return resolveStoryExportUncached(sources, sourcePath, exportName, active);
+    }
+    const cache = storyAuditExportContextCache.get(sources) ?? new Map<string, AbstractValue>();
+    storyAuditExportContextCache.set(sources, cache);
+    // Only reachable modules can observe active entries. The original complete
+    // active set still reaches every cycle check in the resolver below.
+    const key = JSON.stringify([sourcePath, exportName, storyActiveContext(sources, sourcePath, active)]);
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const result = resolveStoryExportUncached(sources, sourcePath, exportName, active);
+    // Namespace objects and closures can carry mutable state. Only cache the
+    // immutable provenance sentinels; leave namespace resolution unchanged.
+    if (result.kind === 'unknown' || result.kind === 'story-confirm-function'
+      || result.kind === 'server-response-function') cache.set(key, result);
+    return result;
+  }
+  const exportCache = storyAuditTopExportCache ?? storyExportCache;
+  const cache = exportCache.get(sources) ?? new Map<string, AbstractValue>();
+  exportCache.set(sources, cache);
   const key = `${sourcePath}:${exportName}`;
   const cached = cache.get(key);
   if (cached) return cached;
@@ -1418,11 +1525,13 @@ function importTargetsSource(
   moduleName: string,
   targetPath: string,
 ): boolean {
+  const importer = importerPath.replace(/\\/g, '/');
+  const specifier = moduleName.replace(/\\/g, '/');
   let resolved: string;
-  if (moduleName.startsWith('@/')) {
-    resolved = `web/src/${moduleName.slice(2)}`;
-  } else if (moduleName.startsWith('.')) {
-    resolved = join(dirname(importerPath), moduleName);
+  if (specifier.startsWith('@/')) {
+    resolved = `web/src/${specifier.slice(2)}`;
+  } else if (specifier.startsWith('.')) {
+    resolved = posix.join(posix.dirname(importer), specifier);
   } else {
     return false;
   }
@@ -1642,12 +1751,18 @@ const COMPONENT_OWNERS = new Map<string, readonly string[]>([
 ]);
 
 function clientAuthorizationViolations(sources: Map<string, string>): string[] {
-  const unsafe = [...sources.entries()].some(([path, source]) => (
-    isProductionWebSourcePath(path)
-    && /(?:confirmation|serverConfirmationToken|confirmInterviewStory|interview-story-proposals[^\n]*confirm)/i.test(source)
-    && hasClientGeneratedStoryAuthorization(parse(path, source), { path, sources })
-  ));
-  return unsafe ? ['ui:client-authorization-token'] : [];
+  // Share immutable syntax trees only during this audit. Token-flow, import,
+  // and cycle-cutoff rules are unchanged.
+  // This synchronous scan treats sources as a fixed input snapshot: callers
+  // changing any source must start another audit with fresh audit-local caches.
+  return withStoryAuditParseCache(() => {
+    const unsafe = [...sources.entries()].some(([path, source]) => (
+      isProductionWebSourcePath(path)
+      && /(?:confirmation|serverConfirmationToken|confirmInterviewStory|interview-story-proposals[^\n]*confirm)/i.test(source)
+      && hasClientGeneratedStoryAuthorization(parse(path, source), { path, sources })
+    ));
+    return unsafe ? ['ui:client-authorization-token'] : [];
+  });
 }
 
 function canonicalComponentViolations(sources: Map<string, string>): string[] {
@@ -1701,6 +1816,195 @@ describe('review readiness mechanical gate', () => {
     import { confirmInterviewStoryProposal } from '@/services/interviewStories';
     ${source}
   `);
+
+  it('shares syntax trees only within an audit and checks source content on every lookup', () => {
+    const path = 'web/src/features/reviewReadiness/Owner.tsx';
+    const original = 'export const source = "original";';
+    const changed = 'export const source = "changed";';
+    const first = withStoryAuditParseCache(() => {
+      const sourceFile = parse(path, original);
+      expect(parse(path, original)).toBe(sourceFile);
+      expect(parse(path, changed)).not.toBe(sourceFile);
+      expect(parse(path, changed).text).toBe(changed);
+      expect(parse('web/src/Other.tsx', changed).fileName).toBe('web/src/Other.tsx');
+      return sourceFile;
+    });
+    withStoryAuditParseCache(() => {
+      expect(parse(path, original)).not.toBe(first);
+    });
+    expect(parse(path, original)).not.toBe(first);
+    expect(() => withStoryAuditParseCache(() => { throw new Error('audit stopped'); }))
+      .toThrow('audit stopped');
+    expect(storyAuditParseCache).toBeNull();
+    expect(storyAuditExportContextCache).toBeNull();
+    expect(storyAuditTopExportCache).toBeNull();
+    expect(storyAuditDependencyIndexes).toBeNull();
+  });
+
+  it('keeps relevant active-set context when caching immutable Story provenance', () => {
+    let sourceReads = 0;
+    class CountedSources extends Map<string, string> {
+      entries() { sourceReads++; return super.entries(); }
+      keys() { sourceReads++; return super.keys(); }
+    }
+    const a = 'web/src/facades/cycleA.ts';
+    const b = 'web/src/facades/cycleB.ts';
+    const sources = new CountedSources([
+      [a, `import { submit } from './cycleB'; import { confirmInterviewStoryProposal as confirm } from '@/services/interviewStories'; export function direct(id, input) { return confirm(id, input); }`],
+      [b, `import { direct as relay } from './cycleA'; export function submit(id, input) { return relay(id, input); }`],
+    ]);
+    withStoryAuditParseCache(() => {
+      expect(resolveStoryExport(sources, b, 'submit', new Set([`${a}:direct`, 'external:anchor']))).toBe(UNKNOWN);
+      const afterFirst = sourceReads;
+      expect(afterFirst).toBeGreaterThan(0);
+      expect(resolveStoryExport(sources, b, 'submit', new Set(['external:anchor', `${a}:direct`]))).toBe(UNKNOWN);
+      expect(sourceReads).toBe(afterFirst);
+      expect(resolveStoryExport(sources, b, 'submit', new Set(['other:ancestor', `${a}:direct`]))).toBe(UNKNOWN);
+      expect(sourceReads).toBe(afterFirst);
+      expect(resolveStoryExport(sources, b, 'submit', new Set(['external:anchor']))).toBe(STORY_CONFIRM_FUNCTION);
+      expect(sourceReads).toBeGreaterThan(afterFirst);
+    });
+  });
+
+  it('isolates nested export caches between audits and never caches mutable namespace values', () => {
+    const path = 'web/src/facades/submit.ts';
+    const active = new Set(['external:anchor']);
+    const sources = new Map([[path, 'export function submit(id, input) { return input; }']]);
+    withStoryAuditParseCache(() => {
+      expect(resolveStoryExport(sources, path, 'submit', active)).toBe(UNKNOWN);
+    });
+    sources.set(path, `import { confirmInterviewStoryProposal as confirm } from '@/services/interviewStories'; export function submit(id, input) { return confirm(id, input); }`);
+    withStoryAuditParseCache(() => {
+      expect(resolveStoryExport(sources, path, 'submit', active)).toBe(STORY_CONFIRM_FUNCTION);
+    });
+    const namespacePath = 'web/src/facades/namespace.ts';
+    sources.set(namespacePath, `export * as story from './submit';`);
+    withStoryAuditParseCache(() => {
+      expect(resolveStoryExport(sources, namespacePath, 'story', active).kind).toBe('object');
+      expect(storyAuditExportContextCache?.get(sources)?.has(
+        JSON.stringify([namespacePath, 'story', storyActiveContext(sources, namespacePath, active)]),
+      )).toBe(false);
+    });
+  });
+
+  it('finishes each reachable closure independently across cycles and missing service endpoints', () => {
+    const a = 'web/src/facades/a.ts';
+    const b = 'web/src/facades/b.ts';
+    const c = 'web/src/facades/c.ts';
+    const service = 'web/src/services/interviewStories.ts';
+    const sources = new Map([
+      [a, `import { value } from './b'; export { submit } from './c';`],
+      [b, `import { submit } from './a'; export const value = 1;`],
+      [c, `import { confirmInterviewStoryProposal as confirm } from '@/services/interviewStories'; export function submit(id, input) { return confirm(id, input); }`],
+    ]);
+    withStoryAuditParseCache(() => {
+      expect([...storyReachableSources(sources, a)!].sort()).toEqual([a, b, c, service].sort());
+      expect([...storyReachableSources(sources, b)!].sort()).toEqual([a, b, c, service].sort());
+      expect(resolveStoryExport(sources, c, 'submit', new Set([`${service}:confirmInterviewStoryProposal`]))).toBe(UNKNOWN);
+      expect(resolveStoryExport(sources, c, 'submit', new Set(['unrelated:ancestor']))).toBe(STORY_CONFIRM_FUNCTION);
+    });
+  });
+
+  it('includes namespace reset edges, all exports, and colon-containing export guards', () => {
+    const namespace = 'web/src/facades/namespace.ts';
+    const leaf = 'web/src/facades/leaf.ts';
+    const other = 'web/src/facades/other.ts';
+    const service = 'web/src/services/interviewStories.ts';
+    const sources = new Map([
+      [namespace, `export * as story from './leaf'; export { value } from './other'; export { submit as 'send:again' } from './leaf';`],
+      [leaf, `import { confirmInterviewStoryProposal as confirm } from '@/services/interviewStories'; export function submit(id, input) { return confirm(id, input); } export function otherSubmit(id, input) { return confirm(id, input); }`],
+      [other, 'export const value = 1;'],
+    ]);
+    withStoryAuditParseCache(() => {
+      expect([...storyReachableSources(sources, namespace)!].sort()).toEqual([namespace, leaf, other, service].sort());
+      const value = resolveStoryExport(sources, namespace, 'story', new Set([`${leaf}:submit`]));
+      expect(propertyValue(value, 'submit')).toBe(STORY_CONFIRM_FUNCTION);
+      expect(propertyValue(value, 'otherSubmit')).toBe(STORY_CONFIRM_FUNCTION);
+      expect(resolveStoryExport(sources, namespace, 'send:again', new Set([`${namespace}:send:again`]))).toBe(UNKNOWN);
+      expect(resolveStoryExport(sources, namespace, 'send:again', new Set([`${leaf}:submit`]))).toBe(UNKNOWN);
+      expect(resolveStoryExport(sources, namespace, 'send:again', new Set(['unrelated:ancestor']))).toBe(STORY_CONFIRM_FUNCTION);
+    });
+  });
+
+  it('uses exact module resolution for type edges and falls back when dependency analysis is unknown', () => {
+    const path = 'web/src/facades/owner.ts';
+    const sources = new Map([
+      [path, `import type { Preview } from './leaf'; export { submit } from './directory'; import type { Other } from './windows';`],
+      ['web/src/facades/leaf.ts', 'export interface Preview {}'],
+      ['web/src/facades/leaf.tsx', 'export interface Ignored {}'],
+      ['web/src/facades/directory/index.tsx', 'export const submit = 1;'],
+      ['web\\src\\facades\\windows.ts', 'export interface Other {}'],
+    ]);
+    withStoryAuditParseCache(() => {
+      expect([...storyReachableSources(sources, path)!].sort()).toEqual([
+        path, 'web/src/facades/leaf.ts', 'web/src/facades/directory/index.tsx', 'web/src/facades/windows.ts',
+      ].sort());
+    });
+    sources.set(path, 'export { submit } from moduleName;');
+    withStoryAuditParseCache(() => {
+      expect(storyReachableSources(sources, path)).toBeNull();
+      expect(storyActiveContext(sources, path, new Set(['external:second', 'external:first'])))
+        .toEqual(['external:first', 'external:second']);
+    });
+  });
+
+  it('rejects a changed source at the same path in a later audit', () => {
+    const path = 'web/src/features/reviewReadiness/Owner.tsx';
+    const owner = (token: string) => `
+      import { confirmInterviewStoryProposal } from '@/services/interviewStories';
+      confirmInterviewStoryProposal(id, { confirmation_token: ${token} });
+    `;
+    const sources = new Map([[path, owner('draft.serverConfirmationToken')]]);
+    expect(clientAuthorizationViolations(sources)).toEqual([]);
+    sources.set(path, owner('crypto.randomUUID()'));
+    expect(clientAuthorizationViolations(sources)).toEqual(['ui:client-authorization-token']);
+    sources.set(path, owner('draft.serverConfirmationToken'));
+    expect(clientAuthorizationViolations(sources)).toEqual([]);
+  });
+
+  it('rechecks a changed export behind an unchanged owner in the same source map', () => {
+    const ownerPath = 'web/src/features/reviewReadiness/Owner.tsx';
+    const facadePath = 'web/src/facades/submit.ts';
+    const benign = 'export function submit(id, input) { return input; }';
+    const sources = new Map([
+      [ownerPath, `import { submit } from '@/facades/submit'; submit(id, { confirmation_token: crypto.randomUUID() });`],
+      [facadePath, benign],
+    ]);
+    expect(clientAuthorizationViolations(sources)).toEqual([]);
+    sources.set(facadePath, `import { confirmInterviewStoryProposal as confirm } from '@/services/interviewStories'; export function submit(id, input) { return confirm(id, input); }`);
+    expect(clientAuthorizationViolations(sources)).toEqual(['ui:client-authorization-token']);
+    sources.set(facadePath, benign);
+    expect(clientAuthorizationViolations(sources)).toEqual([]);
+  });
+
+  it('preserves Story rejection through cyclic aliases, mixed type imports, and re-exports', () => {
+    const ownerPath = 'web/src/features/reviewReadiness/Owner.tsx';
+    const owner = (token: string) => `
+      import { direct } from '@/facades/cycleA';
+      import { type Preview, send } from '@/facades/reExport';
+      send(id, { confirmation_token: ${token} });
+    `;
+    const sources = new Map<string, string>([
+      [ownerPath, owner('crypto.randomUUID()')],
+      ['web/src/facades/cycleA.ts', `
+        import { submit as throughCycle } from './cycleB';
+        import { confirmInterviewStoryProposal as confirm } from '@/services/interviewStories';
+        export function direct(id, input) { return confirm(id, input); }
+        export function wrapped(id, input) { return throughCycle(id, input); }
+      `],
+      ['web/src/facades/cycleB.ts', `
+        import { direct as relay } from './cycleA';
+        export function submit(id, input) { return relay(id, input); }
+      `],
+      ['web/src/facades/reExport.ts', `
+        export interface Preview { label: string; }
+        export { submit as send } from './cycleB';
+      `],
+    ]);
+    expect(clientAuthorizationViolations(sources)).toEqual(['ui:client-authorization-token']);
+    sources.set(ownerPath, owner('draft.serverConfirmationToken'));
+    expect(clientAuthorizationViolations(sources)).toEqual([]);
+  });
 
   it('ignores comments, strings, and aliased server-issued draft tokens', () => {
     const safe = parse('safe.tsx', `
@@ -1801,6 +2105,16 @@ describe('review readiness mechanical gate', () => {
       '..\\features\\reviewReadiness\\ProductActionConfirmation',
       'web/src/features/reviewReadiness/ProductActionConfirmation.tsx',
     )).toBe(true);
+    expect(importTargetsSource(
+      'web\\src\\components\\InterviewStoryDrawer.tsx',
+      '..\\features\\reviewReadiness\\OtherConfirmation',
+      'web/src/features/reviewReadiness/ProductActionConfirmation.tsx',
+    )).toBe(false);
+    expect(importTargetsSource(
+      'web\\src\\components\\InterviewStoryDrawer.tsx',
+      '..\\..\\fixtures\\ProductActionConfirmation',
+      'web/src/features/reviewReadiness/ProductActionConfirmation.tsx',
+    )).toBe(false);
     const unsafe = `confirmInterviewStoryProposal(id, { confirmation_token: crypto.randomUUID() });`;
     expect(clientAuthorizationViolations(new Map([
       ['web/src/components/unsafe.test.tsx', unsafe],

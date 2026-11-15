@@ -1,3 +1,5 @@
+import { useLocalizedValidation } from './applicationUiText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef } from 'react';
 import { Alert, Button, Modal, Form, Input, InputNumber, Select, App as AntApp } from 'antd';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -15,13 +17,17 @@ interface Props {
   requestToken?: string | null;
 }
 
+
+
+export default function AddOfferForm({ open, onClose, applications, editing, requestToken }: Props) {
 const STATUS_OPTIONS = (Object.keys(OFFER_STATUS_LABELS) as OfferStatus[]).map((s) => ({
   value: s,
   label: OFFER_STATUS_LABELS[s],
 }));
 
-export default function AddOfferForm({ open, onClose, applications, editing, requestToken }: Props) {
+  useLocale();
   const [form] = Form.useForm();
+  useLocalizedValidation(form);
   const { message: toast } = AntApp.useApp();
   const qc = useQueryClient();
   const historicalReadOnly = Boolean(editing && listOfferBindingState(editing) === 'unbound');
@@ -72,14 +78,14 @@ export default function AddOfferForm({ open, onClose, applications, editing, req
   ) {
     applicationOptions.unshift({
       value: editingApplicationId,
-      label: `#${editingApplicationId}（当前绑定投递不可见）`,
+      label: t("#{editingApplicationId}（当前绑定投递不可见）", { editingApplicationId: editingApplicationId }),
     });
   }
 
   const submit = (values: OfferInput) => {
     if (historicalReadOnly) return;
     if (!editing && (!Number.isInteger(values.application_id) || Number(values.application_id) <= 0)) {
-      form.setFields([{ name: 'application_id', errors: ['请选择所属投递'] }]);
+      form.setFields([{ name: 'application_id', errors: [t("请选择所属投递")] }]);
       return;
     }
     const payload: OfferInput = editing
@@ -94,23 +100,23 @@ export default function AddOfferForm({ open, onClose, applications, editing, req
       return createOffer(values);
     },
     onSuccess: () => {
-      toast.success(editing ? 'Offer 已更新' : 'Offer 已录入');
+      toast.success(editing ? t("Offer 已更新") : t("Offer 已录入"));
       qc.invalidateQueries({ queryKey: ['offers'] });
       onClose();
     },
     onError: (e: unknown) => {
       const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      toast.error(msg || '保存失败');
+      toast.error(msg || t("保存失败"));
     },
   });
 
   return (
     <Modal
-      title={historicalReadOnly ? '查看 Offer' : editing ? '编辑 Offer' : '录入 Offer'}
+      title={historicalReadOnly ? t("查看 Offer") : editing ? t("编辑 Offer") : t("录入 Offer")}
       open={open}
       onCancel={onClose}
       onOk={historicalReadOnly ? undefined : () => form.submit()}
-      footer={historicalReadOnly ? <Button onClick={onClose}>关闭</Button> : undefined}
+      footer={historicalReadOnly ? <Button onClick={onClose}>{t("关闭")}</Button> : undefined}
       confirmLoading={mutation.isPending}
       destroyOnHidden
       data-request-token={requestToken ?? undefined}
@@ -120,8 +126,8 @@ export default function AddOfferForm({ open, onClose, applications, editing, req
           type="warning"
           showIcon
           style={{ marginBottom: 16 }}
-          message="历史 Offer 仅支持只读查看"
-          description="该记录没有所属投递，不能编辑、补绑定或进入谈薪准备。"
+          message={t("历史 Offer 仅支持只读查看")}
+          description={t("该记录没有所属投递，不能编辑、补绑定或进入谈薪准备。")}
         />
       ) : null}
       <Form
@@ -131,47 +137,47 @@ export default function AddOfferForm({ open, onClose, applications, editing, req
         data-offer-mode={historicalReadOnly ? 'read-only' : 'editable'}
         onFinish={(v) => submit(v as OfferInput)}
       >
-        <Form.Item name="company_name" label="公司" rules={[{ required: true, message: '请输入公司' }]}>
+        <Form.Item name="company_name" label={t("公司")} rules={[{ required: true, message: t("请输入公司") }]}>
           <Input />
         </Form.Item>
-        <Form.Item name="position_name" label="岗位" rules={[{ required: true, message: '请输入岗位' }]}>
+        <Form.Item name="position_name" label={t("岗位")} rules={[{ required: true, message: t("请输入岗位") }]}>
           <Input />
         </Form.Item>
         <Form.Item
           name="application_id"
-          label="关联投递"
-          rules={editing ? undefined : [{ required: true, message: '请选择所属投递' }]}
+          label={t("关联投递")}
+          rules={editing ? undefined : [{ required: true, message: t("请选择所属投递") }]}
         >
           <Select
             disabled={Boolean(editing)}
             allowClear={!editing}
-            placeholder="选择投递记录"
+            placeholder={t("选择投递记录")}
             options={applicationOptions}
             onChange={handleApplicationChange}
           />
         </Form.Item>
-        <Form.Item name="status" label="状态">
+        <Form.Item name="status" label={t("状态")}>
           <Select options={STATUS_OPTIONS} />
         </Form.Item>
-        <Form.Item name="base_monthly" label="月薪（元）" rules={[{ type: 'number', min: 0, message: '不能为负' }]}>
+        <Form.Item name="base_monthly" label={t("月薪（元）")} rules={[{ type: 'number', min: 0, message: t("不能为负") }]}>
           <InputNumber style={{ width: '100%' }} min={0} />
         </Form.Item>
-        <Form.Item name="months_per_year" label="薪数（如 12/13/16）" rules={[{ type: 'number', min: 1, message: '至少 1' }]}>
+        <Form.Item name="months_per_year" label={t("薪数（如 12/13/16）")} rules={[{ type: 'number', min: 1, message: t("至少 1") }]}>
           <InputNumber style={{ width: '100%' }} min={1} />
         </Form.Item>
-        <Form.Item name="signing_bonus" label="签字费（元）">
+        <Form.Item name="signing_bonus" label={t("签字费（元）")}>
           <InputNumber style={{ width: '100%' }} min={0} />
         </Form.Item>
-        <Form.Item name="equity" label="期权">
-          <Input placeholder="如 20万股 RSU 4年 vest" />
+        <Form.Item name="equity" label={t("期权")}>
+          <Input placeholder={t("如 20万股 RSU 4年 vest")} />
         </Form.Item>
-        <Form.Item name="perks" label="福利">
+        <Form.Item name="perks" label={t("福利")}>
           <Input />
         </Form.Item>
-        <Form.Item name="deadline" label="截止日">
-          <Input placeholder="如 2026-07-08" />
+        <Form.Item name="deadline" label={t("截止日")}>
+          <Input placeholder={t("如 2026-07-08")} />
         </Form.Item>
-        <Form.Item name="notes" label="备注">
+        <Form.Item name="notes" label={t("备注")}>
           <Input.TextArea rows={2} />
         </Form.Item>
       </Form>

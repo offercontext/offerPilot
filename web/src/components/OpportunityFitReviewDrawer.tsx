@@ -1,3 +1,5 @@
+import { applicationUiMessage } from '@/components/applicationUiText';
+import { t, useLocale, getLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -194,6 +196,7 @@ function isCurrentAttempt(
 }
 
 function EvidenceRefs({ refs }: { refs: OpportunityFitEvidenceRef[] }) {
+  useLocale();
   if (refs.length === 0) return <Typography.Text type="secondary">{OPPORTUNITY_FIT_COPY.drawer.noDirectEvidence}</Typography.Text>;
   return (
     <Space direction="vertical" size={2} style={{ width: '100%' }}>
@@ -215,6 +218,7 @@ function ReviewItem({
   statement: string;
   refs: OpportunityFitEvidenceRef[];
 }) {
+  useLocale();
   return (
     <Card size="small" title={title} style={{ marginBottom: 8 }}>
       <Typography.Paragraph>{statement}</Typography.Paragraph>
@@ -224,6 +228,7 @@ function ReviewItem({
 }
 
 function V2EvidenceRefs({ refs }: { refs: OpportunityFitV2EvidenceRef[] }) {
+  useLocale();
   return refs.length > 0 ? (
     <Space direction="vertical" size={2} style={{ width: '100%' }}>
       {refs.map((ref, index) => (
@@ -232,14 +237,15 @@ function V2EvidenceRefs({ refs }: { refs: OpportunityFitV2EvidenceRef[] }) {
         </Typography.Text>
       ))}
     </Space>
-  ) : <Typography.Text type="secondary">暂无可验证证据引用</Typography.Text>;
+  ) : <Typography.Text type="secondary">{t("暂无可验证证据引用")}</Typography.Text>;
 }
 
 function V2ProposalView({ proposal }: { proposal: OpportunityFitV2Proposal }) {
+  useLocale();
   const sections = [
-    ['条件', proposal.conditions],
-    ['风险', proposal.risks],
-    ['下一步', proposal.next_steps],
+    [t("条件"), proposal.conditions],
+    [t("风险"), proposal.risks],
+    [t("下一步"), proposal.next_steps],
   ] as const;
   return (
     <div>
@@ -248,7 +254,7 @@ function V2ProposalView({ proposal }: { proposal: OpportunityFitV2Proposal }) {
       {sections.map(([title, items]) => (
         <section key={title}>
           <Typography.Title level={5}>{title}</Typography.Title>
-          {items.length === 0 ? <Typography.Text type="secondary">暂无可验证内容</Typography.Text> : null}
+          {items.length === 0 ? <Typography.Text type="secondary">{t("暂无可验证内容")}</Typography.Text> : null}
           {items.map((item) => (
             <Card size="small" key={item.id} style={{ marginBottom: 8 }}>
               <Typography.Paragraph>{item.text}</Typography.Paragraph>
@@ -258,7 +264,7 @@ function V2ProposalView({ proposal }: { proposal: OpportunityFitV2Proposal }) {
           ))}
         </section>
       ))}
-      <Typography.Title level={5}>待确认问题</Typography.Title>
+      <Typography.Title level={5}>{t("待确认问题")}</Typography.Title>
       {proposal.questions.map((item) => (
         <Card size="small" key={item.question_id} style={{ marginBottom: 8 }}>
           <Typography.Paragraph>{item.text}</Typography.Paragraph>
@@ -283,6 +289,7 @@ export default function OpportunityFitReviewDrawer({
   ownerStore: ownerStoreProp,
   onApplicationMissing,
 }: Props) {
+  const locale = useLocale();
   const localOwnerStoreRef = useRef<OpportunityFitOwnerStore | null>(null);
   if (!localOwnerStoreRef.current) localOwnerStoreRef.current = createOpportunityFitOwnerStore();
   const ownerStore = ownerStoreProp ?? localOwnerStoreRef.current;
@@ -457,8 +464,8 @@ export default function OpportunityFitReviewDrawer({
     return typeof status === 'number' && status >= 500;
   };
 
-  const unknownResultCopy = '操作结果待确认，请使用原尝试重试。';
-  const historyUnavailableCopy = '部分历史暂时不可用';
+  const unknownResultCopy = t("操作结果待确认，请使用原尝试重试。");
+  const historyUnavailableCopy = t("部分历史暂时不可用");
 
   const recoverConfirmedTriage = async (generation: number, attemptKey: string): Promise<boolean> => {
     if (!application || !v2Triage) return false;
@@ -588,7 +595,7 @@ export default function OpportunityFitReviewDrawer({
         }
         if (conflict.status === 'review_missing') {
           activeAttemptRef.current = null;
-          resetV2Review('当前投递或岗位评估已不存在，请重新打开。');
+          resetV2Review(t("当前投递或岗位评估已不存在，请重新打开。"));
           return;
         }
       }
@@ -628,7 +635,7 @@ export default function OpportunityFitReviewDrawer({
       : v2HistoryQuery.data === undefined
         ? { status: 'loading' }
         : { status: 'ready', value: v2HistoryQuery.data },
-  }), [application?.id, reviewHistoryQuery.data, reviewHistoryQuery.error, v2Deep?.source_fingerprint_sha256, v2HistoryQuery.data, v2HistoryQuery.error, v2Triage?.source_fingerprint_sha256]);
+  }), [locale, application?.id, reviewHistoryQuery.data, reviewHistoryQuery.error, v2Deep?.source_fingerprint_sha256, v2HistoryQuery.data, v2HistoryQuery.error, v2Triage?.source_fingerprint_sha256]);
 
   const historySourceByKey = useMemo(() => {
     const map = new Map<string, { source: 'v1' | 'v2'; id: number }>();
@@ -683,7 +690,7 @@ export default function OpportunityFitReviewDrawer({
       history: historyProjection.items,
       historyState,
     });
-  }, [actionError, application?.id, draft, historyProjection.items, review, reviewHistoryQuery.data, reviewHistoryQuery.error, v2Deep, v2HasSourceConflict, v2HistoryQuery.data, v2HistoryQuery.error, v2Triage]);
+  }, [locale, actionError, application?.id, draft, historyProjection.items, review, reviewHistoryQuery.data, reviewHistoryQuery.error, v2Deep, v2HasSourceConflict, v2HistoryQuery.data, v2HistoryQuery.error, v2Triage]);
 
   useEffect(() => {
     if (application && ownerProjection.applicationId === application.id) {
@@ -825,7 +832,7 @@ export default function OpportunityFitReviewDrawer({
         }
         if (conflict.status === 'review_missing') {
           activeAttemptRef.current = null;
-          resetV2Review('当前投递或岗位评估已不存在，请重新打开。');
+          resetV2Review(t("当前投递或岗位评估已不存在，请重新打开。"));
           return;
         }
       }
@@ -1037,20 +1044,20 @@ export default function OpportunityFitReviewDrawer({
       <Typography.Paragraph type="secondary">
         {OPPORTUNITY_FIT_COPY.drawer.description}
       </Typography.Paragraph>
-      {actionError ? <Alert type="error" showIcon message={actionError} /> : null}
+      {actionError ? <Alert type="error" showIcon message={applicationUiMessage(actionError)} /> : null}
       {stage === 'input' ? (
         <Card size="small" title={OPPORTUNITY_FIT_COPY.drawer.history} className={workflowStyles.section} style={{ marginBottom: 16 }}>
           {historyProjection.partial ? (
             <Alert
               type="warning"
               showIcon
-              message={historyErrorMessage ? `${historyErrorMessage}；部分历史暂时不可用` : '部分历史暂时不可用'}
+              message={historyErrorMessage ? t("{historyErrorMessage}；部分历史暂时不可用", { historyErrorMessage: historyErrorMessage }) : t("部分历史暂时不可用")}
             />
           ) : null}
           {reviewHistoryQuery.data === undefined && v2HistoryQuery.data === undefined ? (
-            <Typography.Text type="secondary">历史记录加载中</Typography.Text>
+            <Typography.Text type="secondary">{t("历史记录加载中")}</Typography.Text>
           ) : historyProjection.items.length === 0 && !historyProjection.partial ? (
-            <Typography.Text type="secondary">暂无历史记录</Typography.Text>
+            <Typography.Text type="secondary">{t("暂无历史记录")}</Typography.Text>
           ) : null}
           <fieldset disabled={historyButtonsDisabled} style={{ border: 0, padding: 0, margin: 0 }}>
             <Space direction="vertical" style={{ width: '100%' }}>
@@ -1062,7 +1069,7 @@ export default function OpportunityFitReviewDrawer({
                       <Typography.Text>{item.summary}</Typography.Text>
                       <br />
                       <Typography.Text type="secondary">
-                        {item.sourceState === 'source_changed' ? '来源已更新，已有结果仍保留' : '当前来源'} · {new Date(item.createdAt).toLocaleString()}
+                        {item.sourceState === 'source_changed' ? t("来源已更新，已有结果仍保留") : t("当前来源")} · {new Date(item.createdAt).toLocaleString(getLocale())}
                       </Typography.Text>
                     </div>
                     {reference ? (
@@ -1112,7 +1119,7 @@ export default function OpportunityFitReviewDrawer({
               placeholder={OPPORTUNITY_FIT_COPY.drawer.jdPlaceholder}
             />
             <Typography.Text type="secondary">
-              {currentJdText ? '使用投递当前已确认的岗位资料；如需修改，请先返回 JD 版本入口。' : '当前投递尚未确认岗位资料，请先保存 JD 版本。'}
+              {currentJdText ? t("使用投递当前已确认的岗位资料；如需修改，请先返回 JD 版本入口。") : t("当前投递尚未确认岗位资料，请先保存 JD 版本。")}
             </Typography.Text>
           </Form.Item>
           <Form.Item label={OPPORTUNITY_FIT_COPY.drawer.assertionsLabel}>
@@ -1137,7 +1144,7 @@ export default function OpportunityFitReviewDrawer({
           />
           <div data-testid="opportunity-fit-action-group" className={workflowStyles.actionGroup}>
             <Button type="primary" onClick={submit} loading={createMutation.isPending} disabled={!canSubmit}>
-              {draft?.triageKey ? '使用原尝试重试' : OPPORTUNITY_FIT_COPY.drawer.startTriage}
+              {draft?.triageKey ? t("使用原尝试重试") : OPPORTUNITY_FIT_COPY.drawer.startTriage}
             </Button>
           </div>
         </Form>
@@ -1145,7 +1152,7 @@ export default function OpportunityFitReviewDrawer({
       ) : v2Triage ? (
         <div className={`${workflowStyles.section} op-long-text`}>
           <Space wrap>
-            <Tag color="blue">岗位判断</Tag>
+            <Tag color="blue">{t("岗位判断")}</Tag>
             <SourceStateTag
               state={v2HasSourceConflict ? 'changed' : 'frozen'}
               detail={v2HasSourceConflict ? OPPORTUNITY_FIT_COPY.drawer.sourceChanged : OPPORTUNITY_FIT_COPY.drawer.sourceFrozen}
@@ -1157,9 +1164,7 @@ export default function OpportunityFitReviewDrawer({
             <Alert type="warning" showIcon message={OPPORTUNITY_FIT_COPY.drawer.sourceChanged} />
           ) : v2Triage.proposal ? <V2ProposalView proposal={v2Triage.proposal} /> : <Spin />}
           {!v2Historical && ['generating', 'provider_unknown'].includes(v2Triage.stage_status) ? (
-            <Button type="primary" onClick={submit} loading={createMutation.isPending} disabled={!canSubmit}>
-              使用原尝试重试
-            </Button>
+            <Button type="primary" onClick={submit} loading={createMutation.isPending} disabled={!canSubmit}>{t("使用原尝试重试")}</Button>
           ) : null}
           {!v2Historical && v2Triage.stage_status === 'ready' && v2Triage.confirmation_token ? (
             <Button
@@ -1178,7 +1183,7 @@ export default function OpportunityFitReviewDrawer({
               }}
               loading={confirmV2Mutation.isPending}
             >
-              {draft?.resultUnknown ? '使用原尝试重试' : '确认快速判断'}
+              {draft?.resultUnknown ? t("使用原尝试重试") : t("确认快速判断")}
             </Button>
           ) : null}
           {!v2Historical && v2Triage.stage_status === 'confirmed' && !v2Deep ? (
@@ -1187,7 +1192,7 @@ export default function OpportunityFitReviewDrawer({
               onClick={submitDeepReview}
               loading={deepReviewMutation.isPending}
             >
-              {draft?.deepKey ? '使用原尝试重试' : OPPORTUNITY_FIT_COPY.drawer.startDeepReview}
+              {draft?.deepKey ? t("使用原尝试重试") : OPPORTUNITY_FIT_COPY.drawer.startDeepReview}
             </Button>
           ) : null}
           {v2Deep ? (
@@ -1198,12 +1203,10 @@ export default function OpportunityFitReviewDrawer({
                 <Alert type="warning" showIcon message={OPPORTUNITY_FIT_COPY.drawer.sourceChanged} />
               ) : v2Deep.proposal ? <V2ProposalView proposal={v2Deep.proposal} /> : <Spin />}
               {!v2Historical && ['generating', 'provider_unknown'].includes(v2Deep.stage_status) ? (
-                <Button type="primary" onClick={submitDeepReview} loading={deepReviewMutation.isPending}>
-                  使用原尝试重试
-                </Button>
+                <Button type="primary" onClick={submitDeepReview} loading={deepReviewMutation.isPending}>{t("使用原尝试重试")}</Button>
               ) : null}
               {v2Deep.jd_version_id !== jdVersionId ? (
-                <Alert type="warning" showIcon message={`${OPPORTUNITY_FIT_COPY.drawer.sourceChanged} 请重新开始评估。`} />
+                <Alert type="warning" showIcon message={t("{sourceChanged} 请重新开始评估。", { sourceChanged: OPPORTUNITY_FIT_COPY.drawer.sourceChanged })} />
               ) : null}
               <Button
                 type="primary"
@@ -1229,7 +1232,7 @@ export default function OpportunityFitReviewDrawer({
             <Button
               disabled={historyReadPending || createMutation.isPending || confirmV2Mutation.isPending || deepReviewMutation.isPending}
               onClick={() => resetV2Review()}
-            >重新开始岗位评估</Button>
+            >{t("重新开始岗位评估")}</Button>
           ) : null}
         </div>
       ) : review ? (

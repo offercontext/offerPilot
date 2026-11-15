@@ -64,7 +64,9 @@ def test_browser_harness_allows_three_same_context_attempts_and_selects_success_
     assert "attemptLifecycleDiagnostics" in script
     assert "_mock_interview_attempt_state" in script
     assert "_latest_mock_interview_failure_diagnostic" in script
-    assert "mock_interview_{kind}_failure" in api
+    execution = (Path(__file__).parents[1] / "src" / "offerpilot" / "mock_interview_execution.py").read_text(encoding="utf-8")
+    assert "mock_interview_{kind}_failure" in execution
+    assert "MockInterviewExecutionService" in api
     assert "category=" in script
     assert "_assert_mock_interview_attempt_restart_state" in script
 

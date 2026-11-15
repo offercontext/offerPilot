@@ -1,3 +1,4 @@
+import { t, getLocale } from '@/i18n';
 import type { Offer } from '@/types/offer';
 
 export interface ComparisonFact {
@@ -8,7 +9,7 @@ export interface ComparisonFact {
 
 export function textFact(value: string | null | undefined): ComparisonFact {
   const text = value?.trim() ?? '';
-  if (!text) return { value: null, text: '未补充', state: 'missing' };
+  if (!text) return { value: null, text: t("未补充"), state: 'missing' };
   return { value: text, text, state: /待确认|待核实|未确定|待沟通/.test(text) ? 'uncertain' : 'known' };
 }
 
@@ -40,11 +41,11 @@ export function isSameKnownRow(values: ComparisonFact[]): boolean {
 }
 
 export function formatWan(value: number): string {
-  return new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(value / 10000);
+  return new Intl.NumberFormat(getLocale(), { minimumFractionDigits: 1, maximumFractionDigits: 2 }).format(value / 10000);
 }
 
 export function formatCash(value: number): string {
-  return value === 0 ? '0 元' : value < 10000 ? `${value.toLocaleString('zh-CN')} 元` : `${formatWan(value)} 万元`;
+  return value === 0 ? t("0 元") : value < 10000 ? t("{value} 元", { value: value.toLocaleString(getLocale()) }) : t("{value} 万元", { value: formatWan(value) });
 }
 
 export function comparisonInsights(offers: Offer[]) {
@@ -63,10 +64,10 @@ export function comparisonInsights(offers: Offer[]) {
   const gaps: { label: string; state: ComparisonFact['state'] }[] = [];
   offers.forEach((offer) => {
     const facts: [string, ComparisonFact][] = [
-      ['月薪', numberFact(offer.base_monthly, String)],
-      ['计薪月数', offer.months_per_year > 0 ? numberFact(offer.months_per_year, String) : textFact(null)],
-      ['签字费', numberFact(offer.signing_bonus, String)],
-      ['期权', textFact(offer.equity)], ['福利', textFact(offer.perks)], ['回复截止', textFact(offer.deadline)],
+      [t("月薪"), numberFact(offer.base_monthly, String)],
+      [t("计薪月数"), offer.months_per_year > 0 ? numberFact(offer.months_per_year, String) : textFact(null)],
+      [t("签字费"), numberFact(offer.signing_bonus, String)],
+      [t("期权"), textFact(offer.equity)], [t("福利"), textFact(offer.perks)], [t("回复截止"), textFact(offer.deadline)],
     ];
     facts.forEach(([label, value]) => { if (value.state !== 'known') gaps.push({ label, state: value.state }); });
   });

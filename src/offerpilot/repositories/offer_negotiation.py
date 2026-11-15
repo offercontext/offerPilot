@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/opportunity-offers.md（谈薪生成、恢复与确认）。
+# 确认产物是本地沟通提纲，不发送给招聘方，也不自动改变 Offer 条款。
+
 import json
 import re
 from dataclasses import dataclass
@@ -94,6 +97,8 @@ class OfferNegotiationRepository:
         idempotency_key: str,
         expected_source_fingerprint: str | None = None,
     ) -> OfferNegotiationGenerationResult:
+        # 本方法只领取生成资格或重放记录；模型调用由上层在事务之外执行。
+        # 新请求冻结 Offer/维度/用户诉求，旧请求由 _replay_existing 决定等待、恢复或冲突。
         self._validate_key(idempotency_key)
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -261,6 +266,8 @@ class OfferNegotiationRepository:
         selected_blocks: list[str],
         edited_content: dict[str, str],
     ) -> tuple[OfferNegotiationBrief, bool]:
+        # 每份建议最多落一份确认提纲；已有提纲直接返回。
+        # 首次确认才检查 ready、Offer 来源及选中块，用户编辑只能落在选中块内。
         self._validate_key(confirmation_key)
         if not selected_blocks or len(selected_blocks) > 32 or len(set(selected_blocks)) != len(selected_blocks):
             raise OfferNegotiationValidationError("selected blocks are invalid")

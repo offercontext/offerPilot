@@ -1,0 +1,51 @@
+name: UI localization synthetic browser QA
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/20261019-localization-integration, test/20261019-localization-browser-review, feat/20261021-product-simplification]
+    paths: ['web/**', '.github/workflows/ui-localization.yml']
+permissions:
+  contents: read
+concurrency:
+  group: ui-localization-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  synthetic-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - name: Build actual production UI and run mounted integration supplement
+        run: |
+          npm run build --prefix web
+          npm test --prefix web -- tests/localization/mounted.test.tsx
+      - name: Install test browser and CJK fonts
+        working-directory: web
+        run: |
+          npx playwright-core install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Strict synthetic browser acceptance (no backend, credentials, mail or models)
+        env:
+          LOCALIZATION_EVIDENCE_DIR: ${{ github.workspace }}/artifacts/ui-localization
+        run: npm run test:localization --prefix web
+      - name: Product simplification synthetic browser acceptance
+        env:
+          SIMPLIFICATION_EVIDENCE_DIR: ${{ github.workspace }}/artifacts/simplification
+        run: npm run test:simplification --prefix web
+      - name: Upload browser report, request log and bilingual screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-localization-${{ github.sha }}
+          path: |
+            artifacts/ui-localization
+            artifacts/simplification
+          if-no-files-found: warn
+          retention-days: 14

@@ -9,7 +9,6 @@ import offerCenter from '@/components/OfferCenterView.tsx?raw';
 import offerCompare from '@/components/OfferCompareDrawer.tsx?raw';
 import questionBank from '@/components/QuestionBankView.tsx?raw';
 import reviewForm from '@/components/ReviewFormDrawer.tsx?raw';
-import reviewManagement from '@/components/ReviewManagementView.tsx?raw';
 import resumeEditor from '@/components/ResumeEditorDrawer.tsx?raw';
 import resumeLibrary from '@/components/ResumeLibraryView.tsx?raw';
 import settingsView from '@/components/SettingsView.tsx?raw';
@@ -74,8 +73,7 @@ describe('workspace drill-down layout contract', () => {
     expect(reviewForm).toContain('返回上一层');
   });
 
-  it('opens review and offer compare flows as replacement workspace layers', () => {
-    expect(reviewManagement).toContain('if (drawerOpen) {');
+  it('opens offer comparison as a replacement workspace layer', () => {
     expect(offerCenter).toContain('if (compareOpen) {');
     expect(offerCompare).toContain('返回 Offer 中心');
   });
@@ -85,7 +83,7 @@ describe('workspace drill-down layout contract', () => {
     const drawers = offerCompare.match(/<Drawer\b/g) ?? [];
     expect(drawers).toHaveLength(1);
     const settingsDrawer = offerCompare.slice(offerCompare.indexOf('<Drawer'), offerCompare.indexOf('</Drawer>'));
-    expect(settingsDrawer).toContain('title="调整对比项"');
+    expect(settingsDrawer).toContain('title={t("调整对比项")}');
     expect(settingsDrawer).toContain('open={settingsOpen}');
     expect(settingsDrawer).toContain('onClose={() => setSettingsOpen(false)}');
     expect(offerCompare).not.toMatch(/return\s*\(?\s*<Drawer\b/);

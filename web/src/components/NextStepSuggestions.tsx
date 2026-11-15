@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import type {
   NextStepDestination,
   NextStepSuggestions as Suggestions,
@@ -34,6 +35,7 @@ export default function NextStepSuggestions({
   onNavigateReadonly,
   isReadonlyNavigationAvailable,
 }: NextStepSuggestionsProps) {
+  useLocale();
   const candidate = suggestions.candidates[0];
   const activeState = candidate && isCurrentSessionState(sessionState, candidate.stateKey) ? sessionState : null;
   const isSnoozed = activeState?.disposition === 'snoozed';
@@ -43,10 +45,10 @@ export default function NextStepSuggestions({
     : false;
 
   return (
-    <section className={styles.root} aria-label="下一步建议">
+    <section className={styles.root} aria-label={t("下一步建议")}>
       {candidate && !isIgnored && !isSnoozed ? (
         <article className={styles.actionCard}>
-          <div className={styles.eyebrow}>下一步建议</div>
+          <div className={styles.eyebrow}>{t("下一步建议")}</div>
           <h3>{candidate.title}</h3>
           <p>{candidate.reason}</p>
           <div className={styles.sources}>
@@ -59,7 +61,7 @@ export default function NextStepSuggestions({
               type="button"
               disabled={!candidateNavigationAvailable}
               onClick={() => onNavigate(candidate.destination)}
-            >前往</button>
+            >{t("前往")}</button>
             <button
               type="button"
               onClick={() => onSetDisposition(applicationId, candidate.id, {
@@ -67,8 +69,7 @@ export default function NextStepSuggestions({
                 disposition: 'snoozed',
               })}
             >
-              稍后处理
-            </button>
+              {t("稍后处理")}</button>
             <button
               type="button"
               onClick={() => onSetDisposition(applicationId, candidate.id, {
@@ -76,15 +77,14 @@ export default function NextStepSuggestions({
                 disposition: 'ignored',
               })}
             >
-              忽略
-            </button>
+              {t("忽略")}</button>
           </div>
         </article>
       ) : null}
       {candidate && isSnoozed ? (
         <div className={styles.collapsed}>
-          <span>建议已暂时收起</span>
-          <button type="button" onClick={() => onSetDisposition(applicationId, candidate.id, null)}>恢复建议</button>
+          <span>{t("建议已暂时收起")}</span>
+          <button type="button" onClick={() => onSetDisposition(applicationId, candidate.id, null)}>{t("恢复建议")}</button>
         </div>
       ) : null}
       {suggestions.sourceRisks.length > 0 ? (
@@ -104,9 +104,8 @@ export default function NextStepSuggestions({
                 && onNavigateReadonly
                 && (isReadonlyNavigationAvailable?.(risk.readonlyDestination) ?? false) ? (
                 <button type="button" onClick={() => onNavigateReadonly(risk.readonlyDestination as ReadonlyDestination)}>
-                  查看来源
-                </button>
-              ) : risk.readonlyDestination ? <span>暂不可打开</span> : null}
+                  {t("查看来源")}</button>
+              ) : risk.readonlyDestination ? <span>{t("暂不可打开")}</span> : null}
             </article>
           ))}
         </div>

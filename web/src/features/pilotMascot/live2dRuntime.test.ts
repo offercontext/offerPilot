@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -93,6 +94,7 @@ describe('serializePilotMascotRuntime', () => {
 function runtimeDependencies(overrides: Partial<Live2dRuntimeDependencies> = {}) {
   const application = {
     stage: { addChild: vi.fn() },
+    renderer: { resize: vi.fn() },
     render: vi.fn(),
     destroy: vi.fn(),
   };
@@ -107,7 +109,7 @@ function runtimeDependencies(overrides: Partial<Live2dRuntimeDependencies> = {})
     expression: vi.fn().mockResolvedValue(true),
     destroy: vi.fn(),
   };
-  const Application = vi.fn(function Application() {
+  const Application = vi.fn(function Application(_options: Record<string, unknown>) {
     return application;
   });
   const Live2DModel = {
@@ -124,7 +126,106 @@ function runtimeDependencies(overrides: Partial<Live2dRuntimeDependencies> = {})
   return { dependencies, Application, Live2DModel, application, model, observer };
 }
 
+function cubismPoseFixture() {
+  // Use the installed pose implementation without loading a real Cubism model,
+  // WebGL context, or ticker. The module only needs the core's presence here.
+  const hadCore = 'Live2DCubismCore' in window;
+  if (!hadCore) Object.defineProperty(window, 'Live2DCubismCore', { configurable: true, value: {} });
+  let CubismPose: { create: (data: unknown) => { updateParameters: (model: unknown, dt: number) => void } };
+  try {
+    ({ CubismPose } = createRequire(import.meta.url)('pixi-live2d-display/cubism4'));
+  } finally {
+    if (!hadCore) Reflect.deleteProperty(window, 'Live2DCubismCore');
+  }
+  const poseData = JSON.parse(readFileSync(resolve(process.cwd(), 'public/live2d/haru-receptionist/haru_greeter_t03.pose3.json'), 'utf8')) as {
+    Groups: Array<Array<{ Id: string }>>;
+  };
+  const partIds = poseData.Groups.flatMap((group) => group.map(({ Id }) => Id));
+  const opacities = partIds.map(() => 1);
+  const parameters = partIds.map(() => 0);
+  let drawnOpacities = [...opacities];
+  const coreModel = {
+    getParameterIndex: (id: string) => partIds.indexOf(id),
+    getPartIndex: (id: string) => partIds.indexOf(id),
+    setParameterValueByIndex: (index: number, value: number) => { parameters[index] = value; },
+    getParameterValueByIndex: (index: number) => parameters[index],
+    setPartOpacityByIndex: (index: number, value: number) => { opacities[index] = value; },
+    getPartOpacityByIndex: (index: number) => opacities[index],
+    update: vi.fn(() => { drawnOpacities = [...opacities]; }),
+  };
+  const pose = CubismPose.create(poseData);
+  const updatePose = vi.spyOn(pose, 'updateParameters');
+  return { internalModel: { coreModel, pose }, updatePose, readDrawnOpacities: () => [...drawnOpacities] };
+}
+
 describe('createLive2dPilotMascotRuntime', () => {
+  it.each([
+    { animationLevel: 'off' as const, reducedMotion: false },
+    { animationLevel: 'full' as const, reducedMotion: true },
+    { animationLevel: 'minimal' as const, reducedMotion: true },
+  ])('initializes mutually exclusive Haru arm parts before the first static frame ($animationLevel, reduced motion $reducedMotion)', async ({ animationLevel, reducedMotion }) => {
+    const fixture = runtimeDependencies({ prefersReducedMotion: () => reducedMotion });
+    const pose = cubismPoseFixture();
+    Object.assign(fixture.model, { internalModel: pose.internalModel });
+    const frames: number[][] = [];
+    fixture.application.render.mockImplementation(() => { frames.push(pose.readDrawnOpacities()); });
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+
+    const controller = await createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, undefined, animationLevel);
+    expect(frames).toEqual([[1, 0, 1, 0]]);
+    expect(pose.updatePose).toHaveBeenCalledWith(pose.internalModel.coreModel, 0);
+    expect(pose.internalModel.coreModel.update).toHaveBeenCalledTimes(1);
+    expect(fixture.Application).toHaveBeenCalledWith(expect.objectContaining({ autoStart: false }));
+    expect(fixture.Live2DModel.from).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ autoUpdate: false }));
+
+    controller.setActivity('waiting_confirmation');
+    controller.setZoom(1.1);
+    const resize = (fixture.dependencies.createResizeObserver as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    resize();
+    expect(frames).toEqual([[1, 0, 1, 0], [1, 0, 1, 0], [1, 0, 1, 0]]);
+    expect(pose.updatePose).toHaveBeenCalledTimes(1);
+    expect(pose.internalModel.coreModel.update).toHaveBeenCalledTimes(1);
+    expect(fixture.model.motion).not.toHaveBeenCalled();
+    expect(fixture.model.expression).not.toHaveBeenCalled();
+    controller.dispose();
+    resize();
+    expect(frames).toHaveLength(3);
+    expect(fixture.model.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['full', 'minimal'] as const)('leaves pose updates to the existing ticker for %s animation', async (animationLevel) => {
+    const fixture = runtimeDependencies();
+    const pose = cubismPoseFixture();
+    Object.assign(fixture.model, { internalModel: pose.internalModel });
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+
+    const controller = await createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, undefined, animationLevel);
+    expect(pose.updatePose).not.toHaveBeenCalled();
+    expect(pose.internalModel.coreModel.update).not.toHaveBeenCalled();
+    expect(fixture.Live2DModel.from).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ autoUpdate: true }));
+    controller.dispose();
+  });
+
+  it('cleans up without rendering if static pose initialization fails', async () => {
+    const fixture = runtimeDependencies();
+    const pose = cubismPoseFixture();
+    Object.assign(fixture.model, { internalModel: pose.internalModel });
+    pose.internalModel.coreModel.update.mockImplementation(() => { throw new Error('pose initialization failed'); });
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+
+    await expect(createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, undefined, 'off')).rejects.toThrow('pose initialization failed');
+    expect(fixture.application.render).not.toHaveBeenCalled();
+    expect(fixture.model.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
+  });
+
   it('registers a neutral empty expression instead of reusing a facial expression as reset', () => {
     const modelPath = resolve(process.cwd(), 'public/live2d/haru-receptionist/haru_greeter_t03.model3.json');
     const model = JSON.parse(readFileSync(modelPath, 'utf8')) as {
@@ -153,6 +254,28 @@ describe('createLive2dPilotMascotRuntime', () => {
     await expect(createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas)).rejects.toThrow('model failed');
     expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
     expect(fixture.model.destroy).not.toHaveBeenCalled();
+  });
+
+  it('releases WebGL immediately when aborted during model loading and destroys the late model', async () => {
+    const fixture = runtimeDependencies();
+    let finish!: (value: typeof fixture.model) => void;
+    fixture.Live2DModel.from.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const host = document.createElement('div');
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+    const abort = new AbortController();
+    const mount = createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, abort.signal);
+    await Promise.resolve();
+    expect(fixture.Application).toHaveBeenCalledTimes(1);
+    abort.abort();
+    expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.model.destroy).not.toHaveBeenCalled();
+    finish(fixture.model);
+    await expect(mount).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fixture.model.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.application.destroy).toHaveBeenCalledTimes(1);
+    expect(fixture.application.stage.addChild).not.toHaveBeenCalled();
+    expect(fixture.observer.observe).not.toHaveBeenCalled();
   });
 
   it('cleans up model and application when ResizeObserver setup fails', async () => {
@@ -202,6 +325,34 @@ describe('createLive2dPilotMascotRuntime', () => {
     controller.setActivity('success');
     expect(fixture.model.motion).not.toHaveBeenCalled();
     expect(fixture.model.expression).not.toHaveBeenCalled();
+    controller.dispose();
+  });
+
+  it('resizes the drawing buffer before the final static frame on every portrait resize', async () => {
+    const fixture = runtimeDependencies();
+    const host = document.createElement('div');
+    let width = 244;
+    let height = 254;
+    Object.defineProperties(host, {
+      clientWidth: { get: () => width },
+      clientHeight: { get: () => height },
+    });
+    const canvas = document.createElement('canvas');
+    host.append(canvas);
+    const controller = await createLive2dPilotMascotRuntime(fixture.dependencies).mount(canvas, undefined, 'off');
+    expect(fixture.Application.mock.calls[0]?.[0]).not.toHaveProperty('resizeTo');
+    const resize = (fixture.dependencies.createResizeObserver as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    for (const size of [[404, 100], [244, 254]]) {
+      [width, height] = size;
+      fixture.application.renderer.resize.mockClear();
+      fixture.application.render.mockClear();
+      resize();
+      expect(fixture.application.renderer.resize).toHaveBeenCalledWith(width, height);
+      expect(fixture.application.render).toHaveBeenCalledTimes(1);
+      expect(fixture.application.renderer.resize.mock.invocationCallOrder[0]).toBeLessThan(fixture.application.render.mock.invocationCallOrder[0]);
+      expect(fixture.model.x).toBe(width / 2);
+      expect(fixture.model.y).toBe(height / 2);
+    }
     controller.dispose();
   });
 

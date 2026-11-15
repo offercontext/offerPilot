@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import dayjs, { type ConfigType } from 'dayjs';
 
 interface TodayAction {
@@ -33,7 +34,7 @@ export function deriveWeeklyCompletedHighlight({
   now: ConfigType;
 }) {
   const current = dayjs(now);
-  const weekStart = current.startOf('week');
+  const weekStart = current.locale('en').startOf('week');
   const inCurrentWeek = (value?: string) => {
     const timestamp = dayjs(value);
     return timestamp.isValid()
@@ -47,8 +48,8 @@ export function deriveWeeklyCompletedHighlight({
     return {
       kind: 'offer' as const,
       id: latestOffer.id,
-      title: `本周已完成：收到${latestOffer.company_name} Offer`,
-      detail: `${latestOffer.position_name} · 已记录 Offer`,
+      title: t("本周已完成：收到{value0} Offer", { value0: latestOffer.company_name }),
+      detail: t("{value0} · 已记录 Offer", { value0: latestOffer.position_name }),
     };
   }
 
@@ -58,7 +59,7 @@ export function deriveWeeklyCompletedHighlight({
   return latestApplication ? {
     kind: 'application' as const,
     id: latestApplication.id,
-    title: `本周已完成：投递${latestApplication.company_name}`,
+    title: t("本周已完成：投递{value0}", { value0: latestApplication.company_name }),
     detail: latestApplication.position_name,
   } : null;
 }

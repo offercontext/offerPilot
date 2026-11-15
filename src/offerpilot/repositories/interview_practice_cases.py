@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（快速模拟案例）；问答执行见 interview-mock.md。
+
 import json
 from datetime import datetime, timezone
 
@@ -47,6 +49,8 @@ class InterviewPracticeCaseRepository:
         jd_text: str,
         resume_id: int,
     ) -> tuple[InterviewPracticeCase, bool]:
+        # 案例冻结岗位、JD 与简历快照，不创建正式投递或日程。
+        # 重放前读取当前简历并纳入请求指纹，因此同 key 下简历内容变化会冲突。
         position_name = _validate_text("position_name", position_name, maximum=200)
         if not isinstance(jd_text, str) or not jd_text.strip() or len(jd_text) > 100_000:
             raise InterviewPracticeCaseValidationError("jd_text must contain 1-100000 characters")

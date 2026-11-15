@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Tag } from 'antd';
 import {
   CheckCircleOutlined,
@@ -26,20 +27,21 @@ const STATE_ICONS: Record<ApplicationReadinessState, ReactNode> = {
 };
 
 export default function ApplicationReadinessStrip({ items, focusApplicationId, onFocus }: Props) {
+  useLocale();
   if (items.length === 0) {
     return (
-      <section className={styles.readinessStrip} aria-label="投递准备度">
-        <div className={styles.readinessEmpty}>暂无活跃投递。添加投递后，这里会显示材料、日程和准备状态。</div>
+      <section className={styles.readinessStrip} aria-label={t("投递准备度")}>
+        <div className={styles.readinessEmpty}>{t("暂无活跃投递。添加投递后，这里会显示材料、日程和准备状态。")}</div>
       </section>
     );
   }
 
   return (
-    <section className={styles.readinessStrip} aria-label="投递准备度">
+    <section className={styles.readinessStrip} aria-label={t("投递准备度")}>
       <div className={styles.sectionHeaderLine}>
         <div>
-          <div className={styles.commandEyebrow}>准备度</div>
-          <h2 className={styles.sectionHeading}>重点投递准备度</h2>
+          <div className={styles.commandEyebrow}>{t("准备度")}</div>
+          <h2 className={styles.sectionHeading}>{t("重点投递准备度")}</h2>
         </div>
       </div>
       <div className={styles.readinessList}>
@@ -58,7 +60,7 @@ export default function ApplicationReadinessStrip({ items, focusApplicationId, o
             <span className={styles.readinessBody}>
               <span className={styles.readinessTitle}>{item.companyName}</span>
               <span className={styles.readinessPosition}>{item.positionName}</span>
-              <span className={styles.readinessEvidence}>{item.evidence[0] ?? '暂无准备风险'}</span>
+              <span className={styles.readinessEvidence}>{item.evidence[0] ?? t("暂无准备风险")}</span>
             </span>
             <span className={styles.readinessTags}>
               <Tag>{READINESS_STATE_LABELS[item.readiness]}</Tag>

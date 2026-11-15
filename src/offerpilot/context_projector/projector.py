@@ -14,6 +14,7 @@ from offerpilot.context_projector.budget import (
     ProviderBudget,
     canonical_messages,
     conservative_units,
+    message_input_units,
     optional_shares,
     surface_input_limit,
 )
@@ -37,6 +38,7 @@ from offerpilot.context_projector.history import (
 )
 from offerpilot.context_projector.selector import ToolSelectionResult, ToolSelectionSignals
 from offerpilot.context_sources.loader import OptionalSources
+from offerpilot.image_contracts import MAX_CALL_IMAGES, MAX_MESSAGE_IMAGE_BYTES, ImageInputError, require_image_call_limits
 
 
 @dataclass(frozen=True)
@@ -80,12 +82,17 @@ class ModelSurfaceProjector:
 
         input_limit = surface_input_limit(request.provider_budgets)
         mandatory = self._mandatory_messages(contributors)
-        mandatory_bytes = canonical_messages(mandatory)
+        mandatory_images = tuple(image for message in mandatory for image in message.images)
+        require_image_call_limits(mandatory_images)
+        has_history_images = any(message.images for message in request.history)
         fixed_assembly_cost = 64
+        # Reserve a bounded truthful omission marker before optional selection.
+        if has_history_images:
+            fixed_assembly_cost += 512
         remainder = (
             input_limit
             - len(tool_bytes)
-            - conservative_units(mandatory_bytes)
+            - message_input_units(mandatory)
             - fixed_assembly_cost
         )
         if remainder < 0 and any(message.role == "tool" for message in mandatory):
@@ -95,18 +102,20 @@ class ModelSurfaceProjector:
             baseline_remainder = (
                 input_limit
                 - len(tool_bytes)
-                - conservative_units(canonical_messages(without_tool_results))
+                - message_input_units(without_tool_results)
                 - fixed_assembly_cost
             )
             if baseline_remainder >= 0:
                 raise ProjectionError("mandatory_tool_result_over_budget")
+        if remainder < 0 and mandatory_images:
+            raise ImageInputError("image_context_budget_exceeded")
         optional_names = ("confirmed_readiness", "confirmed_memory", "knowledge_context", "older_conversation_summary")
         history = request.history
         covered = request.optional_sources.covered_history if request.optional_sources else ()
         summary_messages = self._messages_for(contributors, "older_conversation_summary")
         if summary_messages:
             prefix = history[:len(covered)]
-            if not covered or tuple((message.role, message.content) for message in prefix) != covered or any(message.tool_calls or message.tool_call_id or message.provider_blocks_json != b"{}" for message in prefix) or (len(history) > len(covered) and history[len(covered)].role != "user"):
+            if not covered or tuple((message.role, message.content) for message in prefix) != covered or any(message.images or message.tool_calls or message.tool_call_id or message.provider_blocks_json != b"{}" for message in prefix) or (len(history) > len(covered) and history[len(covered)].role != "user"):
                 contributors["older_conversation_summary"] = ContributorResult("older_conversation_summary", "unavailable")
                 summary_messages = ()
         optional_items = tuple(message for name in optional_names for message in self._messages_for(contributors, name))
@@ -116,9 +125,14 @@ class ModelSurfaceProjector:
             history = history[len(covered):]
         shares, shared_pool = optional_shares(remainder - optional_used)
 
-        scope_messages = self._messages_for(contributors, "current_scope") + self._messages_for(
-            contributors, "request_page_context"
-        )
+        # Companion evidence is mandatory with either default or custom expression.
+        # Only server-bound evidence gets this protection; unrelated business scope
+        # keeps its optional budget. Preserve the existing custom-persona envelope.
+        required_scope = self._required_scope(contributors)
+        scope_messages = tuple(
+            message for message in self._messages_for(contributors, "current_scope")
+            if message not in required_scope
+        ) + self._messages_for(contributors, "request_page_context")
         attachment_messages = self._messages_for(contributors, "request_attachments")
         groups = group_history(history, legacy_orphan_compat=True)
         ranked_groups = rank_history(groups, current_request=request.tool_signals.current_request)
@@ -150,6 +164,18 @@ class ModelSurfaceProjector:
         ):
             selected_attachments = ()
         selected_groups = (*selected_groups, *shared_selected[2])
+        image_count = len(mandatory_images)
+        image_bytes = sum(image.size_bytes for image in mandatory_images)
+        image_fitted_groups = []
+        for group in selected_groups:
+            group_images = tuple(image for message in group.messages for image in message.images)
+            group_bytes = sum(image.size_bytes for image in group_images)
+            if image_count + len(group_images) > MAX_CALL_IMAGES or image_bytes + group_bytes > MAX_MESSAGE_IMAGE_BYTES:
+                continue
+            image_fitted_groups.append(group)
+            image_count += len(group_images)
+            image_bytes += group_bytes
+        selected_groups = tuple(image_fitted_groups)
         selected_groups = tuple(
             sorted(
                 selected_groups, key=lambda group: (group.first_message_id, group.last_message_id)
@@ -163,6 +189,7 @@ class ModelSurfaceProjector:
             if name in optional_names:
                 assembled.extend(message for message in self._messages_for(contributors, name) if message in selected_optional)
             elif name == "current_scope":
+                assembled.extend(required_scope)
                 assembled.extend(selected_scope)
             elif name == "request_page_context":
                 continue
@@ -173,6 +200,12 @@ class ModelSurfaceProjector:
             else:
                 assembled.extend(self._messages_for(contributors, name))
         messages = tuple(assembled)
+        omitted_image_count = sum(len(message.images) for message in history) - sum(
+            len(message.images) for message in selected_history
+        )
+        if omitted_image_count:
+            marker = FrozenMessage(role="system", content=f"本轮有 {omitted_image_count} 张历史图片因上下文筛选未提供原图。回答涉及历史图片时，明确告知本轮未读取这些原图；不得声称已查看，需要时请用户再次引用。")
+            messages = (marker, *messages)
         validate_message_integrity(messages)
         message_bytes = canonical_messages(messages)
         combined = len(message_bytes) + len(tool_bytes)
@@ -180,7 +213,7 @@ class ModelSurfaceProjector:
             raise ProjectionError("canonical_messages_byte_cap_exceeded")
         if combined > COMBINED_SURFACE_BYTE_CAP:
             raise ProjectionError("combined_surface_byte_cap_exceeded")
-        estimated = conservative_units(message_bytes) + conservative_units(tool_bytes)
+        estimated = message_input_units(messages) + conservative_units(tool_bytes)
         for budget in request.provider_budgets:
             if estimated > budget.input_limit:
                 raise ProjectionError("provider_context_window_exceeded")
@@ -210,6 +243,7 @@ class ModelSurfaceProjector:
                 len(selected_optional) != len(optional_items) or len(selected_scope) != len(scope_messages)
                 or len(selected_attachments) != len(attachment_messages)
                 or len(selected_groups) != len(groups)
+                or omitted_image_count > 0
             ),
             source_records=tuple(
                 RuntimeSourceAudit(
@@ -224,7 +258,7 @@ class ModelSurfaceProjector:
                 ("fallback_all_tools",)
                 if selection.full_catalog_fallback
                 else ("catalog_domain_union", "catalog_dependency_closure")
-            ),
+            ) + (("history_images_omitted",) if omitted_image_count else ()),
         )
         return FrozenModelSurface(
             model_call_id=request.model_call_id,
@@ -255,11 +289,23 @@ class ModelSurfaceProjector:
         contributor = contributors[name]
         return contributor.messages if contributor.status == "ready" else ()
 
+    def _required_scope(
+        self, contributors: dict[str, ContributorResult]
+    ) -> tuple[FrozenMessage, ...]:
+        scope = self._messages_for(contributors, "current_scope")
+        if self._messages_for(contributors, "persona_profile"):
+            return scope
+        return tuple(message for message in scope if message.required_scope)
+
     def _mandatory_messages(
         self, contributors: dict[str, ContributorResult]
     ) -> tuple[FrozenMessage, ...]:
         return (
             *self._messages_for(contributors, "static_policy"),
+            # Persona is one bounded data envelope: never truncate it or let a
+            # scope budget eviction silently change the admitted expression.
+            *self._messages_for(contributors, "persona_profile"),
+            *self._required_scope(contributors),
             *self._messages_for(contributors, "active_control"),
             *self._messages_for(contributors, "current_request"),
         )
@@ -280,11 +326,11 @@ class ModelSurfaceProjector:
 
     @staticmethod
     def _message_cost(message: FrozenMessage) -> int:
-        return len(canonical_json(message.canonical_value())) + 1
+        return len(canonical_json(message.canonical_value())) + 1 + sum(image.input_units for image in message.images)
 
     @staticmethod
     def _group_cost(group: TurnGroup) -> int:
-        return len(group.canonical_bytes) + 1
+        return message_input_units(group.messages) + 1
 
     @classmethod
     def _round_robin_shared(

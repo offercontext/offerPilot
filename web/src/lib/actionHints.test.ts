@@ -1,19 +1,13 @@
-import dayjs from 'dayjs';
 import { describe, expect, it } from 'vitest';
-import { ACTION_HINT_THRESHOLDS, deriveActionHints } from './actionHints';
+import { deriveActionHints } from './actionHints';
+import { derivePipelineInsights } from './pipelineInsights';
+import type { ReminderCandidate } from '@/types/reminders';
+import rawCorpus from '../../../contracts/reminder-candidates.v1.json?raw';
 
+const corpus = JSON.parse(rawCorpus) as { cases: Array<{ name: string; now: string; expected: ReminderCandidate[] }> };
 describe('action hints', () => {
-  it('publishes one stable threshold source', () => {
-    expect(ACTION_HINT_THRESHOLDS).toEqual({
-      offerDeadlineDays: 7,
-      interviewHours: 72,
-      staleApplicationDays: 7,
-      questionDue: 1,
-    });
-  });
-
-  it('derives explainable hints from the shared pipeline rules', () => {
-    const hints = deriveActionHints({ apps: [], events: [], offers: [], now: dayjs('2026-07-27') });
-    expect(hints).toEqual([]);
+  it.each(corpus.cases)('uses the same candidate facts for $name', ({ now, expected }) => {
+    const input = { apps: [], events: [], offers: [], now, reminderCandidates: expected };
+    expect(deriveActionHints(input)).toEqual(derivePipelineInsights(input));
   });
 });

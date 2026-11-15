@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（练习重点与撤销）。
+# Signal 写入须消费 Product Action 授权，并与操作账本共用调用方事务。
+# 回归入口：tests/test_review_readiness_repository.py、tests/test_review_readiness_api.py。
+# 撤销授权、版本漂移与原子提交另见 tests/product_actions/test_compensation.py。
+
 from contextlib import contextmanager
 import hashlib
 from dataclasses import dataclass
@@ -310,6 +315,8 @@ class ReadinessSignalRepository:
         authorization: ProductActionExecutionAuthorization,
         authorization_binding: tuple[object, ...],
     ) -> ReadinessSignalWriteResultV1:
+        # 只接受已投影的候选和绑定本次操作的授权；本方法 flush，不自行 commit。
+        # Signal、首版证据和操作终态必须由调用方一起提交或一起回滚。
         if type(candidate) is not ReadinessCandidateV1:
             raise TypeError("Readiness Signal write requires an exact candidate")
         with self._proof_registry.claim(
@@ -393,6 +400,8 @@ class ReadinessSignalRepository:
         session: Session,
         operation_id: str,
     ) -> ReadinessSignalAggregateV1 | None:
+        # 通过原操作找回结果时同时检查当前版本指针和证据序号，
+        # 防止将缺失或已偏离操作结果的聚合当作可重放成功。
         version = session.scalar(
             select(InterviewReadinessSignalVersion).where(
                 InterviewReadinessSignalVersion.write_operation_id == operation_id
@@ -558,6 +567,8 @@ class ReadinessSignalRepository:
         execution_claim: _CompensationExecutionUowClaimV1 | None = None,
     ) -> dict[str, JSONValue]:
 
+        # 撤销不是直接删除：须消费本实例签发的一次性 domain claim，
+        # 并由同一执行工作单元收尾；仅有 signal ID 或手工构造的授权不足以写入。
         with self._compensation_domain_registry_lock:
             record = self._compensation_domain_registry_records.pop(
                 id(domain_claim),
@@ -638,6 +649,7 @@ class ReadinessSignalRepository:
                 "parent_operation_id": parent_operation_id,
             }
         )
+        # 授权必须绑定原操作终态摘要与这一次撤销参数，不能挪用到其他历史结果。
         if (
             authorization_binding[3] != compensation.parent_terminal_payload_sha256
             or authorization_binding[5] != expected_undo_json
@@ -652,6 +664,7 @@ class ReadinessSignalRepository:
             signal.current_version_id != expected_current_version_id
             or signal.revision != expected_signal_revision
         ):
+            # 用户确认撤销后 Signal 又被更新时，拒绝覆盖后续工作。
             raise ProductActionCompensationStale("readiness_signal_undo_stale")
         parent = session.get(
             InterviewReadinessSignalVersion,
@@ -696,6 +709,7 @@ class ReadinessSignalRepository:
         ) != tuple(range(len(evidence_rows))):
             raise ProductActionIntegrityError("readiness_signal_evidence_prefix")
         total_excerpt_bytes = 0
+        # 撤销复制历史证据，所以先验证其完整性；损坏历史不能被复制成可信新版本。
         for row in evidence_rows:
             if row.source_path not in {
                 "/questions",
@@ -738,6 +752,7 @@ class ReadinessSignalRepository:
             write_operation_id=compensation_operation_id,
             created_at=now,
         )
+        # 追加 retracted 子版本保留溯源，再移动当前指针；不删除原 active 版本。
         session.add(retracted)
         session.flush()
         session.add_all(
@@ -773,6 +788,7 @@ class ReadinessSignalRepository:
             signal.revision,
         )
         try:
+            # 领域结果和撤销操作终态在同一事务内完成；收尾失败必须连同撤销一起回滚。
             return execution_claim.terminalize_signal(session, domain_result)
         except BaseException:
             session.rollback()

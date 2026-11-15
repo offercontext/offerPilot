@@ -10,6 +10,7 @@ import {
   pageContextChips,
   pageContextKey,
   pilotPageContextRemovalReducer,
+  pilotPageContextControlProjection,
   removePageContextChip,
 } from './pilotPageContext';
 
@@ -46,6 +47,39 @@ const offer: Offer = {
 };
 
 describe('pilot page context', () => {
+  it('projects only builder-authored presentation without mutating or serializing provenance', () => {
+    const context = buildPilotPageContext({ view: 'board', selectedApplication: application })!;
+    const wire = JSON.stringify(context);
+    expect(pilotPageContextControlProjection(context)).toEqual({
+      ...context,
+      label: { authoredView: 'board' },
+      entity: { ...context.entity, description: { authoredStatus: 'interview', kind: 'application' } },
+    });
+    expect(JSON.stringify(context)).toBe(wire);
+    const clone = { ...context };
+    expect(pilotPageContextControlProjection(clone)).toBe(clone);
+  });
+
+  it('reads current semantic fields and retains changes to registered context objects', () => {
+    const context = buildPilotPageContext({ view: 'board', selectedApplication: application })!;
+    context.entity!.id = '99';
+    context.entity!.label = 'Today';
+    context.filters = [{ key: 'status', label: '用户筛选', value: 'offer' }];
+    expect(pilotPageContextControlProjection(context)).toMatchObject({
+      entity: { id: '99', label: 'Today' }, filters: context.filters,
+    });
+    context.label = 'Today';
+    context.entity!.description = 'Current status: Interview';
+    expect(pilotPageContextControlProjection(context)).toEqual(context);
+  });
+
+  it('does not normalize a replaced entity or a label reassigned to another view', () => {
+    const context = buildPilotPageContext({ view: 'board', selectedApplication: application })!;
+    context.entity = { ...context.entity! };
+    context.view = 'dashboard';
+    expect(pilotPageContextControlProjection(context)).toEqual(context);
+  });
+
   it('labels every current module view', () => {
     expect(PILOT_VIEW_LABELS).toEqual({
       dashboard: '今日',

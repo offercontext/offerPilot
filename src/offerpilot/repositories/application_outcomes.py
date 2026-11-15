@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/applications.md（投递存档与结果）。
+# SubmissionSnapshot 冻结材料事实；Outcome 引用该快照记录后续反馈，不等同于投递状态变更。
+
 import hashlib
 import json
 import re
@@ -104,6 +107,8 @@ class ApplicationOutcomesRepository:
     def create_snapshot(
         self, data: SubmissionSnapshotCreate
     ) -> WriteResult[ApplicationSubmissionSnapshot]:
+        # 同 key/请求先恢复原归档；新建才校验简历可用和 JD/材料包归属。
+        # 正文与摘要一并冻结，后续编辑或删除来源不应重写这份历史材料。
         _validate_snapshot_input(data)
         fingerprint = _hash_json(
             {
@@ -196,6 +201,8 @@ class ApplicationOutcomesRepository:
             return self._snapshot_view(session, snapshot)
 
     def create_outcome(self, data: OutcomeCreate) -> WriteResult[ApplicationOutcome]:
+        # 结果必须引用同一投递的提交快照，可选事件也须属于该投递。
+        # 重放比较完整请求指纹；这里只追加结果记录，不自动推进 Application 状态。
         normalized_tags = _validate_outcome_input(data)
         fingerprint = _hash_json(
             {

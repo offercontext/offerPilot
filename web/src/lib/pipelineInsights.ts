@@ -1,13 +1,18 @@
+import { t } from '@/i18n';
 import dayjs, { type ConfigType } from 'dayjs';
 import type { Application, ApplicationStatus } from '@/types/application';
 import { EVENT_TYPE_LABELS, type ScheduleEvent } from '@/types/event';
+import type { ReminderCandidate } from '@/types/reminders';
 import type { Offer } from '@/types/offer';
 import type { PracticeStats } from '@/types/question';
 
 export type PipelinePriority = 'p0' | 'p1' | 'p2';
 export type PipelineInsightKind =
   | 'offer_deadline'
+  | 'application_deadline'
+  | 'interview_review'
   | 'interview_soon'
+  | 'event_upcoming'
   | 'stale_application'
   | 'no_next_event'
   | 'material_kit_incomplete'
@@ -25,6 +30,11 @@ export interface ActionCommand {
   eventId?: number;
 }
 
+/** Action identity is independent of translated labels. */
+export function pipelineActionId(insight: { id: string }, action: ActionCommand & { id?: string }, kind: 'primary' | 'secondary'): string {
+  return action.id ?? `${insight.id}:${kind}:${action.target}:${action.appId ?? ''}:${action.offerId ?? ''}:${action.eventId ?? ''}`;
+}
+
 export interface PipelineInsight {
   id: string;
   kind: PipelineInsightKind;
@@ -38,6 +48,7 @@ export interface PipelineInsight {
   offerId?: number;
   eventId?: number;
   questionCount?: number;
+  candidate?: ReminderCandidate;
 }
 
 export interface PipelineHealth {
@@ -83,6 +94,7 @@ interface DerivePipelineInsightsInput {
   events: ScheduleEvent[];
   offers: Offer[];
   materialKits?: MaterialKitState[];
+  reminderCandidates?: ReminderCandidate[];
   practiceStats?: PracticeStats | null;
   weeklyTarget?: number;
   now?: ConfigType;
@@ -122,17 +134,6 @@ function parseStrictDate(value?: string): dayjs.Dayjs | null {
   return parsed.isValid() ? parsed : null;
 }
 
-function parseDeadline(value?: string): dayjs.Dayjs | null {
-  if (!value) return null;
-  if (isStrictDateOnly(value)) return dayjs(value).endOf('day');
-  return parseStrictDate(value);
-}
-
-function formatDate(value: string): string {
-  if (isStrictDateOnly(value)) return value;
-  return dayjs(value).format('YYYY-MM-DD');
-}
-
 function formatCompanyPosition(company?: string, position?: string): string {
   return [company, position].filter(Boolean).join(' - ');
 }
@@ -142,16 +143,63 @@ function makeAction(label: string, target: ActionCommandTarget, refs: Omit<Actio
 }
 
 export function formatPipelineHealthLabel(label: PipelineHealth['label']): string {
-  if (label === 'critical') return '高风险';
-  if (label === 'watch') return '需关注';
-  return '健康';
+  if (label === 'critical') return t("高风险");
+  if (label === 'watch') return t("需关注");
+  return t("健康");
+}
+
+/** Presentation only. The server owns eligibility, source identity and windows. */
+export function reminderCandidateInsight(candidate: ReminderCandidate, current: dayjs.Dayjs): PipelineInsight | null {
+  const now = current.valueOf() / 1000;
+  if (now < candidate.display_from || (candidate.display_until !== null && now >= candidate.display_until)) return null;
+  const hours = (candidate.due_at - now) / 3600;
+  const common = { id: candidate.id, candidate, appId: candidate.application_id ?? undefined,
+    eventId: candidate.event_id ?? undefined, offerId: candidate.offer_id ?? undefined };
+  const refs = { appId: common.appId, eventId: common.eventId, offerId: common.offerId };
+  if (candidate.reason_code === 'offer_response_deadline') {
+    const priority: PipelinePriority = hours <= 48 ? 'p0' : 'p1';
+    return { ...common, kind: 'offer_deadline', priority,
+      title: t("{company_name} offer 答复截止", { company_name: candidate.company }),
+      reason: priority === 'p0' ? t("Offer 答复截止时间已进入 48 小时内。") : t("Offer 答复截止时间将在本周到来。"),
+      evidence: [t("截止日：{deadlineLabel}", { deadlineLabel: candidate.deadline_label ?? '' })],
+      primaryAction: makeAction(t("打开谈薪中心"), 'offers', refs), sortKey: hours };
+  }
+  if (candidate.reason_code === 'stale_application') {
+    const days = Math.floor((now - (candidate.updated_at ?? candidate.due_at)) / 86400);
+    return { ...common, kind: 'stale_application', priority: days >= 14 ? 'p1' : 'p2',
+      title: t("{company_name} 需要跟进", { company_name: candidate.company }),
+      reason: t("已 {days} 天没有更新。", { days }),
+      evidence: [t("最近更新：{value}", { value: dayjs((candidate.updated_at ?? candidate.due_at) * 1000).format('YYYY-MM-DD') })],
+      primaryAction: makeAction(t("打开投递看板"), 'board', refs), sortKey: 1000 - days };
+  }
+  const label = formatCompanyPosition(candidate.company, candidate.position) || t("已安排日程");
+  const evidence = [t("日程时间：{value}", { value: dayjs(candidate.due_at * 1000).format('YYYY-MM-DD HH:mm') })];
+  if (candidate.reason_code === 'review') {
+    return { ...common, kind: 'interview_review', priority: 'p2',
+      title: t("面试复盘提醒"), reason: t("面试结束，可记录复盘"), evidence,
+      primaryAction: makeAction(t("打开日历"), 'calendar', refs), sortKey: 250 };
+  }
+  if (candidate.reason_code === 'event_upcoming') {
+    return { ...common, kind: 'event_upcoming', priority: hours <= 24 ? 'p0' : 'p1',
+      title: t("{label} 即将开始", { label }),
+      reason: t("{value} 将在 {value2} 小时后开始。", {
+        value: candidate.event_type ? EVENT_TYPE_LABELS[candidate.event_type] : t("日程"),
+        value2: Math.max(1, Math.ceil(hours)),
+      }), evidence,
+      primaryAction: makeAction(t("打开日历"), 'calendar', refs), sortKey: 200 + hours };
+  }
+  const deadline = candidate.reason_code === 'deadline';
+  return { ...common, kind: deadline ? 'application_deadline' : 'interview_soon', priority: hours <= 24 ? 'p0' : 'p1',
+    title: deadline ? t("截止提醒") : t("{label} 即将开始", { label }),
+    reason: deadline ? t("投递截止时间临近") : t("面试临近，可提前准备"), evidence,
+    primaryAction: makeAction(t("打开日历"), 'calendar', refs), sortKey: 200 + hours };
 }
 
 export function derivePipelineInsights({
   apps,
   events,
-  offers,
   materialKits,
+  reminderCandidates = [],
   practiceStats,
   weeklyTarget,
   now = dayjs(),
@@ -159,102 +207,32 @@ export function derivePipelineInsights({
   const current = dayjs(now);
   const insights: PipelineInsight[] = [];
 
-  for (const offer of offers) {
-    if (!['pending', 'negotiating'].includes(offer.status)) continue;
-
-    const deadline = parseDeadline(offer.deadline);
-    if (!deadline) continue;
-
-    const hours = deadline.diff(current, 'hour', true);
-    if (!Number.isFinite(hours) || hours < 0 || hours > 168) continue;
-
-    const deadlineLabel = formatDate(offer.deadline);
-    const priority: PipelinePriority = hours <= 48 ? 'p0' : 'p1';
-    insights.push({
-      id: `offer-${offer.id}`,
-      kind: 'offer_deadline',
-      priority,
-      title: `${offer.company_name} offer 答复截止`,
-      reason:
-        priority === 'p0'
-          ? 'Offer 答复截止时间已进入 48 小时内。'
-          : 'Offer 答复截止时间将在本周到来。',
-      evidence: [`截止日：${deadlineLabel}`],
-      primaryAction: makeAction('打开谈薪中心', 'offers', {
-        appId: offer.application_id,
-        offerId: offer.id,
-      }),
-      appId: offer.application_id,
-      offerId: offer.id,
-      sortKey: hours,
-    });
-  }
-
-  for (const event of events) {
-    const scheduledAt = parseStrictDate(event.scheduled_at);
-    if (!scheduledAt) continue;
-
-    const hours = scheduledAt.diff(current, 'hour', true);
-    if (!Number.isFinite(hours) || hours < 0 || hours > 72) continue;
-
-    const label = formatCompanyPosition(event.company_name, event.position_name) || '已安排日程';
-    const priority: PipelinePriority = hours <= 24 ? 'p0' : 'p1';
-    insights.push({
-      id: `interview-${event.id}`,
-      kind: 'interview_soon',
-      priority,
-      title: `${label} 即将开始`,
-      reason: `${EVENT_TYPE_LABELS[event.event_type] ?? '日程'} 将在 ${Math.max(1, Math.ceil(hours))} 小时后开始。`,
-      evidence: [`日程时间：${scheduledAt.format('YYYY-MM-DD HH:mm')}`],
-      primaryAction: makeAction('打开日历', 'calendar', {
-        appId: event.application_id,
-        eventId: event.id,
-      }),
-      appId: event.application_id,
-      eventId: event.id,
-      sortKey: 200 + hours,
-    });
+  for (const candidate of reminderCandidates) {
+    const insight = reminderCandidateInsight(candidate, current);
+    if (insight) insights.push(insight);
   }
 
   const appsWithFutureEvents = new Set(
     events
       .filter((event) => {
         const scheduledAt = parseStrictDate(event.scheduled_at);
-        return Boolean(scheduledAt?.isAfter(current));
+        return event.status === 'todo' && Boolean(scheduledAt?.isAfter(current));
       })
       .map((event) => event.application_id),
   );
 
   for (const app of apps) {
-    if (WAITING_STATUSES.includes(app.status)) {
-      const baseDate = parseStrictDate(app.updated_at || app.applied_at);
-      if (baseDate) {
-        const days = current.diff(baseDate, 'day');
-        if (Number.isFinite(days) && days > 7) {
-          insights.push({
-            id: `stale-${app.id}`,
-            kind: 'stale_application',
-            priority: days >= 14 ? 'p1' : 'p2',
-            title: `${app.company_name} 需要跟进`,
-            reason: `已 ${days} 天没有更新。`,
-            evidence: [`最近更新：${baseDate.format('YYYY-MM-DD')}`],
-            primaryAction: makeAction('打开投递看板', 'board', { appId: app.id }),
-            appId: app.id,
-            sortKey: 1000 - days,
-          });
-        }
-      }
-    }
+    if (app.closed_at || app.deleted_at || app.status === 'closed') continue;
 
     if (app.status === 'interview' && !appsWithFutureEvents.has(app.id)) {
       insights.push({
         id: `no-next-${app.id}`,
         kind: 'no_next_event',
         priority: 'p2',
-        title: `${app.company_name} 缺少下一步日程`,
-        reason: '投递已进入面试阶段，但还没有安排下一次日程。',
-        evidence: [`当前阶段：${app.status}`],
-        primaryAction: makeAction('打开日历', 'calendar', { appId: app.id }),
+        title: t("{company_name} 缺少下一步日程", { company_name: app.company_name }),
+        reason: t("投递已进入面试阶段，但还没有安排下一次日程。"),
+        evidence: [t("当前阶段：{status}", { status: app.status })],
+        primaryAction: makeAction(t("打开日历"), 'calendar', { appId: app.id }),
         appId: app.id,
         sortKey: 2500,
       });
@@ -273,10 +251,10 @@ export function derivePipelineInsights({
         id: `material-kit-${app.id}`,
         kind: 'material_kit_incomplete',
         priority: 'p2',
-        title: `${app.company_name} 申请材料待完善`,
-        reason: '简历、沟通记录或申请材料仍需要复核。',
-        evidence: ['材料包：未完成'],
-        primaryAction: makeAction('打开投递看板', 'board', { appId: app.id }),
+        title: t("{company_name} 申请材料待完善", { company_name: app.company_name }),
+        reason: t("简历、沟通记录或申请材料仍需要复核。"),
+        evidence: [t("材料包：未完成")],
+        primaryAction: makeAction(t("打开投递看板"), 'board', { appId: app.id }),
         appId: app.id,
         sortKey: 2700,
       });
@@ -289,10 +267,10 @@ export function derivePipelineInsights({
       id: 'questions-due',
       kind: 'question_due',
       priority: due >= 10 ? 'p1' : 'p2',
-      title: `${due} 道题待复习`,
-      reason: `今天有 ${due} 道练习题到期需要复习。`,
-      evidence: [`待复习题目：${due}`],
-      primaryAction: makeAction('打开题库练习', 'questions'),
+      title: t("{due} 道题待复习", { due: due }),
+      reason: t("今天有 {due} 道练习题到期需要复习。", { due: due }),
+      evidence: [t("待复习题目：{due}", { due: due })],
+      primaryAction: makeAction(t("打开题库练习"), 'questions'),
       questionCount: due,
       sortKey: 3000 - Math.min(due, 50),
     });
@@ -304,10 +282,10 @@ export function derivePipelineInsights({
       id: 'weekly-goal-gap',
       kind: 'weekly_goal_gap',
       priority: 'p2',
-      title: '本周投递目标需要关注',
-      reason: `距离本周目标还差 ${weeklyHealth.weeklyGap} 个投递。`,
-      evidence: [`本周投递：${weeklyHealth.weeklyApplications}/${weeklyHealth.weeklyTarget}`],
-      primaryAction: makeAction('打开投递看板', 'board'),
+      title: t("本周投递目标需要关注"),
+      reason: t("距离本周目标还差 {weeklyGap} 个投递。", { weeklyGap: weeklyHealth.weeklyGap }),
+      evidence: [t("本周投递：{weeklyApplications}/{weeklyTarget}", { weeklyApplications: weeklyHealth.weeklyApplications, weeklyTarget: weeklyHealth.weeklyTarget })],
+      primaryAction: makeAction(t("打开投递看板"), 'board'),
       sortKey: 4000,
     });
   }
@@ -319,10 +297,10 @@ export function derivePipelineInsights({
       id: 'pipeline-bottleneck-applied',
       kind: 'pipeline_bottleneck',
       priority: 'p2',
-      title: '投递集中在已申请阶段',
-      reason: '大多数活跃投递还没有推进到后续阶段。',
-      evidence: [`已申请：${appliedCount}/${activeApps.length}`],
-      primaryAction: makeAction('打开投递看板', 'board'),
+      title: t("投递集中在已申请阶段"),
+      reason: t("大多数活跃投递还没有推进到后续阶段。"),
+      evidence: [t("已申请：{appliedCount}/{length}", { appliedCount: appliedCount, length: activeApps.length })],
+      primaryAction: makeAction(t("打开投递看板"), 'board'),
       sortKey: 4100,
     });
   }
@@ -341,7 +319,7 @@ export function summarizePipelineHealth(
   const current = dayjs(now);
   const weeklyApplications = apps.filter((app) => {
     const appliedAt = parseStrictDate(app.applied_at);
-    return Boolean(appliedAt && current.diff(appliedAt, 'day') < 7);
+    return Boolean(appliedAt && !appliedAt.isBefore(current.locale('en').startOf('week')) && !appliedAt.isAfter(current.locale('en').endOf('week')));
   }).length;
   const dueQuestions = insights.reduce((total, insight) => total + (insight.questionCount ?? 0), 0);
   const p0 = insights.filter((insight) => insight.priority === 'p0').length;
@@ -354,7 +332,7 @@ export function summarizePipelineHealth(
   const bottleneck =
     insights.find((insight) => insight.priority === 'p0')?.title ??
     insights.find((insight) => insight.priority === 'p1')?.title ??
-    (weeklyGap > 0 ? '本周投递节奏' : '暂无明显瓶颈');
+    (weeklyGap > 0 ? t("本周投递节奏") : t("暂无明显瓶颈"));
 
   return {
     score,

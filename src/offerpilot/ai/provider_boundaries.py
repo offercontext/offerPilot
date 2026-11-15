@@ -3,11 +3,15 @@
 NON_AGENT_PROVIDER_CALL_MANIFEST = (
     ("offerpilot/api.py", "test_settings_provider", 1),
     ("offerpilot/api.py", "_generate_conversation_title", 1),
-    ("offerpilot/api.py", "_complete_json", 1),
     ("offerpilot/ai/interview_knowledge_capture.py", "generate_interview_knowledge_preview", 2),
     (
         "offerpilot/ai/interview_preparation_proposals.py",
         "generate_interview_preparation_proposal",
+        2,
+    ),
+    (
+        "offerpilot/ai/interview_preparation_proposals.py",
+        "generate_interview_preparation_proposal_v2",
         2,
     ),
     ("offerpilot/ai/interview_review_proposals.py", "_complete_interview_review_model", 2),
@@ -17,6 +21,7 @@ NON_AGENT_PROVIDER_CALL_MANIFEST = (
     ("offerpilot/ai/mock_interview.py", "_complete_feedback", 2),
     ("offerpilot/ai/offer_negotiation.py", "generate_offer_negotiation_proposal", 1),
     ("offerpilot/ai/opportunity_fit_reviews.py", "_generate", 1),
+    # api._complete_json is an import alias, not a second provider implementation.
     ("offerpilot/ai/workflows.py", "complete_json", 1),
 )
 
@@ -41,6 +46,6 @@ RAW_PROVIDER_BOUNDARIES = (
 )
 
 assert len(NON_AGENT_PROVIDER_CALL_MANIFEST) == 13
-assert sum(item[2] for item in NON_AGENT_PROVIDER_CALL_MANIFEST) == 18
+assert sum(item[2] for item in NON_AGENT_PROVIDER_CALL_MANIFEST) == 19
 assert len(RAW_PROVIDER_BOUNDARIES) == 5
 

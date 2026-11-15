@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Application } from '@/types/application';
-import { buildApplicationSearchCommands, buildPipelineNavigationCommands } from './CommandPalette';
+import { buildApplicationSearchCommands, buildPipelineNavigationCommands, mergeDestinationCommands, matchesCommand } from './CommandPalette';
 import source from './CommandPalette.tsx?raw';
 
 function app(patch: Partial<Application>): Application {
@@ -42,10 +42,10 @@ describe('CommandPalette resume commands', () => {
   });
 
   it('uses the unified settings destination wording', () => {
-    expect(source).toContain("label: '打开设置'");
+    expect(source).toMatch(/label: t\(["']打开设置["']\)/);
     expect(source).not.toContain('打开 AI 设置');
     expect(source).toContain('打开 Offer 中心');
-    expect(source).toContain("hint: '今日'");
+    expect(source).toContain('hint: t("今日")');
   });
 
   it('builds application search commands without soft-deleted rows', () => {
@@ -84,5 +84,19 @@ describe('CommandPalette resume commands', () => {
     expect(navigated).toEqual(['applications-list']);
     commands[4].run();
     expect(navigated).toEqual(['applications-list', 'offers']);
+  });
+});
+
+
+describe('canonical command destinations', () => {
+  it('keeps one action per destination and searches merged aliases', () => {
+    const canonical = { key: 'settings', label: '打开设置', destination: 'settings' as const, run: () => undefined };
+    const commands = mergeDestinationCommands([canonical, { key: 'nav-settings', label: '前往 设置', destination: 'settings', run: () => undefined }]);
+    expect(commands).toHaveLength(1);
+    expect(commands[0].key).toBe('settings');
+    expect(matchesCommand(commands[0], '前往 设置')).toBe(true);
+  });
+  it('does not offer a fake resume create action', () => {
+    expect(source).not.toContain("key: 'new-resume'");
   });
 });

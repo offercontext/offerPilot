@@ -1,6 +1,7 @@
+import { t, useLocale } from '@/i18n';
 import { Button, Input, Select, Table, Tag } from 'antd';
 import { RobotOutlined } from '@ant-design/icons';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import type { ColumnsType } from 'antd/es/table';
 import type { Application, ApplicationStatus } from '@/types/application';
@@ -26,16 +27,13 @@ interface ApplicationListViewProps {
   onViewStateChange?: (state: ApplicationViewState) => void;
 }
 
-const STATUS_FILTERS = [
-  { value: 'all', label: '全部状态' },
-  ...KANBAN_COLUMNS.map((status) => ({ value: status, label: STATUS_LABELS[status] })),
-];
+
 
 const SORT_OPTIONS: { value: ApplicationSortBy; label: string }[] = [
-  { value: 'updated_desc', label: '最近更新优先' },
-  { value: 'updated_asc', label: '最早更新优先' },
-  { value: 'applied_desc', label: '最近投递优先' },
-  { value: 'applied_asc', label: '最早投递优先' },
+  { value: 'updated_desc', get label() { return t("最近更新优先"); } },
+  { value: 'updated_asc', get label() { return t("最早更新优先"); } },
+  { value: 'applied_desc', get label() { return t("最近投递优先"); } },
+  { value: 'applied_asc', get label() { return t("最早投递优先"); } },
 ];
 
 export default function ApplicationListView({
@@ -47,6 +45,22 @@ export default function ApplicationListView({
   viewState,
   onViewStateChange,
 }: ApplicationListViewProps) {
+  const locale = useLocale();
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [horizontalOverflow, setHorizontalOverflow] = useState(false);
+  useEffect(() => {
+    const content = tableRef.current?.querySelector<HTMLElement>('.ant-table-content');
+    if (!content) return;
+    const update = () => setHorizontalOverflow(content.scrollWidth > content.clientWidth);
+    update();
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(update);
+    observer?.observe(content);
+    return () => observer?.disconnect();
+  }, []);
+  const STATUS_FILTERS = [
+    { value: 'all', label: t("全部状态") },
+    ...KANBAN_COLUMNS.map((status) => ({ value: status, label: STATUS_LABELS[status] })),
+  ];
   const [localViewState, setLocalViewState] = useState<ApplicationViewState>(DEFAULT_APPLICATION_VIEW_STATE);
   const currentViewState = viewState ?? localViewState;
   const { keyword, status, sortBy } = currentViewState;
@@ -63,17 +77,18 @@ export default function ApplicationListView({
 
   const columns: ColumnsType<Application> = [
     {
-      title: '投递',
+      title: t("投递"),
       key: 'application',
+      width: 260,
       render: (_, row) => (
         <div className={styles.meta}>
-          <span className={styles.company}>{row.company_name}</span>
-          <span className={styles.position}>{row.position_name}</span>
+          <span className={styles.company} title={row.company_name}>{row.company_name}</span>
+          <span className={styles.position} title={row.position_name}>{row.position_name}</span>
         </div>
       ),
     },
     {
-      title: '状态',
+      title: t("状态"),
       dataIndex: 'status',
       width: 120,
       render: (value: ApplicationStatus) => (
@@ -81,19 +96,19 @@ export default function ApplicationListView({
       ),
     },
     {
-      title: '来源',
+      title: t("来源"),
       dataIndex: 'source',
       width: 120,
-      render: (value: string) => <span className={styles.muted}>{value || '-'}</span>,
+      render: (value: string) => <span className={styles.muted} title={value}>{value || '-'}</span>,
     },
     {
-      title: '下一事件',
+      title: t("下一事件"),
       key: 'next_event',
       width: 220,
-      render: (_, row) => <span className={styles.muted}>{formatNextApplicationEvent(row, events)}</span>,
+      render: (_, row) => <span className={styles.muted} title={formatNextApplicationEvent(row, events)}>{formatNextApplicationEvent(row, events)}</span>,
     },
     {
-      title: '更新时间',
+      title: t("更新时间"),
       dataIndex: 'updated_at',
       width: 150,
       render: (value: string) => <span className={styles.muted}>{dayjs(value).format('YYYY-MM-DD HH:mm')}</span>,
@@ -109,56 +124,67 @@ export default function ApplicationListView({
             size="small"
             icon={<RobotOutlined />}
             onClick={() => onAskPilot(row)}
-          >
-            问 Pilot
-          </Button>
+          >{t("问 Pilot")}</Button>
         </div>
       ),
     },
   ];
 
   return (
-    <section aria-label="投递列表">
-      <div className={styles.toolbar}>
+    <section className={styles.list} aria-label={t("投递列表")}>
+      <div className={styles.toolbar} data-pilot-mascot-toolbar>
         <Input.Search
           className={styles.search}
           allowClear
-          placeholder="搜索公司、岗位、备注"
+          placeholder={t("搜索公司、岗位、备注")}
           value={keyword}
           onChange={(event) => updateViewState({ keyword: event.target.value })}
         />
         <Select
-          aria-label="状态"
+          aria-label={t("状态")}
           value={status}
           options={STATUS_FILTERS}
           onChange={(value) => updateViewState({ status: value })}
           style={{ width: 140 }}
         />
         <Select
-          aria-label="排序"
+          aria-label={t("排序")}
           value={sortBy}
-          options={SORT_OPTIONS}
+          options={SORT_OPTIONS.map((option) => ({ ...option }))}
           onChange={(value) => updateViewState({ sortBy: value })}
-          style={{ width: 160 }}
+          style={{ width: locale === 'en-US' ? 220 : 160, maxWidth: '100%' }}
+        />
+        <div className={styles.fallbackDock} data-pilot-mascot-fallback-dock />
+      </div>
+      <div className={styles.tableArea} data-pilot-mascot-safe-area data-pilot-table-min-width={982} ref={tableRef}
+        role="region" aria-label={t("投递表格，可横向滚动")} tabIndex={horizontalOverflow ? 0 : undefined}
+        aria-describedby={horizontalOverflow ? 'application-table-scroll-hint' : undefined}
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
+          event.preventDefault();
+          tableRef.current?.querySelector('.ant-table-content')?.scrollBy({ left: event.key === 'ArrowRight' ? 240 : -240 });
+        }}>
+        {horizontalOverflow ? <p id="application-table-scroll-hint" data-pilot-mascot-scroll-hint className={styles.scrollHint}>{t("左右滚动查看其余列；聚焦表格后也可按 ← →")}</p> : null}
+        <Table<Application>
+          rowKey="id"
+          tableLayout="fixed"
+          scroll={{ x: 982 }}
+          columns={columns}
+          dataSource={rows}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          onRow={(row) => ({
+            ...(onAttachToPilot
+              ? createPilotAttachmentDragBinding({
+                  kind: 'application',
+                  id: String(row.id),
+                  label: `${row.company_name} · ${row.position_name}`,
+                })
+              : {}),
+            onClick: () => onOpenDetail(row),
+            style: { cursor: 'pointer' },
+          })}
         />
       </div>
-      <Table<Application>
-        rowKey="id"
-        columns={columns}
-        dataSource={rows}
-        pagination={{ pageSize: 10, showSizeChanger: false }}
-        onRow={(row) => ({
-          ...(onAttachToPilot
-            ? createPilotAttachmentDragBinding({
-                kind: 'application',
-                id: String(row.id),
-                label: `${row.company_name} · ${row.position_name}`,
-              })
-            : {}),
-          onClick: () => onOpenDetail(row),
-          style: { cursor: 'pointer' },
-        })}
-      />
     </section>
   );
 }

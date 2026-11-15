@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { Conversation } from '@/types/chat';
 
 export type ConversationView = 'active' | 'archived';
@@ -12,7 +13,7 @@ export const CONVERSATION_GROUP_KEYS: ConversationGroupKey[] = [
 ];
 
 export function conversationModeLabel(mode?: string): string {
-  return mode === 'nego_coach' ? '谈薪教练' : '通用';
+  return mode === 'nego_coach' ? t("谈薪教练") : t("通用");
 }
 
 function conversationSearchText(conversation: Conversation): string {

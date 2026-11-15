@@ -113,6 +113,40 @@ def _require_client_identity_forwarding(
     assert forwarded is delegates[0], f"{node.name} Gateway delegate must be the unconditional body"
 
 
+def _require_bounded_connection_probe(node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
+    calls = [item for item in ast.walk(node) if isinstance(item, ast.Call)]
+    delegates = [call for call in calls if _terminal(call.func) == "_complete_with_provider"]
+    assert len(delegates) == 1, "connection probe must delegate exactly once"
+    delegate = delegates[0]
+    assert isinstance(node.body[-1], ast.Return) and node.body[-1].value is delegate, (
+        "connection probe must return the unconditional single attempt"
+    )
+    assert ast.unparse(delegate.func) == "self._complete_with_provider"
+    assert [ast.unparse(argument) for argument in delegate.args] == [
+        "provider",
+        "[Message(role='user', content='Reply with OK.')]",
+        "[]",
+    ]
+    keywords = {keyword.arg: ast.unparse(keyword.value) for keyword in delegate.keywords}
+    assert len(keywords) == len(delegate.keywords)
+    assert keywords == {
+        "timeout_seconds": "15",
+        "output_limit": "64",
+        "disable_thinking": "_is_deepseek_v4_provider(provider)",
+    }
+    assert all(
+        ast.unparse(call.func) in {
+            "next",
+            "self._candidate_providers",
+            "ValueError",
+            "self._complete_with_provider",
+            "Message",
+            "_is_deepseek_v4_provider",
+        }
+        for call in calls
+    ), "connection probe must not bypass the bounded delegate or add fallback"
+
+
 def _functions(path: Path) -> dict[tuple[str, str], ast.FunctionDef | ast.AsyncFunctionDef]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
     result: dict[tuple[str, str], ast.FunctionDef | ast.AsyncFunctionDef] = {}
@@ -363,18 +397,235 @@ def test_surface_selection_matcher_never_rebuilds_names_or_fingerprint() -> None
     assert not {"names", "envelope_fingerprint", "tools"}.intersection(attributes)
 
 
-def test_fixed_non_agent_manifest_has_13_functions_and_18_calls() -> None:
+def _require_complete_non_agent_manifest(sources: dict[str, str]) -> None:
+    actual: Counter[tuple[str, str]] = Counter()
+    # Agent adapters have separate invocation-identity and raw-boundary gates.
+    agent_adapters = {"offerpilot/ai/client.py", "offerpilot/ai/agent_loop.py"}
+    # These complete methods close local lifecycle state, not provider requests.
+    local_completions = {
+        ("offerpilot/api.py", "complete_adaptive_practice", "adaptive_practice.complete"),
+        ("offerpilot/chat_transport.py", "_transition_complete", "self._prepared.complete"),
+        ("offerpilot/chat_transport.py", "_transition_complete", "self._lifecycle.complete"),
+        ("offerpilot/chat_transport.py", "complete_execution", "self.complete"),
+        ("offerpilot/chat_transport.py", "complete_normal", "self.complete"),
+        ("offerpilot/chat_transport.py", "complete_cancelled", "self.complete"),
+        ("offerpilot/chat_transport.py", "complete_transport_aborted", "self.complete"),
+        ("offerpilot/chat_transport.py", "finalize", "self.complete"),
+        ("offerpilot/chat_transport.py", "_complete_preserving", "self.guard.complete"),
+        ("offerpilot/chat_transport.py", "_finalize_owner", "self.guard.complete"),
+        ("offerpilot/pilot_runtime/contracts.py", "complete", "self._lifecycle.complete"),
+    }
+    for relative, source in sources.items():
+        if relative in agent_adapters:
+            continue
+        tree = ast.parse(source)
+        parents = {child: parent for parent in ast.walk(tree)
+                   for child in ast.iter_child_nodes(parent)}
+        for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+            if not isinstance(call.func, ast.Attribute) or call.func.attr not in {
+                "complete", "stream_complete", "test_connection",
+            }:
+                continue
+            owner: ast.AST = call
+            while not isinstance(owner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                assert owner in parents, f"Unowned provider call in {relative}"
+                owner = parents[owner]
+            if (relative, owner.name, ast.unparse(call.func)) in local_completions:
+                continue
+            actual[(relative, owner.name)] += 1
+    expected = {(path, name): count for path, name, count in NON_AGENT_PROVIDER_CALL_MANIFEST}
+    assert len(expected) == len(NON_AGENT_PROVIDER_CALL_MANIFEST), "Duplicate manifest entry"
+    assert actual == expected, "Non-agent provider call inventory drift"
+
+
+@pytest.fixture(scope="module")
+def provider_sources() -> dict[str, str]:
+    return {path.relative_to(ROOT.parent).as_posix(): path.read_text(encoding="utf-8")
+            for path in ROOT.rglob("*.py")}
+
+
+def test_non_agent_manifest_matches_current_provider_call_sites(provider_sources) -> None:
     assert len(NON_AGENT_PROVIDER_CALL_MANIFEST) == 13
-    assert sum(count for _, _, count in NON_AGENT_PROVIDER_CALL_MANIFEST) == 18
+    assert sum(count for _, _, count in NON_AGENT_PROVIDER_CALL_MANIFEST) == 19
+    _require_complete_non_agent_manifest(provider_sources)
+    totals: Counter[str] = Counter()
     for relative, function_name, expected_calls in NON_AGENT_PROVIDER_CALL_MANIFEST:
         node = _functions(ROOT.parent / relative)[("", function_name)]
-        actual = sum(
-            isinstance(call.func, ast.Attribute)
-            and call.func.attr in {"complete", "stream_complete"}
+        calls = [
+            call
             for call in ast.walk(node)
-            if isinstance(call, ast.Call)
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+        ]
+        ordinary_calls = sum(
+            _terminal(call.func) in {"complete", "stream_complete"} for call in calls
         )
-        assert actual == expected_calls, (relative, function_name)
+        probe_calls = [call for call in calls if _terminal(call.func) == "test_connection"]
+        # The settings call is still one of the fixed 19 high-level calls. Only
+        # this entry may use the bounded probe instead of ordinary completion.
+        if (relative, function_name) == ("offerpilot/api.py", "test_settings_provider"):
+            assert ordinary_calls == 0
+            assert len(probe_calls) == 1
+            probe = probe_calls[0]
+            assert not probe.args and not probe.keywords
+            assert isinstance(probe.func, ast.Attribute)
+            assert isinstance(probe.func.value, ast.Call)
+            assert _terminal(probe.func.value.func) == "ConfiguredAIClient"
+        else:
+            assert not probe_calls, (relative, function_name)
+        assert ordinary_calls + len(probe_calls) == expected_calls, (relative, function_name)
+        totals.update(ordinary=ordinary_calls, probe=len(probe_calls))
+    assert totals == {"ordinary": 18, "probe": 1}
+
+
+@pytest.mark.parametrize("damage", [
+    "duplicate-call", "unlisted-entry", "copied-local-expression", "omitted-v2",
+])
+def test_non_agent_inventory_rejects_added_or_unlisted_calls(
+    provider_sources, monkeypatch, damage,
+) -> None:
+    sources = dict(provider_sources)
+    if damage == "duplicate-call":
+        path = "offerpilot/ai/workflows.py"
+        sources[path] = sources[path].replace(
+            "        assistant = model.complete(",
+            "        model.complete([], [])\n        assistant = model.complete(", 1,
+        )
+    elif damage == "unlisted-entry":
+        sources["offerpilot/new_provider_entry.py"] = (
+            "def new_entry(model):\n    return model.complete([], [])\n"
+        )
+    elif damage == "copied-local-expression":
+        sources["offerpilot/api.py"] += (
+            "\ndef unlisted_completion(adaptive_practice):\n"
+            "    return adaptive_practice.complete()\n"
+        )
+    else:
+        monkeypatch.setitem(globals(), "NON_AGENT_PROVIDER_CALL_MANIFEST", tuple(
+            row for row in NON_AGENT_PROVIDER_CALL_MANIFEST
+            if row[1] != "generate_interview_preparation_proposal_v2"
+        ))
+    with pytest.raises(AssertionError, match="provider call inventory drift"):
+        _require_complete_non_agent_manifest(sources)
+
+
+def _require_shared_json_alias(source: str) -> None:
+    tree = ast.parse(source)
+    imports = [(node.module, alias.name) for node in ast.walk(tree)
+               if isinstance(node, ast.ImportFrom) for alias in node.names
+               if (alias.asname or alias.name) == "_complete_json"]
+    assert imports == [("offerpilot.ai.workflows", "complete_json")]
+    assert not any(
+        (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.arg))
+         and getattr(node, "name", getattr(node, "arg", None)) == "_complete_json")
+        or (isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
+            and node.id == "_complete_json")
+        for node in ast.walk(tree)
+    ), "API must not shadow the shared JSON completion alias"
+
+
+def test_api_json_completion_is_only_an_import_alias(provider_sources) -> None:
+    _require_shared_json_alias(provider_sources["offerpilot/api.py"])
+    material_kit = _functions(ROOT / "api.py")[("", "generate_application_material_kit")]
+    delegates = [call for call in ast.walk(material_kit) if isinstance(call, ast.Call)
+                 and _terminal(call.func) == "_complete_json"]
+    assert len(delegates) == 1
+
+
+@pytest.mark.parametrize("damage", ["different-import", "local-wrapper", "reassignment"])
+def test_json_alias_gate_rejects_unbound_or_shadowed_shared_implementation(
+    provider_sources, damage,
+) -> None:
+    source = provider_sources["offerpilot/api.py"]
+    if damage == "different-import":
+        source = source.replace("from offerpilot.ai.workflows import (",
+                                "from offerpilot.ai.client import (", 1)
+    elif damage == "local-wrapper":
+        source += "\ndef _complete_json(model, system, user):\n    return model.complete([], [])\n"
+    else:
+        source += "\n_complete_json = replacement\n"
+    with pytest.raises(AssertionError):
+        _require_shared_json_alias(source)
+
+
+@pytest.mark.parametrize("entrypoint", ["api", "workflows"])
+@pytest.mark.parametrize("outcome", ["success", "invalid-json", "provider-error"])
+def test_json_entrypoints_share_exactly_one_provider_attempt(entrypoint, outcome) -> None:
+    from offerpilot import api
+    from offerpilot.ai import workflows
+    from offerpilot.ai.types import Assistant
+
+    assert api._complete_json is workflows.complete_json
+    attempts = []
+
+    class Model:
+        def complete(self, messages, tools):
+            attempts.append((messages, tools))
+            if outcome == "provider-error":
+                raise RuntimeError("offline provider failure")
+            return Assistant(content="{}" if outcome == "success" else "not json")
+
+    complete = api._complete_json if entrypoint == "api" else workflows.complete_json
+    if outcome == "success":
+        assert complete(Model(), "system", "user") == {}
+    else:
+        with pytest.raises(RuntimeError):
+            complete(Model(), "system", "user")
+    assert len(attempts) == 1
+    assert [(message.role, message.content) for message in attempts[0][0]] == [
+        ("system", "system"), ("user", "user"),
+    ]
+    assert attempts[0][1] == []
+
+
+def test_settings_connection_probe_keeps_bounded_single_attempt_delegation() -> None:
+    node = _functions(ROOT / "ai" / "client.py")[("ConfiguredAIClient", "test_connection")]
+    _require_bounded_connection_probe(node)
+
+
+@pytest.mark.parametrize(
+    "before,after",
+    [
+        ("timeout_seconds=15", "timeout_seconds=None"),
+        ("timeout_seconds=15", "timeout_seconds=60"),
+        ("output_limit=64", "output_limit=None"),
+        ("output_limit=64", "output_limit=4096"),
+        ("disable_thinking=_is_deepseek_v4_provider(provider)", "disable_thinking=False"),
+        ("[],", "tools,"),
+        ("self._complete_with_provider", "self.complete"),
+        (
+            "return self._complete_with_provider",
+            "if False:\n        return self._complete_with_provider",
+        ),
+        (
+            "return self._complete_with_provider",
+            "self.complete([], [])\n    return self._complete_with_provider",
+        ),
+        (
+            "return self._complete_with_provider",
+            "self._complete_with_provider(provider, [], [])\n"
+            "    return self._complete_with_provider",
+        ),
+    ],
+)
+def test_connection_probe_gate_rejects_unbounded_or_bypassed_delegation(before, after) -> None:
+    source = """\
+def test_connection(self):
+    return self._complete_with_provider(
+        provider,
+        [Message(role="user", content="Reply with OK.")],
+        [],
+        timeout_seconds=15,
+        output_limit=64,
+        disable_thinking=_is_deepseek_v4_provider(provider),
+    )
+"""
+    valid = ast.parse(source).body[0]
+    assert isinstance(valid, ast.FunctionDef)
+    _require_bounded_connection_probe(valid)
+    mutated = ast.parse(source.replace(before, after)).body[0]
+    assert isinstance(mutated, ast.FunctionDef)
+    with pytest.raises(AssertionError):
+        _require_bounded_connection_probe(mutated)
 
 
 def test_raw_provider_boundary_manifest_resolves_exactly_five_functions() -> None:

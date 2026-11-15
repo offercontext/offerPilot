@@ -2,14 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
+import time
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.config import Config
 from offerpilot.pilot_runtime.managed_execution import RuntimeExecutionManager
-from .contracts import ProactivePolicyUpdate
+from .contracts import CompanionBidRequest, ProactivePolicyUpdate
 from .repository import ProactiveConflict, ProactiveRepository
 from .runtime import ProactiveRuntime, configured_draft
 
@@ -19,6 +21,20 @@ def register_proactive_routes(app: FastAPI, sessions: sessionmaker[Session],
     repository = ProactiveRepository(sessions)
     runtime = ProactiveRuntime(repository, manager, configured_draft(config_loader))
     app.state.proactive_runtime = runtime
+
+    @app.post("/api/companion/bid")
+    def companion_bid(command: CompanionBidRequest) -> dict[str, Any]:
+        return {"item": repository.take_companion_bid(
+            str(command.identity), command.expected_revision, str(command.client_id),
+        )}
+
+    @app.get("/api/reminders/candidates")
+    def reminder_candidates(timezone: str = Query(default="UTC", min_length=1, max_length=80)) -> dict[str, Any]:
+        try:
+            ZoneInfo(timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail="unknown timezone") from exc
+        return {"items": repository.reminder_candidates(time.time(), timezone)}
 
     @app.get("/api/proactive/settings")
     def settings() -> dict[str, Any]:

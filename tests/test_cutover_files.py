@@ -39,30 +39,41 @@ def test_readme_states_the_product_boundary_and_core_capabilities():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
     for text in [
-        "# OfferPilot — 开源、本地优先的 AI 求职与投递管理工具",
+        "# OfferPilot — 开源、本地优先的求职 Agent",
         "| 投递管理 |",
         "| 简历与材料准备 |",
         "| 面试准备与模拟 |",
         "| 面试复盘 |",
         "| Offer 对比与谈薪 |",
-        "| Pilot AI 助手 |",
+        "| Pilot 求职 Agent |",
         "本地工作区",
         "相关资料会发送给你配置的模型服务",
         "不自动向招聘方投递或发送消息",
         "默认需要用户确认",
         "仍由你决定",
-        "AGPLv3",
+        "[AGPLv3](LICENSE)",
         "[English](README.en.md)",
     ]:
         assert text in readme
     english = (ROOT / "README.en.md").read_text(encoding="utf-8")
     for text in (
+        "# OfferPilot — An Open-source, Local-first Job-search Agent",
         "local-first",
-        "configured model service",
+        "| Pilot agent |",
+        "| Application tracking |",
+        "| Resume and material preparation |",
+        "| Mock interviews |",
+        "| Interview reviews |",
+        "| Offer comparison and negotiation preparation |",
+        "Workspace data is stored locally",
+        "AI features send relevant materials to your configured model service",
+        "may incur provider fees",
+        "Changes to important job-search records require confirmation by default",
         "does not automatically submit applications or message recruiters",
-        "[LICENSE](LICENSE)",
+        "Decisions about applications, offers and negotiation remain yours",
     ):
-        assert text in english
+        assert text.casefold() in english.casefold()
+    assert "[AGPLv3](LICENSE)" in english
 
 
 def test_docker_smoke_scripts_document_container_smoke_path():

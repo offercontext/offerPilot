@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Empty, Input, Modal, Skeleton, Tag, message } from 'antd';
 import { CheckCircleOutlined, ClockCircleOutlined, CompassOutlined } from '@ant-design/icons';
 import {
@@ -19,11 +21,21 @@ import type {
   AdaptivePracticeV2StartInput,
 } from '@/types/adaptiveInterviewPractice';
 import styles from './AdaptiveInterviewPracticeWorkspace.module.css';
+import TrainingEvidencePanel from './TrainingEvidencePanel';
+import type { TrainingEvidenceDraft } from '@/types/trainingEvidence';
+
+// Native disclosure state is user-owned. Recovering a draft may open it, but
+// clearing a successfully saved draft must not close the result or next exercise.
+export function PracticeHistoryDetails({ restoreOpen, children }: { restoreOpen: boolean; children: ReactNode }) {
+  const disclosure = useRef<HTMLDetailsElement>(null);
+  useEffect(() => { if (restoreOpen && disclosure.current) disclosure.current.open = true; }, [restoreOpen]);
+  return <details ref={disclosure} className={styles.historyCard}>{children}</details>;
+}
 
 const ASSESSMENTS: Array<{ value: AdaptivePracticeAssessment; label: string; detail: string }> = [
-  { value: 'needs_work', label: '还需要练', detail: '关键步骤还不够顺畅' },
-  { value: 'clearer', label: '更清楚了', detail: '结构已经明显改善' },
-  { value: 'confident', label: '可以复用', detail: '能稳定用于下一次回答' },
+  { value: 'needs_work', get label() { return t("还需要练"); }, get detail() { return t("关键步骤还不够顺畅"); } },
+  { value: 'clearer', get label() { return t("更清楚了"); }, get detail() { return t("结构已经明显改善"); } },
+  { value: 'confident', get label() { return t("可以复用"); }, get detail() { return t("能稳定用于下一次回答"); } },
 ];
 
 export interface AdaptiveInterviewPracticeWorkspaceProps {
@@ -92,6 +104,18 @@ function emptyDraft(key: string, generation: number, plan?: AdaptivePracticePlan
   };
 }
 
+export function replaceTrainingEvidenceDraft(
+  base: AdaptivePracticeOwnerDraft,
+  trainingDraft: TrainingEvidenceDraft | null,
+  host: NonNullable<AdaptivePracticeOwnerDraft['trainingEvidenceHost']>,
+): AdaptivePracticeOwnerDraft | null {
+  if (trainingDraft) return { ...base, trainingEvidenceDraft: trainingDraft, trainingEvidenceHost: host };
+  const remaining = { ...base };
+  delete remaining.trainingEvidenceDraft;
+  delete remaining.trainingEvidenceHost;
+  return remaining.resultUnknown || remaining.pendingOperation !== null || remaining.answer || remaining.reflection || remaining.assessment || remaining.startInput || remaining.completionInput ? remaining : null;
+}
+
 function recoverableDraftIdentity(draft: AdaptivePracticeOwnerDraft): { signalVersionId: number | null; targetEventId: number | null } {
   return {
     signalVersionId: draft.startInput?.readiness_signal_version_id ?? draft.signalVersionId,
@@ -114,16 +138,17 @@ export function recoverAdaptivePracticeDrafts(
   const recovered: AdaptivePracticeOwnerDraft[] = [];
   const migrations: Array<{ fromOwnerKey: string; draft: AdaptivePracticeOwnerDraft }> = [];
   for (const draft of Object.values(drafts)) {
-    const hasPendingRecovery = draft.resultUnknown || draft.pendingOperation !== null;
-    const hasUnsavedPractice = draft.planId !== null && Boolean(draft.answer || draft.reflection || draft.assessment);
+    const hasPendingRecovery = draft.resultUnknown || draft.pendingOperation !== null || Boolean(draft.trainingEvidenceDraft?.command);
+    const hasUnsavedPractice = draft.planId !== null && Boolean(draft.answer || draft.reflection || draft.assessment || draft.trainingEvidenceDraft);
     if (
       draft.ownerGeneration !== recoveryOwnerGeneration
       || (!hasPendingRecovery && !hasUnsavedPractice)
     ) continue;
     const identity = recoverableDraftIdentity(draft);
+    const hostIdentity = draft.trainingEvidenceDraft && draft.trainingEvidenceHost ? draft.trainingEvidenceHost : identity;
     if (focus) {
-      if (identity.signalVersionId !== focus.signalVersionId || identity.targetEventId !== focus.targetEventId) continue;
-    } else if (identity.signalVersionId !== null || identity.targetEventId !== null) continue;
+      if (hostIdentity.signalVersionId !== focus.signalVersionId || hostIdentity.targetEventId !== focus.targetEventId) continue;
+    } else if (hostIdentity.signalVersionId !== null || hostIdentity.targetEventId !== null) continue;
     if (draft.pendingOperation === 'start' && !draft.startInput) continue;
     if (draft.pendingOperation === 'complete' && !draft.completionInput) continue;
     const oldKey = draft.planId === null
@@ -147,6 +172,7 @@ export function recoverAdaptivePracticeDrafts(
 }
 
 export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGeneration, recoveryOwnerGeneration, drafts, onDraftChange, onGuardChange }: AdaptiveInterviewPracticeWorkspaceProps) {
+  useLocale();
   const generation = ownerGeneration ?? focus?.ownerGeneration ?? 0;
   const scopeKey = focus ? `${generation}:${focus.signalVersionId}:${focus.targetEventId}` : `${generation}:legacy`;
   const scopeIdentityRef = useRef(scopeKey);
@@ -284,8 +310,8 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
   useEffect(() => {
     const relevant = Object.values(draftSnapshot).filter((draft) => draft.ownerGeneration === generation);
     onGuardChange?.({
-      pending: relevant.some((draft) => draft.resultUnknown || draft.pendingOperation !== null),
-      unsaved: relevant.some((draft) => Boolean(draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput)),
+      pending: relevant.some((draft) => draft.resultUnknown || draft.pendingOperation !== null || Boolean(draft.trainingEvidenceDraft?.command)),
+      unsaved: relevant.some((draft) => Boolean(draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput || draft.trainingEvidenceDraft)),
     });
   }, [draftSnapshot, generation, onGuardChange]);
 
@@ -312,12 +338,12 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
         idempotency_key: canonicalV2Key(),
       };
     } catch {
-      message.error('当前环境无法创建规范练习标识，请刷新后重试。');
+      message.error(liveText(() => t("当前环境无法创建规范练习标识，请刷新后重试。")));
       return;
     }
     const base = startDraft ?? emptyDraft(currentStartKey, generation, undefined, focus);
     if (!persistDraft(currentStartKey, { ...base, startInput: input, pendingOperation: 'start', resultUnknown: false })) {
-      message.error('无法安全保存本次练习操作，请保留页面后重试。');
+      message.error(liveText(() => t("无法安全保存本次练习操作，请保留页面后重试。")));
       return;
     }
     const operation = { key: currentStartKey, draft: { ...base, startInput: input, pendingOperation: 'start' as const, resultUnknown: false } };
@@ -348,7 +374,7 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
         setResultUnknown(true);
         setPendingOperation('start');
       }
-      message.error(cause instanceof Error ? cause.message : '开始结果待确认，请使用原操作重试');
+      message.error(cause instanceof Error ? t(cause.message) : t("开始结果待确认，请使用原操作重试"));
     } finally {
       if (activeOperation.current === operation) {
         activeOperation.current = null;
@@ -372,13 +398,13 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
         idempotency_key: completionKeyFor(active),
       };
     } catch {
-      message.error('当前环境无法创建规范练习标识，请刷新后重试。');
+      message.error(liveText(() => t("当前环境无法创建规范练习标识，请刷新后重试。")));
       return;
     }
     const base = existing ?? emptyDraft(currentPlanKey, generation, active);
     const frozen = { ...base, answer: input.response_text, reflection: input.reflection_text, assessment: input.self_assessment, completionInput: input, pendingOperation: 'complete' as const, resultUnknown: false };
     if (!persistDraft(currentPlanKey, frozen)) {
-      message.error('无法安全保存本次练习操作，请保留页面后重试。');
+      message.error(liveText(() => t("无法安全保存本次练习操作，请保留页面后重试。")));
       return;
     }
     const operation = { key: currentPlanKey, draft: frozen };
@@ -398,7 +424,7 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
       setAssessment(null);
       setResultUnknown(false);
       setPendingOperation(null);
-      message.success('练习已完成并保存');
+      message.success(liveText(() => t("练习已完成并保存")));
     } catch (cause) {
       if (!mounted.current || scopeIdentityRef.current !== requestScope) return;
       if (isDeterministicClientFailure(cause)) {
@@ -411,7 +437,7 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
         setResultUnknown(true);
         setPendingOperation('complete');
       }
-      message.error(cause instanceof Error ? cause.message : '完成结果待确认，请使用原操作重试');
+      message.error(cause instanceof Error ? t(cause.message) : t("完成结果待确认，请使用原操作重试"));
     } finally {
       if (activeOperation.current === operation) {
         activeOperation.current = null;
@@ -430,43 +456,43 @@ export default function AdaptiveInterviewPracticeWorkspace({ focus, ownerGenerat
   const exactItems = useMemo(() => readiness ? [readiness] : undefined, [readiness]);
 
   if (loading) return <div aria-busy="true"><Skeleton active paragraph={{ rows: 8 }} /></div>;
-  if (plansError) return <Alert type="error" showIcon role="alert" message="练习记录暂时无法读取。" action={<Button onClick={() => void load()}>重新读取</Button>} />;
+  if (plansError) return <Alert type="error" showIcon role="alert" message={t("练习记录暂时无法读取。")} action={<Button onClick={() => void load()}>{t("重新读取")}</Button>} />;
 
   return (
     <div className={styles.workspace} data-practice-owner-scope={scopeKey} data-practice-draft-scope={`${scopeKey}:${activePlanId ?? 'new'}`} aria-busy={busy}>
       <section className={styles.hero}>
         <div className={styles.heroIcon}><CompassOutlined /></div>
-        <div><span className={styles.eyebrow}>{focus ? '已确认复盘重点' : '历史练习'}</span><h2>{focus ? '围绕明确的下一场面试练习' : '继续已创建的复盘练习'}</h2><p>{focus ? '练习只绑定当前 Signal Version 和目标 Event，不会猜测其他面试。' : '没有 V2 重点时仍可读取并完成历史 V1 练习。'}</p></div>
+        <div><span className={styles.eyebrow}>{focus ? t("已确认复盘重点") : t("历史练习")}</span><h2>{focus ? t("围绕明确的下一场面试练习") : t("继续已创建的复盘练习")}</h2><p>{focus ? t("练习只绑定当前 Signal Version 和目标 Event，不会猜测其他面试。") : t("没有 V2 重点时仍可读取并完成历史 V1 练习。")}</p></div>
       </section>
 
-      {!focus ? <Alert type="info" showIcon message="请选择一个已确认的复盘重点和明确的目标面试后再创建新练习；历史练习仍可继续。" /> : null}
-      {focusError ? <Alert type="error" showIcon role="alert" message="无法确认这个重点与目标面试；历史练习仍可继续。" action={<Button onClick={() => void load()}>重新读取</Button>} /> : null}
+      {!focus ? <Alert type="info" showIcon message={t("请选择一个已确认的复盘重点和明确的目标面试后再创建新练习；历史练习仍可继续。")} /> : null}
+      {focusError ? <Alert type="error" showIcon role="alert" message={t("无法确认这个重点与目标面试；历史练习仍可继续。")} action={<Button onClick={() => void load()}>{t("重新读取")}</Button>} /> : null}
       {readiness && focus ? <ReadinessFeedbackAdvisory eventId={focus.targetEventId} initialItems={exactItems} selectedVersionIds={[focus.signalVersionId]} onSelectionChange={() => undefined} frozen /> : null}
 
       {active ? (
         <section className={styles.activeGrid}>
           <div className={styles.practiceCard}>
-            <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>练习进行中</span><h3>{active.title}</h3></div><Tag color="processing" icon={<ClockCircleOutlined />}>进行中</Tag></div>
-            <div className={styles.promptBox}><span>本次练习</span><strong>{active.prompt}</strong></div>
-            <label className={styles.fieldLabel} htmlFor={`adaptive-answer-${active.id}`}>你的回答</label>
-            <Input.TextArea id={`adaptive-answer-${active.id}`} aria-label="练习回答" disabled={resultUnknown} value={answer} onChange={(event) => { const value = event.target.value; setAnswer(value); updatePlanDraft({ answer: value }); }} autoSize={{ minRows: 6, maxRows: 12 }} />
-            <label className={styles.fieldLabel} htmlFor={`adaptive-reflection-${active.id}`}>练完后的复盘（可选）</label>
-            <Input.TextArea id={`adaptive-reflection-${active.id}`} aria-label="练习复盘" disabled={resultUnknown} value={reflection} onChange={(event) => { const value = event.target.value; setReflection(value); updatePlanDraft({ reflection: value }); }} autoSize={{ minRows: 3, maxRows: 6 }} />
-            <div className={styles.assessmentGroup}><span className={styles.fieldLabel}>这次练习后的感受</span><div className={styles.assessmentOptions}>{ASSESSMENTS.map((item) => <Button key={item.value} disabled={resultUnknown} className={assessment === item.value ? styles.assessmentActive : styles.assessment} onClick={() => { setAssessment(item.value); updatePlanDraft({ assessment: item.value }); }}><strong>{item.label}</strong><span>{item.detail}</span></Button>)}</div></div>
-            {resultUnknown && pendingOperation === 'complete' ? <Alert type="warning" showIcon message="完成结果待确认，输入已冻结。" action={<Button size="large" onClick={() => void finish()}>使用原操作重试</Button>} /> : <Button type="primary" size="large" disabled={!answer.trim() || !assessment} loading={busy} onClick={() => void finish()}>完成本次练习</Button>}
+            <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t("练习进行中")}</span><h3>{active.title}</h3></div><Tag color="processing" icon={<ClockCircleOutlined />}>{t("进行中")}</Tag></div>
+            <div className={styles.promptBox}><span>{t("本次练习")}</span><strong>{active.prompt}</strong></div>
+            <label className={styles.fieldLabel} htmlFor={`adaptive-answer-${active.id}`}>{t("你的回答")}</label>
+            <Input.TextArea id={`adaptive-answer-${active.id}`} aria-label={t("练习回答")} disabled={resultUnknown} value={answer} onChange={(event) => { const value = event.target.value; setAnswer(value); updatePlanDraft({ answer: value }); }} autoSize={{ minRows: 6, maxRows: 12 }} />
+            <label className={styles.fieldLabel} htmlFor={`adaptive-reflection-${active.id}`}>{t("练完后的复盘（可选）")}</label>
+            <Input.TextArea id={`adaptive-reflection-${active.id}`} aria-label={t("练习复盘")} disabled={resultUnknown} value={reflection} onChange={(event) => { const value = event.target.value; setReflection(value); updatePlanDraft({ reflection: value }); }} autoSize={{ minRows: 3, maxRows: 6 }} />
+            <div className={styles.assessmentGroup}><span className={styles.fieldLabel}>{t("这次练习后的感受")}</span><div className={styles.assessmentOptions}>{ASSESSMENTS.map((item) => <Button key={item.value} disabled={resultUnknown} className={assessment === item.value ? styles.assessmentActive : styles.assessment} onClick={() => { setAssessment(item.value); updatePlanDraft({ assessment: item.value }); }}><strong>{item.label}</strong><span>{item.detail}</span></Button>)}</div></div>
+            {resultUnknown && pendingOperation === 'complete' ? <Alert type="warning" showIcon message={t("完成结果待确认，输入已冻结。")} action={<Button size="large" onClick={() => void finish()}>{t("使用原操作重试")}</Button>} /> : <Button type="primary" size="large" disabled={!answer.trim() || !assessment} loading={busy} onClick={() => void finish()}>{t("完成本次练习")}</Button>}
           </div>
-          <aside className={styles.evidencePanel}><span className={styles.eyebrow}>为什么现在练</span><p>{active.reason}</p><span className={styles.evidenceLabel}>冻结复盘来源</span><blockquote>{active.source_excerpt}</blockquote><Tag>{active.origin_contract === 'confirmed_readiness_signal_v1' ? '精确目标练习' : '历史 V1 练习'}</Tag></aside>
+          <aside className={styles.evidencePanel}><span className={styles.eyebrow}>{t("为什么现在练")}</span><p>{active.reason}</p><span className={styles.evidenceLabel}>{t("冻结复盘来源")}</span><blockquote>{active.source_excerpt}</blockquote><Tag>{active.origin_contract === 'confirmed_readiness_signal_v1' ? t("精确目标练习") : t("历史 V1 练习")}</Tag></aside>
         </section>
       ) : null}
 
-      {canStart ? <section className={styles.section}><article className={styles.recommendationCard}><div><h3>{readiness?.title}</h3><p>{readiness?.sourceLabel}</p></div>{startDraft?.resultUnknown && startDraft.pendingOperation === 'start' ? <Alert type="warning" showIcon message="开始结果待确认。" action={<Button onClick={() => void confirmStart()}>使用原操作重试</Button>} /> : <Button type="primary" size="large" onClick={() => setConfirming(true)}>确认这组重点与目标</Button>}</article></section> : !active && focus ? <section className={styles.section}><Empty description="这个重点与目标当前不可创建新练习。" image={Empty.PRESENTED_IMAGE_SIMPLE} /></section> : null}
+      {canStart ? <section className={styles.section}><article className={styles.recommendationCard}><div><h3>{readiness?.title}</h3><p>{readiness?.sourceLabel}</p></div>{startDraft?.resultUnknown && startDraft.pendingOperation === 'start' ? <Alert type="warning" showIcon message={t("开始结果待确认。")} action={<Button onClick={() => void confirmStart()}>{t("使用原操作重试")}</Button>} /> : <Button type="primary" size="large" onClick={() => setConfirming(true)}>{t("确认这组重点与目标")}</Button>}</article></section> : !active && focus ? <section className={styles.section}><Empty description={t("这个重点与目标当前不可创建新练习。")} image={Empty.PRESENTED_IMAGE_SIMPLE} /></section> : null}
 
-      {otherInProgress.length > 0 ? <section className={styles.section}><div className={styles.sectionHeading}><div><span className={styles.eyebrow}>其他进行中</span><h3>切换练习</h3></div></div><div className={styles.recommendationGrid}>{otherInProgress.map((item) => <article className={styles.recommendationCard} key={item.id}><div><h4>{item.title}</h4><p>{item.company_name} · {item.position_name}</p></div><Button size="large" onClick={() => setActivePlanId(item.id)}>{item.origin_contract === 'legacy_review_focus_v1' ? '继续历史练习' : '继续这组练习'}</Button></article>)}</div></section> : null}
+      {otherInProgress.length > 0 ? <section className={styles.section}><div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t("其他进行中")}</span><h3>{t("切换练习")}</h3></div></div><div className={styles.recommendationGrid}>{otherInProgress.map((item) => <article className={styles.recommendationCard} key={item.id}><div><h4>{item.title}</h4><p>{item.company_name} · {item.position_name}</p></div><Button size="large" onClick={() => setActivePlanId(item.id)}>{item.origin_contract === 'legacy_review_focus_v1' ? t("继续历史练习") : t("继续这组练习")}</Button></article>)}</div></section> : null}
 
-      <section className={styles.section}><div className={styles.sectionHeading}><div><span className={styles.eyebrow}>完成记录</span><h3>历史练习</h3></div></div><div className={styles.historyList}>{completedPlans.map((item) => <details key={item.id} className={styles.historyCard}><summary><span className={styles.historyIcon}><CheckCircleOutlined /></span><span><strong>{item.title}</strong><small>{item.company_name} · {item.position_name}</small></span><Tag color="success">已完成</Tag></summary><div className={styles.historyBody}><div><span>你的回答</span><p>{item.response_text}</p></div>{item.reflection_text ? <div><span>练后复盘</span><p>{item.reflection_text}</p></div> : null}</div></details>)}</div></section>
+      <section className={styles.section}><div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t("完成记录")}</span><h3>{t("历史练习")}</h3></div></div><div className={styles.historyList}>{completedPlans.map((item) => <PracticeHistoryDetails key={`${scopeKey}:${item.id}`} restoreOpen={Boolean(draftSnapshot[planOwnerKey(generation, item)]?.trainingEvidenceDraft)}><summary><span className={styles.historyIcon}><CheckCircleOutlined /></span><span><strong>{item.title}</strong><small>{item.company_name} · {item.position_name}</small></span><Tag color="success">{t("已完成")}</Tag></summary><div className={styles.historyBody}><div><span>{t("你的回答")}</span><p>{item.response_text}</p></div>{item.reflection_text ? <div><span>{t("练后复盘")}</span><p>{item.reflection_text}</p></div> : null}{item.origin_contract === 'confirmed_readiness_signal_v1' ? <TrainingEvidencePanel key={`${scopeKey}:${item.id}`} planId={item.id} originalAnswer={item.response_text} draft={draftSnapshot[planOwnerKey(generation, item)]?.trainingEvidenceDraft} onDraftChange={(trainingDraft) => { const key = planOwnerKey(generation, item); const base = draftsRef.current[key] ?? emptyDraft(key, generation, item); return persistDraft(key, replaceTrainingEvidenceDraft(base, trainingDraft, { signalVersionId: focus?.signalVersionId ?? null, targetEventId: focus?.targetEventId ?? null })); }} /> : null}</div></PracticeHistoryDetails>)}</div></section>
 
-      <div className={styles.liveStatus} role="status" aria-live="polite" aria-atomic="true">{busy ? '正在处理练习。' : resultUnknown ? '练习操作结果待确认。' : ''}</div>
-      <Modal title="开始前确认" open={confirming} confirmLoading={busy} okText="确认开始" cancelText="暂不开始" onOk={() => void confirmStart()} onCancel={() => { if (!busy) setConfirming(false); }}><p>将使用 <strong>{readiness?.title}</strong>，并绑定目标面试 #{focus?.targetEventId}。</p><Alert type="info" showIcon message="只有确认后才会创建练习记录；不会调用 AI。" /></Modal>
+      <div className={styles.liveStatus} role="status" aria-live="polite" aria-atomic="true">{busy ? t("正在处理练习。") : resultUnknown ? t("练习操作结果待确认。") : ''}</div>
+      <Modal title={t("开始前确认")} open={confirming} confirmLoading={busy} okText={t("确认开始")} cancelText={t("暂不开始")} onOk={() => void confirmStart()} onCancel={() => { if (!busy) setConfirming(false); }}><p>{t("将使用")}{" "}<strong>{readiness?.title}</strong>{t("，并绑定目标面试 #")}{focus?.targetEventId}。</p><Alert type="info" showIcon message={t("只有确认后才会创建练习记录；不会调用 AI。")} /></Modal>
     </div>
   );
 }

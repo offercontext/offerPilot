@@ -12,97 +12,16 @@ from sqlalchemy.orm import sessionmaker
 
 from offerpilot.ai.types import Assistant
 from offerpilot.db import init_database
-from offerpilot.models import OpportunityFitReview
+from tests.fixtures.opportunity_fit_v1_history import seed_v1_history
 from offerpilot.models import OpportunityFitReviewSession, OpportunityFitReviewStage
 from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
 from offerpilot.repositories.application_jd_versions import ApplicationJDService
 from offerpilot.repositories.opportunity_fit_reviews import (
     OpportunityFitReviewConflictError,
-    OpportunityFitReviewNotFound,
     OpportunityFitReviewsRepository,
 )
 from offerpilot.ai.opportunity_fit_reviews import OpportunityFitModelError
 from offerpilot.repositories.resumes import ResumeCreate, ResumesRepository
-
-
-def _triage() -> dict[str, object]:
-    return {
-        "recommendation": "hold",
-        "hard_constraints": [
-            {
-                "id": "location",
-                "requirement": "Shanghai office",
-                "status": "unknown",
-                "explanation": "Availability is not in the resume.",
-                "evidence_refs": [
-                    {"source": "jd", "path": "/text", "excerpt": "Kubernetes preferred"}
-                ],
-            }
-        ],
-        "fit_signals": [
-            {
-                "id": "api",
-                "statement": "Existing API work is relevant.",
-                "evidence_refs": [
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "gaps": [
-            {
-                "id": "kubernetes",
-                "requirement": "Kubernetes production experience",
-                "kind": "preferred",
-                "candidate_status": "unknown",
-                "evidence_refs": [
-                    {"source": "jd", "path": "/text", "excerpt": "Kubernetes preferred"},
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "deadline": {"status": "not_stated", "text": "", "evidence_refs": []},
-        "next_questions": ["Can you work in Shanghai?"],
-    }
-
-
-def _deep() -> dict[str, object]:
-    return {
-        "strengths": [
-            {
-                "id": "api",
-                "statement": "API implementation is a strength.",
-                "evidence_refs": [
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "gaps_to_address": [
-            {
-                "id": "kubernetes",
-                "statement": "Kubernetes experience needs confirmation.",
-                "evidence_refs": [
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "questions_to_clarify": [
-            {"id": "location", "statement": "Confirm Shanghai availability.", "evidence_refs": []}
-        ],
-        "recommended_path": "clarify_first",
-        "next_actions": [
-            {"id": "assertion", "label": "补充事实", "kind": "add_assertion"}
-        ],
-    }
-
-
-class ReviewModel:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def complete(self, messages, tools):  # type: ignore[no-untyped-def]
-        self.calls += 1
-        payload = _triage() if self.calls % 2 == 1 else _deep()
-        return Assistant(content=json.dumps(payload, ensure_ascii=False))
 
 
 def _v2_triage() -> dict[str, object]:
@@ -289,101 +208,47 @@ def _add_jd_version(factory, application_id: int) -> int:
     ).version.id
 
 
-def test_create_triage_persists_minimal_immutable_snapshot_and_is_idempotent(tmp_path) -> None:
-    factory, application, resume = _ready(tmp_path)
-    repository = OpportunityFitReviewsRepository(factory)
-    model = ReviewModel()
+def _controlled_lease_clock(monkeypatch):
+    class LeaseClock(datetime):
+        current = datetime(2026, 11, 11, 0, 0, 0, 123456, tzinfo=timezone.utc)
 
-    review, created = repository.create_triage(
-        application.id,
-        resume.id,
-        "Kubernetes preferred",
-        "Recruiter copy",
-        ["I can work in Shanghai."],
-        "d4b4b5e8-0a3a-4a3e-8e4d-6bc7a04d36b0",
-        model,
-    )
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return cls.current.astimezone(tz) if tz is not None else cls.current.replace(tzinfo=None)
 
-    assert created is True
-    stored = json.loads(review.source_snapshot_json)
-    assert stored["application"] == {
-        "id": application.id,
-        "company_name": "Acme",
-        "position_name": "Backend",
-    }
-    assert stored["resume"]["content_json"]["raw_text"] == "Built APIs"
-    assert stored["candidate_assertions"] == [{"index": 0, "text": "I can work in Shanghai."}]
-    assert "notes" not in stored["application"]
-
-    replay, replay_created = repository.create_triage(
-        application.id,
-        resume.id,
-        "different JD",
-        "different source",
-        [],
-        "d4b4b5e8-0a3a-4a3e-8e4d-6bc7a04d36b0",
-        model,
-    )
-    assert replay_created is False
-    assert replay.id == review.id
-    assert model.calls == 1
+    # Keep real heartbeat threads and SQLite writes, but do not let setup or
+    # scheduling consume a subsecond test lease before the final fenced write.
+    monkeypatch.setattr("offerpilot.repositories.opportunity_fit_reviews.datetime", LeaseClock)
+    monkeypatch.setattr("offerpilot.repositories.lease_heartbeat.datetime", LeaseClock)
+    return LeaseClock
 
 
-def test_create_triage_does_not_leave_record_when_application_deleted_during_model_call(tmp_path) -> None:
-    factory, application, resume = _ready(tmp_path)
-    repository = OpportunityFitReviewsRepository(factory)
-
-    class DeletesApplicationModel(ReviewModel):
-        def complete(self, messages, tools):  # type: ignore[no-untyped-def]
-            ApplicationsRepository(factory).delete(application.id)
-            return super().complete(messages, tools)
-
-    with pytest.raises(OpportunityFitReviewNotFound):
-        repository.create_triage(
-            application.id,
-            resume.id,
-            "Kubernetes preferred",
-            "copy",
-            [],
-            "26b4dd35-75e6-4d3f-8806-3cb7bc9f3e2e",
-            DeletesApplicationModel(),
-        )
-
+def _advance_past_initial_lease(factory, stage_id, clock):
     with factory() as session:
-        assert list(session.scalars(select(OpportunityFitReview))) == []
+        stage = session.get(OpportunityFitReviewStage, stage_id)
+        assert stage is not None and stage.lease_expires_at is not None
+        initial_expiry = stage.lease_expires_at.replace(tzinfo=timezone.utc)
+        generation, token = stage.stage_generation, stage.provider_call_token
+        assert stage.status == "generating" and token
 
+    clock.current = initial_expiry - timedelta(seconds=0.4)
+    deadline = time.monotonic() + 5
+    while True:
+        with factory() as session:
+            stage = session.get(OpportunityFitReviewStage, stage_id)
+            assert stage is not None and stage.lease_expires_at is not None
+            assert (stage.stage_generation, stage.provider_call_token) == (generation, token)
+            renewed_expiry = stage.lease_expires_at.replace(tzinfo=timezone.utc)
+        if renewed_expiry > initial_expiry:
+            break
+        assert time.monotonic() < deadline, "real heartbeat did not persist a renewed lease"
+        time.sleep(0.02)
 
-def test_deep_review_reads_saved_snapshot_and_is_idempotent(tmp_path) -> None:
-    factory, application, resume = _ready(tmp_path)
-    repository = OpportunityFitReviewsRepository(factory)
-    model = ReviewModel()
-    review, _created = repository.create_triage(
-        application.id,
-        resume.id,
-        "Kubernetes preferred",
-        "copy",
-        [],
-        "1b9f9d39-dfbd-464e-8bb0-4a50b09b5e5c",
-        model,
-    )
-
-    first, created = repository.create_deep_review(application.id, review.id, model)
-    replay, replay_created = repository.create_deep_review(application.id, review.id, model)
-
-    assert created is True
-    assert replay_created is False
-    assert first.id == replay.id == review.id
-    assert json.loads(first.deep_review_json or "{}")["recommended_path"] == "clarify_first"
-    assert model.calls == 2
-
-
-def test_hidden_application_and_resume_are_not_readable(tmp_path) -> None:
-    factory, application, resume = _ready(tmp_path)
-    repository = OpportunityFitReviewsRepository(factory)
-    ApplicationsRepository(factory).delete(application.id)
-
-    with pytest.raises(OpportunityFitReviewNotFound):
-        repository.create_triage(application.id, resume.id, "JD", "copy", [], "f6f71c9f-6e8d-4c9f-9d5f-1cc3d9687382", ReviewModel())
+    # Replay after the original lease expires, but within the actual extension.
+    # A stopped or no-op heartbeat must fail above rather than pass on frozen time.
+    clock.current = initial_expiry + timedelta(seconds=0.1)
+    assert clock.current < renewed_expiry
+    return generation, token
 
 
 def test_v2_triage_creates_one_root_and_stage_and_replays_same_key(tmp_path) -> None:
@@ -521,8 +386,9 @@ def test_v2_expired_provider_lease_is_taken_over_before_the_next_provider_call(t
     assert old_token
 
 
-def test_v2_live_lease_heartbeat_keeps_same_key_replay_pending(tmp_path) -> None:
+def test_v2_live_lease_heartbeat_keeps_same_key_replay_pending(tmp_path, monkeypatch) -> None:
     factory, application, resume = _ready(tmp_path)
+    clock = _controlled_lease_clock(monkeypatch)
     repository = OpportunityFitReviewsRepository(
         factory,
         confirmation_secret="test-secret",
@@ -543,37 +409,39 @@ def test_v2_live_lease_heartbeat_keeps_same_key_replay_pending(tmp_path) -> None
             key,
             model,
         )
-        assert model.entered.wait(timeout=5)
-        time.sleep(1.2)
+        try:
+            assert model.entered.wait(timeout=5)
+            with factory() as session:
+                stage = session.scalar(select(OpportunityFitReviewStage))
+                assert stage is not None
+                stage_id = stage.id
+            generation, token = _advance_past_initial_lease(factory, stage_id, clock)
 
-        replay = repository.create_triage_v2(
-            application.id,
-            resume.id,
-            "Kubernetes preferred",
-            "copy",
-            [],
-            key,
-            model,
-        )
-        assert replay[1].status == "generating"
-        assert replay[2] is False
-        assert model.calls == 1
-        with factory() as session:
-            persisted = session.scalar(select(OpportunityFitReviewStage))
-            assert persisted is not None
-            assert persisted.stage_generation == 1
-            assert persisted.provider_call_token
-            assert persisted.lease_expires_at is not None
-
-        model.release.set()
+            replay = repository.create_triage_v2(
+                application.id,
+                resume.id,
+                "Kubernetes preferred",
+                "copy",
+                [],
+                key,
+                model,
+            )
+            assert replay[1].status == "generating"
+            assert replay[2] is False
+            assert replay[1].stage_generation == generation == 1
+            assert replay[1].provider_call_token == token
+            assert model.calls == 1
+        finally:
+            model.release.set()
         first = first_future.result(timeout=10)
 
     assert first[1].status == "ready"
     assert model.calls == 1
 
 
-def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path) -> None:
+def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path, monkeypatch) -> None:
     factory, application, resume = _ready(tmp_path)
+    clock = _controlled_lease_clock(monkeypatch)
     jd_version_id = _add_jd_version(factory, application.id)
     repository = OpportunityFitReviewsRepository(
         factory,
@@ -592,6 +460,7 @@ def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path) -> None:
         triage_model,
         jd_version_id=jd_version_id,
     )
+    assert triage.status == "ready" and token
     repository.confirm_triage_v2(application.id, root.id, triage.id, token)
     model = BlockingDeepV2ReviewModel()
     key = "deep-heartbeat-key-00000000000000000000000000000001"
@@ -609,25 +478,34 @@ def test_v2_deep_review_uses_live_lease_heartbeat(tmp_path) -> None:
             key,
             model,
         )
-        assert model.entered.wait(timeout=5)
-        time.sleep(1.2)
+        try:
+            assert model.entered.wait(timeout=5)
+            with factory() as session:
+                stage = session.scalar(select(OpportunityFitReviewStage).where(
+                    OpportunityFitReviewStage.stage == "deep_review"
+                ))
+                assert stage is not None
+                stage_id = stage.id
+            generation, token = _advance_past_initial_lease(factory, stage_id, clock)
 
-        replay = repository.create_deep_review_v2(
-            application.id,
-            root.id,
-            triage.id,
-            resume.id,
-            "Kubernetes preferred",
-            "copy",
-            [],
-            key,
-            model,
-        )
-        assert replay[0].status == "generating"
-        assert replay[1] is False
-        assert model.calls == 1
-
-        model.release.set()
+            replay = repository.create_deep_review_v2(
+                application.id,
+                root.id,
+                triage.id,
+                resume.id,
+                "Kubernetes preferred",
+                "copy",
+                [],
+                key,
+                model,
+            )
+            assert replay[0].status == "generating"
+            assert replay[1] is False
+            assert replay[0].stage_generation == generation == 1
+            assert replay[0].provider_call_token == token
+            assert model.calls == 1
+        finally:
+            model.release.set()
         first = first_future.result(timeout=10)
 
     assert first[0].status == "ready"
@@ -853,8 +731,32 @@ def test_v2_expired_contract_error_does_not_delete_stale_stage(tmp_path, monkeyp
         assert stage.provider_call_token
 
 
-def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_path) -> None:
+def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_path, monkeypatch) -> None:
     factory, application, resume = _ready(tmp_path)
+    from offerpilot.repositories.lease_heartbeat import LeaseHeartbeat
+
+    # A real thread still owns renewal/stop. Only lease time is controlled: a
+    # slow runner must not consume the new 0.8s lease between provider return
+    # and the final fenced commit, which is not what this test exercises.
+    now = datetime(2026, 11, 2, 0, 0, 0, 123456, tzinfo=timezone.utc)
+
+    class LeaseClock(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def]
+            return now.astimezone(tz) if tz is not None else now.replace(tzinfo=None)
+
+    monkeypatch.setattr("offerpilot.repositories.opportunity_fit_reviews.datetime", LeaseClock)
+    monkeypatch.setattr("offerpilot.repositories.lease_heartbeat.datetime", LeaseClock)
+    heartbeats: list[LeaseHeartbeat] = []
+
+    def tracked_heartbeat(*args, **kwargs):  # type: ignore[no-untyped-def]
+        heartbeat = LeaseHeartbeat(*args, **kwargs)
+        heartbeats.append(heartbeat)
+        return heartbeat
+
+    monkeypatch.setattr(
+        "offerpilot.repositories.opportunity_fit_reviews.LeaseHeartbeat", tracked_heartbeat
+    )
     repository = OpportunityFitReviewsRepository(
         factory,
         confirmation_secret="test-secret",
@@ -875,7 +777,25 @@ def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_p
             model,
         )
 
-    time.sleep(1.2)
+    assert len(heartbeats) == 1
+    assert not heartbeats[0].is_alive
+    with factory() as session:
+        failed = session.scalar(select(OpportunityFitReviewStage))
+        assert failed is not None
+        assert failed.status == "provider_unknown"
+        generation = failed.stage_generation
+        expiry = failed.lease_expires_at.replace(tzinfo=timezone.utc)
+        assert expiry == now + timedelta(seconds=0.8)
+
+    before_expiry = repository.create_triage_v2(
+        application.id, resume.id, "Kubernetes preferred", "copy", [], key, model
+    )
+    assert before_expiry[1].status == "provider_unknown"
+    assert before_expiry[1].stage_generation == generation
+    assert model.calls == 1
+    assert len(heartbeats) == 1
+
+    now = expiry
     replay = repository.create_triage_v2(
         application.id,
         resume.id,
@@ -887,7 +807,10 @@ def test_v2_provider_error_stops_heartbeat_and_allows_takeover_after_lease(tmp_p
     )
 
     assert replay[1].status == "ready"
+    assert replay[1].stage_generation == generation + 1
     assert model.calls == 2
+    assert len(heartbeats) == 2
+    assert not heartbeats[1].is_alive
 
 
 def test_v2_stopped_heartbeat_allows_takeover_but_fences_late_result(tmp_path, monkeypatch) -> None:
@@ -1071,3 +994,30 @@ def test_v2_deep_same_key_across_roots_returns_idempotency_conflict(tmp_path) ->
             "deep-shared-key",
             V2ReviewModel(),
         )
+
+
+def test_v1_history_remains_byte_preserved_after_database_reinitialization(tmp_path) -> None:
+    factory, application, resume = _ready(tmp_path)
+    saved = seed_v1_history(factory, application.id, resume.id)
+    init_database(tmp_path / "data.db")
+    repository = OpportunityFitReviewsRepository(factory)
+    listed = repository.list(application.id)
+    assert [item.id for item in listed] == [saved.id]
+    detail = repository.get(application.id, saved.id)
+    assert detail is not None
+    for field in ("source_snapshot_json", "triage_json", "deep_review_json", "source_fingerprint_sha256",
+                  "triage_sha256", "deep_review_sha256", "proposal_schema_version"):
+        assert getattr(detail, field) == getattr(saved, field)
+    assert detail.created_at.isoformat() == "2026-07-21T09:00:00+00:00"
+    assert detail.deep_reviewed_at.isoformat() == "2026-07-21T09:05:00+00:00"
+    assert not hasattr(repository, "create_triage")
+    assert not hasattr(repository, "create_deep_review")
+
+
+def test_v1_history_respects_application_visibility(tmp_path) -> None:
+    factory, application, resume = _ready(tmp_path)
+    saved = seed_v1_history(factory, application.id, resume.id)
+    repository = OpportunityFitReviewsRepository(factory)
+    ApplicationsRepository(factory).delete(application.id)
+    assert repository.list(application.id) == []
+    assert repository.get(application.id, saved.id) is None

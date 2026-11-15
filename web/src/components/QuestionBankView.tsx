@@ -1,3 +1,6 @@
+import { liveText } from '@/i18n/liveText';
+import { useLocalizedValidation } from '@/components/applicationUiText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -48,15 +51,15 @@ import styles from './QuestionBankView.module.css';
 const { Paragraph } = Typography;
 
 const DIFFICULTY_META: Record<QuestionDifficulty, { label: string; color: string }> = {
-  easy: { label: '简单', color: 'green' },
-  medium: { label: '中等', color: 'gold' },
-  hard: { label: '困难', color: 'red' },
+  easy: { get label() { return t("简单"); }, color: 'green' },
+  medium: { get label() { return t("中等"); }, color: 'gold' },
+  hard: { get label() { return t("困难"); }, color: 'red' },
 };
 
 const STATUS_META: Record<QuestionStatus, { label: string; color: string }> = {
-  new: { label: '未刷', color: 'default' },
-  practicing: { label: '练习中', color: 'blue' },
-  mastered: { label: '已掌握', color: 'green' },
+  new: { get label() { return t("未刷"); }, color: 'default' },
+  practicing: { get label() { return t("练习中"); }, color: 'blue' },
+  mastered: { get label() { return t("已掌握"); }, color: 'green' },
 };
 
 interface QuestionBankViewProps {
@@ -68,13 +71,14 @@ export default function QuestionBankView({
   focusId,
   practiceRequestToken,
 }: QuestionBankViewProps) {
+  useLocale();
   const [tab, setTab] = useState<'question_bank' | 'review'>(practiceRequestToken ? 'review' : 'question_bank');
   const lastPracticeRequestTokenRef = useRef<number | undefined>(practiceRequestToken);
 
   // When launched from a mock-interview drill link, surface the target id.
   useEffect(() => {
     if (focusId) {
-      message.info(`正在定位题目 #${focusId}，可在题库中按 ID 查找`);
+      message.info(liveText(() => t("正在定位题目 #{questionId}，可在题库中按 ID 查找", { questionId: focusId })));
     }
   }, [focusId]);
 
@@ -90,21 +94,21 @@ export default function QuestionBankView({
     <div className={styles.page}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>题库刷题</h1>
-          <p className={styles.subtitle}>基于已记录的面试问题生成题目，管理题库，按间隔复习巩固面试知识</p>
+          <h1 className={styles.title}>{t("题库刷题")}</h1>
+          <p className={styles.subtitle}>{t("基于已记录的面试问题生成题目，管理题库，按间隔复习巩固面试知识")}</p>
         </div>
         <Segmented
           value={tab}
           onChange={(v) => setTab(v as 'question_bank' | 'review')}
           options={[
-            { label: '题库', value: 'question_bank' },
-            { label: '今日复习', value: 'review' },
+            { label: t("题库"), value: 'question_bank' },
+            { label: t("今日复习"), value: 'review' },
           ]}
         />
       </div>
 
-      <section hidden={tab !== 'question_bank'} aria-label="题库模式"><BankTab /></section>
-      <section hidden={tab !== 'review'} aria-label="今日复习模式"><PracticeTab /></section>
+      <section hidden={tab !== 'question_bank'} aria-label={t("题库模式")}><BankTab /></section>
+      <section hidden={tab !== 'review'} aria-label={t("今日复习模式")}><PracticeTab /></section>
     </div>
   );
 }
@@ -112,6 +116,7 @@ export default function QuestionBankView({
 /* ----------------------------- 题库 tab ----------------------------- */
 
 function BankTab() {
+  const locale = useLocale();
   const qc = useQueryClient();
   const [status, setStatus] = useState<QuestionStatus | 'all'>('all');
   const [difficulty, setDifficulty] = useState<QuestionDifficulty | 'all'>('all');
@@ -148,11 +153,11 @@ function BankTab() {
   const delMutation = useMutation({
     mutationFn: (id: number) => deleteQuestion(id),
     onSuccess: () => {
-      message.success('已删除');
+      message.success(liveText(() => t("已删除")));
       qc.invalidateQueries({ queryKey: ['questions'] });
       qc.invalidateQueries({ queryKey: ['questions-due'] });
     },
-    onError: () => message.error('删除失败'),
+    onError: () => message.error(liveText(() => t("删除失败"))),
   });
 
   const toggleExpand = (id: number) =>
@@ -175,41 +180,39 @@ function BankTab() {
           className="op-ai-btn"
           onClick={() => setGenerateOpen(true)}
         >
-          AI 生成题目
-        </Button>
+          {t("AI 生成题目")}</Button>
         <Button icon={<PlusOutlined />} onClick={() => setManualOpen(true)}>
-          手动添加
-        </Button>
+          {t("手动添加")}</Button>
         <span className={styles.spacer} />
         <Input.Search
-          placeholder="搜索题目 / 分类 / 标签"
+          placeholder={t("搜索题目 / 分类 / 标签")}
           allowClear
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 240 }}
+          style={{ width: locale === 'en-US' ? 340 : 240, maxWidth: '100%' }}
         />
         <Select
           value={status}
           onChange={setStatus}
-          style={{ width: 120 }}
-          aria-label="按状态筛选"
+          style={{ width: locale === 'en-US' ? 145 : 120 }}
+          aria-label={t("按状态筛选")}
           options={[
-            { label: '全部状态', value: 'all' },
-            { label: '未刷', value: 'new' },
-            { label: '练习中', value: 'practicing' },
-            { label: '已掌握', value: 'mastered' },
+            { label: t("全部状态"), value: 'all' },
+            { label: t("未刷"), value: 'new' },
+            { label: t("练习中"), value: 'practicing' },
+            { label: t("已掌握"), value: 'mastered' },
           ]}
         />
         <Select
           value={difficulty}
           onChange={setDifficulty}
-          style={{ width: 110 }}
-          aria-label="按难度筛选"
+          style={{ width: locale === 'en-US' ? 150 : 110 }}
+          aria-label={t("按难度筛选")}
           options={[
-            { label: '全部难度', value: 'all' },
-            { label: '简单', value: 'easy' },
-            { label: '中等', value: 'medium' },
-            { label: '困难', value: 'hard' },
+            { label: t("全部难度"), value: 'all' },
+            { label: t("简单"), value: 'easy' },
+            { label: t("中等"), value: 'medium' },
+            { label: t("困难"), value: 'hard' },
           ]}
         />
       </div>
@@ -226,7 +229,7 @@ function BankTab() {
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
-            questions.length === 0 ? '题库还是空的' : '没有符合条件的题目'
+            questions.length === 0 ? t("题库还是空的") : t("没有符合条件的题目")
           }
           style={{ padding: '48px 0' }}
         >
@@ -237,8 +240,7 @@ function BankTab() {
               className="op-ai-btn"
               onClick={() => setGenerateOpen(true)}
             >
-              从面试复盘生成题目，或手动添加
-            </Button>
+              {t("从面试复盘生成题目，或手动添加")}</Button>
           )}
         </Empty>
       ) : (
@@ -253,28 +255,27 @@ function BankTab() {
                 <Tag color={STATUS_META[q.status].color}>{STATUS_META[q.status].label}</Tag>
                 {q.practice_count > 0 && (
                   <span style={{ fontSize: 12, color: 'var(--op-muted)' }}>
-                    刷题 {q.practice_count} 次
-                  </span>
+                    {t("刷题 {count} 次", { count: q.practice_count })}</span>
                 )}
                 <div className={styles.qActions}>
-                  <Tooltip title="编辑">
+                  <Tooltip title={t("编辑")}>
                     <Button
                       type="text"
                       size="small"
-                      aria-label="编辑题目"
+                      aria-label={t("编辑题目")}
                       icon={<EditOutlined />}
                       onClick={() => setEditing(q)}
                     />
                   </Tooltip>
                   <Popconfirm
-                    title="删除这道题？"
-                    okText="删除"
-                    cancelText="取消"
+                    title={t("删除这道题？")}
+                    okText={t("删除")}
+                    cancelText={t("取消")}
                     okButtonProps={{ danger: true }}
                     onConfirm={() => delMutation.mutate(q.id)}
                   >
-                    <Tooltip title="删除">
-                      <Button type="text" size="small" aria-label="删除题目" icon={<DeleteOutlined />} danger />
+                    <Tooltip title={t("删除")}>
+                      <Button type="text" size="small" aria-label={t("删除题目")} icon={<DeleteOutlined />} danger />
                     </Tooltip>
                   </Popconfirm>
                 </div>
@@ -298,8 +299,7 @@ function BankTab() {
               )}
               {expanded.has(q.id) && !q.reference_answer && (
                 <div className={styles.qAnswer} style={{ color: 'var(--op-muted)' }}>
-                  （暂无参考答案）
-                </div>
+                  {t("（暂无参考答案）")}</div>
               )}
             </div>
           ))}
@@ -321,6 +321,7 @@ function BankTab() {
 /* --------------------------- 生成抽屉 --------------------------- */
 
 function GenerateDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
+  useLocale();
   const qc = useQueryClient();
   const [source, setSource] = useState<'knowledge' | 'notes'>('notes');
   const [count, setCount] = useState(8);
@@ -332,60 +333,54 @@ function GenerateDrawer({ open, onClose }: { open: boolean; onClose: () => void 
         count,
       }),
     onSuccess: (res) => {
-      const extra = res.skipped > 0 ? `，跳过 ${res.skipped} 道重复` : '';
-      message.success(`已生成 ${res.count} 道题${extra}`);
+      message.success(liveText(() => t("已生成 {count} 道题{duplicates}", { count: res.count, duplicates: res.skipped > 0 ? t("，跳过 {count} 道重复", { count: res.skipped }) : '' })));
       qc.invalidateQueries({ queryKey: ['questions'] });
       qc.invalidateQueries({ queryKey: ['questions-due'] });
       onClose();
     },
     onError: (err: unknown) => {
-      const msg =
-        (err as { response?: { data?: { error?: string } } })?.response?.data?.error ??
-        '生成失败，请检查 AI 配置';
-      message.error(msg);
+      const serverError = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+      message.error(serverError ?? liveText(() => t("生成失败，请检查 AI 配置")));
     },
   });
 
   if (!open) return null;
 
   return (
-    <section aria-label="AI 生成题目">
+    <section aria-label={t("AI 生成题目")}>
       <div className={styles.layerHeader}>
         <div>
           <Button type="link" className={styles.backButton} onClick={onClose}>
-            返回题库
-          </Button>
-          <h2 className={styles.layerTitle}>AI 生成题目</h2>
+            {t("返回题库")}</Button>
+          <h2 className={styles.layerTitle}>{t("AI 生成题目")}</h2>
         </div>
       </div>
       <Space direction="vertical" size={20} style={{ width: '100%' }}>
         <div>
-          <div style={{ marginBottom: 8, fontWeight: 600 }}>来源</div>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>{t("来源")}</div>
           <Segmented
             block
             value={source}
             onChange={(v) => setSource(v as 'knowledge' | 'notes')}
             options={[
-              { label: '参考资料（暂未开放）', value: 'knowledge', disabled: true },
-              { label: '面试复盘真题', value: 'notes' },
+              { label: t("参考资料（暂未开放）"), value: 'knowledge', disabled: true },
+              { label: t("面试复盘真题"), value: 'notes' },
             ]}
           />
         </div>
 
         {source === 'knowledge' && (
           <Paragraph type="secondary" style={{ margin: 0 }}>
-            参考资料出题暂未开放，可选择面试复盘或手动添加题目。
-          </Paragraph>
+            {t("参考资料出题暂未开放，可选择面试复盘或手动添加题目。")}</Paragraph>
         )}
 
         {source === 'notes' && (
           <Paragraph type="secondary" style={{ margin: 0 }}>
-            将从已记录的面试问题中提炼题目。参考资料出题暂未开放，可先手动添加题目。
-          </Paragraph>
+            {t("将从已记录的面试问题中提炼题目。参考资料出题暂未开放，可先手动添加题目。")}</Paragraph>
         )}
 
         <div>
-          <div style={{ marginBottom: 8, fontWeight: 600 }}>生成数量</div>
+          <div style={{ marginBottom: 8, fontWeight: 600 }}>{t("生成数量")}</div>
           <InputNumber min={1} max={20} value={count} onChange={(v) => setCount(v ?? 8)} style={{ width: '100%' }} />
         </div>
 
@@ -397,11 +392,10 @@ function GenerateDrawer({ open, onClose }: { open: boolean; onClose: () => void 
           loading={genMutation.isPending}
           onClick={() => genMutation.mutate()}
         >
-          {genMutation.isPending ? 'AI 正在出题…' : '开始生成'}
+          {genMutation.isPending ? t("AI 正在出题…") : t("开始生成")}
         </Button>
         <Paragraph type="secondary" style={{ margin: 0, fontSize: 12 }}>
-          已存在的题目会自动去重（精确 + 近似），不会重复入库。
-        </Paragraph>
+          {t("已存在的题目会自动去重（精确 + 近似），不会重复入库。")}</Paragraph>
       </Space>
     </section>
   );
@@ -418,8 +412,10 @@ function QuestionFormModal({
   question: Question | null;
   onClose: () => void;
 }) {
+  useLocale();
   const qc = useQueryClient();
   const [form] = Form.useForm();
+  useLocalizedValidation(form);
   const isEdit = !!question;
 
   useEffect(() => {
@@ -438,22 +434,22 @@ function QuestionFormModal({
     mutationFn: (values: QuestionInput) =>
       isEdit ? updateQuestion(question!.id, values) : createQuestion(values),
     onSuccess: () => {
-      message.success(isEdit ? '已保存' : '已添加');
+      message.success(isEdit ? t("已保存") : t("已添加"));
       qc.invalidateQueries({ queryKey: ['questions'] });
       qc.invalidateQueries({ queryKey: ['questions-due'] });
       onClose();
     },
-    onError: () => message.error('保存失败'),
+    onError: () => message.error(liveText(() => t("保存失败"))),
   });
 
   return (
     <Modal
-      title={isEdit ? '编辑题目' : '手动添加题目'}
+      title={isEdit ? t("编辑题目") : t("手动添加题目")}
       open={open}
       onCancel={onClose}
       onOk={() => form.submit()}
-      okText="保存"
-      cancelText="取消"
+      okText={t("保存")}
+      cancelText={t("取消")}
       confirmLoading={saveMutation.isPending}
       destroyOnHidden
     >
@@ -465,30 +461,30 @@ function QuestionFormModal({
       >
         <Form.Item
           name="question"
-          label="题目"
-          rules={[{ required: true, message: '请输入题目' }]}
+          label={t("题目")}
+          rules={[{ required: true, message: t("请输入题目") }]}
         >
-          <Input.TextArea rows={2} placeholder="例如：什么是 goroutine 泄漏？如何排查？" />
+          <Input.TextArea rows={2} placeholder={t("例如：什么是 goroutine 泄漏？如何排查？")} />
         </Form.Item>
         <Space size={12} style={{ display: 'flex' }}>
-          <Form.Item name="category" label="分类" style={{ flex: 1 }}>
-            <Input placeholder="如 Go并发 / 系统设计" />
+          <Form.Item name="category" label={t("分类")} style={{ flex: 1 }}>
+            <Input placeholder={t("如 Go并发 / 系统设计")} />
           </Form.Item>
-          <Form.Item name="difficulty" label="难度" style={{ width: 120 }}>
+          <Form.Item name="difficulty" label={t("难度")} style={{ width: 120 }}>
             <Select
               options={[
-                { label: '简单', value: 'easy' },
-                { label: '中等', value: 'medium' },
-                { label: '困难', value: 'hard' },
+                { label: t("简单"), value: 'easy' },
+                { label: t("中等"), value: 'medium' },
+                { label: t("困难"), value: 'hard' },
               ]}
             />
           </Form.Item>
         </Space>
-        <Form.Item name="tags" label="标签">
-          <Select mode="tags" placeholder="回车添加标签" tokenSeparators={[',']} />
+        <Form.Item name="tags" label={t("标签")}>
+          <Select mode="tags" placeholder={t("回车添加标签")} tokenSeparators={[',']} />
         </Form.Item>
-        <Form.Item name="reference_answer" label="参考答案">
-          <Input.TextArea rows={4} placeholder="要点式参考答案" />
+        <Form.Item name="reference_answer" label={t("参考答案")}>
+          <Input.TextArea rows={4} placeholder={t("要点式参考答案")} />
         </Form.Item>
       </Form>
     </Modal>
@@ -498,6 +494,7 @@ function QuestionFormModal({
 /* ----------------------------- 刷题打卡 tab ----------------------------- */
 
 function PracticeTab() {
+  useLocale();
   const qc = useQueryClient();
   const [revealed, setRevealed] = useState(false);
   const [doneToday, setDoneToday] = useState(0);
@@ -521,7 +518,7 @@ function PracticeTab() {
       qc.invalidateQueries({ queryKey: ['questions-due'] });
       qc.invalidateQueries({ queryKey: ['questions'] });
     },
-    onError: () => message.error('打卡失败'),
+    onError: () => message.error(liveText(() => t("打卡失败"))),
   });
 
   const rate = (rating: ReviewRating) => {
@@ -557,33 +554,28 @@ function PracticeTab() {
       <div className={styles.statRow}>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>
-            <ThunderboltOutlined /> 今日已刷
-          </span>
+            <ThunderboltOutlined /> {t("今日已刷")}</span>
           <span className={`${styles.statValue} op-tnum`}>{stats?.today_reviews ?? 0}</span>
-          <span className={styles.statHint}>本次会话 {doneToday} 道</span>
+          <span className={styles.statHint}>{t("本次会话 {count} 道", { count: doneToday })}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>
-            <FireOutlined /> 连续打卡
-          </span>
-          <span className={`${styles.statValue} op-tnum`}>{stats?.streak_days ?? 0} 天</span>
-          <span className={styles.statHint}>坚持就是胜利</span>
+            <FireOutlined /> {t("连续打卡")}</span>
+          <span className={`${styles.statValue} op-tnum`}>{t("{count} 天", { count: stats?.streak_days ?? 0 })}</span>
+          <span className={styles.statHint}>{t("坚持就是胜利")}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>
-            <BulbOutlined /> 已掌握
-          </span>
+            <BulbOutlined /> {t("已掌握")}</span>
           <span className={`${styles.statValue} op-tnum`}>{masteryRate}%</span>
           <span className={styles.statHint}>
-            {stats?.mastered ?? 0} / {stats?.total ?? 0} 道
-          </span>
+            {t("{mastered} / {total} 道", { mastered: stats?.mastered ?? 0, total: stats?.total ?? 0 })}</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>
-            <ReloadOutlined /> 待复习
-          </span>
+            <ReloadOutlined /> {t("待复习")}</span>
           <span className={`${styles.statValue} op-tnum`}>{stats?.due ?? 0}</span>
-          <span className={styles.statHint}>到期需要巩固</span>
+          <span className={styles.statHint}>{t("到期需要巩固")}</span>
         </div>
       </div>
 
@@ -595,7 +587,7 @@ function PracticeTab() {
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={
-            (stats?.total ?? 0) === 0 ? '题库还是空的，先去生成一些题目吧' : '太棒了，今天的复习队列已清空'
+            (stats?.total ?? 0) === 0 ? t("题库还是空的，先去生成一些题目吧") : t("太棒了，今天的复习队列已清空")
           }
           style={{ padding: '56px 0' }}
         />
@@ -613,11 +605,11 @@ function PracticeTab() {
 
           {revealed ? (
             <div className={styles.flashAnswer}>
-              {current.reference_answer || '（这道题暂无参考答案，凭记忆自评即可）'}
+              {current.reference_answer || t("（这道题暂无参考答案，凭记忆自评即可）")}
             </div>
           ) : (
             <Button size="large" onClick={() => setRevealed(true)} style={{ alignSelf: 'flex-start' }}>
-              显示答案 <span className={styles.rateKey}>（空格）</span>
+              {t("显示答案")}{" "}<span className={styles.rateKey}>{t("（空格）")}</span>
             </Button>
           )}
 
@@ -632,24 +624,21 @@ function PracticeTab() {
                   onClick={() => rate(1)}
                   disabled={reviewMutation.isPending}
                 >
-                  不会
-                  <span className={styles.rateKey}>1 · 明天再练</span>
+                  {t("不会")}<span className={styles.rateKey}>{t("1 · 明天再练")}</span>
                 </button>
                 <button
                   className={`${styles.rateBtn} ${styles.rateHard}`}
                   onClick={() => rate(2)}
                   disabled={reviewMutation.isPending}
                 >
-                  模糊
-                  <span className={styles.rateKey}>2 · 3 天后</span>
+                  {t("模糊")}<span className={styles.rateKey}>{t("2 · 3 天后")}</span>
                 </button>
                 <button
                   className={`${styles.rateBtn} ${styles.rateGood}`}
                   onClick={() => rate(3)}
                   disabled={reviewMutation.isPending}
                 >
-                  掌握
-                  <span className={styles.rateKey}>3 · 7 天后</span>
+                  {t("掌握")}<span className={styles.rateKey}>{t("3 · 7 天后")}</span>
                 </button>
               </div>
             )}

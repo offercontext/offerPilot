@@ -90,3 +90,42 @@ export function getCoreTaskOwner(taskId: unknown): CoreTaskOwnerLookupResult {
 }
 
 export const resolveCoreTaskOwner = getCoreTaskOwner;
+
+export interface RetainedOwnerSafety {
+  readonly hasDraft: boolean;
+  readonly activeRun: boolean;
+  readonly pendingApproval: boolean;
+}
+
+/** Non-navigable source/interview draft owners join the existing registry for
+ * exit/update safety only. They do not create task IDs or alternate launchers. */
+export const RETAINED_DRAFT_OWNER_REGISTRY = Object.freeze({
+  'application.jd': Object.freeze({ ownerId: 'application-jd-source' }),
+  'application.offer_review': CORE_TASK_REGISTRY['application.offer_review'],
+  'interview.retained': Object.freeze({ ownerId: 'interview-retained-drafts' }),
+});
+
+type RetainedOwnerReadouts = Record<keyof typeof RETAINED_DRAFT_OWNER_REGISTRY, () => RetainedOwnerSafety>;
+
+/** Read at decision time, not at registration time. A failed owner read cannot
+ * silently authorize a destructive update or exit. No domain state is stored. */
+export function readRetainedOwnerSafety(owners: RetainedOwnerReadouts): RetainedOwnerSafety {
+  let hasDraft = false;
+  let activeRun = false;
+  let pendingApproval = false;
+  for (const owner of Object.keys(RETAINED_DRAFT_OWNER_REGISTRY) as (keyof RetainedOwnerReadouts)[]) {
+    try {
+      const projection = owners[owner]();
+      if (typeof projection?.hasDraft !== 'boolean' || typeof projection.activeRun !== 'boolean'
+        || typeof projection.pendingApproval !== 'boolean') throw new Error('owner_safety_unavailable');
+      hasDraft ||= projection.hasDraft;
+      activeRun ||= projection.activeRun;
+      pendingApproval ||= projection.pendingApproval;
+    } catch {
+      hasDraft = true;
+      activeRun = true;
+      pendingApproval = true;
+    }
+  }
+  return { hasDraft, activeRun, pendingApproval };
+}

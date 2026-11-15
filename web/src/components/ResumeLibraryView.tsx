@@ -1,3 +1,5 @@
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Button, Dropdown, Input, Spin, message } from 'antd';
 import {
@@ -55,6 +57,7 @@ export default function ResumeLibraryView({
   onEvidenceFocusConsumed,
   onboardingFocusToken,
 }: ResumeLibraryViewProps) {
+  useLocale();
   const qc = useQueryClient();
   const [uploadOpen, setUploadOpen] = useState(false);
   const [editing, setEditing] = useState<Resume | null>(null);
@@ -70,83 +73,83 @@ export default function ResumeLibraryView({
 
   const resumesQuery = useQuery({ queryKey: ['resumes'], queryFn: listResumes });
 
-  const createDialogMut = useMutation({
+  const createBlankMut = useMutation({
     mutationFn: () =>
       createResume({
-        title: 'Haru 对话初稿简历',
-        source: 'dialog',
+        title: t("空白简历"),
+        source: 'manual',
         content_json: BLANK_RESUME_CONTENT,
         career_intent: BLANK_RESUME_CONTENT.career_intent,
       }),
     onSuccess: (res) => {
-      message.success('已创建初稿简历');
+      message.success(liveText(() => t("已创建空白简历")));
       qc.invalidateQueries({ queryKey: ['resumes'] });
       qc.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
       setEditing(res);
     },
-    onError: () => message.error('创建失败'),
+    onError: () => message.error(liveText(() => t("创建失败"))),
   });
 
   const sampleMut = useMutation({
     mutationFn: () => createResumeFromSample({ sample_id: 'backend' }),
     onSuccess: (res) => {
-      message.success('已从样例创建');
+      message.success(liveText(() => t("已从样例创建")));
       qc.invalidateQueries({ queryKey: ['resumes'] });
       qc.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
       setEditing(res);
     },
-    onError: () => message.error('创建样例失败'),
+    onError: () => message.error(liveText(() => t("创建样例失败"))),
   });
 
   const uploadMut = useMutation({
     mutationFn: (file: File) => uploadResume(file),
     onSuccess: (res) => {
-      message.success(res.parse_status === 'text-ready' ? '已提取文字，可在简历编辑器中进行 AI 分类并核对' : '已上传，但未提取到文字；请检查文件是否为扫描件');
+      message.success(res.parse_status === 'text-ready' ? t("已提取文字，可在简历编辑器中进行 AI 分类并核对") : t("已上传，但未提取到文字；请检查文件是否为扫描件"));
       qc.invalidateQueries({ queryKey: ['resumes'] });
       qc.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
       setUploadOpen(false);
       setEditing(res);
     },
-    onError: () => message.error('上传失败'),
+    onError: () => message.error(liveText(() => t("上传失败"))),
   });
 
   const setMasterMut = useMutation({
     mutationFn: (id: number) => updateResume(id, { is_master: true }),
     onSuccess: (res) => {
-      message.success('已设为基础简历');
+      message.success(liveText(() => t("已设为基础简历")));
       qc.invalidateQueries({ queryKey: ['resumes'] });
       qc.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
       setEditing(res);
     },
-    onError: () => message.error('设置基础简历失败'),
+    onError: () => message.error(liveText(() => t("设置基础简历失败"))),
   });
 
   const copyMut = useMutation({
     mutationFn: (id: number) => copyResume(id),
     onSuccess: (res) => {
-      message.success('已复制简历');
+      message.success(liveText(() => t("已复制简历")));
       qc.invalidateQueries({ queryKey: ['resumes'] });
       setEditing(res);
     },
-    onError: () => message.error('复制失败'),
+    onError: () => message.error(liveText(() => t("复制失败"))),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteResume(id),
     onSuccess: () => {
-      message.success('已删除');
+      message.success(liveText(() => t("已删除")));
       qc.invalidateQueries({ queryKey: ['resumes'] });
       qc.invalidateQueries({ queryKey: ONBOARDING_QUERY_KEY });
     },
     onError: (error: any) => {
       const detail = error?.response?.data?.error;
-      message.error(detail === 'master resume cannot be deleted' ? '基础简历不可删除' : '删除失败');
+      message.error(detail === 'master resume cannot be deleted' ? t("基础简历不可删除") : t("删除失败"));
     },
   });
 
   const uploadFile = (file: File) => {
     if (!file.name.toLowerCase().endsWith('.pdf')) {
-      message.error('仅支持 PDF 简历');
+      message.error(liveText(() => t("仅支持 PDF 简历")));
       return;
     }
     uploadMut.mutate(file);
@@ -192,7 +195,7 @@ export default function ResumeLibraryView({
     if (resume) {
       setEditing(resume);
     } else {
-      message.warning('引用的记录已不存在');
+      message.warning(liveText(() => t("引用的记录已不存在")));
     }
     onEvidenceFocusConsumed?.();
   }, [
@@ -229,7 +232,7 @@ export default function ResumeLibraryView({
     return (
       <div role="status" style={{ textAlign: 'center', padding: 48 }}>
         <Spin />
-        <div>正在加载简历</div>
+        <div>{t("正在加载简历")}</div>
       </div>
     );
   }
@@ -237,8 +240,8 @@ export default function ResumeLibraryView({
   if (resumesQuery.isError) {
     return (
       <div role="alert" style={{ textAlign: 'center', padding: 48 }}>
-        <div style={{ marginBottom: 12 }}>加载简历失败</div>
-        <Button onClick={() => void resumesQuery.refetch()}>重试</Button>
+        <div style={{ marginBottom: 12 }}>{t("加载简历失败")}</div>
+        <Button onClick={() => void resumesQuery.refetch()}>{t("重试")}</Button>
       </div>
     );
   }
@@ -303,18 +306,18 @@ export default function ResumeLibraryView({
     >
       <div className={styles.header}>
         <div>
-          <div className={styles.title}>简历库</div>
-          <div className={styles.subtitle}>共 {filtered.length} 份 · 拖入 PDF 至任意位置可上传</div>
+          <div className={styles.title}>{t("简历库")}</div>
+          <div className={styles.subtitle}>{t("共 ")}{filtered.length}{t(" 份 · 拖入 PDF 至任意位置可上传")}</div>
         </div>
         <div
           ref={onboardingEntryRef}
           className={`${styles.headerActions} ${onboardingFocusActive ? styles.onboardingFocus : ''}`}
           tabIndex={-1}
           data-onboarding-target="resume-create"
-          aria-label="创建基础简历入口"
+          aria-label={t("创建基础简历入口")}
         >
           <Input.Search
-            placeholder="搜索简历"
+            placeholder={t("搜索简历")}
             value={keyword}
             onChange={(e) => setKeyword(e.target.value)}
             allowClear
@@ -322,14 +325,13 @@ export default function ResumeLibraryView({
           />
           <Button
             icon={<PlusOutlined />}
-            loading={createDialogMut.isPending}
-            onClick={() => createDialogMut.mutate()}
+            loading={createBlankMut.isPending}
+            onClick={() => createBlankMut.mutate()}
           >
-             和 Haru 创建初稿
-           </Button>
-           <Button icon={<CloudUploadOutlined />} onClick={() => setUploadOpen(true)}>上传现有简历</Button>
-           <Dropdown menu={{ items: [{ key: 'sample', label: '用样例开始', icon: <FileAddOutlined />, onClick: () => sampleMut.mutate() }] }}>
-             <Button icon={<MoreOutlined />} loading={sampleMut.isPending}>更多创建方式</Button>
+             {t("新建空白简历")}</Button>
+           <Button icon={<CloudUploadOutlined />} onClick={() => setUploadOpen(true)}>{t("上传现有简历")}</Button>
+           <Dropdown menu={{ items: [{ key: 'sample', label: t("用样例开始"), icon: <FileAddOutlined />, onClick: () => sampleMut.mutate() }] }}>
+             <Button icon={<MoreOutlined />} loading={sampleMut.isPending}>{t("更多创建方式")}</Button>
            </Dropdown>
         </div>
       </div>
@@ -337,23 +339,23 @@ export default function ResumeLibraryView({
       {resumes.length === 0 ? (
         <div className={styles.emptyState}>
           <div className={styles.emptyIcon}><FileTextOutlined /></div>
-          <div className={styles.emptyTitle}>还没有简历</div>
-          <div className={styles.emptyHint}>选择一个入口开始，之后都可以在编辑器里补全结构化章节。</div>
+          <div className={styles.emptyTitle}>{t("还没有简历")}</div>
+          <div className={styles.emptyHint}>{t("选择一个入口开始，之后都可以在编辑器里补全结构化章节。")}</div>
           <div className={styles.emptyActions}>
-            <button className={styles.emptyAction} type="button" onClick={() => createDialogMut.mutate()}>
-               <div className={styles.emptyActionTitle}>和 Haru 创建初稿</div>
-              <div className={styles.emptyActionDesc}>先生成可编辑的空结构，再逐章补充。</div>
+            <button className={styles.emptyAction} type="button" onClick={() => createBlankMut.mutate()}>
+               <div className={styles.emptyActionTitle}>{t("新建空白简历")}</div>
+              <div className={styles.emptyActionDesc}>{t("先生成可编辑的空结构，再逐章补充。")}</div>
             </button>
             <button className={styles.emptyAction} type="button" onClick={() => setUploadOpen(true)}>
-               <div className={styles.emptyActionTitle}>上传现有简历</div>
-              <div className={styles.emptyActionDesc}>继续使用现有上传流程，仅支持 PDF。</div>
+               <div className={styles.emptyActionTitle}>{t("上传现有简历")}</div>
+              <div className={styles.emptyActionDesc}>{t("继续使用现有上传流程，仅支持 PDF。")}</div>
             </button>
           </div>
         </div>
       ) : filtered.length === 0 ? (
         <div className={styles.dropZone}>
-          <div className={styles.dropTitle}>没有匹配的简历</div>
-          <div className={styles.dropHint}>换个关键词，或从右上角创建新简历。</div>
+          <div className={styles.dropTitle}>{t("没有匹配的简历")}</div>
+          <div className={styles.dropHint}>{t("换个关键词，或从右上角创建新简历。")}</div>
         </div>
       ) : (
         <div className={styles.grid}>
@@ -376,12 +378,12 @@ export default function ResumeLibraryView({
 
       {resumes.length > 0 && !resumesQuery.isLoading && (
         <div className={`${styles.dropZone} ${styles.dropZoneCompact} ${dragActive ? styles.dropZoneActive : ''}`} style={{ marginTop: 16 }}>
-          <div className={styles.dropTitle}>拖拽 PDF 到此处上传</div>
-           <div className={styles.dropHint}>或点击「上传现有简历」按钮</div>
+          <div className={styles.dropTitle}>{t("拖拽 PDF 到此处上传")}</div>
+           <div className={styles.dropHint}>{t("或点击「上传现有简历」按钮")}</div>
         </div>
       )}
 
-      {dragActive && <div className={styles.overlay}>松开以上传 PDF 简历</div>}
+      {dragActive && <div className={styles.overlay}>{t("松开以上传 PDF 简历")}</div>}
 
       <ResumeUploadModal
         open={uploadOpen}

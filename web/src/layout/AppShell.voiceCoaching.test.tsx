@@ -7,7 +7,7 @@ import AppShell from './AppShell';
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutate: vi.fn() }),
   useQuery: () => ({ data: [], isError: false, isLoading: false, isFetching: false, error: null }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryCache: () => ({ subscribe: () => () => undefined }) }),
 }));
 vi.mock('@dnd-kit/core', () => ({
   DndContext: (props: { children: ReactNode }) => <div>{props.children}</div>,

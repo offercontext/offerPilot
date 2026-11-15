@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { ResumeContent } from '@/types/resume';
 
 type ResumeEntry = Record<string, unknown>;
@@ -43,7 +44,7 @@ function isRecordArray(value: unknown): value is ResumeEntry[] {
 
 export function parseStructuredResume(value: unknown): StructuredResumeParseResult {
   const content = decode(value);
-  if (!content) return { mode: 'recovery', raw: typeof value === 'string' ? value : JSON.stringify(value, null, 2), reason: '历史 JSON 无法解析' };
+  if (!content) return { mode: 'recovery', raw: typeof value === 'string' ? value : JSON.stringify(value, null, 2), reason: "历史 JSON 无法解析" };
 
   const careerIntent = content.career_intent ?? {};
   const contact = content.contact ?? {};
@@ -56,7 +57,7 @@ export function parseStructuredResume(value: unknown): StructuredResumeParseResu
     && (!('target_locations' in careerIntent) || (Array.isArray(careerIntent.target_locations) && careerIntent.target_locations.every((item) => typeof item === 'string')));
   const rawTextValid = !('raw_text' in content) || typeof content.raw_text === 'string';
   if (!knownIntentFieldsValid || !isRecord(contact) || !isRecordArray(education) || !isRecordArray(experience) || !isRecordArray(projects) || !Array.isArray(skills) || !skills.every((item) => typeof item === 'string') || !rawTextValid) {
-    return { mode: 'recovery', raw: JSON.stringify(content, null, 2), reason: '历史字段类型与结构化编辑器不兼容' };
+    return { mode: 'recovery', raw: JSON.stringify(content, null, 2), reason: "历史字段类型与结构化编辑器不兼容" };
   }
 
   const roles = Array.isArray(careerIntent.target_roles) ? careerIntent.target_roles.filter((item): item is string => typeof item === 'string') : [];
@@ -79,7 +80,7 @@ export function parseStructuredResume(value: unknown): StructuredResumeParseResu
 
 export function serializeStructuredResume(original: unknown, draft: StructuredResumeDraft): ResumeContent {
   const parsed = parseStructuredResume(original);
-  if (parsed.mode !== 'structured') throw new Error('历史简历无法安全保存，请使用恢复或高级编辑');
+  if (parsed.mode !== 'structured') throw new Error(t("历史简历无法安全保存，请使用恢复或高级编辑"));
   const sourceIntent = isRecord(parsed.source.career_intent) ? parsed.source.career_intent : {};
   return {
     ...clone(parsed.source),

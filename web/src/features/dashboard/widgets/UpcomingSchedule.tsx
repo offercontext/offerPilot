@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import dayjs from 'dayjs';
 import { Button } from 'antd';
 import type { ScheduleEvent } from '@/types/event';
@@ -11,6 +12,7 @@ export default function UpcomingSchedule({
   events: ScheduleEvent[];
   onOpenCalendar?: () => void;
 }) {
+  useLocale();
   const upcoming = events
     .filter((e) => e.scheduled_at && dayjs(e.scheduled_at).isAfter(dayjs()))
     .sort((a, b) => dayjs(a.scheduled_at).valueOf() - dayjs(b.scheduled_at).valueOf())
@@ -19,21 +21,21 @@ export default function UpcomingSchedule({
   return (
     <div className={styles.card}>
       <div className={styles.sectionHeaderLine}>
-        <div className={styles.cardTitle}>近期日程</div>
-        {onOpenCalendar ? <Button type="link" onClick={onOpenCalendar}>打开日历</Button> : null}
+        <div className={styles.cardTitle}>{t("近期日程")}</div>
+        {onOpenCalendar ? <Button type="link" onClick={onOpenCalendar}>{t("打开日历")}</Button> : null}
       </div>
       {upcoming.length === 0 ? (
-        <div className={styles.empty}>暂无安排</div>
+        <div className={styles.empty}>{t("暂无安排")}</div>
       ) : (
         upcoming.map((e) => {
           const d = dayjs(e.scheduled_at);
           return (
             <div key={e.id} className={styles.schedItem}>
               <time className={`${styles.schedDate} op-tnum`} dateTime={d.format('YYYY-MM-DD')}>
-                {d.format('M月D日')}
+                {d.format(t("M月D日"))}
               </time>
               <div className={styles.schedText}>
-                {e.company_name ?? '安排'} {EVENT_TYPE_LABELS[e.event_type]} · {d.format('HH:mm')}
+                {e.company_name ?? t("安排")} {EVENT_TYPE_LABELS[e.event_type]} · {d.format('HH:mm')}
               </div>
             </div>
           );

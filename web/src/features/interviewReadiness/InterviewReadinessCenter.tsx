@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Checkbox, Input, Select } from 'antd';
 import type { Resume } from '@/types/resume';
@@ -85,11 +86,11 @@ interface Props {
 }
 
 const STATUS_COPY: Record<ReadinessItem['status'], string> = {
-  ready: '已就绪',
-  needs_input: '需要补充',
-  source_changed: '来源已更新，已有结果仍保留',
-  unknown: '暂时未知',
-  unavailable: '暂时不可用',
+  get ready() { return t("已就绪"); },
+  get needs_input() { return t("需要补充"); },
+  get source_changed() { return t("来源已更新，已有结果仍保留"); },
+  get unknown() { return t("暂时未知"); },
+  get unavailable() { return t("暂时不可用"); },
 };
 
 function isValidId(value: unknown): value is number {
@@ -217,13 +218,14 @@ function resumeLabel(resume: ResumeSelectionCandidate, rows: ResumeRows): string
     const lineage = resolveResumeLineage(rows as readonly Resume[], resume.id);
     return `${resumeDisplayTitle(candidate as Resume)} · ${formatResumeLineage(lineage)}`;
   } catch {
-    return '未命名简历 · 关系待确认';
+    return t("未命名简历 · 关系待确认");
   }
 }
 
 function Checklist({ items, onAction }: { items: readonly ReadinessItem[]; onAction?: (item: ReadinessItem) => void }) {
+  useLocale();
   return (
-    <div className={styles.checklist} aria-label="开始前检查">
+    <div className={styles.checklist} aria-label={t("开始前检查")}>
       {items.map((item) => (
         <div className={styles.checkItem} key={item.key} data-status={item.status}>
           <span className={styles.checkIcon} aria-hidden="true">{item.status === 'ready' ? '✓' : '·'}</span>
@@ -268,6 +270,7 @@ function LockedRealSurface({
   onOpenTask?: TaskLauncher;
   onOpenPreparation?: (applicationId: number, eventId: number) => void;
 }) {
+  useLocale();
   const internalLeaseRef = useRef<ResumeSelectionLease>();
   if (!internalLeaseRef.current || internalLeaseRef.current.generation !== (generation ?? 0)) {
     internalLeaseRef.current = createResumeSelectionLease(generation ?? 0);
@@ -333,8 +336,8 @@ function LockedRealSurface({
   if (!event || !validContext) {
     return (
       <div className={styles.prepPanel} data-testid="locked-real-preparation-unavailable">
-        <div className={styles.panelHeader}><div><span className={styles.eyebrow}>准备检查</span><h2>选择一场具体面试</h2></div></div>
-        <p className={styles.privacyNote}>请从面试事件卡进入准备，当前入口没有可验证的面试身份。</p>
+        <div className={styles.panelHeader}><div><span className={styles.eyebrow}>{t("准备检查")}</span><h2>{t("选择一场具体面试")}</h2></div></div>
+        <p className={styles.privacyNote}>{t("请从面试事件卡进入准备，当前入口没有可验证的面试身份。")}</p>
       </div>
     );
   }
@@ -353,7 +356,7 @@ function LockedRealSurface({
   const sourceUnavailable = selection?.kind === 'unavailable';
   const displayedItems = sourceUnavailable
     ? readiness.items.map((item) => item.key === 'resume'
-      ? { ...item, status: 'unavailable' as const, detail: '简历来源暂时无法确认。' }
+      ? { ...item, status: 'unavailable' as const, detail: t("简历来源暂时无法确认。") }
       : item)
     : readiness.items;
   const ready = readiness.ready && !sourceUnavailable && jd.status === 'ready' && isValidId(jd.id) && typeof jd.text === 'string' && jd.text.length > 0;
@@ -373,19 +376,18 @@ function LockedRealSurface({
   return (
     <div className={styles.prepPanel} data-testid="locked-real-preparation">
       <div className={styles.panelHeader}>
-        <div><span className={styles.eyebrow}>面试准备</span><h2>{event.companyName || '本次面试'}{event.positionName ? ` · ${event.positionName}` : ''}</h2></div>
-        <span className={styles.roundBadge}>事件已锁定</span>
+        <div><span className={styles.eyebrow}>{t("面试准备")}</span><h2>{event.companyName || t("本次面试")}{event.positionName ? ` · ${event.positionName}` : ''}</h2></div>
+        <span className={styles.roundBadge}>{t("事件已锁定")}</span>
       </div>
       <div className={styles.readOnlyJd} aria-live="polite">
-        <span>当前 JD（只读）</span>
-        <p>{jd.status === 'ready' ? jd.text : jd.status === 'unknown' ? '正在读取当前已确认版本…' : jd.status === 'source_changed' ? '岗位资料版本已变化，请先确认最新版本。' : jd.status === 'unavailable' ? '岗位资料暂时无法读取。' : '尚未找到当前已确认的岗位资料版本。'}</p>
+        <span>{t("当前 JD（只读）")}</span>
+        <p>{jd.status === 'ready' ? jd.text : jd.status === 'unknown' ? t("正在读取当前已确认版本…") : jd.status === 'source_changed' ? t("岗位资料版本已变化，请先确认最新版本。") : jd.status === 'unavailable' ? t("岗位资料暂时无法读取。") : t("尚未找到当前已确认的岗位资料版本。")}</p>
       </div>
       <div className={styles.controls}>
-        <label>选择简历
-          <Select
+        <label>{t("选择简历")}<Select
             id="locked-readiness-resume"
             value={localResumeId}
-            placeholder="请选择已保存简历"
+            placeholder={t("请选择已保存简历")}
             allowClear
             disabled={sourceUnavailable}
             onChange={(value) => selectResume(value)}
@@ -394,9 +396,9 @@ function LockedRealSurface({
         </label>
       </div>
       <Checklist items={displayedItems} />
-      {selection?.reason === 'source_loading' ? <div className={styles.error} role="status">简历列表正在加载，确认后才能开始。</div> : null}
-      {selection?.reason === 'source_error' || selection?.reason === 'source_unknown' ? <div className={styles.error} role="alert">简历状态暂时无法确认，请重试后再开始。</div> : null}
-      {selection?.reason === 'source_absent' ? <div className={styles.error} role="status">简历列表尚未加载。</div> : null}
+      {selection?.reason === 'source_loading' ? <div className={styles.error} role="status">{t("简历列表正在加载，确认后才能开始。")}</div> : null}
+      {selection?.reason === 'source_error' || selection?.reason === 'source_unknown' ? <div className={styles.error} role="alert">{t("简历状态暂时无法确认，请重试后再开始。")}</div> : null}
+      {selection?.reason === 'source_absent' ? <div className={styles.error} role="status">{t("简历列表尚未加载。")}</div> : null}
       <button
         type="button"
         className={styles.secondaryAction}
@@ -412,7 +414,7 @@ function LockedRealSurface({
           if (launch) launch(request);
           else onOpenPreparation?.(event.applicationId, event.eventId);
         }}
-      >开始准备<span aria-hidden="true">↗</span></button>
+      >{t("开始准备")}<span aria-hidden="true">↗</span></button>
     </div>
   );
 }
@@ -436,6 +438,7 @@ export default function InterviewReadinessCenter({
   onOpenPreparation,
   onOpenStudio,
 }: Props) {
+  useLocale();
   const [mode, setMode] = useState<'real' | 'quick'>(fixedMode ?? initialMode);
   const [quickDraft, setQuickDraft] = useState<QuickPracticeDraft>({ positionName: '', jdText: '', jdConfirmed: false, resumeId: undefined });
   const [quickError, setQuickError] = useState<string | null>(null);
@@ -520,25 +523,25 @@ export default function InterviewReadinessCenter({
     <section className={styles.surface} data-testid="interview-readiness-center" data-readiness-mode={mode} aria-labelledby="readiness-title">
       <div className={styles.hero}>
         <div>
-          <span className={styles.kicker}>面试准备</span>
-          <h1 id="readiness-title">面试准备中心</h1>
-          <p>{realMode ? '围绕已锁定的面试事件准备，不需要重新挑选上下文。' : '先把要带进练习的证据准备好，再进入一间只属于这次练习的工作台。'}</p>
+          <span className={styles.kicker}>{t("面试准备")}</span>
+          <h1 id="readiness-title">{t("面试准备中心")}</h1>
+          <p>{realMode ? t("围绕已锁定的面试事件准备，不需要重新挑选上下文。") : t("先把要带进练习的证据准备好，再进入一间只属于这次练习的工作台。")}</p>
         </div>
-        <div className={styles.heroNote}><span className={styles.liveDot} /> 准备信息已确认</div>
+        <div className={styles.heroNote}><span className={styles.liveDot} /> {t("准备信息已确认")}</div>
       </div>
 
-      {!fixedMode ? <div className={styles.modeGrid} role="tablist" aria-label="练习模式">
+      {!fixedMode ? <div className={styles.modeGrid} role="tablist" aria-label={t("练习模式")}>
         <button type="button" role="tab" aria-selected={mode === 'real'} className={styles.modeCard} data-active={mode === 'real'} onClick={() => setMode('real')}>
           <span className={styles.modeNumber}>01</span>
-          <span className={styles.modeTitle}>围绕真实投递练习</span>
-          <span className={styles.modeDescription}>只接受从具体面试事件进入的准备上下文。</span>
-          <span className={styles.modeMeta}>适合面试前的真实准备</span>
+          <span className={styles.modeTitle}>{t("围绕真实投递练习")}</span>
+          <span className={styles.modeDescription}>{t("只接受从具体面试事件进入的准备上下文。")}</span>
+          <span className={styles.modeMeta}>{t("适合面试前的真实准备")}</span>
         </button>
         <button type="button" role="tab" aria-selected={mode === 'quick'} className={styles.modeCard} data-active={mode === 'quick'} onClick={() => setMode('quick')}>
           <span className={styles.modeNumber}>02</span>
-          <span className={styles.modeTitle}>快速练习</span>
-          <span className={styles.modeDescription}>只针对一个岗位开始，不创建虚假的投递或日程。</span>
-          <span className={styles.modeMeta}>适合临时热身与探索岗位</span>
+          <span className={styles.modeTitle}>{t("快速练习")}</span>
+          <span className={styles.modeDescription}>{t("只针对一个岗位开始，不创建虚假的投递或日程。")}</span>
+          <span className={styles.modeMeta}>{t("适合临时热身与探索岗位")}</span>
         </button>
       </div> : null}
 
@@ -560,31 +563,31 @@ export default function InterviewReadinessCenter({
         ) : (
           <div className={styles.prepPanel} data-testid="quick-practice-panel">
             <div className={styles.panelHeader}>
-              <div><span className={styles.eyebrow}>准备检查</span><h2>开始前检查</h2></div>
-              <span className={styles.roundBadge}>{quickReadiness.ready && quickResumeSelectionValid ? '可以出发' : '还差一点'}</span>
+              <div><span className={styles.eyebrow}>{t("准备检查")}</span><h2>{t("开始前检查")}</h2></div>
+              <span className={styles.roundBadge}>{quickReadiness.ready && quickResumeSelectionValid ? t("可以出发") : t("还差一点")}</span>
             </div>
             <div className={styles.controls}>
-              <label>岗位名称<Input value={quickDraft.positionName} maxLength={200} placeholder="例如：后端工程师" onChange={(event) => setQuickDraft((current) => ({ ...current, positionName: event.target.value }))} /></label>
-              <label>粘贴 JD<TextArea id="quick-readiness-jd" value={quickDraft.jdText} rows={5} placeholder="粘贴你已核对的岗位描述原文，不抓取 URL。" onChange={(event) => setQuickDraft((current) => ({ ...current, jdText: event.target.value }))} /></label>
-              <label className={styles.confirmLabel}><Checkbox checked={quickDraft.jdConfirmed} onChange={(event) => setQuickDraft((current) => ({ ...current, jdConfirmed: event.target.checked }))}>已核对，本次按此岗位资料练习</Checkbox></label>
-              <label>选择简历<Select id="quick-readiness-resume" value={quickDraft.resumeId} placeholder="请选择已保存简历" allowClear onChange={(value) => setQuickDraft((current) => ({ ...current, resumeId: value }))} options={quickResumeRows.map((resume) => ({ value: resume.id, label: resumeLabel(resume, quickResumeRows) }))} /></label>
+              <label>{t("岗位名称")}<Input value={quickDraft.positionName} maxLength={200} placeholder={t("例如：后端工程师")} onChange={(event) => setQuickDraft((current) => ({ ...current, positionName: event.target.value }))} /></label>
+              <label>{t("粘贴 JD")}<TextArea id="quick-readiness-jd" value={quickDraft.jdText} rows={5} placeholder={t("粘贴你已核对的岗位描述原文，不抓取 URL。")} onChange={(event) => setQuickDraft((current) => ({ ...current, jdText: event.target.value }))} /></label>
+              <div className={styles.confirmLabel}><Checkbox checked={quickDraft.jdConfirmed} onChange={(event) => setQuickDraft((current) => ({ ...current, jdConfirmed: event.target.checked }))}>{t("已核对，本次按此岗位资料练习")}</Checkbox></div>
+              <label>{t("选择简历")}<Select id="quick-readiness-resume" value={quickDraft.resumeId} placeholder={t("请选择已保存简历")} allowClear onChange={(value) => setQuickDraft((current) => ({ ...current, resumeId: value }))} options={quickResumeRows.map((resume) => ({ value: resume.id, label: resumeLabel(resume, quickResumeRows) }))} /></label>
             </div>
             <Checklist items={quickReadiness.items} onAction={(item) => item.key === 'resume' ? focusControl('quick-readiness-resume') : item.key === 'jd' ? focusControl('quick-readiness-jd') : undefined} />
-            {quickResumeSourceStatus === 'loading' ? <div className={styles.error} role="status">简历列表正在加载，确认完成后才能开始。</div> : null}
-            {quickResumeSourceStatus === 'absent' ? <div className={styles.error} role="status">简历列表尚未加载，确认完成后才能开始。</div> : null}
-            {quickResumeSourceStatus === 'error' || quickResumeSourceStatus === 'unknown' ? <div className={styles.error} role="alert">简历列表状态暂时无法确认，请重试后再开始。</div> : null}
-            {quickError ? <div className={styles.error} role="alert">{quickError}</div> : null}
+            {quickResumeSourceStatus === 'loading' ? <div className={styles.error} role="status">{t("简历列表正在加载，确认完成后才能开始。")}</div> : null}
+            {quickResumeSourceStatus === 'absent' ? <div className={styles.error} role="status">{t("简历列表尚未加载，确认完成后才能开始。")}</div> : null}
+            {quickResumeSourceStatus === 'error' || quickResumeSourceStatus === 'unknown' ? <div className={styles.error} role="alert">{t("简历列表状态暂时无法确认，请重试后再开始。")}</div> : null}
+            {quickError ? <div className={styles.error} role="alert">{t(quickError)}</div> : null}
             <button type="button" className={actionEmphasis === 'primary' ? styles.primaryAction : styles.secondaryAction} disabled={!quickReadiness.ready || !quickResumeSelectionValid || creatingCase} onClick={() => void startQuickPractice()}>
-              {creatingCase ? '正在冻结练习资料…' : '进入快速练习'}<span aria-hidden="true">↗</span>
+              {creatingCase ? t("正在冻结练习资料…") : t("进入快速练习")}<span aria-hidden="true">↗</span>
             </button>
-            <p className={styles.privacyNote}>默认逐轮核对文字，并保留原尝试恢复。实验性实时对话需要另行授权自动记录，开启前会说明音频处理位置。</p>
+            <p className={styles.privacyNote}>{t('默认逐轮核对文字，并保留原尝试恢复。实验性实时对话需要另行授权自动记录，开启前会说明音频处理位置。')}</p>
           </div>
         )}
 
-        <aside className={styles.sidePanel} aria-label="面试说明">
-          <div className={styles.sideBlock}><span className={styles.eyebrow}>本次输入</span><h3>{realMode ? '只带入已确认来源' : '只发送已确认资料'}</h3><p>{realMode ? '当前 JD、明确选择的简历和已锁定的面试事件属于本次准备。' : '快速练习使用冻结 JD、明确选择的简历和本场已提交的回答。'}</p></div>
-          <div className={styles.sideBlock}><span className={styles.eyebrow}>音频隐私</span><h3>按所选模式处理音频</h3><p>标准语音在浏览器内识别；实时对话会将音频发送到 OfferPilot 所在设备或服务器处理，不保存原始音频。Haru 的位置仅在本机保存。</p></div>
-          <div className={styles.sideBlock}><span className={styles.eyebrow}>练习结束后</span><h3>保留清晰的来源边界</h3><p>历史回答会区分人工提交与语音自动记录。快速练习不会出现在投递或日历里。</p></div>
+        <aside className={styles.sidePanel} aria-label={t('面试说明')}>
+          <div className={styles.sideBlock}><span className={styles.eyebrow}>{t('本次输入')}</span><h3>{realMode ? t('只带入已确认来源') : t('只发送已确认资料')}</h3><p>{realMode ? t('当前 JD、明确选择的简历和已锁定的面试事件属于本次准备。') : t('快速练习使用冻结 JD、明确选择的简历和本场已提交的回答。')}</p></div>
+          <div className={styles.sideBlock}><span className={styles.eyebrow}>{t('音频隐私')}</span><h3>{t('按所选模式处理音频')}</h3><p>{t('标准语音在浏览器内识别；实时对话会将音频发送到 OfferPilot 所在设备或服务器处理，不保存原始音频。Haru 的位置仅在本机保存。')}</p></div>
+          <div className={styles.sideBlock}><span className={styles.eyebrow}>{t('练习结束后')}</span><h3>{t('保留清晰的来源边界')}</h3><p>{t('历史回答会区分人工提交与语音自动记录。快速练习不会出现在投递或日历里。')}</p></div>
         </aside>
       </div>
     </section>

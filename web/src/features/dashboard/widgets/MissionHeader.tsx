@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Button, Tag } from 'antd';
 import { ArrowRightOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import { formatPipelineHealthLabel, type PipelineInsight } from '@/lib/pipelineInsights';
@@ -12,6 +13,7 @@ interface Props {
 }
 
 export default function MissionHeader({ summary, nextAction, onRunAction, onAddApplication }: Props) {
+  useLocale();
   const healthColor = summary.healthLabel === 'critical' ? 'red' : summary.healthLabel === 'watch' ? 'orange' : 'green';
 
   return (
@@ -19,8 +21,7 @@ export default function MissionHeader({ summary, nextAction, onRunAction, onAddA
       <div className={styles.missionHeaderText}>
         <div className={styles.commandEyebrow}>Mission Control</div>
         <h1 id="mission-control-title" className={styles.missionTitle}>
-          本周求职作战台
-        </h1>
+          {t("本周求职作战台")}</h1>
         <p className={styles.missionHeadline}>{summary.headline}</p>
         <div className={styles.missionMeta}>
           <span className="op-tnum">
@@ -44,8 +45,7 @@ export default function MissionHeader({ summary, nextAction, onRunAction, onAddA
           </Button>
         ) : (
           <Button type="primary" size="large" onClick={onAddApplication}>
-            添加投递
-            <ArrowRightOutlined />
+            {t("添加投递")}<ArrowRightOutlined />
           </Button>
         )}
       </div>

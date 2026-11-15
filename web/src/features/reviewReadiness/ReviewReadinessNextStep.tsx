@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { InterviewReviewProposal } from '@/types/interviewReviewProposal';
 import { committedSignalIdentity, recoverReviewReadinessOwnerDraft, sanitizeReviewReadinessTerminalDraft, type ProductActionOwnerDraft, type ProductActionProposalResponse, type ProductActionUndoRequest, type ReviewReadinessCandidate, type ReviewReadinessOwnerDraft } from './contracts';
@@ -22,12 +23,12 @@ interface ReviewReadinessNextStepProps {
 }
 
 function stateMessage(state: string): string {
-  if (state === 'already_confirmed') return '这个准备重点已经保存，可在目标面试的准备页查看。';
-  if (state === 'legacy_requires_regeneration') return '旧版复盘建议需要重新生成后才能保存准备重点。';
-  if (state === 'source_changed') return '复盘来源已变化，请重新生成建议。';
-  if (state === 'source_missing') return '复盘来源已不可见，不能创建新的准备重点。';
-  if (state === 'not_eligible') return '当前复盘没有可安全保存的准备重点。';
-  return '准备重点暂时不可用，请稍后重试。';
+  if (state === 'already_confirmed') return t("这个准备重点已经保存，可在目标面试的准备页查看。");
+  if (state === 'legacy_requires_regeneration') return t("旧版复盘建议需要重新生成后才能保存准备重点。");
+  if (state === 'source_changed') return t("复盘来源已变化，请重新生成建议。");
+  if (state === 'source_missing') return t("复盘来源已不可见，不能创建新的准备重点。");
+  if (state === 'not_eligible') return t("当前复盘没有可安全保存的准备重点。");
+  return t("准备重点暂时不可用，请稍后重试。");
 }
 
 function terminalDraft(
@@ -108,6 +109,7 @@ export function ReviewReadinessNextStep({
   onOpenStory,
   onSignalCommitted,
 }: ReviewReadinessNextStepProps) {
+  useLocale();
   const eligible = safeV2Proposal(proposal, ownerBlocked);
   const ownerKey = `review:${ownerGeneration}:${noteId}:${proposal.id}`;
   const recoveredDraft = useMemo(() => recoverReviewReadinessOwnerDraft(draft, {
@@ -384,14 +386,14 @@ export function ReviewReadinessNextStep({
   }
 
   return (
-    <section className={styles.nextStep} aria-label="复盘后的下一步" aria-busy={loading || proposing}>
-      <h3>复盘后的下一步</h3>
-      <p>选择一个有原始来源的练习重点。保存前仍需要你在这里明确确认。</p>
+    <section className={styles.nextStep} aria-label={t("复盘后的下一步")} aria-busy={loading || proposing}>
+      <h3>{t("复盘后的下一步")}</h3>
+      <p>{t("选择一个有原始来源的练习重点。保存前仍需要你在这里明确确认。")}</p>
       {loading ? <div className={styles.skeleton} aria-hidden="true" /> : null}
-      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      {error ? <p className={styles.error} role="alert">{t(error)}</p> : null}
       {!loading && projectionState && projectionState !== 'ready' ? <p className={styles.empty}>{stateMessage(projectionState)}</p> : null}
       {!loading && projectionState === 'ready' && candidates ? (
-        <div className={styles.focusList} role="radiogroup" aria-label="选择准备重点">
+        <div className={styles.focusList} role="radiogroup" aria-label={t("选择准备重点")}>
           {candidates.map((candidate) => (
             <label key={candidate.focus_id} className={styles.focusOption}>
               <input
@@ -408,7 +410,7 @@ export function ReviewReadinessNextStep({
                   });
                 }}
               />
-              <span><strong>{candidate.statement}</strong><small>{candidate.evidence[0]?.excerpt ?? '已验证来源'}</small></span>
+              <span><strong>{candidate.statement}</strong><small>{candidate.evidence[0]?.excerpt ?? t("已验证来源")}</small></span>
             </label>
           ))}
         </div>
@@ -416,8 +418,7 @@ export function ReviewReadinessNextStep({
       {(selected || visibleActionDraft) ? (
         <>
           <label className={styles.noteField}>
-            给自己的备注（可选）
-            <textarea
+            {t("给自己的备注（可选）")}<textarea
               maxLength={500}
               disabled={ownerDraft.proposalUnknown || proposing || ownerDraft.actionDraft?.resultUnknown || Boolean(ownerDraft.actionDraft && ownerDraft.actionDraft.status !== 'proposed')}
               value={ownerDraft.userNote}
@@ -428,8 +429,8 @@ export function ReviewReadinessNextStep({
             />
           </label>
           {!ownerDraft.actionDraft ? <div className={styles.actions}>
-            <button className={styles.primaryButton} type="button" disabled={proposing} onClick={() => void propose()}>{ownerDraft.proposalUnknown ? '使用原操作重试' : '保存为下次准备重点'}</button>
-            {onOpenStory && selected ? <button className={styles.secondaryButton} type="button" disabled={proposing || ownerDraft.proposalUnknown} onClick={() => onOpenStory(noteId, selected.focus_id)}>整理为经历素材</button> : null}
+            <button className={styles.primaryButton} type="button" disabled={proposing} onClick={() => void propose()}>{ownerDraft.proposalUnknown ? t("使用原操作重试") : t("保存为下次准备重点")}</button>
+            {onOpenStory && selected ? <button className={styles.secondaryButton} type="button" disabled={proposing || ownerDraft.proposalUnknown} onClick={() => onOpenStory(noteId, selected.focus_id)}>{t("整理为经历素材")}</button> : null}
           </div> : null}
         </>
       ) : null}
@@ -472,7 +473,7 @@ export function ReviewReadinessNextStep({
         />
       ) : null}
       {!ownerDraft.actionDraft ? <div className={styles.liveStatus} role="status" aria-live="polite" aria-atomic="true">
-        {loading ? '正在读取准备重点。' : proposing ? '正在创建确认操作。' : ownerDraft.proposalUnknown ? '保存请求结果待确认。' : ''}
+        {loading ? t("正在读取准备重点。") : proposing ? t("正在创建确认操作。") : ownerDraft.proposalUnknown ? t("保存请求结果待确认。") : ''}
       </div> : null}
     </section>
   );

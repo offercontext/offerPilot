@@ -1,0 +1,126 @@
+name: Simplification bounded real AI acceptance
+on:
+  push:
+    branches: [feat/20261021-product-simplification]
+# No dispatch, pull_request, pull_request_target, deploy, publish or write token.
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: offerpilot-simplification-ai-20261021-one-shot
+  cancel-in-progress: false
+jobs:
+  offline:
+    name: Simplification offline safety
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - name: Install frozen dependencies without provider credentials
+        run: uv sync --frozen
+      - name: Test fake upstream, budget failures, genuine CLI and loopback API
+        run: |
+          uv run --frozen python -m scripts.simplification_ai_validation.offline --output artifacts/simplification-offline/results.json
+          uv run --frozen pytest -q tests/test_simplification_ai_platform.py
+          uv run --frozen ruff check scripts/simplification_ai_validation tests/test_simplification_ai_platform.py
+          uv run --frozen mypy scripts/simplification_ai_validation --exclude /tests/ --follow-imports=silent --explicit-package-bases
+      - name: Preserve exact Linux safety node evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simplification-offline-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/simplification-offline/results.json
+          if-no-files-found: error
+          retention-days: 14
+  preflight:
+    name: Simplification request preflight
+    needs: offline
+    if: >-
+      github.repository == 'offercontext/offerPilot' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/feat/20261021-product-simplification' &&
+      github.run_attempt == 1 &&
+      vars.OFFERPILOT_SIMPLIFICATION_AI_HELPER_SHA != '' &&
+      vars.OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA != '' &&
+      github.sha == vars.OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Verify exact empty-child request, protected environment and full history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OFFERPILOT_SIMPLIFICATION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_SIMPLIFICATION_AI_HELPER_SHA }}
+          OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA }}
+        run: python -m scripts.simplification_ai_validation.preflight --phase before
+  paid:
+    name: Simplification approved real AI
+    needs: [offline, preflight]
+    if: >-
+      github.repository == 'offercontext/offerPilot' &&
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/feat/20261021-product-simplification' &&
+      github.run_attempt == 1 &&
+      github.sha == vars.OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA &&
+      vars.OFFERPILOT_SIMPLIFICATION_AI_HELPER_SHA != ''
+    environment: offerpilot-simplification-ai-20261021
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - name: Prepare frozen dependencies before exposing the provider secret
+        run: uv sync --frozen
+      - name: Recheck owner approval, SHA and no previous paid attempt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OFFERPILOT_SIMPLIFICATION_AI_HELPER_SHA: ${{ vars.OFFERPILOT_SIMPLIFICATION_AI_HELPER_SHA }}
+          OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA: ${{ vars.OFFERPILOT_SIMPLIFICATION_AI_REQUEST_SHA }}
+        run: >-
+          python -m scripts.simplification_ai_validation.preflight --phase paid
+          --admission-file "$RUNNER_TEMP/simplification-ai-admission.json"
+      - name: One synthetic matrix, no retries, 10 CNY cumulative hard budget
+        env:
+          OFFERPILOT_SIMPLIFICATION_DEEPSEEK_20261021: ${{ secrets.OFFERPILOT_SIMPLIFICATION_DEEPSEEK_20261021 }}
+          OFFERPILOT_SIMPLIFICATION_AI_BASE_URL: ${{ vars.OFFERPILOT_SIMPLIFICATION_AI_BASE_URL }}
+          OFFERPILOT_SIMPLIFICATION_AI_MODEL: ${{ vars.OFFERPILOT_SIMPLIFICATION_AI_MODEL }}
+        run: >-
+          .venv/bin/python -m scripts.simplification_ai_validation.run --live
+          --admission-file "$RUNNER_TEMP/simplification-ai-admission.json"
+          --evidence-dir "$GITHUB_WORKSPACE/artifacts/simplification-ai"
+      - name: Retain only numeric ledger and structural result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: simplification-ai-${{ github.sha }}
+          path: |
+            artifacts/simplification-ai/summary.json
+            artifacts/simplification-ai/budget.jsonl
+          if-no-files-found: warn
+          retention-days: 14

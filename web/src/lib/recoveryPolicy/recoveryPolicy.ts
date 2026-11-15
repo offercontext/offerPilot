@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import {
   NETWORK_TRANSPORT_POLICY,
   RECOVERY_POLICIES,
@@ -25,25 +26,25 @@ export interface RecoveryDecision {
 }
 
 const RETRY_SAME_KEY_MESSAGES: Record<RecoveryOperation, string> = {
-  start: '第一题结果待确认，已保留原 question key。',
-  answer: '回答提交结果待确认，已保留原回答 key。',
-  question: '下一题结果待确认，已保留原 question key。',
-  feedback: '复盘结果待确认，已保留原 feedback key。',
+  get start() { return t("第一题结果待确认，已保留原 question key。"); },
+  get answer() { return t("回答提交结果待确认，已保留原回答 key。"); },
+  get question() { return t("下一题结果待确认，已保留原 question key。"); },
+  get feedback() { return t("复盘结果待确认，已保留原 feedback key。"); },
 };
 
 const DISPOSITION_MESSAGES: Record<RecoveryDisposition, string> = {
-  retry_same_key: '结果待确认，已保留原 key。',
-  restart_new_attempt: '该操作已无法用原 key 继续，请重新开始本次练习。',
-  reload_source: '冻结来源暂时无法验证，请退出后回到准备中心重新确认。',
-  edit_input: '当前回答或请求未通过校验，请修改后重试。',
-  terminal_no_retry: '本次生成已终止，请重新开始练习。',
+  get retry_same_key() { return t("结果待确认，已保留原 key。"); },
+  get restart_new_attempt() { return t("该操作已无法用原 key 继续，请重新开始本次练习。"); },
+  get reload_source() { return t("冻结来源暂时无法验证，请退出后回到准备中心重新确认。"); },
+  get edit_input() { return t("当前回答或请求未通过校验，请修改后重试。"); },
+  get terminal_no_retry() { return t("本次生成已终止，请重新开始练习。"); },
 };
 
 const CODE_MESSAGES: Partial<Record<string, string>> = {
-  mock_interview_unverifiable: 'AI 输出未通过证据验证。本次生成已终止，请重新开始练习。',
-  mock_interview_attempt_confirmed: '本次练习已有确认结果，不能删除或重复提交。',
-  mock_interview_review_draft_already_confirmed: '本次复盘已确认，无需重复提交。',
-  quick_practice_review_not_available: '快速练习暂不创建正式面试复盘。',
+  get mock_interview_unverifiable() { return t("AI 输出未通过证据验证。本次生成已终止，请重新开始练习。"); },
+  get mock_interview_attempt_confirmed() { return t("本次练习已有确认结果，不能删除或重复提交。"); },
+  get mock_interview_review_draft_already_confirmed() { return t("本次复盘已确认，无需重复提交。"); },
+  get quick_practice_review_not_available() { return t("快速练习暂不创建正式面试复盘。"); },
 };
 
 function messageFor(errorCode: string, disposition: RecoveryDisposition, operation: RecoveryOperation): string {
@@ -96,7 +97,7 @@ export function resolveErrorRecovery(error: unknown, operation: RecoveryOperatio
       attemptId: null,
       operationId: null,
       terminal: false,
-      message: `网络或服务结果待确认，${RETRY_SAME_KEY_MESSAGES[operation]}`,
+      message: t("网络或服务结果待确认，{value0}", { value0: RETRY_SAME_KEY_MESSAGES[operation] }),
     };
   }
   const entry = errorCode !== null ? RECOVERY_POLICIES[errorCode] : undefined;
@@ -113,8 +114,8 @@ export function resolveErrorRecovery(error: unknown, operation: RecoveryOperatio
       operationId: operationIdOf(data),
       terminal: true,
       message: errorCode
-        ? `遇到未登记的错误（${errorCode}），已停止自动恢复，请重新开始练习。`
-        : '服务返回了未登记的错误，已停止自动恢复，请重新开始练习。',
+        ? t("遇到未登记的错误（{value0}），已停止自动恢复，请重新开始练习。", { value0: errorCode })
+        : t("服务返回了未登记的错误，已停止自动恢复，请重新开始练习。"),
     };
   }
   return {

@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 export type DiffModule =
   | 'contact'
   | 'education'
@@ -91,6 +92,8 @@ const MODULE_ORDER: DiffModule[] = [
 ];
 const KIND_ORDER: DiffKind[] = ['added', 'removed', 'changed'];
 
+// 业务地图：docs/architecture/code-map/materials.md。比较用户选定的两个结构化快照，
+// 只返回差异展示，不合并正文；差异数量也不代表哪份简历更好。
 export function diffResumeContent(
   baselineContent: unknown,
   targetContent: unknown,
@@ -151,7 +154,7 @@ function fallbackResult(left: unknown, right: unknown): ResumeVersionDiffResult 
 function unsupportedDiffValue(): DiffValue {
   return {
     valueType: 'unsupported',
-    text: makeDiffText(UNSUPPORTED_TEXT),
+    text: makeDiffText(t(UNSUPPORTED_TEXT)),
   };
 }
 
@@ -275,7 +278,7 @@ function createDiffValue(value: unknown, forceUnsupported = false): DiffValue {
   if (forceUnsupported) {
     return {
       valueType: 'unsupported',
-      text: makeDiffText(UNSUPPORTED_TEXT),
+      text: makeDiffText(t(UNSUPPORTED_TEXT)),
     };
   }
 
@@ -293,14 +296,14 @@ function createDiffValue(value: unknown, forceUnsupported = false): DiffValue {
     return { valueType: 'null', text: makeDiffText('null') };
   }
   if (inspection.kind === 'unsupported') {
-    return { valueType: 'unsupported', text: makeDiffText(UNSUPPORTED_TEXT) };
+    return { valueType: 'unsupported', text: makeDiffText(t(UNSUPPORTED_TEXT)) };
   }
 
   const safeResult = buildSafeNode(value, new Set<object>(), { remaining: MAX_DIFF_NODES }, 0);
   if (safeResult.budgetExceeded) {
     return {
       valueType: 'unsupported',
-      text: makeDiffText(UNSUPPORTED_TEXT),
+      text: makeDiffText(t(UNSUPPORTED_TEXT)),
     };
   }
   const full = canonicalSerialize(safeResult.node);
@@ -397,7 +400,7 @@ function canonicalSerialize(
   budget = { remaining: MAX_DIFF_NODES },
 ): string {
   if (depth >= MAX_DIFF_DEPTH || budget.remaining <= 0) {
-    return `{"${UNSUPPORTED_MARKER}":${JSON.stringify(UNSUPPORTED_TEXT)}}`;
+    return `{"${UNSUPPORTED_MARKER}":${JSON.stringify(t(UNSUPPORTED_TEXT))}}`;
   }
   budget.remaining -= 1;
 
@@ -411,7 +414,7 @@ function canonicalSerialize(
     case 'null':
       return 'null';
     case 'unsupported':
-      return `{"${UNSUPPORTED_MARKER}":${JSON.stringify(UNSUPPORTED_TEXT)}}`;
+      return `{"${UNSUPPORTED_MARKER}":${JSON.stringify(t(UNSUPPORTED_TEXT))}}`;
     case 'array':
       return `[${node.entries.map((entry) => canonicalSerialize(entry, depth + 1, budget)).join(',')}]`;
     case 'object':

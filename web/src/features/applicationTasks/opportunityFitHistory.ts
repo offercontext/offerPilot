@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type {
   OpportunityFitRecommendation,
   OpportunityFitReviewSummary,
@@ -242,8 +243,8 @@ function v2Item(
       const proposalSummaryRow = isRecord(proposalValue.summary) ? proposalValue.summary : null;
       proposalSummary = proposalSummaryRow ? safeText(proposalSummaryRow.text) : null;
       if (proposalValue.schema_version !== 2 || proposalValue.stage !== latestStage.stage || !proposalSummary) return null;
-    } else if (resultState === 'source_changed') proposalSummary = '资料已更新，结果待确认';
-    else proposalSummary = '结果待确认';
+    } else if (resultState === 'source_changed') proposalSummary = t("资料已更新，结果待确认");
+    else proposalSummary = t("结果待确认");
     const summary = proposalSummary;
     const source = sourceState(latestStage, currentSourceFingerprint);
     if (source === 'unavailable') return null;

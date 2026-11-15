@@ -72,14 +72,6 @@ export interface OpportunityFitReview extends OpportunityFitReviewSummary {
   deep_review: OpportunityFitDeepReview | null;
 }
 
-export interface CreateOpportunityFitReviewInput {
-  resume_id: number;
-  jd_text: string;
-  jd_source_label: string;
-  candidate_assertions: string[];
-  idempotency_key: string;
-}
-
 export type OpportunityFitV2EvidenceRef = {
   source: 'jd' | 'resume' | 'user_assertion';
   path: string;

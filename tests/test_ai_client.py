@@ -166,7 +166,7 @@ def test_client_omits_response_format_for_provider_without_explicit_capability(m
     assert "response_format" not in captured
 
 
-@pytest.mark.parametrize("model", ["deepseek-v4-flash", "openai/deepseek-v4-pro"])
+@pytest.mark.parametrize("model", ["deepseek-flash", "openai/deepseek-flash", "deepseek-v4-flash", "openai/deepseek-v4-pro"])
 def test_readonly_deepseek_v4_draft_disables_thinking_but_chat_is_unchanged(monkeypatch, model):
     captured: list[dict[str, Any]] = []
 
@@ -212,3 +212,96 @@ def test_readonly_draft_does_not_disable_thinking_for_other_provider_or_model(mo
 
     client.complete_readonly_draft([Message(role="user", content="prepare")], timeout_seconds=5)
     assert "extra_body" not in captured[-1]
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("configured,expected", [(0, 4096), (512, 512), (8192, 8192)])
+def test_output_budget_is_sent_to_provider(monkeypatch, stream, configured, expected):
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(kwargs)
+        if kwargs.get("stream"):
+            return [{"choices": [{"delta": {"content": "ok"}}]}]
+        return {"choices": [{"message": {"content": "ok"}}]}
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    client = ConfiguredAIClient(Config(providers=[AIProviderProfile(
+        id="default", api_key="sk-test", context_window=32768,
+        max_output_tokens=configured,
+    )]))
+    if stream:
+        client.stream_complete([Message(role="user", content="hello")], [], lambda _: None)
+    else:
+        client.complete([Message(role="user", content="hello")], [])
+    assert captured[0]["max_tokens"] == expected
+
+
+@pytest.mark.parametrize("budget,expected", [(32, 32), (4096, 64)])
+def test_connection_probe_is_bounded_and_never_falls_back(monkeypatch, budget, expected):
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(kwargs)
+        raise TimeoutError("probe failed")
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    client = ConfiguredAIClient(Config(
+        active_provider_id="deepseek", fallback_provider_ids=["backup"],
+        providers=[
+            AIProviderProfile(id="deepseek", api_key="sk-test", model="deepseek-flash",
+                              base_url="https://api.deepseek.com/v1",
+                              context_window=32768, max_output_tokens=budget),
+            AIProviderProfile(id="backup", api_key="sk-backup"),
+        ],
+    ))
+    with pytest.raises(TimeoutError):
+        client.test_connection()
+    assert len(captured) == 1
+    assert captured[0]["max_tokens"] == expected
+    assert captured[0]["num_retries"] == 0
+    assert captured[0]["timeout"] == 15
+    assert captured[0]["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "tools" not in captured[0]
+
+
+def test_deepseek_stream_reasoning_and_tools_round_trip_without_visible_reasoning(monkeypatch):
+    captured = []
+
+    def fake_completion(**kwargs):
+        captured.append(kwargs)
+        if not kwargs.get("stream"):
+            return {"choices": [{"message": {"content": "done"}}]}
+        return [
+            {"choices": [{"delta": {"reasoning_content": "looked "}}]},
+            {"choices": [{"delta": {"reasoning_content": "up", "tool_calls": [{
+                "index": 0, "id": "call-1", "function": {
+                    "name": "list_applications", "arguments": '{"status":',
+                },
+            }]}}]},
+            {"choices": [{"delta": {"tool_calls": [{
+                "index": 0, "function": {"arguments": '"offer"}'},
+            }]}}]},
+        ]
+
+    monkeypatch.setattr(ai_client, "completion", fake_completion)
+    client = ConfiguredAIClient(Config(providers=[AIProviderProfile(
+        id="default", api_key="sk-test", model="deepseek-flash",
+        base_url="https://api.deepseek.com/v1",
+    )]))
+    deltas = []
+    assistant = client.stream_complete([Message(role="user", content="list")], [], deltas.append)
+    assert deltas == []
+    assert assistant.provider_blocks == {"reasoning_content": "looked up"}
+    assert assistant.tool_calls == [ToolCall(
+        id="call-1", name="list_applications", args='{"status":"offer"}',
+    )]
+    client.complete([
+        Message(role="assistant", content=assistant.content, tool_calls=assistant.tool_calls,
+                provider_blocks=assistant.provider_blocks),
+        Message(role="tool", content="[]", tool_call_id="call-1"),
+    ], [])
+    assert captured[-1]["messages"][0]["reasoning_content"] == "looked up"
+    assert captured[-1]["messages"][0]["tool_calls"][0]["id"] == "call-1"
+    assert captured[-1]["messages"][1]["tool_call_id"] == "call-1"
+    assert all("extra_body" not in call for call in captured)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import time
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -355,16 +355,34 @@ def test_outer_lease_heartbeat_renews_and_stops(tmp_path: Path) -> None:
         session.commit()
 
     renew_count = 0
+    renewed_twice = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
     original = repository.heartbeat_job
 
     def _counting(job_id_: int, **kwargs: object) -> object:
-        nonlocal renew_count
-        renew_count += 1
+        nonlocal renew_count, heartbeat_thread
+        heartbeat_thread = threading.current_thread()
         assert kwargs.get("lease_duration_seconds") == BRIEF_HEARTBEAT_LEASE_SECONDS
-        return original(job_id_, **kwargs)  # type: ignore[arg-type]
+        refreshed = original(job_id_, **kwargs)  # type: ignore[arg-type]
+        if refreshed is not None:
+            renew_count += 1
+            if renew_count >= 2:
+                renewed_twice.set()
+        return refreshed
 
     repository.heartbeat_job = _counting  # type: ignore[assignment]
     worker = BriefWorker(repository, Config(), heartbeat_interval_seconds=0.05)
     with worker._outer_lease_heartbeat(job_id, token):
-        time.sleep(0.2)
+        # 等待两次真实数据库续约完成；超时只用于防止回归导致测试挂死。
+        assert renewed_twice.wait(timeout=10.0), "heartbeat did not renew twice"
     assert renew_count >= 2
+    assert heartbeat_thread is not None
+    assert not heartbeat_thread.is_alive()
+    job = repository.get_job(job_id)
+    assert job is not None
+    assert job.status == "running"
+    assert job.attempt_token == token
+    assert job.heartbeat_at is not None
+    assert job.lease_expires_at == job.heartbeat_at + timedelta(
+        seconds=BRIEF_HEARTBEAT_LEASE_SECONDS
+    )

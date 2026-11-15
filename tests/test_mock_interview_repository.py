@@ -1,5 +1,6 @@
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -565,17 +566,18 @@ def test_expired_second_question_dual_connections_have_one_owner(tmp_path):
         session.commit()
 
     barrier = threading.Barrier(2)
-    owners = []
+    def claim():
+        barrier.wait(timeout=10)
+        worker_factory = init_database(path)
+        try:
+            return MockInterviewRepository(worker_factory).claim_question(attempt.id, 2, "question-2")
+        finally:
+            worker_factory.kw["bind"].dispose()
 
-    def claim() -> None:
-        barrier.wait()
-        owners.append(MockInterviewRepository(init_database(path)).claim_question(attempt.id, 2, "question-2"))
-
-    threads = [threading.Thread(target=claim) for _ in range(2)]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(claim) for _ in range(2)]
+        owners = [future.result(timeout=60) for future in futures]
+    assert len(owners) == 2
     assert sum(owner is not None for owner in owners) == 1
 
 

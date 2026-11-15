@@ -2,7 +2,10 @@
 
 import json
 import re
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from offerpilot.ai.confirmation_receipt import edited_confirmation_receipt
 from offerpilot.ai.tool_specs.catalog import build_model_tool_catalog
@@ -23,15 +26,48 @@ def _editable_fields():
     return sorted(fields)
 
 
-def test_all_editable_fields_have_chinese_card_labels():
-    source = (Path(__file__).resolve().parents[1] / "web/src/components/ChatPanel/ProposalCard.tsx").read_text(
-        encoding="utf-8"
+@pytest.fixture(scope="module")
+def rendered_card_labels():
+    """Exercise live backend fields through Vite, React and the production catalogs."""
+    web = Path(__file__).resolve().parents[1] / "web"
+    fields = _editable_fields()
+    assert fields, "The live tool catalogs must expose editable fields"
+    # Deliberately not an authored UI label: fallback must preserve unknown keys.
+    fields.append("用户自定义字段 / custom_field")
+    result = subprocess.run(
+        ["node", "tests/contracts/confirmation-labels.mjs"],
+        cwd=web,
+        input=json.dumps(fields),
+        text=True,
+        encoding="utf-8",
+        capture_output=True,
+        timeout=90,
+        check=False,
     )
-    block = source.split("const FIELD_LABELS: Record<string, string> = {", 1)[1].split("};", 1)[0]
-    labels = dict(re.findall(r"(\w+): '([^']+)'", block))
-    labels.update(re.findall(r"FIELD_LABELS\.(\w+) = '([^']+)'", source))
-    missing = [field for field in _editable_fields() if not re.search(r"[\u4e00-\u9fff]", labels.get(field, ""))]
-    assert missing == []
+    assert result.returncode == 0, result.stdout + result.stderr
+    lines = [line for line in result.stdout.splitlines() if line.startswith("CONFIRMATION_LABELS=")]
+    assert len(lines) == 1, result.stdout + result.stderr
+    return json.loads(lines[0].split("=", 1)[1])
+
+
+def test_all_editable_fields_have_chinese_card_labels(rendered_card_labels):
+    labels = rendered_card_labels["zh-CN"]
+    for field in _editable_fields():
+        assert re.search(r"[\u4e00-\u9fff]", labels[field]), (field, labels[field])
+
+
+def test_all_editable_fields_have_english_card_labels(rendered_card_labels):
+    for field in _editable_fields():
+        label = rendered_card_labels["en-US"][field]
+        assert label and label != field, (field, label)
+        assert label != rendered_card_labels["zh-CN"][field], (field, label)
+        assert not re.search(r"[\u4e00-\u9fff]", label), (field, label)
+
+
+def test_unknown_card_field_labels_preserve_user_content(rendered_card_labels):
+    field = "用户自定义字段 / custom_field"
+    for locale in ("zh-CN", "en-US"):
+        assert rendered_card_labels[locale][field] == field
 
 
 def test_all_editable_fields_have_chinese_receipt_labels():

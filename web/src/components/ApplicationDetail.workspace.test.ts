@@ -15,7 +15,7 @@ describe('ApplicationDetail staged workspace', () => {
     expect(source).toContain('跟进与安排');
     expect(source).toContain('面试');
     expect(source).toContain('结果');
-    expect(source).toContain('让 Haru 帮我');
+    expect(source).toContain('让 Pilot 帮我');
     expect(source).not.toContain('问 Pilot');
     expect(source).not.toContain('在 Pilot 中评估');
   });

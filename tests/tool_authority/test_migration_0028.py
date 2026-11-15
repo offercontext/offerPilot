@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Barrier, Event
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateIndex, CreateTable
@@ -25,6 +27,103 @@ from offerpilot.repositories.chat import ChatRepository
 def _engine(tmp_path: Path) -> tuple[sessionmaker[Session], Engine]:
     sessions = init_database(tmp_path / "offerpilot.db")
     return sessions, sessions.kw["bind"]
+
+
+def _scope_guard_definitions(engine: Engine) -> dict[str, str]:
+    with engine.connect() as conn:
+        rows = conn.exec_driver_sql(
+            "SELECT name, sql FROM sqlite_master WHERE type='trigger' AND "
+            "(name LIKE 'trg_conversations_%' OR name LIKE 'trg_write_operation_scope_%')"
+        ).all()
+    return dict(rows)
+
+
+@pytest.mark.parametrize(
+    "failed_trigger", ["trg_conversations_scope_insert", "trg_write_operation_scope_insert"]
+)
+def test_scope_guard_rebuild_rolls_back_all_guards_on_ddl_failure(
+    tmp_path: Path, failed_trigger: str
+) -> None:
+    sessions, engine = _engine(tmp_path)
+    conversation = ChatRepository(sessions).create_conversation("guarded")
+    before = _scope_guard_definitions(engine)
+    assert len(before) == 10
+
+    def fail_create(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.lstrip().startswith(f"CREATE TRIGGER {failed_trigger}"):
+            raise RuntimeError("injected scope guard DDL failure")
+
+    event.listen(engine, "before_cursor_execute", fail_create)
+    try:
+        with pytest.raises(RuntimeError, match="injected scope guard DDL failure"):
+            _ensure_scoped_tool_authority_schema(engine)
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_create)
+    try:
+        assert _scope_guard_definitions(engine) == before
+        with pytest.raises(Exception, match="scope revision must increment"):
+            with engine.begin() as conn:
+                conn.execute(
+                    text("UPDATE conversations SET context_ref='unapproved' WHERE id=:id"),
+                    {"id": conversation.id},
+                )
+        _ensure_scoped_tool_authority_schema(engine)
+        assert _scope_guard_definitions(engine) == before
+    finally:
+        engine.dispose()
+
+
+def test_scope_guard_rebuild_never_exposes_dropped_guards_to_another_connection(
+    tmp_path: Path,
+) -> None:
+    _sessions, engine = _engine(tmp_path)
+    before = _scope_guard_definitions(engine)
+    dropped = Event()
+    release = Event()
+
+    def pause_after_drop(_conn, _cursor, statement, _parameters, _context, _executemany):
+        if statement.strip() == "DROP TRIGGER IF EXISTS trg_conversations_scope_insert":
+            dropped.set()
+            assert release.wait(timeout=10), "reader did not finish inspecting the paused rebuild"
+
+    event.listen(engine, "after_cursor_execute", pause_after_drop)
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            rebuild = executor.submit(_ensure_scoped_tool_authority_schema, engine)
+            try:
+                assert dropped.wait(timeout=10), "writer did not reach the DDL boundary"
+                assert _scope_guard_definitions(engine) == before
+            finally:
+                release.set()
+                rebuild.result(timeout=15)
+    finally:
+        event.remove(engine, "after_cursor_execute", pause_after_drop)
+        engine.dispose()
+
+
+def test_scope_guard_rebuilds_on_two_engines_return_without_hidden_thread_errors(
+    tmp_path: Path,
+) -> None:
+    _sessions, first = _engine(tmp_path)
+    second = create_engine(
+        f"sqlite:///{tmp_path / 'offerpilot.db'}", connect_args={"check_same_thread": False}
+    )
+    before = _scope_guard_definitions(first)
+    barrier = Barrier(2)
+
+    def rebuild(engine: Engine) -> None:
+        barrier.wait(timeout=10)
+        _ensure_scoped_tool_authority_schema(engine)
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(rebuild, engine) for engine in (first, second)]
+            for future in futures:
+                future.result(timeout=20)
+        assert _scope_guard_definitions(first) == before
+    finally:
+        first.dispose()
+        second.dispose()
 
 
 def test_fresh_database_has_0028_columns_and_records_migration(tmp_path: Path) -> None:

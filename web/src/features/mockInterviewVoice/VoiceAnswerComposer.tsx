@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject } from 'react';
 import { Alert, Button, Input, Tag } from 'antd';
 import {
@@ -172,6 +173,7 @@ export default function VoiceAnswerComposer({
   continuousCommand,
   onContinuousEvent,
 }: Props) {
+  useLocale();
   const browser = useMemo(() => suppliedBrowser ?? defaultBrowser(), [suppliedBrowser]);
   const capabilities = useMemo(() => detectVoiceInterviewCapabilities({
     MediaRecorder: browser.createMediaRecorder,
@@ -186,7 +188,7 @@ export default function VoiceAnswerComposer({
   const [interimTranscript, setInterimTranscript] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [localLanguageState, setLocalLanguageState] = useState<LocalSpeechLanguageState>('unavailable');
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | { source: string; message: string } | null>(null);
   const [transcriptionStatus, setTranscriptionStatus] = useState<'idle' | 'decoding' | 'transcribing' | 'success' | 'error'>('idle');
   const [sessionState, setSessionState] = useState<VoiceSessionState>({ status: 'idle' });
   const [temporaryTranscript, setTemporaryTranscript] = useState('');
@@ -502,7 +504,7 @@ export default function VoiceAnswerComposer({
       setTranscriptionStatus('error');
       activeTranscriptionRef.current = false;
       setError(transcriptionError instanceof Error
-        ? `${transcriptionError.message}。录音仍在，可重新转写或手工整理文字。`
+        ? { source: '{message}。录音仍在，可重新转写或手工整理文字。', message: transcriptionError.message }
         : '离线转写失败。录音仍在，可重新转写或手工整理文字。');
       emitActivity('error');
       return 'error';
@@ -911,12 +913,12 @@ export default function VoiceAnswerComposer({
   };
 
   const localLabel = localLanguageState === 'available'
-    ? '本机转写已就绪'
+    ? t("本机转写已就绪")
     : localLanguageState === 'downloadable'
-      ? '可下载中文本机语言包'
+      ? t("可下载中文本机语言包")
       : localLanguageState === 'downloading'
-        ? '正在下载本机语言包'
-      : '本机转写不可用';
+        ? t("正在下载本机语言包")
+      : t("本机转写不可用");
 
   const changeMode = (nextMode: AnswerMode) => {
     if (nextMode !== mode) {
@@ -928,25 +930,25 @@ export default function VoiceAnswerComposer({
   };
 
   const sessionLabel = recordingState === 'paused'
-    ? '录音已暂停'
+    ? t("录音已暂停")
     : sessionState.status === 'waiting_for_speech'
-      ? '等待你开口'
+      ? t("等待你开口")
       : sessionState.status === 'speech_paused'
-        ? '检测到停顿'
+        ? t("检测到停顿")
         : recordingState === 'recording'
-          ? '正在聆听你的回答'
+          ? t("正在聆听你的回答")
           : audioUrl
-            ? '回答录音已就绪'
-            : '准备好后开始录音';
+            ? t("回答录音已就绪")
+            : t("准备好后开始录音");
 
   return (
-    <section className={`${styles.composer} ${compact ? styles.compact : ''}`} aria-label="回答方式" data-testid="voice-answer-composer">
+    <section className={`${styles.composer} ${compact ? styles.compact : ''}`} aria-label={t("回答方式")} data-testid="voice-answer-composer">
       <div className={styles.modeHeader}>
         <div>
-          <span className={styles.eyebrow}>回答区</span>
-          <h4>选择你的回答方式</h4>
+          <span className={styles.eyebrow}>{t("回答区")}</span>
+          <h4>{t("选择你的回答方式")}</h4>
         </div>
-        <div className={styles.modeSwitch} role="group" aria-label="回答方式">
+        <div className={styles.modeSwitch} role="group" aria-label={t("回答方式")}>
           {(['text', 'voice'] as AnswerMode[]).map((value) => (
             <button
               key={value}
@@ -955,7 +957,7 @@ export default function VoiceAnswerComposer({
               disabled={disabled || recordingState === 'recording' || recordingState === 'paused'}
               onClick={() => changeMode(value)}
             >
-              {value === 'text' ? '文字回答' : '语音回答'}
+              {value === 'text' ? t("文字回答") : t("语音回答")}
             </button>
           ))}
         </div>
@@ -964,27 +966,26 @@ export default function VoiceAnswerComposer({
       <div className={styles.readingBar}>
         <div>
           <SoundOutlined aria-hidden />
-          <span>由系统音色朗读当前题目</span>
+          <span>{t("由系统音色朗读当前题目")}</span>
         </div>
         <div className={styles.readingActions}>
           {narrationState === 'idle' ? (
             <Button icon={<PlayCircleOutlined />} onClick={() => readQuestion()} disabled={disabled || !capabilities.speechSynthesis || recordingState === 'recording' || recordingState === 'paused'}>
-              朗读题目
-            </Button>
+              {t("朗读题目")}</Button>
           ) : null}
           {narrationState === 'speaking' ? (
-            <Button icon={<PauseOutlined />} onClick={pauseQuestion} disabled={disabled}>暂停朗读</Button>
+            <Button icon={<PauseOutlined />} onClick={pauseQuestion} disabled={disabled}>{t("暂停朗读")}</Button>
           ) : null}
           {narrationState === 'paused' ? (
-            <Button icon={<PlayCircleOutlined />} onClick={resumeQuestion} disabled={disabled}>继续朗读</Button>
+            <Button icon={<PlayCircleOutlined />} onClick={resumeQuestion} disabled={disabled}>{t("继续朗读")}</Button>
           ) : null}
           {narrationState !== 'idle' ? (
-            <Button onClick={() => readQuestion()} disabled={disabled}>重新朗读</Button>
+            <Button onClick={() => readQuestion()} disabled={disabled}>{t("重新朗读")}</Button>
           ) : null}
         </div>
       </div>
 
-      {error ? <Alert showIcon type="warning" message={error} /> : null}
+      {error ? <Alert showIcon type="warning" message={typeof error === 'string' ? t(error) : t(error.source, { message: t(error.message) })} /> : null}
 
       {mode === 'voice' ? (
         <div className={styles.voiceStage}>
@@ -992,7 +993,7 @@ export default function VoiceAnswerComposer({
             <div className={styles.micOrb}><AudioOutlined /></div>
             <div className={styles.voiceCopy}>
               <strong>{sessionLabel}</strong>
-              <span>{sessionState.status === 'speech_paused' ? '可以继续，也可以完成回答。' : audioUrl ? '先试听，再核对下方文字；系统不会保存原始录音。' : '录音仅保存在当前页面，未确认文字不会进入模拟面试。'}</span>
+              <span>{sessionState.status === 'speech_paused' ? t("可以继续，也可以完成回答。") : audioUrl ? t("先试听，再核对下方文字；系统不会保存原始录音。") : t("录音仅保存在当前页面，未确认文字不会进入模拟面试。")}</span>
             </div>
             <span className={styles.timer}>{formatElapsed(elapsed)}</span>
           </div>
@@ -1003,32 +1004,32 @@ export default function VoiceAnswerComposer({
             </div>
           ) : null}
 
-          {batchOnly && recordingState !== 'idle' ? <Alert type="info" showIcon message="当前设备使用录完后批量转写，录音与确认流程不受影响。" /> : null}
+          {batchOnly && recordingState !== 'idle' ? <Alert type="info" showIcon message={t("当前设备使用录完后批量转写，录音与确认流程不受影响。")} /> : null}
           {temporaryTranscript ? (
             <div className={styles.temporaryTranscript} aria-live="polite">
-              <span>临时字幕 · 仅供当前页面参考</span>
+              <span>{t("临时字幕 · 仅供当前页面参考")}</span>
               <p>{temporaryTranscript}</p>
             </div>
           ) : null}
 
           <div className={styles.controls}>
             {recordingState === 'idle' ? (
-              <Button type="primary" icon={<AudioOutlined />} onClick={() => void startRecording()} disabled={disabled || !capabilities.recorder}>开始录音</Button>
+              <Button type="primary" icon={<AudioOutlined />} onClick={() => void startRecording()} disabled={disabled || !capabilities.recorder}>{t("开始录音")}</Button>
             ) : null}
             {recordingState === 'recording' ? (
               <>
-                <Button icon={<PauseOutlined />} onClick={pauseRecording} disabled={disabled}>暂停</Button>
-                <Button type="primary" onClick={stopRecording} disabled={disabled}>完成录音</Button>
+                <Button icon={<PauseOutlined />} onClick={pauseRecording} disabled={disabled}>{t("暂停")}</Button>
+                <Button type="primary" onClick={stopRecording} disabled={disabled}>{t("完成录音")}</Button>
               </>
             ) : null}
             {recordingState === 'paused' ? (
               <>
-                <Button icon={<PlayCircleOutlined />} onClick={resumeRecording} disabled={disabled}>继续</Button>
-                <Button type="primary" onClick={stopRecording} disabled={disabled}>完成录音</Button>
+                <Button icon={<PlayCircleOutlined />} onClick={resumeRecording} disabled={disabled}>{t("继续")}</Button>
+                <Button type="primary" onClick={stopRecording} disabled={disabled}>{t("完成录音")}</Button>
               </>
             ) : null}
             {audioUrl ? (
-              <Button icon={<DeleteOutlined />} onClick={resetVoiceDraft} disabled={disabled}>重录</Button>
+              <Button icon={<DeleteOutlined />} onClick={resetVoiceDraft} disabled={disabled}>{t("重录")}</Button>
             ) : null}
           </div>
 
@@ -1037,31 +1038,30 @@ export default function VoiceAnswerComposer({
           {(!compact || Boolean(audioUrl) || recordingState === 'ready') ? <div ref={transcriptPanelRef} className={styles.transcriptPanel}>
             <div className={styles.transcriptHeader}>
               <div>
-                <span className={styles.eyebrow}>核对回答文字</span>
-                <h4>核对回答文字</h4>
+                <span className={styles.eyebrow}>{t("核对回答文字")}</span>
+                <h4>{t("核对回答文字")}</h4>
               </div>
               <Tag color={localLanguageState === 'available' ? 'green' : 'default'}>{localLabel}</Tag>
             </div>
             {localLanguageState === 'downloadable' ? (
-              <Button onClick={() => void installLanguage()} disabled={disabled}>下载中文本机语言包</Button>
+              <Button onClick={() => void installLanguage()} disabled={disabled}>{t("下载中文本机语言包")}</Button>
             ) : null}
             <OfflineWhisperModelCard controller={offlineController} compact onActivityChange={emitActivity} />
             {transcriptionStatus === 'decoding' || transcriptionStatus === 'transcribing' ? (
               <div className={styles.offlineTranscriptionStatus} role="status" aria-live="polite">
                 <div>
-                  <strong>{transcriptionStatus === 'decoding' ? '正在整理录音格式' : '正在本地整理语音'}</strong>
-                  <span>{offlineModelState.status === 'transcribing' && offlineModelState.backend === 'wasm' ? '兼容模式' : 'GPU 加速优先'}</span>
+                  <strong>{transcriptionStatus === 'decoding' ? t("正在整理录音格式") : t("正在本地整理语音")}</strong>
+                  <span>{offlineModelState.status === 'transcribing' && offlineModelState.backend === 'wasm' ? t("兼容模式") : t("GPU 加速优先")}</span>
                 </div>
-                <Button onClick={cancelTranscription}>取消转写</Button>
+                <Button onClick={cancelTranscription}>{t("取消转写")}</Button>
               </div>
             ) : null}
             {audioUrl && transcriptionStatus !== 'decoding' && transcriptionStatus !== 'transcribing' && !transcript.trim() && offlineModelState.status === 'ready' ? (
               <Button onClick={() => void retryOfflineTranscription()} disabled={disabled}>
-                使用离线模型转写
-              </Button>
+                {t("使用离线模型转写")}</Button>
             ) : null}
             <Input.TextArea
-              aria-label="确认后的回答文字"
+              aria-label={t("确认后的回答文字")}
               value={`${transcript}${interimTranscript ? `${transcript ? ' ' : ''}${interimTranscript}` : ''}`}
               onChange={(event) => {
                 transcriptRef.current = event.target.value;
@@ -1069,14 +1069,13 @@ export default function VoiceAnswerComposer({
                 setInterimTranscript('');
               }}
               disabled={disabled}
-              placeholder="本机或离线转写不可用时，可试听录音后在这里手工整理回答。"
+              placeholder={t("本机或离线转写不可用时，可试听录音后在这里手工整理回答。")}
               autoSize={{ minRows: compact ? 3 : 5, maxRows: compact ? 6 : 10 }}
             />
             <div className={styles.confirmRow}>
-              <span>只有确认后的文字才会交给模拟面试。</span>
+              <span>{t("只有确认后的文字才会交给模拟面试。")}</span>
               <Button type="primary" onClick={confirmTranscript} disabled={disabled || recordingState !== 'ready' || !reviewReady || !transcript.trim()}>
-                确认使用这段文字
-              </Button>
+                {t("确认使用这段文字")}</Button>
             </div>
           </div> : null}
           {deliverySummary ? (
@@ -1085,13 +1084,13 @@ export default function VoiceAnswerComposer({
         </div>
       ) : (
         <div className={styles.textPanel}>
-          <div className={styles.textHint}>直接输入回答；语音能力不会改变现有文本提交流程。</div>
+          <div className={styles.textHint}>{t("直接输入回答；语音能力不会改变现有文本提交流程。")}</div>
           <Input.TextArea
-            aria-label="回答"
+            aria-label={t("回答")}
             value={textValue}
             onChange={(event) => onTextChange?.(event.target.value)}
             disabled={disabled}
-            placeholder="输入你的回答"
+            placeholder={t("输入你的回答")}
             autoSize={{ minRows: compact ? 3 : 5, maxRows: compact ? 6 : 10 }}
           />
         </div>

@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import type { EvidenceTarget, ToolStep, TurnPresentation } from './model';
 import ProcessTimeline from './ProcessTimeline';
 import styles from './ChatPanel.module.css';
@@ -12,9 +13,9 @@ interface Props {
 }
 
 function completionStatus(steps: ToolStep[], presentation?: TurnPresentation): string {
-  if (steps.length) return `已完成 ${steps.length} 步`;
-  if (presentation) return '已完成建议整理';
-  return '等待处理';
+  if (steps.length) return t("已完成 {count} 步", { count: steps.length });
+  if (presentation) return t("已完成建议整理");
+  return t("等待处理");
 }
 
 function normalizeActions(actions: string[]): string[] {
@@ -39,14 +40,15 @@ export default function PilotTaskCard({
   onAction,
   onOpenEvidence,
 }: Props) {
+  useLocale();
   const status = completionStatus(steps, presentation);
   const actions = normalizeActions(presentation?.actions ?? []);
 
   return (
-    <article className={styles.taskCard} aria-label={`本轮任务：${title}`}>
+    <article className={styles.taskCard} aria-label={t("本轮任务：{title}", { title: title })}>
       <header className={styles.taskHead}>
         <div>
-          <span className={styles.taskLabel}>本轮任务</span>
+          <span className={styles.taskLabel}>{t("本轮任务")}</span>
           <h3 className={styles.taskTitle}>{title}</h3>
         </div>
         <span className={styles.taskStatus}>{status}</span>
@@ -55,21 +57,21 @@ export default function PilotTaskCard({
       {steps.length ? <ProcessTimeline steps={steps} summary={status} embedded onOpenEvidence={onOpenEvidence} /> : null}
 
       {presentation ? (
-        <section className={styles.taskConclusion} aria-label="结论">
-          <h4>结论</h4>
+        <section className={styles.taskConclusion} aria-label={t("结论")}>
+          <h4>{t("结论")}</h4>
           <p>{presentation.conclusion}</p>
         </section>
       ) : null}
 
       {actions.length ? (
-        <section className={styles.taskActions} aria-label="下一步">
-          <h4>下一步</h4>
+        <section className={styles.taskActions} aria-label={t("下一步")}>
+          <h4>{t("下一步")}</h4>
           <div>
             {actions.map((action) => (
               <button
                 key={action}
                 type="button"
-                aria-label={`继续：${action}`}
+                aria-label={t("继续：{action}", { action: action })}
                 disabled={disabled}
                 onClick={() => onAction(action)}
               >

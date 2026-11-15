@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/workbench-automation.md（主动任务与展示候选的区别）。
+
 from collections.abc import Callable
 import json
 from threading import Event, Lock, Thread
@@ -90,6 +92,7 @@ class ProactiveRuntime:
                     pass
 
     def tick(self) -> None:
+        # 发现候选、领取任务和执行分开；提醒可确定性生成，面试草稿才进入受预算约束的模型执行。
         if not self._tick_lock.acquire(blocking=False):
             return
         try:

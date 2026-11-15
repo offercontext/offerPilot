@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/README.md（简历、材料包、改写建议）。
+# 此层只生成/校验候选改写；持久化与确认应用由 material_revision_proposals Repository 负责。
+# 回归入口：tests/test_material_revision_proposals_ai.py。
+
 import copy
 import hashlib
 import json
@@ -60,6 +64,8 @@ MaterialProposalDiagnosticSink = Callable[[dict[str, Any]], None]
 def validate_material_proposal(
     payload: dict[str, Any], source_snapshot: dict[str, Any]
 ) -> ValidatedProposal:
+    # 在冻结简历的副本上重放模型给出的局部修改，不接受模型直接返回整份新简历。
+    # 每处改写须命中允许路径、匹配 before 且带可验证引用；空 changes 原样保留内容。
     if not isinstance(payload, dict):
         raise MaterialProposalModelError("model output must be a JSON object")
     if set(payload) != PROPOSAL_FIELDS:
@@ -105,6 +111,7 @@ def validate_material_proposal(
         if pointer in seen_paths or any(_overlaps(pointer, other) for other in seen_paths):
             raise MaterialProposalModelError("change paths must not overlap")
         current = _get_pointer(resume["content_json"], pointer)
+        # before 对照原始快照，而非前一条修改后的内容；重叠路径已先拒绝，避免顺序依赖。
         if not isinstance(current, str) or current != before:
             raise MaterialProposalModelError("change before does not match the frozen resume")
         if not isinstance(refs, list) or not refs:
@@ -138,6 +145,8 @@ def generate_material_proposal(
     *,
     on_diagnostic: MaterialProposalDiagnosticSink | None = None,
 ) -> ValidatedProposal:
+    # 格式/证据契约失败只允许一次修复，并继续使用相同冻结来源。
+    # Provider 异常直接失败，不作为内容修复再调用；诊断只发结构/分类与脱敏标识。
     system = _material_proposal_system()
     prompt = _material_proposal_prompt(source_snapshot, instructions)
     repair_category = ""
@@ -415,6 +424,7 @@ def _elapsed_ms(started_at: float) -> int:
 
 
 def _parse_allowed_pointer(path: str) -> tuple[str, ...]:
+    # 仅允许约定的文本叶子字段与规范数组下标，不能替换整段数组或写入白名单外的字段。
     if not path.startswith("/") or path == "/":
         raise MaterialProposalModelError("path is not allowed")
     parts = tuple(_decode_pointer_part(part) for part in path[1:].split("/"))
@@ -493,6 +503,8 @@ def _set_pointer(root: Any, pointer: tuple[str, ...], value: str) -> None:
 
 
 def _validate_evidence_ref(ref: Any, snapshot: dict[str, Any], change_pointer: tuple[str, ...]) -> None:
+    # 引用必须定位到冻结来源的字符串且与该字段全文相等。
+    # 这里只验证引用可追溯，不证明改写后的语义已被引用充分支持；仍须用户审阅。
     if not isinstance(ref, dict):
         raise MaterialProposalModelError("evidence reference must be an object")
     if set(ref) != EVIDENCE_REF_FIELDS:

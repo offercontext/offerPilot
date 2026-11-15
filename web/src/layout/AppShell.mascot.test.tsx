@@ -17,7 +17,7 @@ vi.mock('@tanstack/react-query', () => ({
     isFetching: false,
     error: null,
   }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryCache: () => ({ subscribe: () => () => undefined }) }),
 }));
 vi.mock('@dnd-kit/core', () => ({
   DndContext: (props: { children: React.ReactNode }) => <div>{props.children}</div>,
@@ -110,7 +110,6 @@ vi.mock('@/features/dashboard/DashboardView', () => ({
   ),
 }));
 vi.mock('@/features/reminders/RemindersView', () => ({ default: () => <div /> }));
-vi.mock('@/components/MockInterviewDrawer', () => ({ default: () => <div /> }));
 vi.mock('@/components/OfferNegotiationDrawer', () => ({ default: () => <div /> }));
 vi.mock('@/components/InterviewV01View', () => ({ default: () => <div /> }));
 vi.mock('@/components/InterviewStoryLibraryView', () => ({ default: () => <div /> }));
@@ -223,7 +222,7 @@ vi.mock('@/components/ChatPanel', async () => {
           })}
         >pending</button>
         {controller.pending ? (
-          <div role="group" aria-label="AI 修改提议">
+          <div role="group" data-pilot-proposal aria-label="AI 修改提议">
             <button type="button" data-testid="pending-action">confirm</button>
           </div>
         ) : null}
@@ -243,12 +242,13 @@ vi.mock('@/components/ChatPanel', async () => {
 });
 vi.mock('@/components/SettingsView', () => ({
   default: (props: {
+    aiSettingsRequest?: number;
     onPilotMascotVisibleChange: (visible: boolean) => void;
     onPilotMascotAnimationLevelChange: (level: 'minimal') => void;
     onPilotMascotResetPosition: () => void;
     systemReducedMotion: boolean;
   }) => (
-    <section data-system-reduced-motion={String(props.systemReducedMotion)}>
+    <section data-ai-settings-request={props.aiSettingsRequest} data-system-reduced-motion={String(props.systemReducedMotion)}>
       <button type="button" data-testid="restore-mascot" onClick={() => props.onPilotMascotVisibleChange(true)}>restore</button>
       <button type="button" data-testid="minimal-animation" onClick={() => props.onPilotMascotAnimationLevelChange('minimal')}>minimal</button>
       <button type="button" data-testid="reset-position" onClick={props.onPilotMascotResetPosition}>reset</button>
@@ -264,6 +264,29 @@ async function flush() {
 }
 
 describe('AppShell Pilot mascot integration', () => {
+  it('opens model settings for a finite desktop intent and clears the request on leaving', async () => {
+    let showSettings!: () => void;
+    let showPilot!: () => void;
+    window.offerpilotDesktop = { role: 'owner', onShowPilot: callback => { showPilot = callback; return vi.fn(); }, onShowAISettings: callback => { showSettings = callback; return vi.fn(); }, getState: vi.fn(), onState: vi.fn(), windowAction: vi.fn() };
+    await act(async () => root.render(<AppShell />));
+    await act(async () => showSettings());
+    await flush();
+    expect(Number(host.querySelector('[data-ai-settings-request]')?.getAttribute('data-ai-settings-request'))).toBe(1);
+    await act(async () => (host.querySelector('[data-testid="nav-offers"]') as HTMLButtonElement).click());
+    await act(async () => (host.querySelector('[data-testid="nav-settings"]') as HTMLButtonElement).click());
+    await flush();
+    expect(host.querySelector('[data-ai-settings-request]')?.getAttribute('data-ai-settings-request')).toBe('0');
+    await act(async () => showSettings());
+    expect(host.querySelector('[data-ai-settings-request]')?.getAttribute('data-ai-settings-request')).toBe('1');
+    await act(async () => showPilot());
+    await act(async () => (host.querySelector('[data-testid="pilot-exit-immersive"]') as HTMLButtonElement).click());
+    expect(host.querySelector('[data-ai-settings-request]')?.getAttribute('data-ai-settings-request')).toBe('0');
+    await act(async () => showSettings());
+    await act(async () => { window.history.replaceState(null, '', '/?view=dashboard'); window.dispatchEvent(new PopStateEvent('popstate')); });
+    await act(async () => (host.querySelector('[data-testid="nav-settings"]') as HTMLButtonElement).click());
+    expect(host.querySelector('[data-ai-settings-request]')?.getAttribute('data-ai-settings-request')).toBe('0');
+  });
+
   beforeEach(() => {
     window.history.replaceState(null, '', '/');
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -282,6 +305,7 @@ describe('AppShell Pilot mascot integration', () => {
 
   afterEach(() => {
     act(() => root.unmount());
+    delete window.offerpilotDesktop;
     host.remove();
     localStorage.clear();
     vi.clearAllMocks();
@@ -376,7 +400,7 @@ describe('AppShell Pilot mascot integration', () => {
 
     act(() => host.querySelector<HTMLButtonElement>('[data-testid="toggle-mascot-pilot"]')?.click());
     await flush();
-    expect(document.querySelector('[role="dialog"][aria-label="Haru 轻量对话"]')).not.toBeNull();
+    expect(document.querySelector('[role="dialog"][aria-label="Pilot 轻量对话"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="pilot-drawer-chat"]')?.getAttribute('data-conversation-request')).toBe('418');
     expect(host.querySelector('[data-testid="pilot-mascot"]')?.getAttribute('data-notification')).toBeNull();
     const sharedChatOwner = host.querySelector('[data-testid="pilot-drawer-chat"]');

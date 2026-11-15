@@ -19,6 +19,7 @@ export interface ActionPresentationV1 {
 }
 
 export interface PilotTurnItemV1 {
+  image_attachments?: import('@/services/chatImages').ChatImageReference[];
   schema_version: number;
   item_id: string;
   kind: 'user_message' | 'assistant_message' | 'action' | 'error_info' | 'run_boundary';

@@ -22,7 +22,10 @@ async function onboardingStyles() {
 
 describe('ResumeLibraryView onboarding source contract', () => {
   it('uses user-facing creation copy and keeps samples in the low-frequency menu', () => {
-    expect(source).toContain('和 Haru 创建初稿');
+    expect(source).toContain('新建空白简历');
+    expect(source).toContain("source: 'manual'");
+    expect(source).not.toContain("source: 'dialog'");
+    expect(source).not.toContain('和 Haru 创建初稿');
     expect(source).toContain('上传现有简历');
     expect(source).toContain('更多创建方式');
     expect(source).not.toContain('和 Pilot 创建薄版');

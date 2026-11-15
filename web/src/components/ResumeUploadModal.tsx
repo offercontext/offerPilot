@@ -1,3 +1,5 @@
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useState } from 'react';
 import { Button, Modal, Upload, message } from 'antd';
 import { InboxOutlined } from '@ant-design/icons';
@@ -11,6 +13,7 @@ interface Props {
 }
 
 export default function ResumeUploadModal({ open, uploading, onSubmit, onClose }: Props) {
+  useLocale();
   const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
@@ -23,11 +26,11 @@ export default function ResumeUploadModal({ open, uploading, onSubmit, onClose }
 
   return (
     <Modal
-      title="上传简历"
+      title={t("上传简历")}
       open={open}
       onCancel={onClose}
       footer={[
-        <Button key="cancel" onClick={onClose}>取消</Button>,
+        <Button key="cancel" onClick={onClose}>{t("取消")}</Button>,
         <Button
           key="submit"
           type="primary"
@@ -35,8 +38,7 @@ export default function ResumeUploadModal({ open, uploading, onSubmit, onClose }
           disabled={!file}
           onClick={() => file && onSubmit(file)}
         >
-          上传
-        </Button>,
+          {t("上传")}</Button>,
       ]}
     >
       <Upload.Dragger
@@ -46,7 +48,7 @@ export default function ResumeUploadModal({ open, uploading, onSubmit, onClose }
         fileList={fileList}
         beforeUpload={(next) => {
           if (next.size > 10 * 1024 * 1024) {
-            message.error('文件过大，最大 10MB');
+            message.error(liveText(() => t("文件过大，最大 10MB")));
             return false;
           }
           setFile(next);
@@ -55,8 +57,8 @@ export default function ResumeUploadModal({ open, uploading, onSubmit, onClose }
         onRemove={() => { setFile(null); return true; }}
       >
         <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-        <p className="ant-upload-text">将 PDF 简历拖到这里</p>
-        <p className="ant-upload-hint">仅支持 .pdf · 单文件最大 10MB</p>
+        <p className="ant-upload-text">{t("将 PDF 简历拖到这里")}</p>
+        <p className="ant-upload-hint">{t("仅支持 .pdf · 单文件最大 10MB")}</p>
       </Upload.Dragger>
     </Modal>
   );

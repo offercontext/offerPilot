@@ -204,7 +204,8 @@ describe('AppShell source contract', () => {
   });
 
   it('keeps UI and Pilot negotiation drafts separate inside the shared ApplicationDetail owner', () => {
-    expect(source).toContain('offerNegotiationPilotDraftsRef');
+    expect(source).toContain('useOfferNegotiationOwnerDrafts');
+    expect(source).toContain('pilotDrafts: offerNegotiationPilotDrafts');
     expect(source).toContain("offerNegotiationEntryPoint === 'pilot'");
     expect(source).toContain('offerNegotiationDrafts={');
     expect(source).toContain('onOfferNegotiationDraftChange={');
@@ -217,7 +218,7 @@ describe('AppShell source contract', () => {
     expect(source).toContain('buildPilotPageContext({');
     expect(source).toContain('selectedApplication: selectedApp');
     expect(source).toContain('coachedOffer');
-    expect(source).toContain('[view, selectedApp, coachedOffer]');
+    expect(source).toContain('[view, selectedApp, coachedOffer, getLocale()]');
   });
 
   it('routes page context through one stable Pilot owner', () => {
@@ -265,7 +266,7 @@ describe('AppShell source contract', () => {
   it('keeps the stable Pilot owner scope and focus target while presentations change', () => {
     expect(source).toContain('data-pilot-surface-host');
     expect(source).toContain(
-      "'[data-pilot-surface-host] [role=\"group\"][aria-label=\"AI 修改提议\"]'",
+      "'[data-pilot-surface-host] [data-pilot-proposal]'",
     );
     expect(source).toContain('offerId={coachOfferId}');
     expect(source).not.toContain("offerId={view === 'pilot' ? undefined : coachOfferId}");
@@ -378,9 +379,9 @@ describe('AppShell source contract', () => {
       source.indexOf('return (', source.indexOf('let topBarPrimaryAction')),
     );
     for (const label of ['添加投递', '开始面试练习', '开始刷题', '上传简历', '添加经历']) {
-      expect(topBarSource).toContain(`label: '${label}'`);
+      expect(topBarSource).toContain(`label: t("${label}")`);
     }
-    expect(topBarSource).toContain("? '添加投递' : '录入 Offer'");
+    expect(topBarSource).toContain('? t("添加投递") : t("录入 Offer")');
     expect(topBarSource).toContain('setResumeUploadRequestToken((token) => token + 1)');
     expect(topBarSource).toContain("['dashboard', 'reminders', 'board', 'applications-list']");
     expect(topBarSource).not.toContain("'calendar', 'board'");
@@ -481,4 +482,15 @@ describe('AppShell source contract', () => {
       'onOpenOfferNegotiationPilot={startOfferNegotiationPilotChat}',
     );
   });
+});
+
+it('routes practice and materials through canonical owners without parallel libraries or implicit targets', () => {
+  expect(source.match(/<ExperienceMaterialsView\b/g)).toHaveLength(1);
+  expect(source).not.toContain('interviewStoryLibraryOpen');
+  expect(source).not.toContain('weeklyTarget: 6');
+  expect(source).toContain('initialMode={interviewPracticeMode}');
+  const practice = source.slice(source.indexOf('  const openFreePractice ='), source.indexOf('  const updateReviewReadinessDraft'));
+  expect(practice.indexOf("result.kind !== 'launched'")).toBeLessThan(practice.indexOf('setInterviewPracticeMode(mode)'));
+  expect(source).toContain("navigateToView('reviews')");
+  expect(source).toContain('REMINDER_CANDIDATES_QUERY_KEY');
 });

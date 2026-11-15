@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Button } from 'antd';
 import { PlusOutlined, SearchOutlined, SettingOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -22,13 +23,14 @@ export interface TopBarProps {
 
 function greeting(): string {
   const h = dayjs().hour();
-  if (h < 6) return '夜深了，注意休息';
-  if (h < 12) return '早上好，继续加油';
-  if (h < 18) return '下午好，保持节奏';
-  return '晚上好，今天辛苦了';
+  if (h < 6) return t("夜深了，注意休息");
+  if (h < 12) return t("早上好，继续加油");
+  if (h < 18) return t("下午好，保持节奏");
+  return t("晚上好，今天辛苦了");
 }
 
 export default function TopBar({ primaryAction, onSearch, onOpenSettings, summary, compact = false }: TopBarProps) {
+  useLocale();
   return (
     <header className={`${styles.topbar} ${compact ? styles.compact : ''} op-topbar`}>
       {!compact ? <div className={styles.greetingBlock}>
@@ -37,18 +39,18 @@ export default function TopBar({ primaryAction, onSearch, onOpenSettings, summar
         </div>
         <div className={styles.date}>
           {summary ? `${summary} · ` : ''}
-          {dayjs().format('YYYY 年 M 月 D 日')}
+          {dayjs().format(t("YYYY 年 M 月 D 日"))}
         </div>
       </div> : null}
       <div className={`${styles.actions} op-topbar-actions`}>
-        <Button className={styles.actionButton} icon={<SearchOutlined />} onClick={onSearch}>
-          快速打开 <span style={{ opacity: 0.6, marginLeft: 4 }}>{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'}</span>
+        <Button className={styles.actionButton} icon={<SearchOutlined />} onClick={onSearch} aria-label={t("快速打开")}>
+          {t("快速打开")}<span style={{ opacity: 0.6, marginLeft: 4 }}>{typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘ K' : 'Ctrl K'}</span>
         </Button>
         <Button
           className={styles.actionButton}
           icon={<SettingOutlined />}
           onClick={onOpenSettings}
-          aria-label="设置"
+          aria-label={t("设置")}
         />
         {primaryAction ? (
           <Button
@@ -62,6 +64,7 @@ export default function TopBar({ primaryAction, onSearch, onOpenSettings, summar
             {primaryAction.label}
           </Button>
         ) : null}
+        <div className={styles.fallbackDock} data-pilot-mascot-global-dock />
       </div>
     </header>
   );

@@ -1,0 +1,5 @@
+Noto Sans SC, SIL Open Font License 1.1 (see OFL.txt).
+Source: https://github.com/google/fonts/tree/main/ofl/notosanssc
+Downloaded 2026-11-11: https://raw.githubusercontent.com/google/fonts/main/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf
+Source SHA-256: a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da
+Bundled font is the static wght=400 instance generated with FontTools varLib.instancer (4.68.0), without subsetting. No runtime download or system font dependency for PDF export.

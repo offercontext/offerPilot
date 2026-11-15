@@ -1,0 +1,85 @@
+name: Image vision bounded real-model acceptance
+on:
+  push:
+    branches: [feat/20261013-pilot-image-messages]
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: offerpilot-image-vision-20261023
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - run: uv sync --frozen
+      - name: Install Chinese fixture font without provider credentials
+        run: |
+          if [ ! -f /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc ]; then
+            timeout 90s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update
+            timeout 180s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y --no-install-recommends fonts-wqy-zenhei
+          fi
+      - run: uv run --frozen pytest -q tests/test_image_vision_acceptance.py tests/test_image_vision_admission.py
+      - run: uv run --frozen ruff check scripts/image_vision_acceptance.py scripts/image_vision_admission.py tests/test_image_vision_acceptance.py tests/test_image_vision_admission.py
+  real-vision:
+    needs: offline
+    if: >-
+      github.repository == 'offercontext/offerPilot' &&
+      github.ref == 'refs/heads/feat/20261013-pilot-image-messages' &&
+      github.run_attempt == 1 &&
+      contains(github.event.head_commit.message, '[image-vision-live]')
+    environment: offerpilot-image-vision-20261023
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src:.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
+        with:
+          version: '0.12.19'
+      - name: Install frozen dependencies before exposing the dedicated secret
+        run: uv sync --frozen
+      - name: Install Chinese fixture font without provider credentials
+        run: |
+          if [ ! -f /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc ]; then
+            timeout 90s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update
+            timeout 180s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y --no-install-recommends fonts-wqy-zenhei
+          fi
+      - name: Reserve against the twenty-call task limit from complete Actions history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/image_vision_admission.py
+      - name: Two targeted history requests, no retries or fallback
+        env:
+          OFFERPILOT_IMAGE_DEEPSEEK_API_KEY: ${{ secrets.OFFERPILOT_IMAGE_DEEPSEEK_API_KEY }}
+        run: >-
+          uv run --frozen python scripts/image_vision_acceptance.py --execute --history-only
+          --output artifacts/image-vision/report.json
+      - name: Retain synthetic results only, never credentials or raw transport
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: image-vision-${{ github.sha }}
+          path: artifacts/image-vision/report.json
+          if-no-files-found: warn
+          retention-days: 14

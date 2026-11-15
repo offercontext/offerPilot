@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   createInterviewPreparationProposal,
@@ -101,12 +102,13 @@ function safeErrorMessage(error: unknown): string {
 
 function aiDisclosureCopy(hasSelectedReadinessFeedback: boolean): string {
   const providerInputs = hasSelectedReadinessFeedback
-    ? 'JD、所选简历、已确认 Knowledge Evidence，以及所选复盘准备重点会发送给 AI。所选复盘准备重点包含准备重点正文、用户备注、证据片段和来源轮次/类型'
-    : '仅 JD、所选简历和已确认 Knowledge Evidence 会发送给 AI';
-  return `${providerInputs}；用户断言仅保存于本次快照，不会发送给 AI，也不作为建议依据。`;
+    ? t("JD、所选简历、已确认 Knowledge Evidence，以及所选复盘准备重点会发送给 AI。所选复盘准备重点包含准备重点正文、用户备注、证据片段和来源轮次/类型")
+    : t("仅 JD、所选简历和已确认 Knowledge Evidence 会发送给 AI");
+  return t("{inputs}；用户断言仅保存于本次快照，不会发送给 AI，也不作为建议依据。", { inputs: providerInputs });
 }
 
 function Evidence({ item }: { item: InterviewPreparationItem }) {
+  useLocale();
   return (
     <div>
       {item.evidence_refs.map((ref, index) => (
@@ -134,13 +136,18 @@ export default function InterviewPreparationProposalDrawer({
   onOpenPractice,
   ownerGeneration = 1,
 }: Props) {
+  useLocale();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [proposal, setProposal] = useState<InterviewPreparationProposal | null>(initialProposal);
   const [attemptKey, setAttemptKey] = useState(() => draft?.attemptState.key ?? attemptState?.key ?? newAttemptKey());
   const [resumeId, setResumeId] = useState(draft?.resumeId ?? context.resumeId);
-  const [jdText, setJdTextState] = useState(draft?.jdText ?? context.jdText);
-  const [jdVersionId] = useState<number | null>(draft?.jdVersionId ?? context.jdVersionId ?? null);
+  const [{ jdText, jdVersionId }, setJdSource] = useState(() => ({
+    jdText: draft?.jdText ?? context.jdText,
+    // A draft's text and version are one source, including legacy/unknown
+    // drafts with no version. Never pair that text with the current version.
+    jdVersionId: draft ? draft.jdVersionId ?? null : context.jdVersionId ?? null,
+  }));
   const [assertionsText, setAssertionsText] = useState(draft?.assertionsText ?? context.userAssertions.join('\n'));
   const [history, setHistory] = useState<InterviewPreparationProposal[]>([]);
   const [selectedEvidenceIds, setSelectedEvidenceIds] = useState<string[]>(() =>
@@ -175,6 +182,14 @@ export default function InterviewPreparationProposalDrawer({
   const isSafeEmpty = proposal?.proposal_status === 'safe_empty';
 
   useEffect(() => {
+    // The owner may mount before its current-JD query resolves. Fill only a
+    // missing source; selected versions and unknown attempts stay frozen.
+    if (!open || busy || resultUnknown || jdText !== '' || jdVersionId !== null) return;
+    if (!context.jdText.trim() || !context.jdVersionId) return;
+    setJdSource({ jdText: context.jdText, jdVersionId: context.jdVersionId });
+  }, [busy, context.jdText, context.jdVersionId, jdText, jdVersionId, open, resultUnknown]);
+
+  useEffect(() => {
     if (!open) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const frame = window.requestAnimationFrame(() => headingRef.current?.focus());
@@ -185,7 +200,7 @@ export default function InterviewPreparationProposalDrawer({
     };
   }, [context.applicationId, context.eventId, open]);
   const setJdText = (value: string) => {
-    if (!jdVersionId) setJdTextState(value);
+    if (!jdVersionId) setJdSource({ jdText: value, jdVersionId: null });
   };
   const input = useMemo<CreateInterviewPreparationProposalInput>(() => {
     const base = {
@@ -264,7 +279,7 @@ export default function InterviewPreparationProposalDrawer({
       return;
     }
     onDraftChange({
-      attemptState: { key: attemptKey, result_unknown: attemptState?.result_unknown ?? false },
+      attemptState: { key: attemptKey, result_unknown: resultUnknown },
       resumeId,
       jdText,
       jdVersionId,
@@ -274,28 +289,33 @@ export default function InterviewPreparationProposalDrawer({
         ? { readinessFeedbackSelection: { present: true as const, orderedVersionIds: [...selectedReadinessVersionIds] } }
         : {}),
     });
-  }, [assertionsText, attemptKey, attemptState?.result_unknown, input.knowledge_selections, jdText, jdVersionId, onDraftChange, open, readinessSelectionPresent, resumeId, selectedReadinessVersionIds]);
+  }, [assertionsText, attemptKey, input.knowledge_selections, jdText, jdVersionId, onDraftChange, open, readinessSelectionPresent, resultUnknown, resumeId, selectedReadinessVersionIds]);
 
   if (!open) return null;
 
   const generate = async () => {
+    // 业务地图：docs/architecture/code-map/interview.md（准备建议）。
+    // unknown/pending 要带原 key 和冻结草稿恢复，不能把未确认结果当成新生成。
+    // 回归入口：InterviewPreparationProposalDrawer.interaction.test.tsx。
     if (!hasInput || busy) return;
     const frozenUnknownDraft = resultUnknown
       ? activeAttemptDraftRef.current ?? draft ?? null
       : null;
+    // 字段缺省（V1）与显式空选择（V2）是不同契约；恢复时不能被晚到的选项查询升级。
     const selectionPresentForRequest = frozenUnknownDraft
       ? frozenUnknownDraft.readinessFeedbackSelection?.present === true
       : readinessSelectionPresent || readinessContractReadyRef.current;
     const selectionForRequest = frozenUnknownDraft?.readinessFeedbackSelection?.orderedVersionIds
       ?? selectedReadinessVersionIds;
-    if (!window.confirm(`${aiDisclosureCopy(
+    if (!window.confirm(t("{disclosure}是否继续？", { disclosure: aiDisclosureCopy(
       selectionPresentForRequest && selectionForRequest.length > 0,
-    )}是否继续？`)) return;
+    ) }))) return;
     const requestInput = selectionPresentForRequest
       ? { ...input, readiness_feedback_version_ids: [...selectionForRequest] }
       : Object.fromEntries(Object.entries(input).filter(([key]) => key !== 'readiness_feedback_version_ids')) as CreateInterviewPreparationProposalInput;
     const requestKey = attemptKey;
     const requestGeneration = activeAttemptGenerationRef.current + 1;
+    // key 标识后端尝试，generation 标识本次组件请求；同 key 的重试也要隔离迟到响应。
     activeAttemptGenerationRef.current = requestGeneration;
     activeAttemptKeyRef.current = requestKey;
     const requestDraft: InterviewPreparationDraft = {
@@ -317,6 +337,7 @@ export default function InterviewPreparationProposalDrawer({
     suppressDraftPersistence.current = false;
     try {
       const result = await createInterviewPreparationProposal(requestInput);
+      // 关闭、卸载或已发起新一代请求后，旧响应不得清掉新草稿或替换当前结果。
       if (
         !mountedRef.current
         || activeAttemptGenerationRef.current !== requestGeneration
@@ -343,6 +364,7 @@ export default function InterviewPreparationProposalDrawer({
         || activeAttemptKeyRef.current !== requestKey
       ) return;
       const typedError = caught instanceof InterviewPreparationProposalError ? caught : null;
+      // 网络/Provider/5xx 无法证明后端没有受理，保留原尝试供重试；确定失败才清理。
       const unknown =
         !typedError
         || typedError.code === null
@@ -375,6 +397,7 @@ export default function InterviewPreparationProposalDrawer({
   };
 
   const handleClose = () => {
+    // 关闭抽屉只放弃本次 UI 响应所有权，不代表后端生成已取消；把在途草稿保存为未知。
     const key = activeAttemptKeyRef.current;
     if (key) {
       activeAttemptGenerationRef.current += 1;
@@ -394,11 +417,11 @@ export default function InterviewPreparationProposalDrawer({
   };
 
   return (
-    <section aria-label="面试准备建议" className={`${workflowStyles.surface} ${workflowStyles.stack}`}>
+    <section aria-label={t("面试准备建议")} className={`${workflowStyles.surface} ${workflowStyles.stack}`}>
       <header className={workflowStyles.sectionHeader}>
         <div>
-          <h2 ref={headingRef} tabIndex={-1}>面试准备建议</h2>
-          <p className={workflowStyles.mutedText}>围绕当前面试事件，生成可审阅、可引用的准备建议。</p>
+          <h2 ref={headingRef} tabIndex={-1}>{t("面试准备建议")}</h2>
+          <p className={workflowStyles.mutedText}>{t("围绕当前面试事件，生成可审阅、可引用的准备建议。")}</p>
           <p className={workflowStyles.mutedText}>{aiDisclosureCopy(
             readinessSelectionPresent && selectedReadinessVersionIds.length > 0,
           )}</p>
@@ -407,22 +430,22 @@ export default function InterviewPreparationProposalDrawer({
       <div data-testid="interview-preparation-source-panel" className={workflowStyles.section}>
       {jdText.trim() && jdVersionId && (
         <div className={workflowStyles.metaRow}>
-          {jdText.trim() ? <SourceStateTag state="current" detail="本次输入的岗位描述" /> : null}
-          {resumeId > 0 ? <SourceStateTag state="current" detail="本次选定的简历" /> : null}
+          {jdText.trim() ? <SourceStateTag state="current" detail={t("本次输入的岗位描述")} /> : null}
+          {resumeId > 0 ? <SourceStateTag state="current" detail={t("本次选定的简历")} /> : null}
         </div>
       )}
       {resultUnknown && (
-        <p role="status">上次请求结果待确认，请使用原尝试重试；请不要修改输入。</p>
+        <p role="status">{t("上次请求结果待确认，请使用原尝试重试；请不要修改输入。")}</p>
       )}
       <dl>
-        <dt>岗位描述</dt><dd>{jdText || '尚未填写'}</dd>
-        <dt>选定简历</dt><dd>{resumeId || '尚未选择'}</dd>
-        <dt>已确认 Knowledge Evidence</dt><dd>{selectedEvidenceIds.length} 条</dd>
+        <dt>{t("岗位描述")}</dt><dd>{jdText || t("尚未填写")}</dd>
+        <dt>{t("选定简历")}</dt><dd>{resumeId || t("尚未选择")}</dd>
+        <dt>{t("已确认 Knowledge Evidence")}</dt><dd>{selectedEvidenceIds.length} {t("条")}</dd>
       </dl>
       </div>
       {knowledgeOptions.length > 0 && (
         <fieldset className={workflowStyles.section}>
-          <legend>选择已确认 Knowledge Evidence</legend>
+          <legend>{t("选择已确认 Knowledge Evidence")}</legend>
           {knowledgeOptions.map((option) => (
             <label key={option.evidence_id} className="op-long-text">
               <input
@@ -440,11 +463,10 @@ export default function InterviewPreparationProposalDrawer({
         </fieldset>
       )}
       <label className={workflowStyles.stack}>
-        选择简历
-        <select data-testid="interview-preparation-resume-select" className={workflowStyles.nativeControl} disabled={resultUnknown} value={resumeId} onChange={(event) => setResumeId(Number(event.target.value))}>
-          <option value={0}>请选择简历</option>
+        {t("选择简历")}<select data-testid="interview-preparation-resume-select" className={workflowStyles.nativeControl} disabled={resultUnknown} value={resumeId} onChange={(event) => setResumeId(Number(event.target.value))}>
+          <option value={0}>{t("请选择简历")}</option>
           {resumeOptions.map((resume) => (
-            <option key={resume.id} value={resume.id}>{resume.title || resume.name || `简历 ${resume.id}`}</option>
+            <option key={resume.id} value={resume.id}>{resume.title || resume.name || t("简历 {resumeId}", { resumeId: resume.id })}</option>
           ))}
         </select>
       </label>
@@ -464,28 +486,26 @@ export default function InterviewPreparationProposalDrawer({
         frozen={busy || resultUnknown}
       />
       <label className={workflowStyles.stack}>
-        粘贴 JD
-        <textarea
+        {t("粘贴 JD")}<textarea
           className={workflowStyles.nativeControl}
           disabled={resultUnknown}
           readOnly
           aria-readonly="true"
           value={jdText}
           onChange={(event) => setJdText(event.target.value)}
-          placeholder="仅粘贴岗位描述文本，不会抓取链接。"
+          placeholder={t("仅粘贴岗位描述文本，不会抓取链接。")}
         />
       </label>
       <label className={workflowStyles.stack}>
-        可选用户断言（不会发送给 AI）
-        <textarea className={workflowStyles.nativeControl} disabled={resultUnknown} value={assertionsText} onChange={(event) => setAssertionsText(event.target.value)} placeholder="每行一条本次准备的补充信息" />
+        {t("可选用户断言（不会发送给 AI）")}<textarea className={workflowStyles.nativeControl} disabled={resultUnknown} value={assertionsText} onChange={(event) => setAssertionsText(event.target.value)} placeholder={t("每行一条本次准备的补充信息")} />
       </label>
       {history.length > 0 && (
-        <aside aria-label="历史面试准备建议" className={workflowStyles.section}>
-          <h3>历史面试准备建议</h3>
+        <aside aria-label={t("历史面试准备建议")} className={workflowStyles.section}>
+          <h3>{t("历史面试准备建议")}</h3>
           {history.map((item) => (
             <div key={item.id} className={workflowStyles.listRow}>
               {item.source_status === 'source_changed' && (
-                <p role="status">历史资料来源已变化，本提案仍保持冻结，可查看但不作为当前来源。</p>
+                <p role="status">{t("历史资料来源已变化，本提案仍保持冻结，可查看但不作为当前来源。")}</p>
               )}
               <button
                 type="button"
@@ -496,17 +516,17 @@ export default function InterviewPreparationProposalDrawer({
                     .catch((caught) => setError(safeErrorMessage(caught)));
                 }}
               >
-                查看 {item.created_at}
+                {t("查看")}{" "}{item.created_at}
               </button>
             </div>
           ))}
         </aside>
       )}
-      {error && <p role="alert" className="op-inline-status" data-tone="danger">{error}</p>}
-      {isSafeEmpty && <p className="op-empty-state">暂无可验证的面试准备建议</p>}
+      {error && <p role="alert" className="op-inline-status" data-tone="danger">{t(error)}</p>}
+      {isSafeEmpty && <p className="op-empty-state">{t("暂无可验证的面试准备建议")}</p>}
       {proposal && !isSafeEmpty && SECTION_LABELS.map(([field, label]) => (
         <section key={field} className={workflowStyles.section}>
-          <h3>{label}</h3>
+          <h3>{t(label)}</h3>
           {proposal.proposal[field].map((item) => (
             <article key={item.id} className={workflowStyles.evidenceBlock}>
               <p>{item.text}</p>
@@ -517,9 +537,9 @@ export default function InterviewPreparationProposalDrawer({
       ))}
       <div className={workflowStyles.actionGroup}>
         <button data-testid="interview-preparation-generate" className={`${workflowStyles.nativeButton} ${workflowStyles.nativeButtonPrimary}`} type="button" disabled={!hasInput || busy} onClick={() => void generate()}>
-          {busy ? '正在生成…' : resultUnknown ? '使用原尝试重试' : '生成面试准备建议'}
+          {busy ? t("正在生成…") : resultUnknown ? t("使用原尝试重试") : t("生成面试准备建议")}
         </button>
-        <button className={workflowStyles.nativeButton} type="button" onClick={handleClose}>关闭</button>
+        <button className={workflowStyles.nativeButton} type="button" onClick={handleClose}>{t("关闭")}</button>
       </div>
     </section>
   );

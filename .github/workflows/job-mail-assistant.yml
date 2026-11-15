@@ -1,0 +1,193 @@
+name: Job mail assistant synthetic acceptance
+on:
+  push:
+    branches: [master, feat/20261009-job-mail-assistant]
+  pull_request:
+    branches: [master]
+  # Always report the existing required checks. Scope expensive steps inside
+  # the jobs; workflow-level path filters can leave required checks pending.
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: job-mail-assistant-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  synthetic-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      native_lock: ${{ steps.scope.outputs.native_lock }}
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Complete PR base or push before/after range, including deletions.
+          persist-credentials: false
+      - name: Determine mail-specific work from the complete change range
+        id: scope
+        run: python scripts/job-mail-ci-scope.py
+      - name: Require explicit scope decisions before conditional work
+        shell: python {0}
+        env:
+          BROWSER_REQUIRED: ${{ steps.scope.outputs.browser }}
+          NATIVE_REQUIRED: ${{ steps.scope.outputs.native_lock }}
+        run: |
+          import os
+          import sys
+          if any(os.environ.get(key) not in ('true', 'false')
+                 for key in ('BROWSER_REQUIRED', 'NATIVE_REQUIRED')):
+              sys.exit('Missing or invalid mail CI scope output')
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.8.22'
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+      - uses: actions/setup-python@v5
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install locked dependencies
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+        run: |
+          uv sync --frozen
+          npm ci --prefix web
+      # Unit tests, ruff, mypy and frontend unit tests belong to the full
+      # desktop-windows.yml gate. Build is still needed to serve the real UI.
+      - name: Build browser fixture UI and test browser wait helper
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+        run: |
+          npm run build --prefix web
+          node --test scripts/job-mail-browser-wait.test.mjs
+      - name: Install isolated browser harness
+        id: browser-harness
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+          npm install --prefix "$RUNNER_TEMP/mail-browser" playwright-core@1.55.1
+      - name: Existing synthetic browser regression
+        if: ${{ steps.scope.outputs.browser == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/job-mail-browser
+          export OFFERPILOT_MAIL_FIXTURE_DATA="$RUNNER_TEMP/job-mail-fixture"
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/mail-browser/node_modules/playwright-core/index.mjs"
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          export MAIL_EVIDENCE_DIR="$GITHUB_WORKSPACE/artifacts/job-mail-browser"
+          .venv/bin/python tests/fixtures/job_mail_app.py > artifacts/job-mail-browser/server.log 2>&1 &
+          server=$!
+          cleanup() {
+            result=$?
+            trap - EXIT
+            kill "$server" 2>/dev/null || true
+            for i in $(seq 1 20); do
+              if ! kill -0 "$server" 2>/dev/null; then
+                wait "$server" 2>/dev/null || true
+                exit "$result"
+              fi
+              sleep 1
+            done
+            echo "This fixture PID did not stop within 20 seconds" >&2
+            exit 1
+          }
+          trap cleanup EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:38091/api/job-mail/status >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:38091/api/job-mail/status >/dev/null
+          node scripts/job-mail-browser-smoke.mjs
+      - name: Synthetic scheduler browser acceptance and screenshots
+        if: ${{ !cancelled() && steps.scope.outputs.browser == 'true' && steps.browser-harness.outcome == 'success' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/job-mail-scheduler
+          export OFFERPILOT_MAIL_FIXTURE_DATA="$RUNNER_TEMP/job-mail-scheduler-fixture"
+          export PLAYWRIGHT_MODULE="$RUNNER_TEMP/mail-browser/node_modules/playwright-core/index.mjs"
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          export MAIL_EVIDENCE_DIR="$GITHUB_WORKSPACE/artifacts/job-mail-scheduler"
+          .venv/bin/python tests/fixtures/job_mail_scheduler_app.py > artifacts/job-mail-scheduler/server.log 2>&1 &
+          server=$!
+          cleanup() {
+            result=$?
+            trap - EXIT
+            kill "$server" 2>/dev/null || true
+            for i in $(seq 1 20); do
+              if ! kill -0 "$server" 2>/dev/null; then
+                wait "$server" 2>/dev/null || true
+                exit "$result"
+              fi
+              sleep 1
+            done
+            echo "This fixture PID did not stop within 20 seconds" >&2
+            exit 1
+          }
+          trap cleanup EXIT
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:38091/api/job-mail/status >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:38091/api/job-mail/status >/dev/null
+          node scripts/job-mail-scheduler-browser.mjs
+      - name: Preserve synthetic evidence only
+        if: ${{ always() && steps.scope.outputs.browser == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: job-mail-synthetic-evidence-${{ github.sha }}
+          path: |
+            artifacts/job-mail-browser/*.png
+            artifacts/job-mail-browser/result.json
+            artifacts/job-mail-scheduler/*.png
+            artifacts/job-mail-scheduler/scheduler-result.json
+          if-no-files-found: ignore
+          retention-days: 7
+  windows-native-lock:
+    needs: synthetic-acceptance
+    if: ${{ always() }}
+    # Irrelevant changes still get a real successful check without a Windows VM.
+    runs-on: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' && 'windows-latest' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    env:
+      PYTHONPATH: src
+    steps:
+      - name: Require valid scope and successful upstream check
+        shell: python {0}
+        env:
+          UPSTREAM_RESULT: ${{ needs.synthetic-acceptance.result }}
+          NATIVE_REQUIRED: ${{ needs.synthetic-acceptance.outputs.native_lock }}
+        run: |
+          import os
+          import sys
+          result = os.environ.get('UPSTREAM_RESULT')
+          required = os.environ.get('NATIVE_REQUIRED')
+          if result != 'success' or required not in ('true', 'false'):
+              sys.exit('Mail scope/browser check did not succeed with a valid scope')
+          print('Native lock required' if required == 'true' else 'Native lock not required for this change')
+      - uses: actions/checkout@v4
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.8.22'
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
+      - name: Install locked test and offline-guard dependencies
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
+        run: uv sync --frozen
+      - name: Verify native lock exclusion and crash release
+        if: ${{ needs.synthetic-acceptance.outputs.native_lock == 'true' }}
+        run: uv run --frozen pytest --noconftest -q tests/test_job_mail_process_lock.py

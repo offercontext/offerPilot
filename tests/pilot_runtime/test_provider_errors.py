@@ -1,6 +1,13 @@
 from offerpilot.config import Config
 from offerpilot.context_projector.contracts import ProjectionError
 from offerpilot.pilot_runtime.composition import _provider_error_message
+from offerpilot.image_contracts import ImageInputError
+
+
+def test_image_capability_and_budget_errors_explain_the_required_action() -> None:
+    assert '切换模型' in _provider_error_message(ImageInputError('provider_vision_required'), Config())
+    assert '裁剪' in _provider_error_message(ImageInputError('image_context_budget_exceeded'), Config())
+    assert '重新添加' in _provider_error_message(ImageInputError('image_unavailable'), Config())
 
 
 def test_budget_projection_error_points_to_explicit_ai_budget_settings() -> None:

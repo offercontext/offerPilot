@@ -265,3 +265,15 @@ describe('deriveMissionControl', () => {
     expect(summary.headline).toContain('添加第一条投递');
   });
 });
+
+
+describe('user-selected weekly goals', () => {
+  it.each([undefined, 0])('does not invent a goal when absent or paused (%s)', (weeklyTarget) => {
+    const summary = deriveMissionControl({ apps: [app({ id: 1 })], events: [], offers: [], materialKits: [kit(1, 'ready')], insights: [], healthLabel: 'healthy', weeklyTarget, now });
+    const applications = summary.metrics.find((metric) => metric.kind === 'applications')!;
+    expect(applications.target).toBeUndefined();
+    expect(applications.state).toBe('on_track');
+    expect(applications.reason).not.toContain('目标');
+    expect(summary.metrics.find((metric) => metric.kind === 'followups')!.target).toBeUndefined();
+  });
+});

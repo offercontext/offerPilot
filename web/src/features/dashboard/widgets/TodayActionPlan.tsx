@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Empty, Tag } from 'antd';
 import { FireOutlined, FlagOutlined, ToolOutlined } from '@ant-design/icons';
 import type { MissionActionGroups } from '@/lib/missionControl';
@@ -11,9 +12,9 @@ interface Props {
 }
 
 const GROUP_META = [
-  { key: 'urgent', title: '紧急处理', icon: <FireOutlined />, tag: 'P0' },
-  { key: 'prepare', title: '准备推进', icon: <ToolOutlined />, tag: '准备' },
-  { key: 'momentum', title: '保持节奏', icon: <FlagOutlined />, tag: '节奏' },
+  { key: 'urgent', get title() { return t("紧急处理"); }, icon: <FireOutlined />, tag: 'P0' },
+  { key: 'prepare', get title() { return t("准备推进"); }, icon: <ToolOutlined />, get tag() { return t("准备"); } },
+  { key: 'momentum', get title() { return t("保持节奏"); }, icon: <FlagOutlined />, get tag() { return t("节奏"); } },
 ] as const;
 
 function priorityLabel(item: PipelineInsight): string {
@@ -25,6 +26,7 @@ function evidenceHint(item: PipelineInsight): string {
 }
 
 export default function TodayActionPlan({ groups, onAction, onSeeAll }: Props) {
+  useLocale();
   const total = groups.urgent.length + groups.prepare.length + groups.momentum.length;
 
   return (
@@ -33,18 +35,16 @@ export default function TodayActionPlan({ groups, onAction, onSeeAll }: Props) {
         <div>
           <div className={styles.commandEyebrow}>Today</div>
           <h2 id="today-action-plan-title" className={styles.sectionHeading}>
-            今日行动计划
-          </h2>
+            {t("今日行动计划")}</h2>
         </div>
         <button type="button" className={styles.textButton} onClick={onSeeAll}>
-          查看全部
-        </button>
+          {t("查看全部")}</button>
       </div>
 
       {total === 0 ? (
         <Empty
           className={styles.compactEmpty}
-          description="暂无需要立即处理的行动。可以新增投递、整理材料，或进行一轮题目复习。"
+          description={t("暂无需要立即处理的行动。可以新增投递、整理材料，或进行一轮题目复习。")}
         />
       ) : (
         <div className={styles.actionPlanGroups}>

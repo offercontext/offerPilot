@@ -1,0 +1,61 @@
+name: Image messages synthetic Chromium QA
+on:
+  push:
+    branches: [feat/20261013-pilot-image-messages]
+    paths:
+      - 'web/src/**'
+      - 'web/tests/image-messages/**'
+      - 'web/tests/simplification/fixture-api.mjs'
+      - 'web/tests/localization/fixture-api.mjs'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - '.github/workflows/image-messages.yml'
+permissions:
+  contents: read
+concurrency:
+  group: image-messages-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  synthetic-chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - name: Build production UI and verify synthetic fixture
+        run: |
+          npm run build --prefix web
+          node web/tests/image-messages/fixture-contract.mjs
+      - name: Verify preinstalled Chrome and Chinese fonts
+        timeout-minutes: 5
+        run: |
+          chrome="$(command -v google-chrome || command -v chromium)"
+          test -n "$chrome" && test -x "$chrome"
+          "$chrome" --version
+          echo "CHROMIUM_EXECUTABLE=$chrome" >> "$GITHUB_ENV"
+          if [ -z "$(fc-list :lang=zh family)" ]; then
+            # Avoid a full browser dependency upgrade and the 61 MB Noto CJK package.
+            timeout 90s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 update
+            timeout 180s sudo apt-get -o Acquire::Retries=1 -o Acquire::http::Timeout=20 install -y --no-install-recommends fonts-wqy-zenhei
+          fi
+          test -n "$(fc-list :lang=zh family)"
+          fc-list :lang=zh family
+      - name: Run isolated image interactions without backend or model access
+        run: node web/tests/image-messages/run.mjs
+        env:
+          IMAGE_EVIDENCE_DIR: ${{ github.workspace }}/artifacts/image-messages
+      - name: Upload actual screenshots, traces and JSON report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-messages-${{ github.sha }}
+          path: artifacts/image-messages
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,30 @@
+const catalog: Record<string, string> = {
+  "接受图片输入": "Accept image input",
+  "确认当前模型与接口支持原生图片输入后开启；修改模型或接口后需重新确认。": "Enable after confirming native image support for this model and endpoint. Confirm again after changing either.",
+  "图片直接发送给当前默认模型；包含图片时，只使用同样开启图片输入的备用模型。": "Images are sent directly to the default model. Image requests only use fallback models with image input enabled.",
+  "测试图片识别（会产生费用）": "Test image recognition (charges apply)",
+  "图片识别通过": "Image recognition passed",
+  "图片识别失败": "Image recognition failed",
+  "图片测试失败，请检查配置后重试。": "Image test failed. Check the configuration and retry.",
+  "消息图片": "Message images",
+  "待发送图片": "Images to send",
+  "上传中…": "Uploading…",
+  "移除": "Remove",
+  "添加图片": "Add images",
+  "选择、粘贴或拖入图片（最多 4 张）": "Select, paste, or drop images (up to 4)",
+  "当前暂不能添加图片，请先完成任务或确认操作。": "Images cannot be added right now. Complete the task or confirmation first.",
+  "松开，添加到这条消息": "Drop to add to this message",
+  "图片就绪后即可发送": "Send when images are ready",
+  "粘贴或拖入图片 · 最多 4 张": "Paste or drop images · Up to 4",
+  "重新加载图片": "Reload image",
+  "加载图片…": "Loading image…",
+  "再次引用": "Use again",
+  "正在检查图片输入能力": "Checking image input support",
+  "图片 {index}": "Image {index}",
+  "移除图片 {index}：{name}": "Remove image {index}: {name}",
+  "重试图片 {index}": "Retry image {index}",
+  "{count} / 4 张 · 可直接发送图片": "{count} / 4 images · Ready to send",
+  "{label}，点击放大": "{label}, click to enlarge"
+};
+
+export default catalog;

@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Tag } from 'antd';
 import { ArrowLeftOutlined, CheckCircleOutlined, FileTextOutlined, MenuOutlined, SendOutlined } from '@ant-design/icons';
@@ -127,8 +128,8 @@ function terminalFailureOf(decision: RecoveryDecision, fallbackAttemptId: number
 }
 
 function questionLabel(turn: TimelineEntry): string {
-  if (turn.question_kind === 'follow_up') return '追问';
-  return '新话题';
+  if (turn.question_kind === 'follow_up') return t("追问");
+  return t("新话题");
 }
 
 function previewText(value: string, length = 180): string {
@@ -200,6 +201,7 @@ function readStudioStartRecovery(storageKey: string): StudioStartRecovery | null
 }
 
 export default function InterviewStudio({ context, onClose, onActivityChange, onToggleHaru, onEvidenceVisibilityChange }: Props) {
+  useLocale();
   const studioRef = useRef<HTMLDivElement>(null);
   const questionHeadingRef = useRef<HTMLHeadingElement>(null);
   const mobileWorkspaceTriggerRef = useRef<HTMLButtonElement>(null);
@@ -700,7 +702,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
       || voiceDirty
       || state?.phase === 'result_unknown'
       || ['preflight', 'reading_question', 'waiting_for_speech', 'listening', 'end_candidate', 'transcribing', 'reviewing_transcript', 'submitting_confirmed_answer', 'generating_next_question', 'paused', 'result_unknown'].includes(continuousState.status);
-    if ((hasUnconfirmedDraft || hasPendingVoiceSave) && !window.confirm('当前还有未确认的回答或待恢复的语音复盘，确定退出工作台吗？')) return;
+    if ((hasUnconfirmedDraft || hasPendingVoiceSave) && !window.confirm(t("当前还有未确认的回答或待恢复的语音复盘，确定退出工作台吗？"))) return;
     studioDisposedRef.current = true;
     startRequestRef.current += 1;
     cancelStartRetry();
@@ -779,6 +781,8 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
     if (state && attemptId) void generateNextQuestion(state, attemptId);
   };
 
+  // 排查链见 docs/architecture/code-map/interview-mock.md：回答提交和下一题是
+  // 两个请求。先取得回答保存成功，再决定是否出题；连续语音由其控制器续接。
   const submitAnswer = async (answerOverride?: string, realtime?: RealtimeAnswer): Promise<'saved' | 'unknown' | 'failed'> => {
     const answer = (answerOverride ?? state?.answer ?? '').trim();
     const businessGeneration = businessGenerationRef.current;
@@ -902,9 +906,9 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
   };
 
   const title = context.kind === 'quick_practice'
-    ? `${context.positionName} · 快速练习`
-    : `${context.companyName ?? '真实投递'} · ${context.positionName ?? '模拟面试'}`;
-  const currentQuestion = state?.question ?? '正在准备第一题…';
+    ? t("{position} · 快速练习", { position: context.positionName })
+    : t("{company} · {position}", { company: context.companyName ?? t('真实投递'), position: context.positionName ?? t('模拟面试') });
+  const currentQuestion = state?.question ?? t("正在准备第一题…");
   const enableContinuous = () => {
     try { window.localStorage.setItem(CONTINUOUS_VOICE_PREFERENCE_KEY, 'true'); } catch { /* preference is best effort */ }
     continuousController.enable(currentQuestion);
@@ -1003,37 +1007,37 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
   return (
     <div ref={studioRef} className={styles.studio} data-testid="interview-studio" data-interview-studio role="dialog" tabIndex={-1} aria-modal="true" aria-labelledby="interview-studio-title">
       <header className={styles.topbar}>
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => closeRequestRef.current()}>退出工作台</Button>
+        <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => closeRequestRef.current()}>{t("退出工作台")}</Button>
         <div className={styles.titleBlock}>
-          <span className={styles.kicker}>{context.kind === 'quick_practice' ? '快速练习' : '真实投递'}</span>
+          <span className={styles.kicker}>{context.kind === 'quick_practice' ? t("快速练习") : t("真实投递")}</span>
           <h1 id="interview-studio-title">{title}</h1>
         </div>
         <div className={styles.topActions}>
-          <span className={styles.round}>{state ? `第 ${state.turnNo} / ${state.maxTurns} 轮` : '准备中'}</span>
-          <Tag color={startError || terminalFailure || state?.phase === 'result_unknown' ? 'orange' : 'green'}>{terminalFailure ? '需要重新开始' : startError || state?.phase === 'result_unknown' ? '结果待确认' : '来源已冻结'}</Tag>
-          {onToggleHaru ? <Button type="text" icon={<MenuOutlined />} onClick={onToggleHaru}>显示 Haru</Button> : null}
+          <span className={styles.round}>{state ? t("第 {round} / {total} 轮", { round: state.turnNo, total: state.maxTurns }) : t("准备中")}</span>
+          <Tag color={startError || terminalFailure || state?.phase === 'result_unknown' ? 'orange' : 'green'}>{terminalFailure ? t("需要重新开始") : startError || state?.phase === 'result_unknown' ? t("结果待确认") : t("来源已冻结")}</Tag>
+          {onToggleHaru ? <Button type="text" icon={<MenuOutlined />} onClick={onToggleHaru}>{t("显示 Haru")}</Button> : null}
           <Button
             onClick={() => void finish()}
             loading={feedbackGenerating}
             aria-busy={feedbackGenerating}
             disabled={!attemptId || !state || working || Boolean(proposal) || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || ['preflight', 'reading_question', 'waiting_for_speech', 'listening', 'end_candidate', 'transcribing', 'reviewing_transcript', 'submitting_confirmed_answer', 'generating_next_question', 'paused', 'result_unknown'].includes(continuousState.status)}
           >
-            {feedbackGenerating ? '正在生成复盘…' : '结束并生成复盘'}
+            {feedbackGenerating ? t("正在生成复盘…") : t("结束并生成复盘")}
           </Button>
         </div>
       </header>
 
       <main className={styles.main}>
-        <section className={`${styles.timeline} ${styles.conversationPane}`} aria-label="面试对话时间线">
-          <div className={styles.timelineHeader}><div><span className={styles.kicker}>面试对话</span><h2>{realtimeState.locked ? '实时对话，回答自动记录' : '保持对话，答案由你确认'}</h2></div><span className={styles.livePill}><i /> {state?.phase === 'contract_failed' ? '需要重新开始' : state?.phase === 'result_unknown' ? '需要对账' : '本轮进行中'}</span></div>
+        <section className={`${styles.timeline} ${styles.conversationPane}`} aria-label={t('面试对话时间线')}>
+          <div className={styles.timelineHeader}><div><span className={styles.kicker}>{t('面试对话')}</span><h2>{realtimeState.locked ? t('实时对话，回答自动记录') : t('保持对话，答案由你确认')}</h2></div><span className={styles.livePill}><i /> {state?.phase === 'contract_failed' ? t('需要重新开始') : state?.phase === 'result_unknown' ? t('需要对账') : t('本轮进行中')}</span></div>
           {feedbackGenerating ? (
             <div className={`${styles.studioStatus} ${styles.feedbackProgress}`} data-interview-studio-status role="status" aria-live="polite">
               <span className={styles.loader} />
-              <div><strong>正在生成复盘，通常需要几十秒</strong><span>请保持当前页面打开；系统只会提交一次，完成后会在这里显示结果。</span></div>
+              <div><strong>{t("正在生成复盘，通常需要几十秒")}</strong><span>{t("请保持当前页面打开；系统只会提交一次，完成后会在这里显示结果。")}</span></div>
             </div>
           ) : startError ? (
             <div className={styles.studioStatus} data-interview-studio-status>
-              <Alert className={styles.alert} type="warning" showIcon message={startError} action={<Button size="small" onClick={retry} disabled={working}>使用原尝试恢复</Button>} />
+              <Alert className={styles.alert} type="warning" showIcon message={t(startError)} action={<Button size="small" onClick={retry} disabled={working}>{t("使用原尝试恢复")}</Button>} />
             </div>
           ) : terminalFailure ? (
             <div ref={studioStatusRef} className={styles.studioStatus} data-interview-studio-status tabIndex={-1}>
@@ -1041,27 +1045,27 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                 className={styles.alert}
                 type="warning"
                 showIcon
-                message={terminalFailure.message}
+                message={t(terminalFailure.message)}
                 action={terminalFailure.userAction === 'reload_source' ? (
-                  <Button size="small" onClick={requestClose} disabled={working}>退出并重新加载</Button>
+                  <Button size="small" onClick={requestClose} disabled={working}>{t("退出并重新加载")}</Button>
                 ) : terminalFailure.userAction === 'restart_new_attempt' ? (
-                  <Button size="small" onClick={() => void restartAfterTerminalFailure()} disabled={working}>重新开始练习</Button>
+                  <Button size="small" onClick={() => void restartAfterTerminalFailure()} disabled={working}>{t("重新开始练习")}</Button>
                 ) : (
-                  <Button size="small" onClick={requestClose} disabled={working}>关闭</Button>
+                  <Button size="small" onClick={requestClose} disabled={working}>{t("关闭")}</Button>
                 )}
               />
             </div>
           ) : state?.phase === 'result_unknown' && state.error ? (
             <div ref={studioStatusRef} className={styles.studioStatus} data-interview-studio-status tabIndex={-1}>
-              <Alert className={styles.alert} type="warning" showIcon message={state.error} action={<Button size="small" onClick={retry} disabled={working}>使用原尝试恢复</Button>} />
+              <Alert className={styles.alert} type="warning" showIcon message={t(state.error)} action={<Button size="small" onClick={retry} disabled={working}>{t("使用原尝试恢复")}</Button>} />
             </div>
           ) : state?.error ? (
             <div className={styles.studioStatus} data-interview-studio-status>
-              <Alert className={styles.alert} type="warning" showIcon message={state.error} />
+              <Alert className={styles.alert} type="warning" showIcon message={t(state.error)} />
             </div>
           ) : proposal ? (
             <div className={styles.studioStatus} data-interview-studio-status role="status" aria-live="polite">
-              <Alert className={styles.alert} type="success" showIcon message={feedbackIsSafeEmpty ? '复盘已完成，暂无可验证建议' : '复盘已生成'} action={<Button size="small" onClick={revealFeedbackResult}>查看复盘</Button>} />
+              <Alert className={styles.alert} type="success" showIcon message={feedbackIsSafeEmpty ? t("复盘已完成，暂无可验证建议") : t("复盘已生成")} action={<Button size="small" onClick={revealFeedbackResult}>{t("查看复盘")}</Button>} />
             </div>
           ) : null}
           <div className={styles.conversationScroll} data-interview-conversation-scroll>
@@ -1070,11 +1074,11 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                 <article key={turn.turn_no} className={`${styles.turn} ${turn.turn_no === state?.turnNo ? styles.activeTurn : ''}`}>
                   <div className={styles.turnMarker}>{String(turn.turn_no).padStart(2, '0')}</div>
                   <div className={styles.turnBody}>
-                    <div className={styles.turnMeta}><span>面试官</span>{turn.turn_no > 1 ? <Tag>{questionLabel(turn)}</Tag> : null}<span className={styles.turnState}>{turn.confirmed ? (turn.acceptance_method === 'session_auto' ? '语音自动记录 · 未人工校对' : turn.acceptance_method === 'manual' ? '人工提交 · 已保存' : '回答已保存 · 来源未知') : turn.turn_no === state?.turnNo ? '等待回答' : ''}</span></div>
+                    <div className={styles.turnMeta}><span>{t('面试官')}</span>{turn.turn_no > 1 ? <Tag>{questionLabel(turn)}</Tag> : null}<span className={styles.turnState}>{turn.confirmed ? (turn.acceptance_method === 'session_auto' ? t('语音自动记录 · 未人工校对') : turn.acceptance_method === 'manual' ? t('人工提交 · 已保存') : t('回答已保存 · 来源未知')) : turn.turn_no === state?.turnNo ? t('等待回答') : ''}</span></div>
                     <h3 ref={turn.turn_no === state?.turnNo ? questionHeadingRef : undefined} tabIndex={turn.turn_no === state?.turnNo ? -1 : undefined} data-interview-studio-question>{turn.question}</h3>
                     {buildEvidenceEntries(turn.basis_refs).length ? (
-                      <div className={styles.turnEvidence} aria-label="提问依据" data-interview-studio-evidence-trigger>
-                        <span className={styles.evidenceLabel}>提问依据</span>
+                      <div className={styles.turnEvidence} aria-label={t("提问依据")} data-interview-studio-evidence-trigger>
+                        <span className={styles.evidenceLabel}>{t("提问依据")}</span>
                         {buildEvidenceEntries(turn.basis_refs).map((entry) => (
                           <button key={entry.key} type="button" className={styles.evidenceLink} onClick={() => focusEvidence(entry)}>{entry.label}</button>
                         ))}
@@ -1084,25 +1088,25 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                       <button type="button" className={styles.followUpLink} data-interview-studio-follow-up onClick={() => {
                         const entry = buildEvidenceEntries(turn.basis_refs)[0];
                         if (entry) focusEvidence(entry);
-                      }}>上一轮回答 → 当前追问</button>
+                      }}>{t("上一轮回答 → 当前追问")}</button>
                     ) : null}
-                    {turn.turn_no === state?.turnNo && !turn.confirmed ? <span className={styles.questionHint}>{realtimeState.locked ? '当前问题 · 本场已授权自动记录' : '当前问题 · 先回答，再由你确认提交'}</span> : null}
+                    {turn.turn_no === state?.turnNo && !turn.confirmed ? <span className={styles.questionHint}>{realtimeState.locked ? t('当前问题 · 本场已授权自动记录') : t('当前问题 · 先回答，再由你确认提交')}</span> : null}
                     {turn.answer && turn.confirmed ? (
                       <div className={styles.candidateMessage} data-interview-speaker="candidate">
-                        <span>你</span>
+                        <span>{t("你")}</span>
                         <p className={styles.answerBubble}>{turn.answer}</p>
                       </div>
                     ) : null}
                   </div>
                 </article>
               ))}
-              {!timeline.length ? <div className={styles.loadingTurn}><span className={styles.loader} />正在创建冻结 Attempt…</div> : null}
+              {!timeline.length ? <div className={styles.loadingTurn}><span className={styles.loader} />{t("正在创建冻结 Attempt…")}</div> : null}
             </div>
-            {state?.phase === 'next_question_generating' ? <div className={styles.generating} role="status" aria-live="polite"><span className={styles.loader} />正在根据已确认回答准备下一题…</div> : null}
-            {voiceReview?.saveState === 'unknown' ? <Alert className={styles.alert} type="warning" showIcon message="表达复盘保存结果待确认，原保存尝试已保留。" action={<Button size="small" onClick={() => void retryVoiceReview()} disabled={working}>使用原尝试恢复</Button>} /> : null}
-            {voiceReview?.saveError ? <Alert className={styles.alert} type="warning" showIcon message={voiceReview.saveError} /> : null}
-            {state?.phase === 'completed' && !proposal ? <div className={styles.completeCard}><CheckCircleOutlined /><div><strong>本轮已完成</strong><span>你可以结束并生成复盘，或退出保留已确认的回答。</span></div></div> : null}
-            {proposal ? <section ref={feedbackResultRef} tabIndex={-1} data-interview-feedback-result className={styles.feedbackCard} aria-label="复盘建议"><span className={styles.kicker}>复盘建议</span><h2>{feedbackIsSafeEmpty ? '复盘已完成' : '复盘建议已准备好'}</h2><p>{feedbackIsSafeEmpty ? '本轮没有生成可验证的复盘建议；已确认回答仍然保留。' : '建议只来自本次已确认回答与冻结来源。正式投递和快速练习会保持各自的来源边界。'}</p>{feedbackItems.length ? <ul>{feedbackItems.map((item) => <li key={item.id}>{item.text}</li>)}</ul> : null}</section> : null}
+            {state?.phase === 'next_question_generating' ? <div className={styles.generating} role="status" aria-live="polite"><span className={styles.loader} />{t("正在根据已确认回答准备下一题…")}</div> : null}
+            {voiceReview?.saveState === 'unknown' ? <Alert className={styles.alert} type="warning" showIcon message={t("表达复盘保存结果待确认，原保存尝试已保留。")} action={<Button size="small" onClick={() => void retryVoiceReview()} disabled={working}>{t("使用原尝试恢复")}</Button>} /> : null}
+            {voiceReview?.saveError ? <Alert className={styles.alert} type="warning" showIcon message={t(voiceReview.saveError)} /> : null}
+            {state?.phase === 'completed' && !proposal ? <div className={styles.completeCard}><CheckCircleOutlined /><div><strong>{t("本轮已完成")}</strong><span>{t("你可以结束并生成复盘，或退出保留已确认的回答。")}</span></div></div> : null}
+            {proposal ? <section ref={feedbackResultRef} tabIndex={-1} data-interview-feedback-result className={styles.feedbackCard} aria-label={t("复盘建议")}><span className={styles.kicker}>{t("复盘建议")}</span><h2>{feedbackIsSafeEmpty ? t("复盘已完成") : t("复盘建议已准备好")}</h2><p>{feedbackIsSafeEmpty ? t("本轮没有生成可验证的复盘建议；已确认回答仍然保留。") : t("建议只来自本次已确认回答与冻结来源。正式投递和快速练习会保持各自的来源边界。")}</p>{feedbackItems.length ? <ul>{feedbackItems.map((item) => <li key={item.id}>{item.text}</li>)}</ul> : null}</section> : null}
           </div>
           <Button
             ref={mobileWorkspaceTriggerRef}
@@ -1112,28 +1116,27 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
             aria-controls="interview-answer-workspace"
             onClick={openAnswerWorkspace}
           >
-            打开回答工作台
-          </Button>
+            {t("打开回答工作台")}</Button>
         </section>
 
-        <aside id="interview-answer-workspace" className={`${styles.answerWorkspace} ${mobileWorkspaceOpen ? styles.mobileWorkspaceOpen : ''}`} aria-label="回答与依据工作台">
+        <aside id="interview-answer-workspace" className={`${styles.answerWorkspace} ${mobileWorkspaceOpen ? styles.mobileWorkspaceOpen : ''}`} aria-label={t("回答与依据工作台")}>
           <div className={styles.workspaceHeader}>
-            <div className={styles.workspaceTabs} role="tablist" aria-label="回答工作台视图">
-              <button ref={answerTabRef} type="button" role="tab" aria-selected={workspaceTab === 'answer'} aria-controls="interview-answer-panel" className={workspaceTab === 'answer' ? styles.activeWorkspaceTab : ''} onClick={() => setWorkspaceTab('answer')}>回答</button>
+            <div className={styles.workspaceTabs} role="tablist" aria-label={t('回答工作台视图')}>
+              <button ref={answerTabRef} type="button" role="tab" aria-selected={workspaceTab === 'answer'} aria-controls="interview-answer-panel" className={workspaceTab === 'answer' ? styles.activeWorkspaceTab : ''} onClick={() => setWorkspaceTab('answer')}>{t('回答')}</button>
               <button type="button" role="tab" aria-selected={workspaceTab === 'evidence'} aria-controls="interview-evidence-panel" className={workspaceTab === 'evidence' ? styles.activeWorkspaceTab : ''} onClick={() => {
                 if (realtimeController.state.locked) void realtimeController.pause('已切换到依据，实时对话已暂停。');
                 setWorkspaceTab('evidence');
-              }}>依据</button>
+              }}>{t('依据')}</button>
             </div>
             <Button className={styles.mobileWorkspaceClose} type="text" onClick={() => {
               if (realtimeController.state.locked) void realtimeController.pause('回答工作台已关闭，实时对话已暂停。');
               setMobileWorkspaceOpen(false);
               window.requestAnimationFrame(() => mobileWorkspaceTriggerRef.current?.focus());
-            }}>关闭回答工作台</Button>
+            }}>{t("关闭回答工作台")}</Button>
           </div>
 
           {workspaceTab === 'answer' ? (
-            <div id="interview-answer-panel" role="tabpanel" className={styles.answerWorkspacePanel} aria-label="回答工作台">
+            <div id="interview-answer-panel" role="tabpanel" className={styles.answerWorkspacePanel} data-interview-studio-answer aria-label={t("回答工作台")}>
               <div className={styles.answerWorkspaceBody}>
                 <RealtimeVoicePanel
                   state={realtimeState}
@@ -1193,23 +1196,23 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                 />
               </div>
               <div className={styles.workspaceActions}>
-                <span>{state?.answerMode === 'voice' ? '语音必须先核对文字，再进入同一个提交流程。' : '提交后回答会冻结，系统自动准备下一题。'}</span>
-                <Button type="primary" size="large" icon={<SendOutlined />} disabled={!canSubmit} onClick={() => void submitAnswer()}>确认并提交回答</Button>
-                {hasConfirmedAnswer && state?.phase === 'answering' ? <span className={styles.confirmedHint}>回答已经发送，正在准备下一步…</span> : null}
+                <span>{state?.answerMode === 'voice' ? t("语音必须先核对文字，再进入同一个提交流程。") : t("提交后回答会冻结，系统自动准备下一题。")}</span>
+                <Button type="primary" size="large" icon={<SendOutlined />} disabled={!canSubmit} onClick={() => void submitAnswer()}>{t("确认并提交回答")}</Button>
+                {hasConfirmedAnswer && state?.phase === 'answering' ? <span className={styles.confirmedHint}>{t("回答已经发送，正在准备下一步…")}</span> : null}
               </div>
             </div>
           ) : (
-            <section id="interview-evidence-panel" role="tabpanel" className={`${styles.evidence} ${styles.evidenceWorkspaceBody}`} aria-label="本轮依据">
-              <div className={styles.evidenceHeader}><div><span className={styles.kicker}>本轮来源</span><h2>提问依据</h2></div><Button type="text" onClick={() => setWorkspaceTab('answer')}>返回回答</Button></div>
+            <section id="interview-evidence-panel" role="tabpanel" className={`${styles.evidence} ${styles.evidenceWorkspaceBody}`} aria-label={t("本轮依据")}>
+              <div className={styles.evidenceHeader}><div><span className={styles.kicker}>{t("本轮来源")}</span><h2>{t("提问依据")}</h2></div><Button type="text" onClick={() => setWorkspaceTab('answer')}>{t("返回回答")}</Button></div>
               <div className={styles.sourceCard} data-evidence-key={evidenceKey(contextJdReference)} data-evidence-active={selectedEvidenceKey === evidenceKey(contextJdReference)} data-evidence-expanded={jdExpanded}>
                 <FileTextOutlined />
-                <div><strong>JD · 冻结版本</strong><p>{jdExpanded ? context.jdText : previewText(context.jdText)}</p>{context.jdText.length > 180 ? <button type="button" className={styles.expandEvidence} onClick={() => setJdExpanded((expanded) => !expanded)}>{jdExpanded ? '收起全文' : '展开全文'}</button> : null}</div>
+                <div><strong>{t("JD · 冻结版本")}</strong><p>{jdExpanded ? context.jdText : previewText(context.jdText)}</p>{context.jdText.length > 180 ? <button type="button" className={styles.expandEvidence} onClick={() => setJdExpanded((expanded) => !expanded)}>{jdExpanded ? t("收起全文") : t("展开全文")}</button> : null}</div>
               </div>
-              <div className={styles.sourceCard}><FileTextOutlined /><div><strong>简历 · 已选快照</strong><p>已使用候选人确认的第 {context.resumeId} 份简历快照；原始内容不会在 Studio 中编辑。</p></div></div>
-              <div className={styles.evidenceList} aria-label="当前问题引用"><strong>当前问题引用</strong>{currentEvidence.length ? currentEvidence.map((entry) => (
+              <div className={styles.sourceCard}><FileTextOutlined /><div><strong>{t("简历 · 已选快照")}</strong><p>{t("已使用候选人确认的第 {resumeId} 份简历快照；原始内容不会在 Studio 中编辑。", { resumeId: context.resumeId })}</p></div></div>
+              <div className={styles.evidenceList} aria-label={t("当前问题引用")}><strong>{t("当前问题引用")}</strong>{currentEvidence.length ? currentEvidence.map((entry) => (
                 <div key={entry.key}><button type="button" className={styles.evidenceExcerpt} data-evidence-key={entry.key} data-evidence-active={selectedEvidenceKey === entry.key} onClick={() => focusEvidence(entry)}><span>{entry.label}</span><q>{entry.excerpt}</q></button><EvidenceTechnicalDetails path={entry.path} /></div>
-              )) : <p className={styles.emptyEvidence}>当前问题的来源正在整理，旧历史仍保持只读。</p>}</div>
-              <div className={styles.sourceNote}>快速练习只关联 Practice Case，不会写入投递、日程、Knowledge、Memory、Story 或 Offer。</div>
+              )) : <p className={styles.emptyEvidence}>{t("当前问题的来源正在整理，旧历史仍保持只读。")}</p>}</div>
+              <div className={styles.sourceNote}>{t("快速练习只关联 Practice Case，不会写入投递、日程、Knowledge、Memory、Story 或 Offer。")}</div>
             </section>
           )}
         </aside>

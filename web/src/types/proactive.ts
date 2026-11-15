@@ -1,9 +1,11 @@
+import { t } from '@/i18n';
 export type ProactiveJobKind =
   | 'deadline'
   | 'interview_preparation'
   | 'stale_application'
   | 'review'
-  | 'interview_draft';
+  | 'interview_draft'
+  | 'companion_life';
 
 export type ProactiveJobState =
   | 'pending'
@@ -34,6 +36,11 @@ export interface ProactiveSettingsResponse {
 export interface ProactiveJob {
   id: string;
   kind: ProactiveJobKind;
+  candidate_id?: string;
+  subject_type?: 'application' | 'application_event';
+  subject_id?: number;
+  reason_code?: string;
+  source_revision?: string;
   application_id: number;
   event_id: number | null;
   state: ProactiveJobState;
@@ -67,23 +74,29 @@ export const DEFAULT_PROACTIVE_SETTINGS: ProactiveSettings = {
 };
 
 export const PROACTIVE_KIND_LABELS: Record<ProactiveJobKind, string> = {
-  deadline: '截止提醒',
-  interview_preparation: '面试准备提醒',
-  stale_application: '投递跟进提醒',
-  review: '面试复盘提醒',
-  interview_draft: '面试准备草稿',
+  get companion_life() { return t('Haru 的虚拟日常'); },
+  get deadline() { return t("截止提醒"); },
+  get interview_preparation() { return t("面试准备提醒"); },
+  get stale_application() { return t("投递跟进提醒"); },
+  get review() { return t("面试复盘提醒"); },
+  get interview_draft() { return t("面试准备草稿"); },
 };
 
 export const PROACTIVE_STATE_LABELS: Record<ProactiveJobState, string> = {
-  pending: '等待处理',
-  leased: '即将处理',
-  running: '处理中',
-  succeeded: '已完成',
-  failed: '处理失败',
-  cancelled: '已取消',
-  result_unknown: '需要检查',
+  get pending() { return t("等待处理"); },
+  get leased() { return t("即将处理"); },
+  get running() { return t("处理中"); },
+  get succeeded() { return t("已完成"); },
+  get failed() { return t("处理失败"); },
+  get cancelled() { return t("已取消"); },
+  get result_unknown() { return t("需要检查"); },
 };
 
 export function isProactiveJobActive(state: ProactiveJobState): boolean {
   return state === 'pending' || state === 'leased' || state === 'running';
+}
+
+/** Companion delivery shares the queue, never the application task surfaces. */
+export function isApplicationProactiveJob(job: ProactiveJob): boolean {
+  return job.kind !== 'companion_life';
 }

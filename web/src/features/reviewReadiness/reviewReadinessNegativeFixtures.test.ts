@@ -69,9 +69,29 @@ function parse(path: string, source: string): ts.SourceFile {
   return parsed;
 }
 
+const forEachAuditChild = ts.forEachChild;
+const auditSourceNodes = new WeakMap<ts.SourceFile, readonly ts.Node[]>();
+
 function walk(node: ts.Node, visit: (node: ts.Node) => void): void {
+  if (ts.isSourceFile(node)) {
+    let nodes = auditSourceNodes.get(node);
+    if (!nodes) {
+      const ordered: ts.Node[] = [];
+      const collect = (current: ts.Node): void => {
+        ordered.push(current);
+        forEachAuditChild(current, collect);
+      };
+      collect(node);
+      nodes = ordered;
+      auditSourceNodes.set(node, nodes);
+    }
+    // Syntax trees are immutable during an audit. Reuse traversal order, never
+    // callback results: fixed-point passes must observe their current state.
+    for (const current of nodes) visit(current);
+    return;
+  }
   visit(node);
-  ts.forEachChild(node, (child) => walk(child, visit));
+  forEachAuditChild(node, (child) => walk(child, visit));
 }
 
 function staticBooleanValue(node: ts.Expression): boolean | null {
@@ -172,14 +192,18 @@ type RuntimeFunctionLike =
   | ts.GetAccessorDeclaration
   | ts.SetAccessorDeclaration;
 
+const RUNTIME_FUNCTION_KINDS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.FunctionDeclaration,
+  ts.SyntaxKind.FunctionExpression,
+  ts.SyntaxKind.ArrowFunction,
+  ts.SyntaxKind.MethodDeclaration,
+  ts.SyntaxKind.Constructor,
+  ts.SyntaxKind.GetAccessor,
+  ts.SyntaxKind.SetAccessor,
+]);
+
 function isRuntimeFunctionLike(node: ts.Node): node is RuntimeFunctionLike {
-  return ts.isFunctionDeclaration(node)
-    || ts.isFunctionExpression(node)
-    || ts.isArrowFunction(node)
-    || ts.isMethodDeclaration(node)
-    || ts.isConstructorDeclaration(node)
-    || ts.isGetAccessorDeclaration(node)
-    || ts.isSetAccessorDeclaration(node);
+  return RUNTIME_FUNCTION_KINDS.has(node.kind);
 }
 
 function expressionContainsIdentifier(
@@ -355,8 +379,13 @@ function namespaceExportResolution(
   return null;
 }
 
+// Member paths depend only on this immutable syntax tree, not the queried root.
+const usedMemberPathsCache = new WeakMap<ts.SourceFile, Map<string, string[]>>();
+
 function usedMemberPaths(sourceFile: ts.SourceFile, root: string): string[] {
-  const paths = new Set<string>();
+  const cached = usedMemberPathsCache.get(sourceFile);
+  if (cached) return cached.get(root) ?? [];
+  const pathsByRoot = new Map<string, Set<string>>();
   const strings = new Map<string, string>();
   let changed = true;
   while (changed) {
@@ -382,11 +411,15 @@ function usedMemberPaths(sourceFile: ts.SourceFile, root: string): string[] {
       members.unshift(name);
       current = current.expression;
     }
-    if (ts.isIdentifier(current) && current.text === root && members.length > 0) {
+    if (ts.isIdentifier(current) && members.length > 0) {
+      const paths = pathsByRoot.get(current.text) ?? new Set<string>();
       paths.add(members.join('.'));
+      pathsByRoot.set(current.text, paths);
     }
   });
-  return [...paths];
+  const paths = new Map([...pathsByRoot].map(([name, members]) => [name, [...members]]));
+  usedMemberPathsCache.set(sourceFile, paths);
+  return paths.get(root) ?? [];
 }
 
 function hasDefaultModifier(node: ts.Node): boolean {
@@ -1565,10 +1598,11 @@ function mutationWrappersForSourceMap(sources: SourceMap): MutationWrapper[] {
     };
     visit(sourceFile, null);
   }
-  const provenance = crossCallableResolver(sources);
   const wrappers = pending.map((wrapper) => ({
     ...wrapper,
-    callable: { isTarget: (expression: ts.Expression) => provenance.isTarget(expression, wrapper.owner) },
+    // An empty wrapper set needs no cross-module callable graph. The resolver
+    // still covers the complete source map when a wrapper is actually queried.
+    callable: { isTarget: (expression: ts.Expression) => crossCallableResolver(sources).isTarget(expression, wrapper.owner) },
   }));
   crossMutationWrapperCache.set(sources, wrappers);
   return wrappers;
@@ -6246,6 +6280,92 @@ function auditProductionOnce(): { violations: string[]; durationMs: number } {
 }
 
 describe('review readiness negative fixture gate', () => {
+  it('retains every node and fresh visitor state across repeated and nested audit walks', () => {
+    const path = 'web/src/repeatedWalk.ts';
+    const first = parse(path, 'function owner() { const token = "secret"; return token; }');
+    const expected: ts.Node[] = [];
+    const reference = (node: ts.Node): void => {
+      expected.push(node);
+      ts.forEachChild(node, reference);
+    };
+    reference(first);
+    const expectedNested: ts.Node[] = [];
+    const referenceNested = (node: ts.Node): void => {
+      expectedNested.push(node);
+      ts.forEachChild(node, referenceNested);
+    };
+    const declaration = first.statements[0] as ts.FunctionDeclaration;
+    referenceNested(declaration.body!);
+    for (const pass of [1, 2]) {
+      const actual: ts.Node[] = [];
+      const nested: ts.Node[] = [];
+      walk(first, (node) => {
+        actual.push(node);
+        if (ts.isFunctionDeclaration(node) && node.body) {
+          walk(node.body, (child) => nested.push(child));
+        }
+      });
+      expect(actual).toEqual(expected);
+      expect(nested).toEqual(expectedNested);
+      const names: string[] = [];
+      walk(first, (node) => { if (ts.isIdentifier(node)) names.push(`${pass}:${node.text}`); });
+      expect(names).toEqual([`${pass}:owner`, `${pass}:token`, `${pass}:token`]);
+    }
+    const changed = parse(path, 'const replacement = localStorage;');
+    const names: string[] = [];
+    walk(changed, (node) => { if (ts.isIdentifier(node)) names.push(node.text); });
+    expect(names).toEqual(['replacement', 'localStorage']);
+  });
+
+  it('classifies runtime functions without treating type signatures as executable', () => {
+    const sourceFile = parse('web/src/runtimeFunctions.ts', `
+      function declaration() {}
+      const expression = function() {};
+      const arrow = () => 1;
+      class Owner {
+        constructor() {}
+        method() {}
+        get value() { return 1; }
+        set value(input) {}
+      }
+      type Callable = () => void;
+      interface Contract { method(): void; }
+    `);
+    const kinds: ts.SyntaxKind[] = [];
+    walk(sourceFile, (node) => {
+      if (isRuntimeFunctionLike(node)) kinds.push(node.kind);
+    });
+    expect(kinds).toEqual([
+      ts.SyntaxKind.FunctionDeclaration, ts.SyntaxKind.FunctionExpression,
+      ts.SyntaxKind.ArrowFunction, ts.SyntaxKind.Constructor,
+      ts.SyntaxKind.MethodDeclaration, ts.SyntaxKind.GetAccessor, ts.SyntaxKind.SetAccessor,
+    ]);
+  });
+
+  it('isolates member paths by syntax tree while retaining every queried root', () => {
+    const path = 'web/src/facades/shared.ts';
+    let rootTraversals = 0;
+    const sourceFile = new Proxy(parse(path, `
+      const PROPERTY = NEXT; const NEXT = 'feedback';
+      benign.any(); readiness[PROPERTY].load();
+    `), {
+      get(target, property, receiver) {
+        if (property === 'statements') rootTraversals++;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(usedMemberPaths(sourceFile, 'missing')).toEqual([]);
+    const indexingTraversals = rootTraversals;
+    expect(indexingTraversals).toBeGreaterThan(0);
+    expect(usedMemberPaths(sourceFile, 'benign')).toEqual(['any']);
+    expect(usedMemberPaths(sourceFile, 'readiness')).toEqual(['feedback.load', 'feedback']);
+    expect(usedMemberPaths(parse('web/src/facades/other.ts', `readiness.safe();`), 'readiness')).toEqual(['safe']);
+    expect(usedMemberPaths(parse(path, `readiness.changed();`), 'readiness')).toEqual(['changed']);
+    expect(usedMemberPaths(sourceFile, 'readiness')).toEqual(['feedback.load', 'feedback']);
+    expect(usedMemberPaths(sourceFile, 'stillMissing')).toEqual([]);
+    expect(rootTraversals).toBe(indexingTraversals);
+  });
+
   it('rejects direct, aliased, spread, helper, and call-chain domain CRUD', () => {
     const fixtures = [
       `import { updateInterviewNote } from '@/services/notes'; updateInterviewNote(1, input);`,

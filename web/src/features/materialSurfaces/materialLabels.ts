@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { Resume } from '@/types/resume';
 import {
   resolveResumeLineage,
@@ -20,15 +21,15 @@ export interface MaterialLabelInput {
 }
 
 export const MATERIAL_LABELS: Readonly<Record<MaterialLabelKey, string>> = Object.freeze({
-  base: '基础简历',
-  job_variant: '岗位版本',
-  independent: '其他简历',
-  relationship_unknown: '关系待确认',
-  experience_story: '经历故事',
-  confirmed_capture: '已确认面试片段',
-  captured_unavailable: '部分来源暂时不可用',
-  external_reference: '参考资料',
-  unclassified: '暂无法归类',
+  get base() { return t("基础简历"); },
+  get job_variant() { return t("岗位版本"); },
+  get independent() { return t("其他简历"); },
+  get relationship_unknown() { return t("关系待确认"); },
+  get experience_story() { return t("经历故事"); },
+  get confirmed_capture() { return t("已确认面试片段"); },
+  get captured_unavailable() { return t("部分来源暂时不可用"); },
+  get external_reference() { return t("参考资料"); },
+  get unclassified() { return t("暂无法归类"); },
 });
 
 /** Map domain material kinds to the one shared user vocabulary. */
@@ -50,7 +51,7 @@ export function formatResumeLineage(
   if (lineage.kind !== 'job_variant') return label;
 
   const detail = safeLineageDetail(lineage.detail);
-  return detail ? `${label} · ${detail}` : label;
+  return detail ? `${label} · ${t("基于 {title}", { title: detail.slice(3) === "这份简历" ? t("这份简历") : detail.slice(3) })}` : label;
 }
 
 /** Resolve and format a resume relationship for any resume surface. */
@@ -66,9 +67,9 @@ export function resumeDisplayTitle(resume: Pick<Resume, 'title' | 'name'>): stri
   try {
     const title = typeof resume.title === 'string' ? resume.title.trim() : '';
     const name = typeof resume.name === 'string' ? resume.name.trim() : '';
-    return Array.from(title || name || '未命名简历').slice(0, 120).join('');
+    return Array.from(title || name || t("未命名简历")).slice(0, 120).join('');
   } catch {
-    return '未命名简历';
+    return t("未命名简历");
   }
 }
 

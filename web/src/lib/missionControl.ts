@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import dayjs, { type ConfigType } from 'dayjs';
 import type { Application, ApplicationStatus } from '@/types/application';
 import type { ScheduleEvent } from '@/types/event';
@@ -20,17 +21,17 @@ export type ApplicationReadinessState = 'ready' | 'watch' | 'blocked';
 export type ReadinessMaterialStatus = MaterialKitStatus | 'missing' | 'unknown';
 
 export const READINESS_STATE_LABELS: Record<ApplicationReadinessState, string> = {
-  ready: '就绪',
-  watch: '关注',
-  blocked: '阻塞',
+  get ready() { return t("就绪"); },
+  get watch() { return t("关注"); },
+  get blocked() { return t("阻塞"); },
 };
 
 export const READINESS_MATERIAL_STATUS_LABELS: Record<ReadinessMaterialStatus, string> = {
-  draft: '草稿',
-  ready: '就绪',
-  submitted: '已提交',
-  missing: '缺失',
-  unknown: '未知',
+  get draft() { return t("草稿"); },
+  get ready() { return t("就绪"); },
+  get submitted() { return t("已提交"); },
+  get missing() { return t("缺失"); },
+  get unknown() { return t("未知"); },
 };
 
 export interface MissionMetric {
@@ -91,11 +92,11 @@ const WAITING_STATUSES: ApplicationStatus[] = ['pending', 'applied', 'written_te
 const PREPARE_KINDS: PipelineInsightKind[] = [
   'offer_deadline',
   'interview_soon',
+  'event_upcoming',
+  'application_deadline',
   'material_kit_incomplete',
   'question_due',
 ];
-const DEFAULT_WEEKLY_TARGET = 6;
-const FOLLOWUP_TARGET = 3;
 const DATE_ONLY_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 function parseDate(value?: string): dayjs.Dayjs | null {
@@ -166,11 +167,11 @@ function buildMetrics(
   offers: Offer[],
   materialKits: MaterialKitViewModel[] | null | undefined,
   practiceStats: PracticeStats | null | undefined,
-  weeklyTarget: number,
+  weeklyTarget: number | undefined,
   now: dayjs.Dayjs,
 ): MissionMetric[] {
-  const weekStart = now.startOf('week');
-  const weekEnd = now.endOf('week');
+  const weekStart = now.locale('en').startOf('week');
+  const weekEnd = now.locale('en').endOf('week');
   const activeApps = apps.filter(isActiveApplication);
   const weeklyApplications = apps.filter((app) => {
     const appliedAt = parseDate(app.applied_at);
@@ -192,45 +193,48 @@ function buildMetrics(
     return Boolean(deadline && deadline.diff(now, 'hour', true) >= 0 && deadline.diff(now, 'hour', true) <= 48);
   }).length;
 
+  const target = weeklyTarget != null && Number.isFinite(weeklyTarget) && weeklyTarget > 0 ? weeklyTarget : undefined;
+
   return [
     {
       kind: 'applications',
-      label: '本周投递',
+      label: t("本周投递"),
       current: weeklyApplications,
-      target: weeklyTarget,
-      state: stateForProgress(weeklyApplications, weeklyTarget),
-      reason: `本周已新增 ${weeklyApplications} 个投递，目标 ${weeklyTarget} 个。`,
+      target,
+      state: stateForProgress(weeklyApplications, target ?? 0),
+      reason: target == null
+        ? t("本周已新增 {weeklyApplications} 个投递。", { weeklyApplications })
+        : t("本周已新增 {weeklyApplications} 个投递，目标 {weeklyTarget} 个。", { weeklyApplications, weeklyTarget: target }),
       targetView: 'board',
     },
     {
       kind: 'followups',
-      label: '跟进节奏',
+      label: t("跟进节奏"),
       current: staleCount,
-      target: staleCount > 0 ? FOLLOWUP_TARGET : 0,
-      state: staleCount === 0 ? 'on_track' : staleCount >= FOLLOWUP_TARGET ? 'blocked' : 'watch',
-      reason: staleCount === 0 ? '暂无明显停滞的活跃投递。' : `${staleCount} 个活跃投递需要跟进。`,
+      state: staleCount === 0 ? 'on_track' : 'watch',
+      reason: staleCount === 0 ? t("暂无明显停滞的活跃投递。") : t("{staleCount} 个活跃投递需要跟进。", { staleCount: staleCount }),
       targetView: 'reminders',
     },
     {
       kind: 'interviews',
-      label: '本周面试',
+      label: t("本周面试"),
       current: interviewsThisWeek,
       state: interviewsThisWeek > 0 ? 'watch' : 'on_track',
-      reason: interviewsThisWeek > 0 ? `本周有 ${interviewsThisWeek} 个面试或测评日程。` : '本周暂无已安排面试。',
+      reason: interviewsThisWeek > 0 ? t("本周有 {interviewsThisWeek} 个面试或测评日程。", { interviewsThisWeek: interviewsThisWeek }) : t("本周暂无已安排面试。"),
       targetView: 'calendar',
     },
     {
       kind: 'practice',
-      label: '刷题准备',
+      label: t("刷题准备"),
       current: dueQuestions,
       target: dueQuestions > 0 ? 1 : 0,
       state: dueQuestions >= 10 ? 'behind' : dueQuestions > 0 ? 'watch' : 'on_track',
-      reason: dueQuestions > 0 ? `${dueQuestions} 道题到期需要复习。` : '暂无到期题目。',
+      reason: dueQuestions > 0 ? t("{dueQuestions} 道题到期需要复习。", { dueQuestions: dueQuestions }) : t("暂无到期题目。"),
       targetView: 'questions',
     },
     {
       kind: 'materials',
-      label: '材料就绪',
+      label: t("材料就绪"),
       current: readyMaterials,
       target: activeApps.length,
       state:
@@ -243,17 +247,17 @@ function buildMetrics(
               : 'watch',
       reason:
         materialKits == null
-          ? '材料状态暂不可用。'
-          : `${readyMaterials}/${activeApps.length} 个活跃投递材料已就绪。`,
+          ? t("材料状态暂不可用。")
+          : t("{readyMaterials}/{length} 个活跃投递材料已就绪。", { readyMaterials: readyMaterials, length: activeApps.length }),
       targetView: 'board',
     },
     {
       kind: 'offers',
-      label: 'Offer 压力',
+      label: t("Offer 压力"),
       current: urgentOffers,
       target: pendingOffers.length,
       state: urgentOffers > 0 ? 'blocked' : pendingOffers.length > 0 ? 'watch' : 'on_track',
-      reason: urgentOffers > 0 ? `${urgentOffers} 个 Offer 截止期进入 48 小时内。` : '暂无 48 小时内截止的 Offer。',
+      reason: urgentOffers > 0 ? t("{urgentOffers} 个 Offer 截止期进入 48 小时内。", { urgentOffers: urgentOffers }) : t("暂无 48 小时内截止的 Offer。"),
       targetView: 'offers',
     },
   ];
@@ -279,15 +283,15 @@ function buildReadiness(
       const evidence: string[] = [];
       let readiness: ApplicationReadinessState = 'ready';
 
-      if (nextEvent) evidence.push(`下一场日程：${dayjs(nextEvent.scheduled_at).format('MM-DD HH:mm')}`);
-      if (materialStatus === 'unknown') evidence.push('材料状态暂不可用');
-      else evidence.push(`材料状态：${READINESS_MATERIAL_STATUS_LABELS[materialStatus]}`);
-      if (staleDays) evidence.push(`已 ${staleDays} 天未更新`);
-      if (dueQuestionCount > 0) evidence.push(`${dueQuestionCount} 道题到期`);
+      if (nextEvent) evidence.push(t("下一场日程：{value}", { value: dayjs(nextEvent.scheduled_at).format('MM-DD HH:mm') }));
+      if (materialStatus === 'unknown') evidence.push(t("材料状态暂不可用"));
+      else evidence.push(t("材料状态：{value}", { value: READINESS_MATERIAL_STATUS_LABELS[materialStatus] }));
+      if (staleDays) evidence.push(t("已 {staleDays} 天未更新", { staleDays: staleDays }));
+      if (dueQuestionCount > 0) evidence.push(t("{dueQuestionCount} 道题到期", { dueQuestionCount: dueQuestionCount }));
 
       if (hoursToEvent != null && hoursToEvent >= 0 && hoursToEvent <= 24 && !isReadyMaterial(materialStatus)) {
         readiness = 'blocked';
-        evidence.push('24 小时内有日程但材料未就绪');
+        evidence.push(t("24 小时内有日程但材料未就绪"));
       } else if (
         staleDays ||
         (app.status === 'interview' && upcomingEvents.length === 0) ||
@@ -334,19 +338,19 @@ export function selectDefaultFocusApplicationId(readiness: ApplicationReadiness[
 
 function buildHeadline(metrics: MissionMetric[], actions: PipelineInsight[], readiness: ApplicationReadiness[]): string {
   if (metrics.find((metric) => metric.kind === 'applications')?.current === 0 && readiness.length === 0) {
-    return '添加第一条投递，OfferPilot 会开始组织你的求职节奏。';
+    return t("添加第一条投递，OfferPilot 会开始组织你的求职节奏。");
   }
 
   const urgent = actions.find((item) => item.priority === 'p0');
-  if (urgent) return `优先处理：${urgent.title}`;
+  if (urgent) return t("优先处理：{title}", { title: urgent.title });
 
   const blocked = readiness.find((item) => item.readiness === 'blocked');
-  if (blocked) return `先解除 ${blocked.companyName} 的准备阻塞。`;
+  if (blocked) return t("先解除 {companyName} 的准备阻塞。", { companyName: blocked.companyName });
 
-  const behind = metrics.find((metric) => metric.state === 'behind');
-  if (behind) return `${behind.label}落后于本周目标。`;
+  const behind = metrics.find((metric) => metric.kind === 'applications' && metric.target != null && metric.state === 'behind');
+  if (behind) return t("{label}落后于本周目标。", { label: behind.label });
 
-  return '本周节奏稳定，保持跟进和准备即可。';
+  return t("本周节奏稳定，保持跟进和准备即可。");
 }
 
 export function deriveMissionControl({
@@ -357,15 +361,15 @@ export function deriveMissionControl({
   practiceStats,
   insights,
   healthLabel,
-  weeklyTarget = DEFAULT_WEEKLY_TARGET,
+  weeklyTarget,
   now = dayjs(),
 }: DeriveMissionControlInput): MissionControlSummary {
   const current = dayjs(now);
   const safeApps = apps ?? [];
   const safeEvents = events ?? [];
   const safeOffers = offers ?? [];
-  const weekStart = current.startOf('week');
-  const weekEnd = current.endOf('week');
+  const weekStart = current.locale('en').startOf('week');
+  const weekEnd = current.locale('en').endOf('week');
   const metrics = buildMetrics(safeApps, safeEvents, safeOffers, materialKits, practiceStats, weeklyTarget, current);
   const readiness = buildReadiness(safeApps, safeEvents, materialKits, practiceStats, current);
   const actionGroups = groupMissionActions(insights);

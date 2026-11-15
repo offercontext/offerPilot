@@ -1,3 +1,4 @@
+import { useLocale } from '@/i18n';
 import styles from './JobDescriptionContent.module.css';
 
 interface Section { title?: string; lines: string[] }
@@ -7,6 +8,7 @@ const headingPattern = /^(?:#{1,6}\s+)?(?:\*\*)?(岗位职责|工作职责|职�
 const bulletPattern = /^\s*[-*•·]\s+|^\s*[•●]\s*/;
 
 export default function JobDescriptionContent({ text }: { text: string }) {
+  useLocale();
   const sections: Section[] = [{ lines: [] }];
   for (const line of text.split(/\r?\n/)) {
     const headingCandidate = line.trim().replace(/^(#{1,6}\s+)?\*\*(.*?)\*\*$/, '$1$2');

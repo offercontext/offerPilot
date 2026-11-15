@@ -1,3 +1,6 @@
+import KnowledgeNoteManager from './KnowledgeNoteManager';
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale, getLocale } from '@/i18n';
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
@@ -78,23 +81,23 @@ const KNOWLEDGE_QUERY_KEY = ['knowledge', 'sources'] as const;
 const SHOW_BRIEF_UI = false;
 
 const STATUS_LABEL: Record<string, string> = {
-  active: '活跃',
-  archived: '已归档',
-  deleting: '删除中',
+  get active() { return t("活跃"); },
+  get archived() { return t("已归档"); },
+  get deleting() { return t("删除中"); },
 };
 const EXTRACTION_LABEL: Record<string, string> = {
-  pending: '等待解析',
-  processing: '解析中',
-  extracted: '已解析',
-  failed: '解析失败',
+  get pending() { return t("等待解析"); },
+  get processing() { return t("解析中"); },
+  get extracted() { return t("已解析"); },
+  get failed() { return t("解析失败"); },
 };
 const BRIEF_LABEL: Record<string, string> = {
-  not_started: '尚未生成',
-  pending: '排队中',
-  processing: '生成中',
-  ready: '已生成',
-  failed: '生成失败',
-  outdated: '已过期',
+  get not_started() { return t("尚未生成"); },
+  get pending() { return t("排队中"); },
+  get processing() { return t("生成中"); },
+  get ready() { return t("已生成"); },
+  get failed() { return t("生成失败"); },
+  get outdated() { return t("已过期"); },
 };
 
 const SOURCE_LIFECYCLES = new Set(['active', 'archived', 'deleting']);
@@ -239,11 +242,11 @@ function externalSourceListItem(
   if (id === null) return null;
   return Object.freeze({
     id,
-    title: boundedText(item.title, '参考资料', MAX_TITLE_LENGTH),
+    title: boundedText(item.title, t("参考资料"), MAX_TITLE_LENGTH),
     lifecycle: boundedText(safeRead(item.record, 'lifecycle'), 'unknown', 32),
     extractionStatus: boundedText(safeRead(item.record, 'extraction_status'), 'unknown', 32),
     briefStatus: boundedText(safeRead(item.record, 'brief_status'), 'unknown', 32),
-    mainFilename: boundedText(safeRead(item.record, 'main_filename'), '未提供文件名', MAX_TITLE_LENGTH),
+    mainFilename: boundedText(safeRead(item.record, 'main_filename'), t("未提供文件名"), MAX_TITLE_LENGTH),
     totalBytes: Math.max(0, safeFiniteNumber(safeRead(item.record, 'total_bytes'))),
   });
 }
@@ -266,7 +269,7 @@ export function normalizeKnowledgeSourceDetail(input: unknown, expectedId: numbe
   const provenanceValue = safeRecord(safeRead(record, 'provenance'));
   const title = boundedText(
     safeRead(record, 'display_title'),
-    boundedText(safeRead(record, 'title'), '参考资料', MAX_TITLE_LENGTH),
+    boundedText(safeRead(record, 'title'), t("参考资料"), MAX_TITLE_LENGTH),
     MAX_TITLE_LENGTH,
   );
   return Object.freeze({
@@ -277,7 +280,7 @@ export function normalizeKnowledgeSourceDetail(input: unknown, expectedId: numbe
     title_hint: boundedText(safeRead(record, 'title_hint'), '', MAX_TITLE_LENGTH),
     author: boundedText(safeRead(record, 'author'), '', MAX_TITLE_LENGTH),
     published_at: boundedText(safeRead(record, 'published_at'), '', 64) || null,
-    main_filename: boundedText(safeRead(record, 'main_filename'), '未提供文件名', MAX_TITLE_LENGTH),
+    main_filename: boundedText(safeRead(record, 'main_filename'), t("未提供文件名"), MAX_TITLE_LENGTH),
     main_media_type: boundedText(safeRead(record, 'main_media_type'), '', 80),
     total_bytes: Math.max(0, safeFiniteNumber(safeRead(record, 'total_bytes'))),
     token_count: Math.max(0, safeFiniteNumber(safeRead(record, 'token_count'))),
@@ -336,7 +339,7 @@ export function normalizeEvidencePage(input: unknown, expectedSourceId: number):
       source_id: sourceId,
       snapshot_id: 0,
       kind: safeRead(record, 'kind') === 'asset' ? 'asset' : 'text',
-      block_kind: '资料片段',
+      block_kind: t("资料片段"),
       ordinal: Math.max(0, safeFiniteNumber(safeRead(record, 'ordinal'))),
       heading_path: headingPath.value as string[],
       char_start: 0,
@@ -371,8 +374,8 @@ function normalizeOriginProjection(
     return [Object.freeze({
       id,
       source_id: sourceId,
-      import_method: boundedText(safeRead(record, 'import_method'), '导入', 40),
-      original_filename: boundedText(safeRead(record, 'original_filename'), '未提供文件名', MAX_TITLE_LENGTH),
+      import_method: boundedText(safeRead(record, 'import_method'), t("导入"), 40),
+      original_filename: boundedText(safeRead(record, 'original_filename'), t("未提供文件名"), MAX_TITLE_LENGTH),
       origin_url: boundedText(safeRead(record, 'origin_url'), '', 500),
       imported_at: boundedText(safeRead(record, 'imported_at'), '', 64),
     })];
@@ -418,7 +421,7 @@ export function normalizeJobProjection(
       retry_count: Math.max(0, safeFiniteNumber(safeRead(record, 'retry_count'))),
       next_retry_at: boundedText(safeRead(record, 'next_retry_at'), '', 64) || null,
       error_code: '',
-      error_message: safeRead(record, 'error_message') ? SAFE_PROCESSING_FAILURE_COPY : '',
+      error_message: safeRead(record, 'error_message') ? t(SAFE_PROCESSING_FAILURE_COPY) : '',
       canceled: safeRead(record, 'canceled') === true,
       lease_owner: '',
       lease_expires_at: null,
@@ -462,7 +465,7 @@ export function normalizeSearchHitProjection(input: unknown): {
       evidence_id: evidenceId,
       source_id: sourceId,
       snapshot_id: 0,
-      block_kind: '资料片段',
+      block_kind: t("资料片段"),
       heading_path: headingPath.value as string[],
       char_start: 0,
       char_end: 0,
@@ -494,6 +497,7 @@ function Pill({
   children: ReactNode;
   className?: string;
 }) {
+  useLocale();
   return (
     <span className={`op-pill op-pill--${variant}${className ? ` ${className}` : ''}`}>
       <span className="op-pill-dot" />
@@ -559,7 +563,10 @@ function jobStatusVariant(status: string): PillVariant {
 }
 
 export default function KnowledgeSourcesView() {
+  useLocale();
   const queryClient = useQueryClient();
+  const [section, setSection] = useState('sources');
+  const [notesVisited, setNotesVisited] = useState(false);
   const [includeArchived, setIncludeArchived] = useState(false);
   const sourcesQuery = useQuery({
     queryKey: [...KNOWLEDGE_QUERY_KEY, { includeArchived }],
@@ -614,9 +621,9 @@ export default function KnowledgeSourcesView() {
       uploadKnowledgeSource(file, titleHint),
     onSuccess: (data) => {
       if (data.deduplicated) {
-        message.success('资料已导入，已进入已有资料来源');
+        message.success(liveText(() => t("资料已导入，已进入已有资料来源")));
       } else {
-        message.success('资料已导入');
+        message.success(liveText(() => t("资料已导入")));
       }
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
       setSelectedSourceId(data.source.id);
@@ -624,7 +631,7 @@ export default function KnowledgeSourcesView() {
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`上传失败：${detail}`);
+      message.error(liveText(() => t("上传失败：{detail}", { detail: detail })));
     },
   });
 
@@ -640,9 +647,9 @@ export default function KnowledgeSourcesView() {
     }) => uploadKnowledgeBundle(main, assets, titleHint),
     onSuccess: (data) => {
       if (data.deduplicated) {
-        message.success('资料已导入，已进入已有资料来源');
+        message.success(liveText(() => t("资料已导入，已进入已有资料来源")));
       } else {
-        message.success('图文资料已导入，图片以附件形式保留');
+        message.success(liveText(() => t("图文资料已导入，图片以附件形式保留")));
       }
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
       setSelectedSourceId(data.source.id);
@@ -650,7 +657,7 @@ export default function KnowledgeSourcesView() {
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`图文资料上传失败：${detail}`);
+      message.error(liveText(() => t("图文资料上传失败：{detail}", { detail: detail })));
     },
   });
 
@@ -666,9 +673,9 @@ export default function KnowledgeSourcesView() {
     }) => pasteKnowledgeSource(paste, { titleHint, originUrl }),
     onSuccess: (data) => {
       if (data.deduplicated) {
-        message.success('资料已导入，已进入已有资料来源');
+        message.success(liveText(() => t("资料已导入，已进入已有资料来源")));
       } else {
-        message.success('正文已导入');
+        message.success(liveText(() => t("正文已导入")));
       }
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
       setSelectedSourceId(data.source.id);
@@ -676,7 +683,7 @@ export default function KnowledgeSourcesView() {
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`粘贴失败：${detail}`);
+      message.error(liveText(() => t("粘贴失败：{detail}", { detail: detail })));
     },
   });
 
@@ -695,7 +702,7 @@ export default function KnowledgeSourcesView() {
 
   const handleSearch = () => {
     if (!searchQuery.trim()) {
-      message.warning('请输入搜索关键词');
+      message.warning(liveText(() => t("请输入搜索关键词")));
       return;
     }
     searchMutation.mutate(searchQuery);
@@ -707,17 +714,20 @@ export default function KnowledgeSourcesView() {
         <div className="knowledge-page-header-row">
           <span className="knowledge-page-mark" />
           <Title level={3} className="knowledge-page-title">
-            素材库
-          </Title>
+            {t("参考知识")}</Title>
           <span className="knowledge-page-count">
-            共 <b>{externalSources.length}</b> 个来源
-          </span>
+            {t("共 ")}<b>{externalSources.length}</b>{t(" 个来源")}</span>
         </div>
         <Paragraph type="secondary" className="knowledge-page-subtitle">
-          上传 Markdown/Text、上传图文资料，或直接粘贴正文；系统按自然结构生成来源依据，并提供关键词检索。
-        </Paragraph>
+          {t("上传 Markdown/Text、上传图文资料，或直接粘贴正文；系统按自然结构生成来源依据，并提供关键词检索。")}</Paragraph>
       </div>
 
+      <Tabs activeKey={section} onChange={(key) => { setSection(key); if (key === 'notes') setNotesVisited(true); }} items={[
+        { key: 'sources', label: t("资料来源") },
+        { key: 'notes', label: t("已确认的知识笔记") },
+      ]} />
+      <div hidden={section !== 'notes'}>{notesVisited ? <KnowledgeNoteManager embedded /> : null}</div>
+      <div hidden={section !== 'sources'}>
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         <div className="knowledge-sources-toolbar">
           <Button
@@ -726,34 +736,32 @@ export default function KnowledgeSourcesView() {
             icon={<InboxOutlined />}
             onClick={() => setUploadOpen(true)}
           >
-            上传 Markdown / Text
-          </Button>
+            {t("上传 Markdown / Text")}</Button>
           <Button icon={<PictureOutlined />} onClick={() => setBundleOpen(true)}>
-            上传图文资料
-          </Button>
+            {t("上传图文资料")}</Button>
           <Button icon={<FormOutlined />} onClick={() => setPasteOpen(true)}>
-            粘贴正文
-          </Button>
+            {t("粘贴正文")}</Button>
           <span className="knowledge-toolbar-spacer" />
-          <Input
-            placeholder="搜索资料内容（中文/英文关键词）"
-            className="knowledge-sources-search-input"
-            style={{ width: 'min(320px, 100%)' }}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onPressEnter={handleSearch}
-            prefix={<SearchOutlined />}
-          />
-          <Button onClick={handleSearch} loading={searchMutation.isPending}>
-            搜索
-          </Button>
+          <div className="knowledge-sources-search">
+            <Input
+              placeholder={t("搜索资料内容（中文/英文关键词）")}
+              className="knowledge-sources-search-input"
+              style={{ width: 'min(320px, 100%)' }}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onPressEnter={handleSearch}
+              prefix={<SearchOutlined />}
+            />
+            <Button onClick={handleSearch} loading={searchMutation.isPending}>
+              {t("搜索")}</Button>
+          </div>
           <Space size={6} align="center">
             <Switch
               checked={includeArchived}
               onChange={(checked) => setIncludeArchived(checked)}
-              aria-label="显示归档资料"
+              aria-label={t("显示归档资料")}
             />
-            <Text type="secondary">显示归档资料</Text>
+            <Text type="secondary">{t("显示归档资料")}</Text>
           </Space>
         </div>
 
@@ -799,6 +807,7 @@ export default function KnowledgeSourcesView() {
           />
         </div>
       </Space>
+      </div>
 
       <UploadModal
         open={uploadOpen}
@@ -841,6 +850,7 @@ function SourceListPanel({
   selectedId: number | null;
   onSelect: (id: number) => void;
 }) {
+  useLocale();
   if (loading) {
     return (
       <div style={{ padding: 24 }}>
@@ -851,29 +861,27 @@ function SourceListPanel({
   if (error) {
     return (
       <div role="alert" style={{ border: '1px solid var(--op-border, #eee)', padding: 24, borderRadius: 8 }}>
-        参考资料暂时无法读取，请稍后重试。
-      </div>
+        {t("参考资料暂时无法读取，请稍后重试。")}</div>
     );
   }
   if (!sources.length) {
     if (unavailable) {
       return (
         <div role="alert" style={{ border: '1px solid var(--op-border, #eee)', padding: 24, borderRadius: 8 }}>
-          参考资料暂时无法读取，请稍后重试。
-        </div>
+          {t("参考资料暂时无法读取，请稍后重试。")}</div>
       );
     }
     return (
       <div style={{ border: '1px solid var(--op-border, #eee)', padding: 24, borderRadius: 8 }}>
-        <Empty description="还没有资料来源" />
+        <Empty description={t("还没有资料来源")} />
       </div>
     );
   }
   return (
     <div className="knowledge-source-list">
-      {unavailable ? <p role="status">部分资料来源暂时不可用，已展示可用内容。</p> : null}
+      {unavailable ? <p role="status">{t("部分资料来源暂时不可用，已展示可用内容。")}</p> : null}
       <div className="knowledge-source-list-head">
-        <span>资料列表</span>
+        <span>{t("资料列表")}</span>
         <span>{sources.length}</span>
       </div>
       <List
@@ -890,14 +898,14 @@ function SourceListPanel({
                 <Text className="knowledge-source-item-title">{item.title}</Text>
                 <div className="knowledge-pill-row">
                   <Pill variant={lifecycleVariant(item.lifecycle)}>
-                    {STATUS_LABEL[item.lifecycle] ?? '状态待确认'}
+                    {STATUS_LABEL[item.lifecycle] ?? t("状态待确认")}
                   </Pill>
                   <Pill variant={extractionVariant(item.extractionStatus)}>
-                    {EXTRACTION_LABEL[item.extractionStatus] ?? '状态待确认'}
+                    {EXTRACTION_LABEL[item.extractionStatus] ?? t("状态待确认")}
                   </Pill>
                   {SHOW_BRIEF_UI ? (
                     <Pill variant={briefVariant(item.briefStatus)}>
-                      {BRIEF_LABEL[item.briefStatus] ?? '状态待确认'}
+                      {BRIEF_LABEL[item.briefStatus] ?? t("状态待确认")}
                     </Pill>
                   ) : null}
                 </div>
@@ -924,10 +932,11 @@ function SourceDetailPanel({
   onHighlightConsumed: () => void;
   onDeleted: () => void;
 }) {
+  useLocale();
   if (sourceId == null) {
     return (
       <div style={{ border: '1px solid var(--op-border, #eee)', padding: 24, borderRadius: 8 }}>
-        <Empty description="选择左侧的资料来源查看详情" />
+        <Empty description={t("选择左侧的资料来源查看详情")} />
       </div>
     );
   }
@@ -952,6 +961,7 @@ function SourceDetailContent({
   onHighlightConsumed: () => void;
   onDeleted: () => void;
 }) {
+  useLocale();
   const queryClient = useQueryClient();
   const sourceQuery = useQuery({
     queryKey: ['knowledge', 'source', sourceId],
@@ -1009,7 +1019,7 @@ function SourceDetailContent({
   const briefRebuildMutation = useMutation({
     mutationFn: (id: number) => rebuildKnowledgeSourceBrief(id),
     onSuccess: (data) => {
-      message.success('已请求重新生成资料导读');
+      message.success(liveText(() => t("已请求重新生成资料导读")));
       // 立即用 202 响应刷新 source / brief 缓存，避免等下一轮 refetch 才看到「排队中」。
       queryClient.setQueryData<KnowledgeSource>(
         ['knowledge', 'source', sourceId],
@@ -1061,7 +1071,7 @@ function SourceDetailContent({
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`资料导读重建失败：${detail}`);
+      message.error(liveText(() => t("资料导读重建失败：{detail}", { detail: detail })));
     },
   });
   const [briefCitationTarget, setBriefCitationTarget] = useState<string | null>(
@@ -1088,12 +1098,12 @@ function SourceDetailContent({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['knowledge', 'source', sourceId] });
-      message.success('展示标题已更新');
+      message.success(liveText(() => t("展示标题已更新")));
       setTitleEditorOpen(false);
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`标题更新失败：${detail}`);
+      message.error(liveText(() => t("标题更新失败：{detail}", { detail: detail })));
     },
   });
   const archiveMutation = useMutation({
@@ -1101,11 +1111,11 @@ function SourceDetailContent({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['knowledge', 'source', sourceId] });
-      message.success('资料已归档');
+      message.success(liveText(() => t("资料已归档")));
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`归档失败：${detail}`);
+      message.error(liveText(() => t("归档失败：{detail}", { detail: detail })));
     },
   });
   const unarchiveMutation = useMutation({
@@ -1113,25 +1123,25 @@ function SourceDetailContent({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ['knowledge', 'source', sourceId] });
-      message.success('资料已取消归档');
+      message.success(liveText(() => t("资料已取消归档")));
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`取消归档失败：${detail}`);
+      message.error(liveText(() => t("取消归档失败：{detail}", { detail: detail })));
     },
   });
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteKnowledgeSource(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: KNOWLEDGE_QUERY_KEY });
-      message.success('已提交永久删除，后台任务完成后资料将被移除');
+      message.success(liveText(() => t("已提交永久删除，后台任务完成后资料将被移除")));
       setDeleteConfirmOpen(false);
       setDeleteConfirmationText('');
       onDeleted();
     },
     onError: (error: unknown) => {
       const detail = extractErrorMessage(error);
-      message.error(`删除失败：${detail}`);
+      message.error(liveText(() => t("删除失败：{detail}", { detail: detail })));
     },
   });
   if (sourceQuery.isLoading) {
@@ -1148,8 +1158,8 @@ function SourceDetailContent({
         <Alert
           type="warning"
           showIcon
-          message="资料详情不可用"
-          description="该资料可能已删除或暂时无法读取，请从左侧选择其他资料。"
+          message={t("资料详情不可用")}
+          description={t("该资料可能已删除或暂时无法读取，请从左侧选择其他资料。")}
         />
       </div>
     );
@@ -1181,10 +1191,10 @@ function SourceDetailContent({
           </Title>
           <div className="knowledge-source-detail-statuses">
             <Pill variant={lifecycleVariant(source.lifecycle)}>
-              {STATUS_LABEL[source.lifecycle] ?? '状态待确认'}
+              {STATUS_LABEL[source.lifecycle] ?? t("状态待确认")}
             </Pill>
             <Pill variant={extractionVariant(source.extraction_status)}>
-              {EXTRACTION_LABEL[source.extraction_status] ?? '状态待确认'}
+              {EXTRACTION_LABEL[source.extraction_status] ?? t("状态待确认")}
             </Pill>
             {SHOW_BRIEF_UI ? (
               <Pill variant={briefVariant(source.brief_status)}>
@@ -1195,8 +1205,7 @@ function SourceDetailContent({
         </div>
         <Space size={6} wrap className="knowledge-source-actions">
           <Button size="small" icon={<EditOutlined />} onClick={openTitleEditor} disabled={!canMutate}>
-            编辑标题
-          </Button>
+            {t("编辑标题")}</Button>
           {isArchived ? (
             <Button
               size="small"
@@ -1206,8 +1215,7 @@ function SourceDetailContent({
               loading={unarchiveMutation.isPending}
               disabled={!canMutate}
             >
-              取消归档
-            </Button>
+              {t("取消归档")}</Button>
           ) : (
             <Button
               size="small"
@@ -1217,8 +1225,7 @@ function SourceDetailContent({
               loading={archiveMutation.isPending}
               disabled={!canMutate}
             >
-              归档
-            </Button>
+              {t("归档")}</Button>
           )}
           <Button
             size="small"
@@ -1231,27 +1238,26 @@ function SourceDetailContent({
               setDeleteConfirmOpen(true);
             }}
           >
-            永久删除该资料
-          </Button>
+            {t("永久删除该资料")}</Button>
         </Space>
       </div>
 
       <div className="knowledge-source-metadata">
-        <SourceMetadataItem label="文件名" value={source.main_filename} />
-        <SourceMetadataItem label="大小" value={formatBytes(source.total_bytes)} />
-        <SourceMetadataItem label="展示标题" value={source.display_title || '使用推导标题'} />
-        <SourceMetadataItem label="推导标题" value={source.title_hint || '无'} />
-        {source.author ? <SourceMetadataItem label="作者" value={source.author} /> : null}
+        <SourceMetadataItem label={t("文件名")} value={source.main_filename} />
+        <SourceMetadataItem label={t("大小")} value={formatBytes(source.total_bytes)} />
+        <SourceMetadataItem label={t("展示标题")} value={source.display_title || t("使用推导标题")} />
+        <SourceMetadataItem label={t("推导标题")} value={source.title_hint || t("无")} />
+        {source.author ? <SourceMetadataItem label={t("作者")} value={source.author} /> : null}
         {source.published_at ? (
-          <SourceMetadataItem label="发布时间" value={formatDateTime(source.published_at)} />
+          <SourceMetadataItem label={t("发布时间")} value={formatDateTime(source.published_at)} />
         ) : null}
         {source.provenance?.url ? (
-          <SourceMetadataItem label="来源 URL" value={source.provenance.url} />
+          <SourceMetadataItem label={t("来源 URL")} value={source.provenance.url} />
         ) : null}
-        <SourceMetadataItem label="导入时间" value={formatDateTime(source.created_at)} />
+        <SourceMetadataItem label={t("导入时间")} value={formatDateTime(source.created_at)} />
         <SourceMetadataItem
-          label="来源依据"
-          value={evidenceQuery.isLoading ? '—' : `${evidenceProjection.items.length} 条`}
+          label={t("来源依据")}
+          value={evidenceQuery.isLoading ? '—' : t("{length} 条", { length: evidenceProjection.items.length })}
         />
       </div>
 
@@ -1276,7 +1282,7 @@ function SourceDetailContent({
         items={[
           {
             key: 'status',
-            label: '处理记录',
+            label: t("处理记录"),
             children: (
               <StatusBlock
                 source={source}
@@ -1288,7 +1294,7 @@ function SourceDetailContent({
           },
           {
             key: 'evidence',
-            label: `来源依据${evidenceProjection.items.length ? ` (${evidenceProjection.items.length})` : ''}`,
+            label: t("来源依据{value}", { value: evidenceProjection.items.length ? ` (${evidenceProjection.items.length})` : '' }),
             children: (
               <EvidenceBlock
                 evidence={evidenceProjection.items}
@@ -1305,7 +1311,7 @@ function SourceDetailContent({
           },
           {
             key: 'original',
-            label: '资料正文',
+            label: t("资料正文"),
             children: (
               <OriginalMarkdownBlock
                 sourceId={sourceId}
@@ -1317,7 +1323,7 @@ function SourceDetailContent({
           },
           {
             key: 'jobs',
-            label: '处理状态',
+            label: t("处理状态"),
             children: (
               <JobsBlock
                 data={{ jobs: [...safeJobs], origins: [...safeOrigins] }}
@@ -1331,7 +1337,7 @@ function SourceDetailContent({
       />
 
       <Modal
-        title="编辑展示标题"
+        title={t("编辑展示标题")}
         open={titleEditorOpen}
         onCancel={() => setTitleEditorOpen(false)}
         onOk={() => {
@@ -1340,36 +1346,35 @@ function SourceDetailContent({
           }
         }}
         okButtonProps={{ loading: titleMutation.isPending, disabled: !canMutate }}
-        okText="保存"
-        cancelText="取消"
+        okText={t("保存")}
+        cancelText={t("取消")}
       >
         <Space direction="vertical" style={{ width: '100%' }} size="small">
           <Input
-            placeholder="留空则回退到推导标题"
+            placeholder={t("留空则回退到推导标题")}
             value={editingTitle}
             onChange={(event) => setEditingTitle(event.target.value)}
             maxLength={85}
             showCount
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            修改展示标题不会触发重新解析，已有来源依据会继续保留。
-          </Text>
+            {t("修改展示标题不会触发重新解析，已有来源依据会继续保留。")}</Text>
         </Space>
       </Modal>
 
       <Modal
-        title="永久删除该资料"
+        title={t("永久删除该资料")}
         open={deleteConfirmOpen}
         onCancel={() => {
           setDeleteConfirmOpen(false);
           setDeleteConfirmationText('');
         }}
-        okText="我已确认,永久删除"
-        cancelText="取消"
+        okText={t("我已确认,永久删除")}
+        cancelText={t("取消")}
         okButtonProps={{
           danger: true,
           loading: deleteMutation.isPending,
-          disabled: !canMutate || deleteConfirmationText.trim() !== '删除',
+          disabled: !canMutate || deleteConfirmationText.trim() !== t("删除"),
         }}
         onOk={() => {
           if (canMutate) deleteMutation.mutate(sourceId);
@@ -1377,23 +1382,20 @@ function SourceDetailContent({
       >
         <Space direction="vertical" style={{ width: '100%' }} size="small">
           <div className="knowledge-delete-warning">
-            <Title level={5}>危险操作</Title>
+            <Title level={5}>{t("危险操作")}</Title>
             <Paragraph type="secondary">
-              永久删除会清除原件、附件、来源依据、保存版本与处理记录,不可恢复。
-              删除后相同内容可作为新的资料来源重新导入。
-            </Paragraph>
+              {t("永久删除会清除原件、附件、来源依据、保存版本与处理记录,不可恢复。 删除后相同内容可作为新的资料来源重新导入。")}</Paragraph>
           </div>
           <Alert
             type="error"
             showIcon
-            message="此操作不可恢复"
-            description="删除后原件、来源依据、附件和处理记录都会被清除。如果之后再次上传相同内容,会得到全新的资料来源。"
+            message={t("此操作不可恢复")}
+            description={t("删除后原件、来源依据、附件和处理记录都会被清除。如果之后再次上传相同内容,会得到全新的资料来源。")}
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
-            为防止误操作,请在下方输入框中输入"删除"以确认。
-          </Text>
+            {t("为防止误操作,请在下方输入框中输入\"删除\"以确认。")}</Text>
           <Input
-            placeholder='输入"删除"以确认'
+            placeholder={t("输入\"删除\"以确认")}
             value={deleteConfirmationText}
             onChange={(event) => setDeleteConfirmationText(event.target.value)}
           />
@@ -1404,6 +1406,7 @@ function SourceDetailContent({
 }
 
 function SourceMetadataItem({ label, value }: { label: string; value: string }) {
+  useLocale();
   return (
     <div className="knowledge-source-metadata-item">
       <span className="knowledge-meta-label">{label}</span>
@@ -1423,44 +1426,44 @@ function StatusBlock({
   briefAttempts: KnowledgeBriefAttempt[];
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   const extractionError = source.extraction_status === 'failed'
-    ? SAFE_PROCESSING_FAILURE_COPY
+    ? t(SAFE_PROCESSING_FAILURE_COPY)
     : '';
   const filterSummary = source.evidence_policy_summary;
   const filteredTotal = filterSummary?.filtered_block_total ?? 0;
   return (
     <div className="knowledge-status-record">
-      <StatusLine label="资料状态" value={STATUS_LABEL[source.lifecycle] ?? '状态待确认'} />
+      <StatusLine label={t("资料状态")} value={STATUS_LABEL[source.lifecycle] ?? t("状态待确认")} />
       <StatusLine
-        label="内容整理"
-        value={EXTRACTION_LABEL[source.extraction_status] ?? '状态待确认'}
+        label={t("内容整理")}
+        value={EXTRACTION_LABEL[source.extraction_status] ?? t("状态待确认")}
       />
       {SHOW_BRIEF_UI ? (
         <>
-          <StatusLine label="资料导读" value={BRIEF_LABEL[source.brief_status] ?? source.brief_status} />
-          <StatusLine label="资料导读暂缓原因" value={source.brief_block_reason || '无'} />
+          <StatusLine label={t("资料导读")} value={BRIEF_LABEL[source.brief_status] ?? source.brief_status} />
+          <StatusLine label={t("资料导读暂缓原因")} value={source.brief_block_reason || t("无")} />
           <BriefAttemptTimeline attempts={briefAttempts} onCitationJump={onCitationJump} />
         </>
       ) : null}
       {extractionError ? (
-        <Alert type="error" showIcon message="内容整理失败" description={extractionError} />
+        <Alert type="error" showIcon message={t("内容整理失败")} description={extractionError} />
       ) : null}
       {filterSummary && filteredTotal > 0 ? (
         <div className="knowledge-status-filter-summary">
           <Space size={4} align="center">
-            <Title level={5}>来源依据过滤统计</Title>
-            <Tooltip title="系统在整理来源依据时按确定性规则过滤作者卡、阅读数、导航、图片壳、Obsidian/Evernote 残片等元数据样板；原文仍可完整查看，被过滤块不参与检索。">
+            <Title level={5}>{t("来源依据过滤统计")}</Title>
+            <Tooltip title={t("系统在整理来源依据时按确定性规则过滤作者卡、阅读数、导航、图片壳、Obsidian/Evernote 残片等元数据样板；原文仍可完整查看，被过滤块不参与检索。")}>
               <Button
                 type="text"
                 size="small"
                 icon={<QuestionCircleOutlined />}
-                aria-label="查看来源依据过滤说明"
+                aria-label={t("查看来源依据过滤说明")}
               />
             </Tooltip>
           </Space>
           <Text type="secondary" style={{ fontSize: 12 }}>
-            已过滤 {filteredTotal} 个元数据样板块（不影响原文查看）。
-          </Text>
+            {t("已过滤 ")}{filteredTotal}{t(" 个元数据样板块（不影响原文查看）。")}</Text>
           <Space size={4} wrap>
             {filterSummary.rules.map((rule) => (
               <Tag key={rule.rule_id}>
@@ -1472,15 +1475,15 @@ function StatusBlock({
       ) : null}
       <div className="knowledge-jobs-origins">
         <Space size={4} align="center" className="knowledge-jobs-origins-title">
-          <Title level={5}>导入记录</Title>
+          <Title level={5}>{t("导入记录")}</Title>
           <Tooltip
-            title="相同内容自动复用已有资料来源。重复上传相同字节时，系统会让上传结果进入已有资料来源，不会创建重复来源依据；每次导入都会追加一条导入记录。"
+            title={t("相同内容自动复用已有资料来源。重复上传相同字节时，系统会让上传结果进入已有资料来源，不会创建重复来源依据；每次导入都会追加一条导入记录。")}
           >
             <Button
               type="text"
               size="small"
               icon={<QuestionCircleOutlined />}
-              aria-label="查看去重说明"
+              aria-label={t("查看去重说明")}
             />
           </Tooltip>
         </Space>
@@ -1491,7 +1494,7 @@ function StatusBlock({
             <List.Item>
               <Space direction="vertical" size={2}>
                 <Text>
-                  {item.import_method}：{item.original_filename || '未提供文件名'}
+                  {item.import_method}：{item.original_filename || t("未提供文件名")}
                 </Text>
                 <Text type="secondary" style={{ fontSize: 12 }}>
                   {item.origin_url ? `URL：${item.origin_url} · ` : ''}
@@ -1507,6 +1510,7 @@ function StatusBlock({
 }
 
 function StatusLine({ label, value }: { label: string; value: string }) {
+  useLocale();
   return (
     <div className="knowledge-status-line">
       <span className="knowledge-status-line-label">{label}</span>
@@ -1516,41 +1520,41 @@ function StatusLine({ label, value }: { label: string; value: string }) {
 }
 
 const BRIEF_ATTEMPT_PHASE_LABEL: Record<string, string> = {
-  generation: '生成候选',
-  attempt_started: '开始处理',
-  model_call: '模型调用',
-  retry: '服务重试',
-  provider_switch: '切换服务',
-  model_response_parsed: '模型响应解析',
-  program_check: '程序检查',
-  validation_report: '校验报告',
-  validation_result: '单条支持校验',
-  validation: '来源依据支持校验',
-  repair: '修复',
-  repair_requested: '修复请求',
-  repair_patch_parsed: '修复补丁解析',
-  revalidation: '修复后复验',
-  final: '最终结果',
+  get generation() { return t("生成候选"); },
+  get attempt_started() { return t("开始处理"); },
+  get model_call() { return t("模型调用"); },
+  get retry() { return t("服务重试"); },
+  get provider_switch() { return t("切换服务"); },
+  get model_response_parsed() { return t("模型响应解析"); },
+  get program_check() { return t("程序检查"); },
+  get validation_report() { return t("校验报告"); },
+  get validation_result() { return t("单条支持校验"); },
+  get validation() { return t("来源依据支持校验"); },
+  get repair() { return t("修复"); },
+  get repair_requested() { return t("修复请求"); },
+  get repair_patch_parsed() { return t("修复补丁解析"); },
+  get revalidation() { return t("修复后复验"); },
+  get final() { return t("最终结果"); },
 };
 
 const BRIEF_ATTEMPT_STATUS_LABEL: Record<string, string> = {
-  pending: '排队中',
-  running: '进行中',
-  processing: '进行中',
-  succeeded: '已完成',
-  ready: '已完成',
-  failed: '已失败',
-  skipped: '已跳过',
+  get pending() { return t("排队中"); },
+  get running() { return t("进行中"); },
+  get processing() { return t("进行中"); },
+  get succeeded() { return t("已完成"); },
+  get ready() { return t("已完成"); },
+  get failed() { return t("已失败"); },
+  get skipped() { return t("已跳过"); },
 };
 
 const BRIEF_REASON_CODE_LABEL: Record<string, string> = {
-  unsupported_qualifier: '限定词无直接证据',
-  unsupported_inference: '推断超出证据',
-  unsupported_claim: '陈述未被证据支持',
-  contradicted_by_evidence: '与证据相矛盾',
-  evidence_missing: '缺少引用证据',
-  validator_parse_failed: '校验结果无法解析',
-  validator_unknown_reason: '校验原因待确认',
+  get unsupported_qualifier() { return t("限定词无直接证据"); },
+  get unsupported_inference() { return t("推断超出证据"); },
+  get unsupported_claim() { return t("陈述未被证据支持"); },
+  get contradicted_by_evidence() { return t("与证据相矛盾"); },
+  get evidence_missing() { return t("缺少引用证据"); },
+  get validator_parse_failed() { return t("校验结果无法解析"); },
+  get validator_unknown_reason() { return t("校验原因待确认"); },
 };
 
 function briefAttemptStatusVariant(status: string): PillVariant {
@@ -1593,6 +1597,7 @@ function BriefAttemptTimeline({
   attempts: KnowledgeBriefAttempt[];
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   const orderedAttempts = [...attempts].sort((left, right) => {
     const leftTime = Date.parse(left.created_at);
     const rightTime = Date.parse(right.created_at);
@@ -1605,12 +1610,10 @@ function BriefAttemptTimeline({
   return (
     <div className="knowledge-brief-attempts">
       <Title level={5} className="knowledge-brief-attempts-title">
-        资料导读处理记录
-      </Title>
+        {t("资料导读处理记录")}</Title>
       {orderedAttempts.length === 0 ? (
         <Text type="secondary" style={{ fontSize: 12 }}>
-          暂无资料导读处理记录
-        </Text>
+          {t("暂无资料导读处理记录")}</Text>
       ) : (
         <List
           className="knowledge-brief-attempt-list"
@@ -1624,7 +1627,7 @@ function BriefAttemptTimeline({
               <List.Item>
                 <div className="knowledge-brief-attempt">
                   <Space size={7} wrap>
-                    <Text strong>处理记录</Text>
+                    <Text strong>{t("处理记录")}</Text>
                     <Pill variant={briefAttemptStatusVariant(attempt.status)}>
                       {BRIEF_ATTEMPT_STATUS_LABEL[attempt.status] ?? attempt.status}
                     </Pill>
@@ -1635,9 +1638,9 @@ function BriefAttemptTimeline({
                     ) : null}
                   </Space>
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    服务：{attempt.actual_provider_id || attempt.provider_id || '—'}
+                    {t("服务：")}{attempt.actual_provider_id || attempt.provider_id || '—'}
                     {attempt.actual_provider_model || attempt.provider_model
-                      ? ` · 模型：${attempt.actual_provider_model || attempt.provider_model}`
+                      ? t(" · 模型：{value}", { value: attempt.actual_provider_model || attempt.provider_model })
                       : ''}
                     {attempt.latency_ms > 0 ? ` · ${attempt.latency_ms} ms` : ''}
                   </Text>
@@ -1653,13 +1656,11 @@ function BriefAttemptTimeline({
                     </div>
                   ) : (
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      暂无细分步骤（当前 API 尚未返回 steps）
-                    </Text>
+                      {t("暂无细分步骤（当前 API 尚未返回 steps）")}</Text>
                   )}
                   {attempt.has_more ? (
                     <Text type="warning" style={{ fontSize: 12 }}>
-                      处理记录仅显示前 {steps.length} / {attempt.total_steps ?? '多'} 条，尚未加载完整时间线。
-                    </Text>
+                      {t("处理记录仅显示前 ")}{steps.length} / {attempt.total_steps ?? t("多")}{t(" 条，尚未加载完整时间线。")}</Text>
                   ) : null}
                 </div>
               </List.Item>
@@ -1678,6 +1679,7 @@ function BriefAttemptStepView({
   step: KnowledgeBriefAttemptStep;
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   const output = step.output ?? {};
   const decision = step.decision ?? output.decision;
   const reasonCode = step.reason_code ?? output.reason_code;
@@ -1689,22 +1691,22 @@ function BriefAttemptStepView({
     <div className="knowledge-brief-step">
       <Space size={6} wrap>
         <Text strong>
-          {BRIEF_ATTEMPT_PHASE_LABEL[step.phase] ?? '当前进度待确认'}
+          {BRIEF_ATTEMPT_PHASE_LABEL[step.phase] ?? t("当前进度待确认")}
         </Text>
         <Pill variant={briefStepStatusVariant(step.status)}>
           {BRIEF_ATTEMPT_STATUS_LABEL[step.status] ?? step.status}
         </Pill>
         {step.block_path ? <Text code>{step.block_path}</Text> : null}
-        {decision ? <Text type="secondary">判定：{decision}</Text> : null}
+        {decision ? <Text type="secondary">{t("判定：")}{decision}</Text> : null}
         {reasonCode ? (
           <Tag color="orange">
-            原因：{BRIEF_REASON_CODE_LABEL[reasonCode] ?? reasonCode}
+            {t("原因：")}{BRIEF_REASON_CODE_LABEL[reasonCode] ?? reasonCode}
           </Tag>
         ) : null}
       </Space>
       {fragments.length > 0 ? (
         <div className="knowledge-brief-diagnostic-line">
-          <Text type="secondary">未直接支持：</Text>
+          <Text type="secondary">{t("未直接支持：")}</Text>
           <Space size={4} wrap>
             {fragments.map((fragment, index) => (
               <Tag key={`${fragment}-${index}`}>{fragment}</Tag>
@@ -1719,7 +1721,7 @@ function BriefAttemptStepView({
       ) : null}
       {suggestedRewrite ? (
         <Text type="secondary" className="knowledge-brief-diagnostic-text">
-          建议改写：{suggestedRewrite}
+          {t("建议改写：")}{suggestedRewrite}
         </Text>
       ) : null}
       {evidenceIds.length > 0 ? (
@@ -1727,9 +1729,9 @@ function BriefAttemptStepView({
       ) : null}
       {step.latency_ms != null || step.token_input_count != null || step.token_output_count != null ? (
         <Text type="secondary" style={{ fontSize: 11 }}>
-          {step.latency_ms != null ? `耗时 ${step.latency_ms} ms` : ''}
-          {step.token_input_count != null ? ` · 输入 ${step.token_input_count} tokens` : ''}
-          {step.token_output_count != null ? ` · 输出 ${step.token_output_count} tokens` : ''}
+          {step.latency_ms != null ? t("耗时 {latency_ms} ms", { latency_ms: step.latency_ms }) : ''}
+          {step.token_input_count != null ? t(" · 输入 {token_input_count} tokens", { token_input_count: step.token_input_count }) : ''}
+          {step.token_output_count != null ? t(" · 输出 {token_output_count} tokens", { token_output_count: step.token_output_count }) : ''}
         </Text>
       ) : null}
     </div>
@@ -1743,11 +1745,11 @@ function BriefEvidenceLinks({
   evidenceIds: string[];
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   return (
     <Space size={4} wrap className="knowledge-brief-step-evidence">
       <Text type="secondary" style={{ fontSize: 11 }}>
-        来源依据：
-      </Text>
+        {t("来源依据：")}</Text>
       {evidenceIds.map((evidenceId, index) => (
         <Button
           key={evidenceId}
@@ -1755,7 +1757,7 @@ function BriefEvidenceLinks({
           type="link"
           onClick={() => onCitationJump(evidenceId)}
         >
-          来源依据 {index + 1}
+          {t("来源依据 ")}{index + 1}
         </Button>
       ))}
     </Space>
@@ -1779,13 +1781,14 @@ function BriefBlock({
   canMutate: boolean;
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   if (loading) {
     return <Spin />;
   }
   const brief: KnowledgeSourceBrief | null = data?.brief ?? null;
   const latestAttempt: KnowledgeBriefAttempt | null = data?.latest_attempt ?? null;
   const blockReason = data?.brief_block_reason ?? '';
-  const errorMessage = data?.brief_error_message ? SAFE_PROCESSING_FAILURE_COPY : '';
+  const errorMessage = data?.brief_error_message ? t(SAFE_PROCESSING_FAILURE_COPY) : '';
   const showEmpty = briefStatus === 'not_started' || (!brief && !latestAttempt);
   // KI-10：旧 Brief 存在时 processing 表示"正在重建"；outdated 表示配置已变化；
   // rebuildFailed 表示最近重建未通过但旧 Brief 已保留（Spec §10.4）。
@@ -1801,11 +1804,10 @@ function BriefBlock({
           <span className="knowledge-brief-spark">
             <ReadOutlined />
           </span>
-          资料导读
-        </Title>
+          {t("资料导读")}</Title>
         <Space size={6} wrap>
           <Pill variant={isRebuilding || outdated || rebuildFailed ? 'amber' : 'violet'}>
-            {isRebuilding ? '正在重建' : BRIEF_LABEL[briefStatus] ?? briefStatus}
+            {isRebuilding ? t("正在重建") : BRIEF_LABEL[briefStatus] ?? briefStatus}
           </Pill>
           <Button
             size="small"
@@ -1813,7 +1815,7 @@ function BriefBlock({
             loading={rebuilding}
             disabled={!canMutate || briefStatus === 'processing'}
           >
-            {brief ? '重建资料导读' : '生成资料导读'}
+            {brief ? t("重建资料导读") : t("生成资料导读")}
           </Button>
         </Space>
       </div>
@@ -1821,16 +1823,16 @@ function BriefBlock({
         <Alert
           type="warning"
           showIcon
-          message={`资料导读暂缓：${blockReason}`}
-          description="请先在设置中配置满足要求的服务，然后点击生成资料导读。"
+          message={t("资料导读暂缓：{blockReason}", { blockReason: blockReason })}
+          description={t("请先在设置中配置满足要求的服务，然后点击生成资料导读。")}
         />
       ) : null}
       {outdated ? (
         <Alert
           type="warning"
           showIcon
-          message="资料导读已相对当前配置过期"
-          description="服务、提示词、结构或保存版本已变化，旧资料导读仍可查看，建议重建。"
+          message={t("资料导读已相对当前配置过期")}
+          description={t("服务、提示词、结构或保存版本已变化，旧资料导读仍可查看，建议重建。")}
           style={{ marginTop: 8 }}
         />
       ) : null}
@@ -1838,7 +1840,7 @@ function BriefBlock({
         <Alert
           type="error"
           showIcon
-          message="最近一次资料导读校验未通过"
+          message={t("最近一次资料导读校验未通过")}
           description={errorMessage}
           style={{ marginTop: 8 }}
         />
@@ -1847,8 +1849,8 @@ function BriefBlock({
         <Alert
           type="warning"
           showIcon
-          message="最近一次重建未通过，已保留旧资料导读"
-          description={SAFE_PROCESSING_FAILURE_COPY}
+          message={t("最近一次重建未通过，已保留旧资料导读")}
+          description={t(SAFE_PROCESSING_FAILURE_COPY)}
           style={{ marginTop: 8 }}
         />
       ) : null}
@@ -1860,7 +1862,7 @@ function BriefBlock({
         />
       ) : null}
       {showEmpty && !blockReason ? (
-        <Empty description="尚未生成资料导读，可在上方点击「生成资料导读」" />
+        <Empty description={t("尚未生成资料导读，可在上方点击「生成资料导读」")} />
       ) : null}
       {brief ? (
         <BriefPayloadView brief={brief} onCitationJump={onCitationJump} />
@@ -1872,18 +1874,18 @@ function BriefBlock({
 // KBR-05：issue_type → 中文 label。Source 状态区只显示稳定 error code + 失败总数 +
 // 短摘要；Attempt 详情按 issue_type 区分 citation/support/coverage/repair 失败。
 const ISSUE_TYPE_LABEL: Record<string, string> = {
-  schema_invalid: 'Schema 非法',
-  citation_missing: '引用缺失',
-  citation_ownership: '引用越界',
-  support_partial: '部分支持',
-  support_unsupported: '未支持',
-  support_contradicted: '相矛盾',
-  validator_parse_failed: '校验结果无法解析',
-  validator_call_failed: '校验暂时不可用',
-  coverage_missing: '章节未覆盖',
+  get schema_invalid() { return t("Schema 非法"); },
+  get citation_missing() { return t("引用缺失"); },
+  get citation_ownership() { return t("引用越界"); },
+  get support_partial() { return t("部分支持"); },
+  get support_unsupported() { return t("未支持"); },
+  get support_contradicted() { return t("相矛盾"); },
+  get validator_parse_failed() { return t("校验结果无法解析"); },
+  get validator_call_failed() { return t("校验暂时不可用"); },
+  get coverage_missing() { return t("章节未覆盖"); },
   // KBR-06：repair patch 非法/越权。
-  repair_invalid: '修复补丁非法',
-  repair_unauthorized: '修复补丁越权',
+  get repair_invalid() { return t("修复补丁非法"); },
+  get repair_unauthorized() { return t("修复补丁越权"); },
 };
 
 export function BriefValidationIssues({
@@ -1893,6 +1895,7 @@ export function BriefValidationIssues({
   report: BriefValidationReport;
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   // Attempt/处理记录展示全部失败项，每项可定位到候选 Brief block 与已引用 Evidence。
   // 详情不复制 Evidence 正文，按 evidence_id 跳转到本地 Evidence。
   const issues = report.issues ?? [];
@@ -1906,7 +1909,7 @@ export function BriefValidationIssues({
       style={{ marginTop: 8 }}
       message={
         report.summary ??
-        `资料导读质量校验失败：共 ${report.failure_count ?? issues.length} 条`
+        t("资料导读质量校验失败：共 {value} 条", { value: report.failure_count ?? issues.length })
       }
       description={
         <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -1919,19 +1922,18 @@ export function BriefValidationIssues({
                 <Pill variant="rose">
                   {ISSUE_TYPE_LABEL[issue.issue_type] ?? issue.issue_type}
                 </Pill>
-                <Text strong>{issue.block_path || '（全局）'}</Text>
+                <Text strong>{issue.block_path || t("（全局）")}</Text>
               </Space>
               <div>
                 {issue.reason_code ? (
                   <Tag color="orange">
-                    原因：{BRIEF_REASON_CODE_LABEL[issue.reason_code] ?? issue.reason_code}
+                    {t("原因：")}{BRIEF_REASON_CODE_LABEL[issue.reason_code] ?? issue.reason_code}
                   </Tag>
                 ) : null}
                 {issue.unsupported_fragments?.length ? (
                   <div className="knowledge-brief-diagnostic-line">
                     <Text type="secondary" style={{ fontSize: 12 }}>
-                      未直接支持：
-                    </Text>
+                      {t("未直接支持：")}</Text>
                     <Space size={4} wrap>
                       {issue.unsupported_fragments.map((fragment, fragmentIndex) => (
                         <Tag key={`${fragment}-${fragmentIndex}`}>{fragment}</Tag>
@@ -1946,7 +1948,7 @@ export function BriefValidationIssues({
                 ) : null}
                 {issue.suggested_rewrite ? (
                   <Text type="secondary" className="knowledge-brief-diagnostic-text">
-                    建议改写：{issue.suggested_rewrite}
+                    {t("建议改写：")}{issue.suggested_rewrite}
                   </Text>
                 ) : null}
               </div>
@@ -1971,23 +1973,23 @@ function BriefPayloadView({
   brief: KnowledgeSourceBrief;
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   const { payload } = brief;
   return (
     <div style={{ width: '100%' }}>
       <BriefStatementList
-        title="概述"
+        title={t("概述")}
         items={payload.overview}
         onCitationJump={onCitationJump}
       />
       <BriefStatementList
-        title="关键要点"
+        title={t("关键要点")}
         items={payload.key_points}
         onCitationJump={onCitationJump}
       />
       <div className="knowledge-brief-section">
         <Title level={5} className="knowledge-brief-section-label">
-          章节导读
-        </Title>
+          {t("章节导读")}</Title>
         {payload.section_guides.map((item, index) => (
           <div key={`${item.section_key}-${index}`} className="knowledge-section-guide">
             <span className="knowledge-section-guide-path">
@@ -2006,7 +2008,7 @@ function BriefPayloadView({
         ))}
       </div>
       <BriefStatementList
-        title="局限与未覆盖"
+        title={t("局限与未覆盖")}
         accent="warning"
         items={payload.limitations}
         onCitationJump={onCitationJump}
@@ -2014,8 +2016,7 @@ function BriefPayloadView({
       {payload.coverage && payload.coverage.length > 0 ? (
         <div className="knowledge-brief-section">
           <Title level={5} className="knowledge-brief-section-label">
-            章节覆盖
-          </Title>
+            {t("章节覆盖")}</Title>
           <div className="knowledge-coverage-row">
             {payload.coverage.map((item) => (
               <span
@@ -2026,7 +2027,7 @@ function BriefPayloadView({
               >
                 {item.section_key}
                 {item.status === 'skipped'
-                  ? `（已跳过：${item.skipped_reason || '—'}）`
+                  ? t("（已跳过：{value}）", { value: item.skipped_reason || '—' })
                   : ''}
               </span>
             ))}
@@ -2048,6 +2049,7 @@ function BriefStatementList({
   items: BriefStatement[];
   onCitationJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   if (!items.length) {
     return null;
   }
@@ -2076,6 +2078,7 @@ function BriefCitationChips({
   evidenceIds: string[];
   onJump: (evidenceId: string) => void;
 }) {
+  useLocale();
   if (!evidenceIds.length) {
     return null;
   }
@@ -2083,7 +2086,7 @@ function BriefCitationChips({
     <div className="knowledge-citation-chips">
       {evidenceIds.map((id, index) => (
         <button key={id} type="button" className="knowledge-chip-cite" onClick={() => onJump(id)}>
-          来源依据 {index + 1}
+          {t("来源依据 ")}{index + 1}
         </button>
       ))}
     </div>
@@ -2105,6 +2108,7 @@ function EvidenceBlock({
   highlightEvidenceId: string | null;
   onHighlightConsumed: () => void;
 }) {
+  useLocale();
   const highlightRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!highlightEvidenceId || loading || !highlightRef.current) return;
@@ -2118,7 +2122,7 @@ function EvidenceBlock({
   }
   if (!evidence.length && !unavailable) {
     return (
-      <Empty description="尚未生成来源依据" />
+      <Empty description={t("尚未生成来源依据")} />
     );
   }
   return (
@@ -2127,8 +2131,8 @@ function EvidenceBlock({
         <Alert
           type="warning"
           showIcon
-          message="部分来源依据暂时不可用"
-          description={evidence.length ? '已展示可安全读取的内容。' : '请稍后重试。'}
+          message={t("部分来源依据暂时不可用")}
+          description={evidence.length ? t("已展示可安全读取的内容。") : t("请稍后重试。")}
         />
       ) : null}
       <List
@@ -2147,8 +2151,7 @@ function EvidenceBlock({
                   <span className="knowledge-evidence-kind">{item.block_kind}</span>
                   {isHighlighted ? (
                     <Pill variant="amber" className="knowledge-evidence-hit-badge">
-                      搜索命中
-                    </Pill>
+                      {t("搜索命中")}</Pill>
                   ) : null}
                 </div>
                 {item.heading_path.length ? (
@@ -2191,6 +2194,7 @@ function OriginalMarkdownBlock({
   loading: boolean;
   error: boolean;
 }) {
+  useLocale();
   if (loading) {
     return <Spin />;
   }
@@ -2199,18 +2203,17 @@ function OriginalMarkdownBlock({
       <Alert
         type="warning"
         showIcon
-        message="无法读取资料正文"
-        description="可以下载原件后在本地查看。"
+        message={t("无法读取资料正文")}
+        description={t("可以下载原件后在本地查看。")}
       />
     );
   }
   return (
     <div className="knowledge-original-markdown">
       <div className="knowledge-original-markdown-toolbar">
-        <Text type="secondary">以下为资料正文预览，过长内容会缩略显示。</Text>
+        <Text type="secondary">{t("以下为资料正文预览，过长内容会缩略显示。")}</Text>
         <Button size="small" href={buildKnowledgeSourceContentUrl(sourceId)} target="_blank">
-          下载原件
-        </Button>
+          {t("下载原件")}</Button>
       </div>
       <MarkdownContent content={content} />
     </div>
@@ -2218,7 +2221,8 @@ function OriginalMarkdownBlock({
 }
 
 function MarkdownContent({ content }: { content: string }) {
-  const safeContent = boundedText(content, '内容暂时不可用', MAX_DETAIL_LENGTH);
+  useLocale();
+  const safeContent = boundedText(content, t("内容暂时不可用"), MAX_DETAIL_LENGTH);
   return (
     <div className="knowledge-markdown">
       <ReactMarkdown
@@ -2240,19 +2244,19 @@ function AssetEvidenceView({
   assetId: number;
   alt: string;
 }) {
+  useLocale();
   const url = buildKnowledgeAssetContentUrl(sourceId, assetId);
   return (
     <Space direction="vertical" size={4} style={{ width: '100%' }}>
       {/* eslint-disable-next-line jsx-a11y/alt-text */}
       <img
         src={url}
-        alt={alt || '图文资料附件'}
+        alt={alt || t("图文资料附件")}
         loading="lazy"
         className="knowledge-evidence-asset"
       />
       <Button size="small" href={url} target="_blank" rel="noopener noreferrer">
-        下载原图
-      </Button>
+        {t("下载原图")}</Button>
     </Space>
   );
 }
@@ -2268,15 +2272,16 @@ function JobsBlock({
   unavailable: boolean;
   canMutate: boolean;
 }) {
+  useLocale();
   const queryClient = useQueryClient();
   const cancelMutation = useMutation({
     mutationFn: (jobId: number) => cancelKnowledgeJob(jobId),
     onSuccess: () => {
-      message.success('已请求取消');
+      message.success(liveText(() => t("已请求取消")));
       queryClient.invalidateQueries({ queryKey: ['knowledge'] });
     },
     onError: () => {
-      message.error('取消失败，请稍后重试。');
+      message.error(liveText(() => t("取消失败，请稍后重试。")));
     },
   });
   if (loading) {
@@ -2288,11 +2293,11 @@ function JobsBlock({
         <Alert
           type="warning"
           showIcon
-          message="部分处理记录暂时不可用"
-          description="已隐藏不完整的处理记录，请稍后重试。"
+          message={t("部分处理记录暂时不可用")}
+          description={t("已隐藏不完整的处理记录，请稍后重试。")}
         />
       ) : null}
-      {!unavailable && data.jobs.length === 0 ? <Empty description="暂无处理记录" /> : null}
+      {!unavailable && data.jobs.length === 0 ? <Empty description={t("暂无处理记录")} /> : null}
       <List
         className="knowledge-jobs-list"
         dataSource={data.jobs}
@@ -2301,23 +2306,23 @@ function JobsBlock({
           <List.Item>
             <Space direction="vertical" size={2} style={{ width: '100%' }}>
               <Space size={8} wrap>
-                <span className="knowledge-evidence-kind">{item.kind === 'delete' ? '删除任务' : '资料处理任务'}</span>
+                <span className="knowledge-evidence-kind">{item.kind === 'delete' ? t("删除任务") : t("资料处理任务")}</span>
                 <Pill variant={jobStatusVariant(item.status)}>
-                  {JOB_STATUS_LABEL[item.status] ?? '状态待确认'}
+                  {JOB_STATUS_LABEL[item.status] ?? t("状态待确认")}
                 </Pill>
-                {item.canceled ? <Pill variant="rose">已取消</Pill> : null}
+                {item.canceled ? <Pill variant="rose">{t("已取消")}</Pill> : null}
               </Space>
               {item.progress > 0 ? <Progress percent={item.progress} size="small" /> : null}
               {item.created_at ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  开始时间：{formatDateTime(item.created_at)}
+                  {t("开始时间：")}{formatDateTime(item.created_at)}
                 </Text>
               ) : null}
               {(item.retry_count ?? 0) > 0 ? (
                 <Text type="secondary" style={{ fontSize: 12 }}>
-                  重试次数：{item.retry_count}
+                  {t("重试次数：")}{item.retry_count}
                   {item.next_retry_at
-                    ? ` · 下次重试 ${formatDateTime(item.next_retry_at)}`
+                    ? t(" · 下次重试 {value}", { value: formatDateTime(item.next_retry_at) })
                     : ''}
                 </Text>
               ) : null}
@@ -2325,7 +2330,7 @@ function JobsBlock({
                 <Alert
                   type="error"
                   showIcon
-                  message={SAFE_PROCESSING_FAILURE_COPY}
+                  message={t(SAFE_PROCESSING_FAILURE_COPY)}
                 />
               ) : null}
               {canMutate && isJobCancellable(item) ? (
@@ -2337,8 +2342,7 @@ function JobsBlock({
                     if (canMutate) cancelMutation.mutate(item.id);
                   }}
                 >
-                  取消任务
-                </Button>
+                  {t("取消任务")}</Button>
               ) : null}
             </Space>
           </List.Item>
@@ -2349,11 +2353,11 @@ function JobsBlock({
 }
 
 const JOB_STATUS_LABEL: Record<string, string> = {
-  pending: '排队中',
-  running: '运行中',
-  succeeded: '已完成',
-  failed: '已失败',
-  canceled: '已取消',
+  get pending() { return t("排队中"); },
+  get running() { return t("运行中"); },
+  get succeeded() { return t("已完成"); },
+  get failed() { return t("已失败"); },
+  get canceled() { return t("已取消"); },
 };
 
 function isJobCancellable(job: KnowledgeJob): boolean {
@@ -2371,13 +2375,14 @@ function SearchResultsPanel({
   unavailable: boolean;
   onPick: (sourceId: number, evidenceId: string) => void;
 }) {
+  useLocale();
   if (!hits.length && unavailable) {
     return (
       <Alert
         type="warning"
         showIcon
-        message="搜索结果暂时不可用"
-        description="请稍后重试。"
+        message={t("搜索结果暂时不可用")}
+        description={t("请稍后重试。")}
       />
     );
   }
@@ -2386,8 +2391,8 @@ function SearchResultsPanel({
       <Alert
         type="info"
         showIcon
-        message={`未匹配资料内容：${query}`}
-        description="尝试更宽的关键词，或确认内容整理已完成。"
+        message={t("未匹配资料内容：{query}", { query: query })}
+        description={t("尝试更宽的关键词，或确认内容整理已完成。")}
       />
     );
   }
@@ -2395,10 +2400,10 @@ function SearchResultsPanel({
     <Alert
       type="success"
       showIcon
-      message={`命中 ${hits.length} 条资料内容：${query}`}
+      message={t("命中 {length} 条资料内容：{query}", { length: hits.length, query: query })}
       description={
         <>
-          {unavailable ? <Text type="warning">部分结果暂时不可用，已展示可安全读取的内容。</Text> : null}
+          {unavailable ? <Text type="warning">{t("部分结果暂时不可用，已展示可安全读取的内容。")}</Text> : null}
           <List
             dataSource={hits}
             rowKey={(item) => item.evidence_id}
@@ -2410,8 +2415,7 @@ function SearchResultsPanel({
                   size="small"
                   onClick={() => onPick(item.source_id, item.evidence_id)}
                 >
-                  打开并定位
-                </Button>,
+                  {t("打开并定位")}</Button>,
               ]}
             >
               <Space direction="vertical" size={2} style={{ width: '100%' }}>
@@ -2423,7 +2427,7 @@ function SearchResultsPanel({
                     </Text>
                   ) : null}
                 </Space>
-                <Text>{boundedText(item.snippet, '内容暂时不可用', 800)}</Text>
+                <Text>{boundedText(item.snippet, t("内容暂时不可用"), 800)}</Text>
               </Space>
             </List.Item>
             )}
@@ -2445,13 +2449,14 @@ function UploadModal({
   uploading: boolean;
   onSubmit: (file: File, titleHint: string) => void;
 }) {
+  useLocale();
   const [fileList, setFileList] = useState<UploadFile[]>([]);
   const [titleHint, setTitleHint] = useState('');
   const pickedFile = fileList[0]?.originFileObj as File | undefined;
 
   const handleUpload = () => {
     if (!pickedFile) {
-      message.warning('请选择一个 Markdown 或 Text 文件');
+      message.warning(liveText(() => t("请选择一个 Markdown 或 Text 文件")));
       return;
     }
     onSubmit(pickedFile, titleHint);
@@ -2459,7 +2464,7 @@ function UploadModal({
 
   return (
     <Modal
-      title="上传 Markdown / Text 资料"
+      title={t("上传 Markdown / Text 资料")}
       open={open}
       onCancel={() => {
         setFileList([]);
@@ -2468,7 +2473,7 @@ function UploadModal({
       }}
       onOk={handleUpload}
       okButtonProps={{ loading: uploading }}
-      okText="开始导入"
+      okText={t("开始导入")}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Upload.Dragger
@@ -2481,13 +2486,12 @@ function UploadModal({
           <p className="ant-upload-drag-icon">
             <InboxOutlined />
           </p>
-          <p className="ant-upload-text">点击或拖拽 .md / .txt 文件到此处</p>
+          <p className="ant-upload-text">{t("点击或拖拽 .md / .txt 文件到此处")}</p>
           <p className="ant-upload-hint">
-            单文件最大 5 MiB / 64,000 tokens；UTF-8（含 BOM）、UTF-16 BOM 或高置信 GBK/GB18030
-          </p>
+            {t("单文件最大 5 MiB / 64,000 tokens；UTF-8（含 BOM）、UTF-16 BOM 或高置信 GBK/GB18030")}</p>
         </Upload.Dragger>
         <Input
-          placeholder="可选：展示标题（不填则用文件名或首个 # 标题）"
+          placeholder={t("可选：展示标题（不填则用文件名或首个 # 标题）")}
           value={titleHint}
           onChange={(event) => setTitleHint(event.target.value)}
         />
@@ -2507,6 +2511,7 @@ function BundleModal({
   uploading: boolean;
   onSubmit: (main: File, assets: File[], titleHint: string) => void;
 }) {
+  useLocale();
   const [mainFileList, setMainFileList] = useState<UploadFile[]>([]);
   const [assetFileList, setAssetFileList] = useState<UploadFile[]>([]);
   const [titleHint, setTitleHint] = useState('');
@@ -2518,11 +2523,11 @@ function BundleModal({
 
   const handleSubmit = () => {
     if (!mainFile) {
-      message.warning('请选择 Markdown 主文件');
+      message.warning(liveText(() => t("请选择 Markdown 主文件")));
       return;
     }
     if (assetFiles.length === 0) {
-      message.warning('图文资料至少需要一张图片附件');
+      message.warning(liveText(() => t("图文资料至少需要一张图片附件")));
       return;
     }
     onSubmit(mainFile, assetFiles, titleHint);
@@ -2530,7 +2535,7 @@ function BundleModal({
 
   return (
     <Modal
-      title="上传图文资料"
+      title={t("上传图文资料")}
       open={open}
       onCancel={() => {
         setMainFileList([]);
@@ -2540,14 +2545,13 @@ function BundleModal({
       }}
       onOk={handleSubmit}
       okButtonProps={{ loading: uploading }}
-      okText="开始导入"
+      okText={t("开始导入")}
       width={640}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <div>
           <Title level={5} style={{ marginBottom: 4 }}>
-            Markdown 主文件
-          </Title>
+            {t("Markdown 主文件")}</Title>
           <Upload.Dragger
             accept=".md,text/markdown"
             maxCount={1}
@@ -2558,14 +2562,13 @@ function BundleModal({
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
-            <p className="ant-upload-text">点击或拖拽 .md 主文件</p>
-            <p className="ant-upload-hint">主文件最大 5 MiB；图片引用必须使用扁平相对路径</p>
+            <p className="ant-upload-text">{t("点击或拖拽 .md 主文件")}</p>
+            <p className="ant-upload-hint">{t("主文件最大 5 MiB；图片引用必须使用扁平相对路径")}</p>
           </Upload.Dragger>
         </div>
         <div>
           <Title level={5} style={{ marginBottom: 4 }}>
-            图片附件（PNG / JPEG / WebP）
-          </Title>
+            {t("图片附件（PNG / JPEG / WebP）")}</Title>
           <Upload.Dragger
             accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp"
             multiple
@@ -2576,22 +2579,21 @@ function BundleModal({
             <p className="ant-upload-drag-icon">
               <PictureOutlined />
             </p>
-            <p className="ant-upload-text">点击或拖拽多张图片到此处</p>
+            <p className="ant-upload-text">{t("点击或拖拽多张图片到此处")}</p>
             <p className="ant-upload-hint">
-              单图 ≤ 10 MiB / 40 MP；图文资料总大小 ≤ 50 MiB；附件数量 ≤ 50
-            </p>
+              {t("单图 ≤ 10 MiB / 40 MP；图文资料总大小 ≤ 50 MiB；附件数量 ≤ 50")}</p>
           </Upload.Dragger>
         </div>
         <Input
-          placeholder="可选：展示标题（不填则用文件名或首个 # 标题）"
+          placeholder={t("可选：展示标题（不填则用文件名或首个 # 标题）")}
           value={titleHint}
           onChange={(event) => setTitleHint(event.target.value)}
         />
         <Alert
           type="info"
           showIcon
-          message="系统不会 OCR 图片内容，也不会调用多模态模型"
-          description="alt 文本作为作者原文参与检索；图片字节不会进入 FTS。"
+          message={t("系统不会 OCR 图片内容，也不会调用多模态模型")}
+          description={t("alt 文本作为作者原文参与检索；图片字节不会进入 FTS。")}
         />
       </Space>
     </Modal>
@@ -2609,13 +2611,14 @@ function PasteModal({
   submitting: boolean;
   onSubmit: (paste: string, titleHint: string, originUrl: string) => void;
 }) {
+  useLocale();
   const [paste, setPaste] = useState('');
   const [titleHint, setTitleHint] = useState('');
   const [originUrl, setOriginUrl] = useState('');
 
   const handleSubmit = () => {
     if (!paste.trim()) {
-      message.warning('请粘贴正文内容');
+      message.warning(liveText(() => t("请粘贴正文内容")));
       return;
     }
     onSubmit(paste, titleHint, originUrl);
@@ -2623,7 +2626,7 @@ function PasteModal({
 
   return (
     <Modal
-      title="粘贴正文"
+      title={t("粘贴正文")}
       open={open}
       onCancel={() => {
         setPaste('');
@@ -2633,23 +2636,23 @@ function PasteModal({
       }}
       onOk={handleSubmit}
       okButtonProps={{ loading: submitting }}
-      okText="开始导入"
+      okText={t("开始导入")}
       width={640}
     >
       <Space direction="vertical" style={{ width: '100%' }} size="middle">
         <Input.TextArea
-          placeholder="在此粘贴 Markdown 正文（系统会作为虚拟 main.md 进入同一 Pipeline）"
+          placeholder={t("在此粘贴 Markdown 正文（系统会作为虚拟 main.md 进入同一 Pipeline）")}
           value={paste}
           onChange={(event) => setPaste(event.target.value)}
           autoSize={{ minRows: 8, maxRows: 18 }}
         />
         <Input
-          placeholder="可选：展示标题（不填则用首个 # 标题或首段内容）"
+          placeholder={t("可选：展示标题（不填则用首个 # 标题或首段内容）")}
           value={titleHint}
           onChange={(event) => setTitleHint(event.target.value)}
         />
         <Input
-          placeholder="可选：来源 URL（仅作为 provenance 保存，系统不会发起网络请求）"
+          placeholder={t("可选：来源 URL（仅作为 provenance 保存，系统不会发起网络请求）")}
           value={originUrl}
           onChange={(event) => setOriginUrl(event.target.value)}
         />
@@ -2668,9 +2671,9 @@ function formatDateTime(value: string | null): string {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  return date.toLocaleString(getLocale());
 }
 
 function extractErrorMessage(error: unknown): string {
-  return error ? '操作未完成，请稍后重试' : '未知错误';
+  return error ? t("操作未完成，请稍后重试") : t("未知错误");
 }

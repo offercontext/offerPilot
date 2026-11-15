@@ -1,3 +1,4 @@
+import { t, useLocale, getLocale, formatNumber } from '@/i18n';
 import { createElement, useEffect, useState } from 'react';
 import { Switch } from 'antd';
 import type { Offer } from '@/types/offer';
@@ -30,6 +31,7 @@ interface Props {
 }
 
 function formatTotal(total: number): string {
+  if (getLocale() === 'en-US') return formatNumber(total, { maximumFractionDigits: 0 });
   if (total >= 10000) return (total / 10000).toFixed(1);
   return String(total);
 }
@@ -53,6 +55,7 @@ export default function ContextPanel({
   offers = [],
   contextKey = '',
 }: Props) {
+  useLocale();
   const [offerPickerOpen, setOfferPickerOpen] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<Offer | null>(null);
   useEffect(() => {
@@ -68,13 +71,13 @@ export default function ContextPanel({
     <aside className={`${styles.context} ${floating ? styles.contextFloating : ''}`}>
       {activeOffer && (isNego || selectedOffer !== null) && (
         <div>
-          <div className={styles.panelLabel}>{offer ? '当前绑定 Offer' : '已选择 Offer'}</div>
+          <div className={styles.panelLabel}>{offer ? t("当前绑定 Offer") : t("已选择 Offer")}</div>
           <div className={styles.offerCard}>
             <div className={styles.offerCompany}>{activeOffer.company_name}</div>
             <div className={styles.offerRole}>{activeOffer.position_name}</div>
             <div className={styles.offerTotal}>
               {formatTotal(activeOffer.total_cash)}
-              <span className={styles.offerUnit}>w 总包/年</span>
+              <span className={styles.offerUnit}>{t("w 总包/年")}</span>
             </div>
             <span
               className={styles.offerStatus}
@@ -93,9 +96,7 @@ export default function ContextPanel({
                 className={styles.capItem}
                 data-testid="pilot-prepare-offer-negotiation"
                 onClick={() => onPrepareOfferNegotiation(activeOffer)}
-              >
-                准备谈薪
-              </button>
+              >{t("准备谈薪")}</button>
               {!offer && selectedOffer && (
                 <button
                   type="button"
@@ -105,28 +106,24 @@ export default function ContextPanel({
                     setSelectedOffer(null);
                     setOfferPickerOpen(true);
                   }}
-                >
-                  更换 Offer
-                </button>
+                >{t("更换 Offer")}</button>
               )}
             </>
           ) : activeOffer ? (
-            <div role="note" className={styles.evidenceEmpty}>历史未绑定 Offer 仅支持只读查看，不能进入谈薪准备。</div>
+            <div role="note" className={styles.evidenceEmpty}>{t("历史未绑定 Offer 仅支持只读查看，不能进入谈薪准备。")}</div>
           ) : null}
         </div>
       )}
       {!activeOffer && onPrepareOfferNegotiation && eligibleOffers.length > 0 && (
         <div>
-          <div className={styles.panelLabel}>谈薪准备</div>
+          <div className={styles.panelLabel}>{t("谈薪准备")}</div>
           {!offerPickerOpen && (
             <button
               type="button"
               className={styles.capItem}
               data-testid="pilot-choose-offer-negotiation"
               onClick={() => setOfferPickerOpen(true)}
-            >
-              选择 Offer 后准备谈薪
-            </button>
+            >{t("选择 Offer 后准备谈薪")}</button>
           )}
           {offerPickerOpen && (
             <PilotOfferSelectionCard
@@ -142,28 +139,26 @@ export default function ContextPanel({
       )}
       {!activeOffer && onPrepareOfferNegotiation && offers.length > 0 && eligibleOffers.length === 0 ? (
         <div>
-          <div className={styles.panelLabel}>谈薪准备</div>
-          <div role="note" className={styles.evidenceEmpty}>暂无可用于谈薪准备的已绑定 Offer。</div>
+          <div className={styles.panelLabel}>{t("谈薪准备")}</div>
+          <div role="note" className={styles.evidenceEmpty}>{t("暂无可用于谈薪准备的已绑定 Offer。")}</div>
         </div>
       ) : null}
 
       {onOpenInterviewStoryLibrary ? (
         <div>
-          <div className={styles.panelLabel}>面试故事</div>
+          <div className={styles.panelLabel}>{t("面试故事")}</div>
           <button
             type="button"
             className={styles.capItem}
             data-testid="pilot-open-interview-story-library"
             data-story-audit="pilot-entry"
             onClick={onOpenInterviewStoryLibrary}
-          >
-            整理面试故事
-          </button>
+          >{t("整理面试故事")}</button>
         </div>
       ) : null}
 
       <div>
-        <div className={styles.panelLabel}>当前参考依据</div>
+        <div className={styles.panelLabel}>{t("当前参考依据")}</div>
         {evidenceSelection.visible.length ? (
           <EvidenceList
             items={evidenceSelection.visible}
@@ -174,14 +169,12 @@ export default function ContextPanel({
             onOpenEvidence={onOpenEvidence}
           />
         ) : (
-          <div className={styles.evidenceEmpty}>
-            暂无参考依据。你可以直接提问，或选择一个能力，让领航员读取本地求职数据。
-          </div>
+          <div className={styles.evidenceEmpty}>{t("暂无参考依据。你可以直接提问，或选择一个能力，让领航员读取本地求职数据。")}</div>
         )}
       </div>
 
       <div>
-        <div className={styles.panelLabel}>{isNego ? '谈薪教练能力' : '常用能力'}</div>
+        <div className={styles.panelLabel}>{isNego ? t("谈薪教练能力") : t("常用能力")}</div>
         <div className={styles.capList}>
           {capabilities.map((cap) => {
             return (
@@ -204,31 +197,23 @@ export default function ContextPanel({
       </div>
 
       <div>
-        <div className={styles.panelLabel}>设置</div>
+        <div className={styles.panelLabel}>{t("设置")}</div>
         <label className={styles.setting}>
-          <span>本地写入自动确认</span>
+          <span>{t("本地写入自动确认")}</span>
           <Switch checked={autoApprove} onChange={onToggleAutoApprove} />
         </label>
       </div>
 
       {!hasKey && (
-        <div className={`${styles.notice} ${styles.noticeWarn}`}>
-          尚未配置 API key，请先完成设置。
-          {onOpenSettings && (
-            <button type="button" className={styles.noticeAction} onClick={onOpenSettings}>
-              打开设置
-            </button>
+        <div className={`${styles.notice} ${styles.noticeWarn}`}>{t("尚未配置 API key，请先完成设置。")}{onOpenSettings && (
+            <button type="button" className={styles.noticeAction} onClick={onOpenSettings}>{t("打开设置")}</button>
           )}
         </div>
       )}
       {degraded && (
-        <div className={styles.notice}>
-          当前模型不支持工具调用，已切换为只读摘要模式，AI 无法修改你的数据。
-        </div>
+        <div className={styles.notice}>{t("当前模型不支持工具调用，已切换为只读摘要模式，AI 无法修改你的数据。")}</div>
       )}
-      <div className={styles.notice}>
-        领航员可读取并修改你的投递、日程、复盘与 Offer。删除等高风险写入始终需要你手动确认。
-      </div>
+      <div className={styles.notice}>{t("领航员可读取并修改你的投递、日程、复盘与 Offer。删除等高风险写入始终需要你手动确认。")}</div>
     </aside>
   );
 }

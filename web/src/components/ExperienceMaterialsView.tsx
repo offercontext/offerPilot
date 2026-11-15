@@ -1,4 +1,4 @@
-import KnowledgeNoteManager from './KnowledgeNoteManager';
+import { t, useLocale } from '@/i18n';
 import type { ReactNode } from 'react';
 import InterviewStoryLibraryView, { type InterviewStoryOpenDraft } from './InterviewStoryLibraryView';
 import {
@@ -47,10 +47,10 @@ function stateForProps(props: ExperienceMaterialsViewProps): MaterialSourceEnvel
 }
 
 function captureStateLabel(state: MaterialProjectionState): ReactNode {
-  if (state === 'loading') return <div role="status">正在加载经历素材</div>;
-  if (state === 'error' || state === 'unavailable') return <div role="alert">面试片段暂时不可用，请稍后重试。</div>;
-  if (state === 'empty') return <div role="status">还没有已确认的面试片段</div>;
-  if (state === 'partial') return <div role="status">部分面试片段暂时不可用，已展示可用内容。</div>;
+  if (state === 'loading') return <div role="status">{t("正在加载经历素材")}</div>;
+  if (state === 'error' || state === 'unavailable') return <div role="alert">{t("面试片段暂时不可用，请稍后重试。")}</div>;
+  if (state === 'empty') return <div role="status">{t("还没有已确认的面试片段")}</div>;
+  if (state === 'partial') return <div role="status">{t("部分面试片段暂时不可用，已展示可用内容。")}</div>;
   return null;
 }
 
@@ -65,21 +65,20 @@ export default function ExperienceMaterialsView({
   onBack,
   ...props
 }: ExperienceMaterialsViewProps) {
+  useLocale();
   const captureProjection = projectExperienceMaterials({
     captures: stateForProps(props),
   });
 
   return (
-    <section aria-label="经历素材" data-testid="experience-materials-view">
+    <section aria-label={t("我的经历")} data-testid="experience-materials-view">
       <header>
-        <h2>经历素材</h2>
-        <p>已确认的经历故事和面试片段会保留在这里，来源变化时仍保留当时确认的内容。</p>
+        <h2>{t("我的经历")}</h2>
+        <p>{t("已确认的经历故事和面试片段会保留在这里，来源变化时仍保留当时确认的内容。")}</p>
       </header>
 
-      <KnowledgeNoteManager />
-
-      <section aria-label="已确认面试片段" data-testid="confirmed-capture-list">
-        <h3>已确认面试片段</h3>
+      <section aria-label={t("已确认面试片段")} data-testid="confirmed-capture-list">
+        <h3>{t("已确认面试片段")}</h3>
         {captureStateLabel(captureProjection.state)}
         {captureProjection.items.length > 0 ? (
           <ul>
@@ -88,9 +87,9 @@ export default function ExperienceMaterialsView({
                 <strong>{item.title}</strong>
                 <p>{item.summary}</p>
                 {item.sourceState === 'source_changed' ? (
-                  <span>来源已更新，已确认内容仍保留</span>
+                  <span>{t("来源已更新，已确认内容仍保留")}</span>
                 ) : item.sourceState === 'unavailable' ? (
-                  <span>部分来源暂时不可用</span>
+                  <span>{t("部分来源暂时不可用")}</span>
                 ) : null}
               </li>
             ))}
@@ -98,7 +97,7 @@ export default function ExperienceMaterialsView({
         ) : null}
       </section>
 
-      <section aria-label="经历故事" data-testid="experience-story-library">
+      <section aria-label={t("经历故事")} data-testid="experience-story-library">
         <InterviewStoryLibraryView onBack={onBack} onOpenDraft={onOpenDraft} />
       </section>
     </section>

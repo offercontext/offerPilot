@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview.md（准备建议）。
+# 本层负责冻结输入、生成租约与结果入库；pending/unknown 仍属于原尝试。
+# 回归入口：tests/test_interview_preparation_repository.py。
+
 import json
 import re
 from dataclasses import dataclass
@@ -149,6 +153,8 @@ class _InterviewPreparationLeaseHeartbeat:
             self._thread.join()
 
     def renew_once(self) -> bool:
+        # 数据库暂时不可达只能说明续租结果不确定，不能据此认定生成权已被接管。
+        # uncertain 会停止后续心跳；模型返回后仍由最终来源/所有权检查决定能否保存。
         for attempt in range(HEARTBEAT_RETRY_ATTEMPTS):
             try:
                 return self._renew_once()
@@ -161,6 +167,7 @@ class _InterviewPreparationLeaseHeartbeat:
         return False
 
     def _renew_once(self) -> bool:
+        # 续租绑定 revision + token，旧生成者不能替新生成者延长租约。
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             result = session.execute(
@@ -241,6 +248,9 @@ class InterviewPreparationProposalsRepository:
         readiness_feedback_version_ids_present: bool,
         readiness_feedback_version_ids: tuple[int, ...],
     ) -> InterviewPreparationGenerationResult | None:
+        # V2 先按已冻结请求恢复身份，再决定是否需要读取实时来源。
+        # 已完成结果可带 source_changed 返回；有效租约只返回 pending。
+        # 请求不匹配直接报冲突，不改写已受理尝试；过期尝试交回生成流程复核来源。
         application = _require_visible_application(session, application_id)
         if not can_prepare_application(session, application):
             raise InterviewPreparationNotFound()
@@ -299,6 +309,8 @@ class InterviewPreparationProposalsRepository:
         readiness_feedback_version_ids_present: bool = False,
         readiness_feedback_version_ids: tuple[int, ...] = (),
     ) -> InterviewPreparationGenerationResult:
+        # 在短写事务内取得生成权并持久化快照，然后释放事务再调用模型。
+        # readiness 字段缺省与显式空数组分别代表 V1/V2 契约，不能互换重试。
         if not isinstance(idempotency_key, str) or not IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
             raise InterviewPreparationValidationError(
                 "idempotency_key must be 16-128 ASCII characters",
@@ -650,6 +662,8 @@ class InterviewPreparationProposalsRepository:
         readiness_feedback_version_ids_present: bool = False,
         readiness_feedback_version_ids: tuple[int, ...] = (),
     ) -> InterviewPreparationGenerationResult | _InterviewPreparationOwnedGeneration | None:
+        # 相同 key 必须对应相同快照：ready 重放、有效租约等待、过期租约才可争抢。
+        # 活跃尝试遇到不同快照会失效，阻止原模型迟到后继续写入；ready 结果保留。
         if row.attempt_status == "invalidated":
             raise _attempt_invalidated()
         if row.source_fingerprint != fingerprint:
@@ -695,6 +709,7 @@ class InterviewPreparationProposalsRepository:
             return None
 
         old_revision = row.generation_revision
+        # UPDATE 再检查旧代次、token 和租约，保证并发恢复只有一个请求取得生成权。
         old_token = row.provider_call_token
         new_token = uuid4().hex
         result = session.execute(
@@ -758,6 +773,8 @@ class InterviewPreparationProposalsRepository:
         readiness_feedback_version_ids_present: bool = False,
         readiness_feedback_version_ids: tuple[int, ...] = (),
     ) -> InterviewPreparationGenerationResult:
+        # 心跳只降低慢模型调用被接管的概率，不替代入库前的来源及所有权校验。
+        # 租约已过期但尚未被接管时仍可保存；确认丢失所有权则只读取当前结果。
         if model is None:
             raise InterviewPreparationProviderError()
         heartbeat = (
@@ -815,6 +832,8 @@ class InterviewPreparationProposalsRepository:
                 session.commit()
                 return _result_for_existing(current)
 
+        # 即使心跳结果不确定也进入最终检查。重新构造来源，避免把生成期间
+        # 已删除、撤销或修改的资料所产生的建议保存为 ready。
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             row = _find_by_key(session, application_id, event_id, idempotency_key)
@@ -965,6 +984,8 @@ class InterviewPreparationProposalsRepository:
         revision: int,
         token: str,
     ) -> None:
+        # Provider 异常不证明外部调用未执行；保留原 token/租约供同 key 恢复，
+        # 且只允许本代生成者标记 unknown，不能覆盖后来接管者的状态。
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
             result = session.execute(

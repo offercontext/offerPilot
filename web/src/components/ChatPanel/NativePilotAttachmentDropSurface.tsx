@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useState, type DragEvent, type ReactNode } from 'react';
 import type { PilotContextAttachment, PilotAttachmentKind } from '@/types/chat';
 import styles from './ChatPanel.module.css';
@@ -30,6 +31,7 @@ function parseNativeAttachment(value: string): PilotContextAttachment | null {
 }
 
 export default function NativePilotAttachmentDropSurface({ children, disabled, onNativeDrop }: Props) {
+  useLocale();
   const [dragging, setDragging] = useState(false);
 
   return (
@@ -66,7 +68,7 @@ export default function NativePilotAttachmentDropSurface({ children, disabled, o
       }}
     >
       {children}
-      {dragging ? <div className={styles.nativePilotDropHint}>松开以加入 Pilot 上下文</div> : null}
+      {dragging ? <div className={styles.nativePilotDropHint}>{t("松开以加入 Pilot 上下文")}</div> : null}
     </div>
   );
 }

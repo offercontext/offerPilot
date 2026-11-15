@@ -30,6 +30,8 @@ vi.mock('@/services/chat', () => ({
   getSettingsBackup: mocks.getSettingsBackup,
 }));
 
+vi.mock('../services/backupRestore', () => ({ getRestoreStatus: vi.fn().mockResolvedValue({ state: 'none' }) }));
+
 const { default: SettingsView } = await import('./SettingsView');
 
 type LogsQueryConfig = {
@@ -37,6 +39,7 @@ type LogsQueryConfig = {
   queryFn: () => Promise<unknown>;
   queryKey: readonly unknown[];
   refetchInterval?: boolean | number;
+  enabled?: boolean;
 };
 
 const logPage = {
@@ -181,13 +184,21 @@ describe('SettingsView runtime diagnostics pagination', () => {
     expect(latestLogsQuery().queryKey).toEqual(['runtime-logs', 20, 0, '']);
   });
 
-  it('polls the newest page every 15 seconds', async () => {
+  it('only polls while diagnostics are visible and stops after closing', async () => {
     await renderSettings();
+    expect(latestLogsQuery().enabled).toBe(false);
+    expect(latestLogsQuery().refetchInterval).toBe(false);
+    const details = [...container.querySelectorAll('details')].find((item) => item.textContent?.includes('查看运行日志与诊断'))!;
+    await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')); });
 
     const query = latestLogsQuery();
     expect(query.queryKey).toEqual(['runtime-logs', 20, 0, '']);
     expect(query.refetchInterval).toBe(15000);
     expect(query.placeholderData).toBe(mocks.keepPreviousData);
+    expect(query.enabled).toBe(true);
+    await act(async () => { details.open = false; details.dispatchEvent(new Event('toggle')); });
+    expect(latestLogsQuery().enabled).toBe(false);
+    expect(latestLogsQuery().refetchInterval).toBe(false);
   });
 
   it('keeps a previous page visible with a retryable refresh warning', async () => {

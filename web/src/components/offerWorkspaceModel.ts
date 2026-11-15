@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 export type OfferWorkspaceMode = 'entry' | 'single' | 'selection' | 'comparison';
 
 export type OfferBindingState = 'bound' | 'unbound';
@@ -24,9 +25,9 @@ export function listMissingOfferFacts(offer: {
   equity?: string | null;
 }): string[] {
   const missing: string[] = [];
-  if (!offer.base_monthly) missing.push('月薪');
-  if (!offer.months_per_year) missing.push('年薪月数');
-  if (!offer.deadline?.trim()) missing.push('截止时间');
-  if (!offer.equity?.trim()) missing.push('股权或期权');
+  if (!offer.base_monthly) missing.push(t("月薪"));
+  if (!offer.months_per_year) missing.push(t("年薪月数"));
+  if (!offer.deadline?.trim()) missing.push(t("截止时间"));
+  if (!offer.equity?.trim()) missing.push(t("股权或期权"));
   return missing;
 }

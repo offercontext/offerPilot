@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 // Offer record — fields match the Go db.Offer JSON tags (snake_case).
 export type OfferStatus = 'pending' | 'negotiating' | 'accepted' | 'declined' | 'expired';
 
@@ -175,11 +176,11 @@ export class OfferNegotiationError extends Error {
 }
 
 export const OFFER_STATUS_LABELS: Record<OfferStatus, string> = {
-  pending: '待处理',
-  negotiating: '谈判中',
-  accepted: '已接受',
-  declined: '已拒绝',
-  expired: '已过期',
+  get pending() { return t("待处理"); },
+  get negotiating() { return t("谈判中"); },
+  get accepted() { return t("已接受"); },
+  get declined() { return t("已拒绝"); },
+  get expired() { return t("已过期"); },
 };
 
 export const OFFER_STATUS_COLORS: Record<OfferStatus, string> = {

@@ -32,3 +32,11 @@ describe('DashboardView onboarding actions', () => {
     expect(source).not.toContain("queryKey: ['questions', 'stats']");
   });
 });
+
+it('uses shared candidate facts, shows unavailable reminders and keeps inbox reachable without applications', () => {
+  expect(source).toContain('useReminderCandidates');
+  expect(source).toContain('reminderCandidates: reminderCandidatesQ.isError ? [] : reminderCandidatesQ.data');
+  const emptySection = source.slice(source.indexOf('if (apps.length === 0)'), source.indexOf('if (selectedInsight)'));
+  expect(emptySection).toContain('<TodayInboxSummary');
+  expect(source).toContain('reminderCandidatesQ.refetch()');
+});

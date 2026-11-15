@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "suite_id": "harness-p0-v1",
+  "execution_items": [
+    {
+      "case_id": "E01",
+      "case_version": 1,
+      "execution_item_id": "E01.runtime_read",
+      "spec_path": "cases/E01.runtime_read.v1.json",
+      "required": true,
+      "coverage_kind": "task",
+      "repeats": {
+        "deterministic": 1
+      }
+    },
+    {
+      "case_id": "E04",
+      "case_version": 1,
+      "execution_item_id": "E04.runtime_edit",
+      "spec_path": "cases/E04.runtime_edit.v1.json",
+      "required": true,
+      "coverage_kind": "task",
+      "repeats": {
+        "deterministic": 1
+      }
+    },
+    {
+      "case_id": "E06",
+      "case_version": 1,
+      "execution_item_id": "E06.legacy_saved",
+      "spec_path": "cases/E06.legacy_saved.v1.json",
+      "required": true,
+      "coverage_kind": "full_recovery",
+      "repeats": {
+        "deterministic": 1
+      }
+    }
+  ]
+}

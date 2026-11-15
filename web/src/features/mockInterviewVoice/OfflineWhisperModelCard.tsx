@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { Button, Popconfirm, Tag } from 'antd';
 import {
@@ -30,6 +31,7 @@ export default function OfflineWhisperModelCard({
   compact = false,
   onActivityChange,
 }: Props) {
+  useLocale();
   const titleId = useId();
   const state = useOfflineWhisperState(controller);
   const [operationError, setOperationError] = useState('');
@@ -68,7 +70,7 @@ export default function OfflineWhisperModelCard({
   };
 
   const busy = state.status === 'checking' || state.status === 'downloading' || state.status === 'loading';
-  const backendLabel = state.status === 'ready' && state.backend === 'wasm' ? '兼容模式' : 'GPU 加速优先';
+  const backendLabel = state.status === 'ready' && state.backend === 'wasm' ? t("兼容模式") : t("GPU 加速优先");
   const stateError = state.status === 'error' ? state.message : operationError;
 
   return (
@@ -76,23 +78,23 @@ export default function OfflineWhisperModelCard({
       <div className={styles.heading}>
         <span className={styles.icon} aria-hidden><SafetyCertificateOutlined /></span>
         <div className={styles.titleGroup}>
-          <span className={styles.eyebrow}>离线语音转写</span>
-          <h4 id={titleId}>离线语音转写</h4>
-          <p>录音不会上传；模型只在你点击下载后保存到当前浏览器。</p>
+          <span className={styles.eyebrow}>{t("离线语音转写")}</span>
+          <h4 id={titleId}>{t("离线语音转写")}</h4>
+          <p>{t("录音不会上传；模型只在你点击下载后保存到当前浏览器。")}</p>
         </div>
-        {state.status === 'ready' ? <Tag color="green">已下载 · {backendLabel}</Tag> : null}
+        {state.status === 'ready' ? <Tag color="green">{t("已下载 ·")}{" "}{backendLabel}</Tag> : null}
       </div>
 
       {state.status === 'downloading' ? (
         <div className={styles.progressBlock} aria-live="polite">
           <div className={styles.progressCopy}>
-            <strong>正在准备离线语音能力</strong>
-            <span>{formatBytes(state.receivedBytes)}{state.totalBytes ? ` / ${formatBytes(state.totalBytes)}` : ' · 总量确认中'}</span>
+            <strong>{t("正在准备离线语音能力")}</strong>
+            <span>{formatBytes(state.receivedBytes)}{state.totalBytes ? ` / ${formatBytes(state.totalBytes)}` : t(" · 总量确认中")}</span>
           </div>
           <div
             className={`${styles.progressTrack} ${percent === undefined ? styles.indeterminate : ''}`}
             role="progressbar"
-            aria-label="离线模型下载进度"
+            aria-label={t("离线模型下载进度")}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={percent}
@@ -103,37 +105,37 @@ export default function OfflineWhisperModelCard({
       ) : null}
 
       {state.status === 'loading' ? (
-        <div className={styles.statusLine} role="status">正在校验并加载模型，完成后即可断网转写。</div>
+        <div className={styles.statusLine} role="status">{t("正在校验并加载模型，完成后即可断网转写。")}</div>
       ) : null}
 
       {state.status === 'ready' ? (
         <div className={styles.readyGrid}>
-          <div><span>模型</span><strong>{OFFLINE_WHISPER_MANIFEST.displayName}</strong></div>
-          <div><span>缓存规模</span><strong>{state.cachedBytes ? formatBytes(state.cachedBytes) : formatModelSize()}</strong></div>
-          <div><span>最长单次</span><strong>5 分钟</strong></div>
+          <div><span>{t("模型")}</span><strong>{t(OFFLINE_WHISPER_MANIFEST.displayName)}</strong></div>
+          <div><span>{t("缓存规模")}</span><strong>{state.cachedBytes ? formatBytes(state.cachedBytes) : formatModelSize()}</strong></div>
+          <div><span>{t("最长单次")}</span><strong>{t("5 分钟")}</strong></div>
         </div>
       ) : null}
 
-      {stateError ? <div className={styles.error} role="alert">{stateError}</div> : null}
-      {state.status === 'incompatible' ? <div className={styles.error} role="alert">{state.reason}</div> : null}
+      {stateError ? <div className={styles.error} role="alert">{t(stateError)}</div> : null}
+      {state.status === 'incompatible' ? <div className={styles.error} role="alert">{t(state.reason)}</div> : null}
 
       <div className={styles.footer}>
         <div className={styles.source}>
           <span>{formatModelSize()} · Apache-2.0</span>
-          <a href={OFFLINE_WHISPER_MANIFEST.sourceUrl} target="_blank" rel="noreferrer">Hugging Face 来源</a>
+          <a href={OFFLINE_WHISPER_MANIFEST.sourceUrl} target="_blank" rel="noreferrer">{t("Hugging Face 来源")}</a>
         </div>
         <div className={styles.actions}>
           {state.status === 'ready' ? (
             <>
-              <Button icon={<ReloadOutlined />} onClick={() => void controller.check()}>重新检查</Button>
+              <Button icon={<ReloadOutlined />} onClick={() => void controller.check()}>{t("重新检查")}</Button>
               <Popconfirm
-                title="删除离线模型？"
-                description="删除后仍可录音和手工填写文字。"
-                okText="确认删除"
-                cancelText="保留模型"
+                title={t("删除离线模型？")}
+                description={t("删除后仍可录音和手工填写文字。")}
+                okText={t("确认删除")}
+                cancelText={t("保留模型")}
                 onConfirm={() => void remove()}
               >
-                <Button danger icon={<DeleteOutlined />}>删除模型</Button>
+                <Button danger icon={<DeleteOutlined />}>{t("删除模型")}</Button>
               </Popconfirm>
             </>
           ) : (
@@ -144,7 +146,7 @@ export default function OfflineWhisperModelCard({
               disabled={busy}
               onClick={() => void prepare()}
             >
-              {state.status === 'error' ? '重试下载' : '下载离线模型'}
+              {state.status === 'error' ? t("重试下载") : t("下载离线模型")}
             </Button>
           )}
         </div>

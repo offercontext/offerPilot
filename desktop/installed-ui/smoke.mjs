@@ -1,0 +1,619 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawn } from 'node:child_process';
+import net from 'node:net';
+import { _electron } from 'playwright-core';
+import { getCurrentFuseWire, FuseState, FuseV1Options } from '@electron/fuses';
+import { extractFile } from '@electron/asar';
+import { hash, treeFiles, verifyPayload, normalizeSourceText } from './integrity.mjs';
+import { auditInstalledDependencies } from './installed-dependencies.mjs';
+import { safeFailure, commandFailure, recordSecurityBeforeValidation } from './diagnostics.mjs';
+import { observeDevToolsDisabled } from './devtools-probe.mjs';
+import { waitForDesktopSurfaces, readDesktopSecurity, validatePartitionIsolation } from './desktop-surfaces.mjs';
+import { installTrayObserver, invokeTrayAction, probeStorageIsolation, probeHaruApiDeny, probeHaruStatusMirror } from './haru-probes.mjs';
+import { probeInstalledCapabilities, readPermissionDecisions, assertDeniedPermissions } from './capability-probes.mjs';
+import { probeInstalledClipboard } from './clipboard-probe.mjs';
+import { DESKTOP_SOURCE_FILES } from './desktop-source-manifest.mjs';
+import { probeInstalledOfflineOrt } from './offline-ort-probe.mjs';
+import { probeSettingsExport } from './settings-export-probes.mjs';
+import { readInstalledIcons, validateInstalledIcon, verifyShortcutIdentity } from './haru-installed-icons.mjs';
+import { probeInstalledHaruWindows } from './haru-window-flow.mjs';
+import { verifyApplicationDetail } from './detail-ui.mjs';
+import { createCoverage, observeRuntime } from './coverage-recorder.mjs';
+import { rootSweep, extendedFlows } from './screen-coverage.mjs';
+import { reloadOnceWithObserver } from './startup-diagnostics.mjs';
+import { PIN, SYNTHETIC, validateRequest, publicApplication, sameWindowsPath,
+  selectOwnedProcesses, validateListeners, validateSecurity } from './contract.mjs';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const evidence = path.resolve(process.env.UI_EVIDENCE_DIR || path.join(here, 'evidence'));
+const source = path.resolve(process.env.UI_SOURCE_DIR || '.installed-ui-source');
+const artifact = path.resolve(process.env.UI_ARTIFACT_DIR || '.installed-ui-artifact');
+const report = { status: 'running', sourceCommit: PIN.commit, buildCommit: PIN.buildCommit, buildWorkflow: PIN.buildWorkflow,
+  buildRunId: PIN.runId, fullRegressionRunId: PIN.fullRegressionRunId, artifactId: PIN.artifactId,
+  scope: 'experimental-installed-UI-with-temporary-loopback-debugging', releaseReady: false,
+  ordinaryUserUacSmartScreenValidated: false, normalUndebuggedLaunchValidated: false,
+  fullRegression: PIN.fullRegressionRunId === null ? 'not-run-package-only' : 'independent-not-certified',
+  instrumentation: { tray: 'invoke-observed-production-callbacks', nativeTrayPointerValidated: false,
+    nativeDialogChoices: 'automated-cancel-or-synthetic-save-path', nativeDialogPointerValidated: false,
+    downloadPolicy: 'Electron-native-default-no-CDP-download-override', syntheticIpcStatusProbe: true },
+  stages: [], launches: [] };
+let stage = 'environment';
+let current;
+let owned = [];
+let exe;
+let backend;
+let userData;
+let installDir;
+let environment;
+let fatalNetwork = false;
+let coverage;
+let snapshotSequence = 0;
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function exists(filename) { try { await fs.access(filename); return true; } catch { return false; } }
+async function writeReport() {
+  await fs.writeFile(path.join(evidence, 'result.json'), JSON.stringify(report, null, 2) + '\n');
+}
+async function checkpoint(name, extra = {}) {
+  report.stages.push({ name, result: 'passed', ...extra });
+  await writeReport();
+  console.log(`Passed: ${name}`);
+}
+async function command(command, args, env = process.env, timeout = 240000) {
+  const tool = command === 'pwsh.exe' ? 'powershell' : '7zip';
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const chunks = [];
+    let bytes = 0;
+    const timer = setTimeout(() => { child.kill(); reject(commandFailure('COMMAND_TIMEOUT', tool)); }, timeout);
+    child.stdout.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes < 8 * 1024 * 1024) chunks.push(chunk);
+    });
+    // Drain, but never publish stderr: it can contain debug endpoints or tokens.
+    child.stderr.resume();
+    child.once('error', (error) => { clearTimeout(timer); reject(commandFailure(error.code, tool)); });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0 || bytes >= 8 * 1024 * 1024) reject(commandFailure(bytes >= 8 * 1024 * 1024 ? 'COMMAND_OUTPUT_LIMIT' : 'COMMAND_EXIT', tool, code));
+      else resolve(Buffer.concat(chunks).toString('utf8').replace(/^\uFEFF/, '').trim());
+    });
+  });
+}
+async function windows(mode, extra = {}) {
+  const phaseFile = path.join(path.dirname(installDir), `windows-snapshot-${++snapshotSequence}.json`);
+  try {
+    return JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'windows.ps1'), '-Mode', mode],
+      { ...environment, ...extra, ...(mode === 'snapshot' ? { UI_SNAPSHOT_PHASE_FILE: phaseFile } : {}) }, mode === 'install' ? 210000 : 30000));
+  } catch (error) {
+    if (mode === 'snapshot') {
+      try {
+        const bytes = await fs.readFile(phaseFile);
+        assert.ok(bytes.length <= 256);
+        const value = JSON.parse(bytes.toString('utf8'));
+        assert.deepEqual(Object.keys(value).sort(), ['elapsedMs', 'mode', 'phase', 'sequence']);
+        assert.equal(value.mode, 'snapshot');
+        const phases = ['script-entry', 'process-query-begin', 'process-query-end', 'listener-query-begin', 'listener-query-end', 'serialize-end'];
+        assert.ok(phases.includes(value.phase));
+        assert.equal(value.sequence, phases.indexOf(value.phase) + 1);
+        assert.ok(Number.isSafeInteger(value.elapsedMs) && value.elapsedMs >= 0 && value.elapsedMs <= 60000);
+        report.failedWindowsSnapshot ||= value;
+      } catch { report.failedWindowsSnapshot ||= { phase: 'unavailable' }; }
+    }
+    throw error;
+  }
+}
+async function waitUntil(callback, timeout = 30000) {
+  const deadline = Date.now() + timeout;
+  do { if (await callback()) return; await delay(400); } while (Date.now() < deadline);
+  throw new Error('condition timed out');
+}
+async function endpointOpen({ address = '127.0.0.1', port }) {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: address, port });
+    const done = (open) => { socket.destroy(); resolve(open); };
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+    socket.setTimeout(1000, () => done(true)); // Inconclusive must not count as closed.
+  });
+}
+async function savedPort() {
+  const value = JSON.parse(await fs.readFile(path.join(userData, 'desktop-port.json'), 'utf8'));
+  assert.deepEqual(Object.keys(value), ['port']);
+  assert.ok(Number.isInteger(value.port) && value.port > 0 && value.port <= 65535);
+  return value.port;
+}
+async function screenshot(page, name) {
+  await page.screenshot({ path: path.join(evidence, `${name}.png`), timeout: 15000 });
+}
+async function launch(number) {
+  assert.equal((await windows('snapshot')).processes.length, 0, 'no installed processes may predate launch');
+  stage = `launch-${number}-electron-start`;
+  const app = await _electron.launch({ executablePath: exe, cwd: installDir, env: environment,
+    chromiumSandbox: true, bypassCSP: false, timeout: 90000 });
+  current = { app };
+  app.context().on('request', (request) => {
+    const url = new URL(request.url());
+    if (['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol) && url.hostname !== '127.0.0.1') fatalNetwork = true;
+  });
+  // Capture ownership before UI waits, so an early renderer timeout still has safe cleanup.
+  stage = `launch-${number}-main-identity`;
+  const identity = await app.evaluate(({ app }) => ({ pid: process.pid, exe: process.execPath, userData: app.getPath('userData') }));
+  assert.ok(sameWindowsPath(identity.exe, exe));
+  assert.ok(sameWindowsPath(identity.userData, userData), 'must use the real APPDATA profile');
+  const early = await windows('snapshot');
+  const main = early.processes.find((item) => item.pid === identity.pid && sameWindowsPath(item.path, exe));
+  assert.ok(main?.created, 'main process must be confirmed by CIM before UI waits');
+  owned = [main, ...early.processes.filter((item) => item.parentPid === main.pid && sameWindowsPath(item.path, backend))];
+  stage = `launch-${number}-saved-origin`;
+  await waitUntil(() => exists(path.join(userData, 'desktop-port.json')), 90000);
+  const port = await savedPort();
+  stage = `launch-${number}-identify-two-surfaces`;
+  const surfaces = await waitForDesktopSurfaces(app, `http://127.0.0.1:${port}`);
+  const page = surfaces.owner.page;
+  const haru = surfaces.haru.page;
+  current.page = page;
+  current.haru = haru;
+  const runtime = observeRuntime(page);
+  for (const surface of [page, haru]) surface.setDefaultTimeout(20000);
+  await page.getByRole('navigation', { name: '主导航', exact: true }).waitFor();
+  await haru.getByRole('main', { name: 'Haru 桌面小窗', exact: true }).waitFor();
+  const ids = {};
+  for (const [role, surface] of [['owner', page], ['haru', haru]]) {
+    ids[role] = await (await app.browserWindow(surface)).evaluate(win => win.id);
+  }
+  const origin = new URL(page.url());
+  assert.equal(origin.protocol, 'http:');
+  assert.equal(origin.hostname, '127.0.0.1');
+  assert.equal(Number(origin.port), port);
+  stage = `launch-${number}-process-and-listener-snapshot`;
+  const snapshot = await windows('snapshot');
+  stage = `launch-${number}-backend-ownership`;
+  const processes = selectOwnedProcesses(snapshot.processes, identity.pid, exe, backend);
+  owned = [processes.backend, processes.main];
+  stage = `launch-${number}-loopback-listeners`;
+  const listeners = validateListeners(snapshot.listeners, processes.main.pid, processes.backend.pid, port);
+  stage = `launch-${number}-runtime-security`;
+  const security = await app.evaluate(readDesktopSecurity, ids);
+  const info = { number, mainPid: processes.main.pid, backendPid: processes.backend.pid,
+    mainCreated: processes.main.created, backendCreated: processes.backend.created,
+    port, realAppData: true, surfaceIds: ids, partitionIsolation: security.partitionIsolation,
+    observedExternalRendererRequests: fatalNetwork, ...listeners, haru: {} };
+  report.launches.push(info);
+  current = { app, page, haru, ids, info, runtime, debugEndpoints: snapshot.listeners.filter((item) => item.pid === identity.pid).map(({ address, port }) => ({ address, port })) };
+  // Persist bounded observations first: a failed assertion must not erase its evidence.
+  await recordSecurityBeforeValidation(info, security.owner, writeReport);
+  await recordSecurityBeforeValidation(info.haru, security.haru, writeReport);
+  stage = `launch-${number}-devtools-disabled-probe`;
+  security.owner.devToolsProbe = await app.evaluate(observeDevToolsDisabled, ids.owner);
+  security.haru.devToolsProbe = await app.evaluate(observeDevToolsDisabled, ids.haru);
+  await recordSecurityBeforeValidation(info, security.owner, writeReport);
+  await recordSecurityBeforeValidation(info.haru, security.haru, writeReport);
+  stage = `launch-${number}-runtime-security`;
+  validateSecurity(security.owner);
+  validateSecurity(security.haru);
+  validatePartitionIsolation(security.partitionIsolation);
+  info.haru.securityValidation = 'passed';
+  info.securityValidation = 'passed';
+  stage = `launch-${number}-external-network`;
+  info.observedExternalRendererRequests = fatalNetwork;
+  await writeReport();
+  assert.equal(fatalNetwork, false, 'external renderer request observed');
+  await checkpoint(`launch-${number}-identity-and-security`);
+  stage = `launch-${number}-observe-real-tray`;
+  await app.evaluate(installTrayObserver);
+  await haru.getByRole('button', { name: '展开 Haru 对话', exact: true }).click();
+  const pin = haru.getByRole('button', { name: 'Haru 始终置顶', exact: true });
+  const pinned = await pin.getAttribute('aria-pressed');
+  assert.ok(['true', 'false'].includes(pinned));
+  for (const expected of [pinned === 'true' ? 'false' : 'true', pinned]) {
+    await pin.click();
+    await haru.waitForFunction(value => document.querySelector('[aria-label="Haru 始终置顶"]').getAttribute('aria-pressed') === value, expected);
+  }
+  await haru.getByRole('button', { name: '收起 Haru 对话', exact: true }).click();
+  info.trayObservedThroughRealMenuRefresh = true;
+  await checkpoint(`launch-${number}-real-tray-observer`);
+  return current;
+}
+async function closeNormally() {
+  const { app, page, haru, ids, info, debugEndpoints } = current;
+  const window = await app.browserWindow(page);
+  const haruWindow = await app.browserWindow(haru);
+  const visible = id => app.evaluate(({ BrowserWindow }, id) => {
+    const win = BrowserWindow.fromId(id);
+    return win && !win.isDestroyed() ? win.isVisible() : null;
+  }, id);
+  stage = `launch-${info.number}-main-close-hides`;
+  await window.evaluate(win => { setTimeout(() => win.close(), 0); });
+  await waitUntil(async () => await visible(ids.owner) === false);
+  assert.equal(page.isClosed(), false, 'main owner must remain alive while hidden');
+  assert.equal(await visible(ids.haru), true);
+  const hiddenSnapshot = await windows('snapshot');
+  for (const item of owned) assert.ok(hiddenSnapshot.processes.some(value => value.pid === item.pid && value.created === item.created), 'hide must preserve owned processes');
+  assert.equal(await endpointOpen({ port: info.port }), true, 'hide must keep the backend available');
+  assert.equal(await page.evaluate(async () => (await fetch('/api/health')).status), 200);
+  assert.equal(await haru.evaluate(async () => (await window.offerpilotDesktop.getState()).connected), true, 'hidden owner must keep status mirror connected');
+  info.mainCloseHidesWithoutStoppingBackend = true;
+  stage = `launch-${info.number}-real-tray-callbacks`;
+  await app.evaluate(invokeTrayAction, 'open');
+  await waitUntil(async () => await visible(ids.owner) === true);
+  await app.evaluate(invokeTrayAction, 'hide');
+  await waitUntil(async () => await visible(ids.haru) === false);
+  await app.evaluate(invokeTrayAction, 'show');
+  await waitUntil(async () => await visible(ids.haru) === true);
+  await haruWindow.evaluate(win => win.close());
+  await waitUntil(async () => await visible(ids.haru) === false);
+  assert.equal(haru.isClosed(), false, 'Haru close must hide, not destroy, its renderer');
+  await app.evaluate(invokeTrayAction, 'click');
+  await waitUntil(async () => await visible(ids.haru) === true);
+  await window.evaluate(win => win.close());
+  await waitUntil(async () => await visible(ids.owner) === false);
+  await app.evaluate(invokeTrayAction, 'double-click');
+  await waitUntil(async () => await visible(ids.owner) === true);
+  info.trayCallbacks = ['open', 'hide', 'show', 'click', 'double-click'];
+  info.haruCloseHidesAndReopensSameWindow = true;
+  stage = `launch-${info.number}-request-tray-exit`;
+  await app.evaluate(invokeTrayAction, 'quit');
+  stage = `launch-${info.number}-process-exit`;
+  await waitUntil(async () => (await windows('snapshot')).processes.length === 0, 45000);
+  stage = `launch-${info.number}-port-release`;
+  await waitUntil(async () => !(await endpointOpen({ port: info.port })) &&
+    (await Promise.all(debugEndpoints.map(endpointOpen))).every(value => !value), 15000);
+  assert.equal(await savedPort(), info.port);
+  info.observedExternalRendererRequests = fatalNetwork;
+  await writeReport();
+  assert.equal(fatalNetwork, false);
+  info.trueExitViaProductionTrayCallback = true;
+  info.mainBackendAndRendererExited = true;
+  info.backendAndDebugPortsClosed = true;
+  current = undefined;
+  owned = [];
+  await checkpoint(`launch-${info.number}-tray-exit-and-port-release`);
+}
+async function openList(page, record, shot) {
+  stage = `${shot}-list-navigation`;
+  const back = page.getByRole('button', { name: '返回上一层', exact: true });
+  if (await back.isVisible()) await back.click();
+  await page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: '投递', exact: true }).click();
+  await page.getByRole('tab', { name: '列表', exact: true }).click();
+  const list = page.locator('section[aria-label="投递列表"]');
+  await list.waitFor();
+  stage = `${shot}-list-search`;
+  await list.getByPlaceholder('搜索公司、岗位、备注', { exact: true }).fill(SYNTHETIC.company_name);
+  const rows = list.locator('tbody tr[data-row-key]').filter({ hasText: SYNTHETIC.company_name });
+  await rows.first().waitFor();
+  stage = `${shot}-list-record-identity`;
+  assert.equal(await rows.count(), 1, 'exactly one matching application row required');
+  assert.equal(await rows.getAttribute('data-row-key'), String(record.id), 'persisted UI row ID must match POST response');
+  assert.ok((await rows.innerText()).includes(SYNTHETIC.position_name));
+  await screenshot(page, shot);
+  return rows;
+}
+
+await fs.mkdir(evidence, { recursive: true });
+try {
+  assert.equal(process.platform, 'win32', 'actual Windows required');
+  assert.ok(process.env.RUNNER_TEMP && process.env.APPDATA);
+  stage = 'request-pin';
+  validateRequest(JSON.parse(await fs.readFile(path.join(here, 'request.json'), 'utf8')));
+  stage = 'fresh-real-profile';
+  // Do not change APPDATA or pass --user-data-dir: main.cjs deliberately overrides userData.
+  userData = path.join(process.env.APPDATA, 'OfferPilot Desktop');
+  assert.equal(await exists(userData), false, 'existing real profile is a blocker; never delete it');
+  const scratch = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP, 'OfferPilot 中文 UI '));
+  installDir = path.join(scratch, '安装 Application');
+  exe = path.join(installDir, 'OfferPilot Desktop.exe');
+  backend = path.join(installDir, 'resources', 'backend', 'offerpilot-backend.exe');
+  // Pass only OS runtime variables and local model-map setting. No CI/provider credentials.
+  environment = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+    /^(SystemRoot|WINDIR|SystemDrive|COMSPEC|PATH|PATHEXT|TEMP|TMP|APPDATA|LOCALAPPDATA|USERPROFILE|HOMEDRIVE|HOMEPATH|ProgramFiles|ProgramFiles\(x86\)|ProgramData|ALLUSERSPROFILE|NUMBER_OF_PROCESSORS|PROCESSOR_ARCHITECTURE|OS|SESSIONNAME)$/i.test(key)));
+  Object.assign(environment, { LITELLM_LOCAL_MODEL_COST_MAP: 'True', PYTHONUTF8: '1', PYTHONUNBUFFERED: '1',
+    UI_EXE: exe, UI_BACKEND: backend, UI_USER_DATA: userData, UI_INSTALL_DIR: installDir });
+  await checkpoint(stage, { freshRealProfile: true, unicodeSpaceInstallationPath: true });
+
+  stage = 'installer-sha256';
+  const installer = path.join(artifact, PIN.installer);
+  assert.equal(await hash(installer), PIN.installerSha256);
+  const unpack = path.join(scratch, 'installer-payload');
+  const payload = path.join(scratch, 'app-payload');
+  const sevenZip = path.join(process.env.ProgramFiles, '7-Zip', '7z.exe');
+  stage = 'installer-archive-extract';
+  await command(sevenZip, ['x', installer, `-o${unpack}`, '-y'], environment);
+  stage = 'installer-payload-discovery';
+  const archives = (await treeFiles(unpack)).filter((name) => path.basename(name) === 'app-64.7z');
+  assert.equal(archives.length, 1, 'one x64 NSIS payload required');
+  stage = 'installer-payload-extract';
+  await command(sevenZip, ['x', path.join(unpack, archives[0]), `-o${payload}`, '-y'], environment);
+  await checkpoint('installer-hash-and-payload', { installerSha256: PIN.installerSha256 });
+
+  stage = 'silent-current-user-install';
+  const installed = await windows('install', { UI_INSTALLER: installer });
+  assert.equal(installed.exitCode, 0);
+  assert.equal(await exists(userData), false, 'installer must not silently launch into a profile');
+  await checkpoint(stage, { exitCode: 0, mode: 'NSIS /S /currentuser', destination: 'fresh RUNNER_TEMP path with Chinese and spaces' });
+
+  stage = 'installed-required-resources';
+  for (const name of ['OfferPilot Desktop.exe', 'resources/app.asar', 'resources/backend/offerpilot-backend.exe',
+    'resources/backend/_internal', 'resources/web/index.html', 'resources/web/assets', 'resources/LICENSE']) {
+    assert.equal(await exists(path.join(installDir, name)), true, 'required installed resource missing');
+  }
+  stage = 'installed-payload-byte-hashes';
+  const checkedPayloadFiles = await verifyPayload(installDir, payload);
+  stage = 'packaged-source-text';
+  for (const name of DESKTOP_SOURCE_FILES) {
+    assert.equal(normalizeSourceText(extractFile(path.join(installDir, 'resources', 'app.asar'), name)),
+      normalizeSourceText(await fs.readFile(path.join(source, 'desktop', name))), 'packaged desktop source differs from pin');
+  }
+  for (const asset of ['haru-tray.png', 'haru-icon.png', 'haru-icon.ico']) {
+    assert.deepEqual(extractFile(path.join(installDir, 'resources', 'app.asar'), `assets/${asset}`),
+      await fs.readFile(path.join(source, 'desktop/assets', asset)), 'packaged icon asset differs from pin');
+  }
+  assert.equal(await hash(path.join(installDir, 'resources', 'LICENSE')), await hash(path.join(source, 'LICENSE')));
+  stage = 'packaged-version-identity';
+  const packageJson = JSON.parse(extractFile(path.join(installDir, 'resources', 'app.asar'), 'package.json').toString());
+  assert.equal(packageJson.name, 'offerpilot-desktop');
+  assert.equal(packageJson.version, '0.1.0-desktop.1');
+  assert.equal(packageJson.main, 'main.cjs');
+  stage = 'installed-production-dependencies';
+  const installedDependencies = await auditInstalledDependencies({ installDir, payload, source, pin: PIN });
+  await checkpoint(stage, { installedDependencies });
+  const exeHashBefore = await hash(exe);
+  stage = 'read-existing-inspect-fuse';
+  const fuses = await getCurrentFuseWire(exe); // Read-only; never flip a fuse.
+  assert.equal(fuses[FuseV1Options.EnableNodeCliInspectArguments], FuseState.ENABLE, 'existing inspect fuse must permit testing without modification');
+  assert.equal(await hash(exe), exeHashBefore);
+  await checkpoint('installed-resource-integrity', { checkedPayloadFiles, installedExeSha256: exeHashBefore,
+    sourceDesktopModulesMatch: 'twelve-CRLF-normalized-modules', sourceDesktopModuleCount: DESKTOP_SOURCE_FILES.length, haruTrayAssetMatch: true, nodeCliInspectFuseAlreadyEnabled: true, fuseReadOnly: true });
+
+  stage = 'first-launch-ui';
+  const first = await launch(1);
+  const haruCapture = async (name, page, options = {}) => {
+    assert.match(name, /^[a-z0-9-]{1,80}$/);
+    await fs.mkdir(path.join(evidence, 'screens'), { recursive: true });
+    const omitBackground = options.omitBackground ?? (page === first.haru && await page.locator('.desktop-haru.collapsed').count() === 1);
+    const bytes = await page.screenshot({ path: path.join(evidence, 'screens', `haru-${name}.png`), omitBackground, timeout: 15000 });
+    (report.haruScreenshots ||= []).push({ file: `screens/haru-${name}.png`, omitBackground,
+      surface: page === first.haru ? 'haru' : 'owner', ...(options.visual ? { visual: options.visual } : {}) });
+    await writeReport();
+    return bytes;
+  };
+  stage = 'installed-haru-icon-and-shortcut';
+  await fs.mkdir(path.join(evidence, 'screens'), { recursive: true });
+  const installedIcons = await first.app.evaluate(readInstalledIcons);
+  report.installedIconRead = installedIcons.ok ? { ok: true } : installedIcons;
+  await writeReport();
+  assert.equal(installedIcons.ok, true, 'Installed icon extraction must succeed');
+  const shortcutTargetVerified = verifyShortcutIdentity(installedIcons, exe);
+  report.installedIcons = { shortcutTargetVerified, shortcutIconIndex: installedIcons.shortcut.iconIndex, icons: [], visualReviewRequired: true };
+  for (const item of installedIcons.icons) {
+    const bytes = validateInstalledIcon(item);
+    const file = `screens/haru-installed-icon-${item.size}.png`;
+    await fs.writeFile(path.join(evidence, file), bytes);
+    report.installedIcons.icons.push({ size: item.size, dimensions: item.dimensions, file, sha256: await hash(path.join(evidence, file)) });
+  }
+  await checkpoint(stage, report.installedIcons);
+  stage = 'installed-haru-native-icon-read';
+  const nativeIcons = JSON.parse(await command('pwsh.exe', ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'haru-native-icons.ps1')], { ...environment, UI_EVIDENCE_DIR: evidence }, 15000));
+  assert.equal(nativeIcons.extraction, 'Windows-native-read-only');
+  assert.equal(typeof nativeIcons.success, 'boolean');
+  if (!nativeIcons.success) {
+    assert.deepEqual(Object.keys(nativeIcons).sort(), ['extractedCount', 'extraction', 'phase', 'success']);
+    assert.ok(['validate-paths', 'load-drawing', 'compile-native-bindings', 'prepare-evidence-directory', 'extract-pe-group',
+      'save-pe-small', 'save-pe-normal', ...['read', 'save'].flatMap(action => ['exe', 'shortcut'].flatMap(target =>
+        ['small', 'normal'].map(size => `shell-${action}-${target}-${size}`)))].includes(nativeIcons.phase));
+    assert.ok(nativeIcons.extractedCount === null || (Number.isSafeInteger(nativeIcons.extractedCount)
+      && nativeIcons.extractedCount >= 0 && nativeIcons.extractedCount <= 0xffffffff));
+  } else {
+    assert.deepEqual(Object.keys(nativeIcons).sort(), ['extraction', 'icons', 'success', 'visualReviewRequired']);
+    assert.equal(nativeIcons.visualReviewRequired, true);
+    assert.deepEqual(nativeIcons.icons.map(item => item.name).sort(), ['pe-normal', 'pe-small', 'shell-exe-normal', 'shell-exe-small', 'shell-shortcut-normal', 'shell-shortcut-small']);
+    for (const item of nativeIcons.icons) {
+      assert.deepEqual(Object.keys(item).sort(), ['file', 'height', 'name', 'width']);
+      assert.equal(item.file, `screens/haru-native-icon-${item.name}.png`);
+      assert.ok(Number.isInteger(item.width) && item.width >= 16 && item.width <= 256);
+      assert.equal(item.height, item.width);
+    }
+  }
+  report.nativeIcons = nativeIcons;
+  await writeReport();
+  stage = 'haru-observed-startup-reload';
+  const haruRuntime = observeRuntime(first.haru);
+  await first.haru.reload({ waitUntil: 'domcontentloaded' });
+  await first.haru.getByRole('main', { name: 'Haru 桌面小窗', exact: true }).waitFor();
+  await first.haru.waitForLoadState('networkidle');
+  report.haruRuntime = { observation: haruRuntime.snapshot(), visual: await first.haru.evaluate(() => ({
+    canvasPresent: Boolean(document.querySelector('.desktop-haru-portrait canvas')),
+    fallbackVisible: Boolean(document.querySelector('.desktop-haru-portrait span')),
+  })), screenshot: 'screens/haru-observed-startup.png',
+    realAiTaskExecutionProven: false, live2dAnimationOrGpuQuality: 'requires-human-review' };
+  await haruCapture('observed-startup', first.haru);
+  await writeReport();
+  assert.equal(report.haruRuntime.observation.ownCriticalFailureCount, 0, 'required Haru resource failed');
+  assert.equal(report.haruRuntime.observation.classifications['unexpected-page-error'] || 0, 0);
+  assert.equal(report.haruRuntime.visual.canvasPresent, true);
+  report.haruRuntime.hasLimitations = report.haruRuntime.visual.fallbackVisible ||
+    Object.keys(report.haruRuntime.observation.classifications).some(key => key !== 'expected-resource-console');
+  await checkpoint(stage);
+  stage = 'haru-permission-deny';
+  report.haruPermissions = await first.haru.evaluate(readPermissionDecisions);
+  assertDeniedPermissions(report.haruPermissions);
+  await checkpoint(stage);
+  stage = 'haru-partition-storage-probes';
+  report.haruStorage = await probeStorageIsolation(first.page, first.haru);
+  await checkpoint(stage);
+  stage = 'haru-direct-api-deny';
+  report.haruApi = await probeHaruApiDeny(first.page, first.haru);
+  await checkpoint(stage);
+  stage = 'haru-synthetic-status-mirror';
+  report.haruStatus = await probeHaruStatusMirror(first.page, first.haru, haruCapture);
+  await checkpoint(stage);
+  stage = 'haru-installed-window-flow';
+  report.haruWindows = await probeInstalledHaruWindows({ ...first, waitUntil, capture: haruCapture,
+    recordMotion: async (policy, details) => {
+      (report.haruMotionObservations ||= []).push({ policy, ...details });
+      await writeReport();
+    },
+    setStage: name => { stage = name; },
+    checkpoint: async (name, details) => { stage = name; await checkpoint(name, details); },
+    nativeInput: async (mode, handles, point = {}) => {
+      stage = mode === 'Drag' ? 'haru-real-os-pointer' : 'haru-owned-os-composition';
+      const args = ['-NoProfile', '-NonInteractive', '-File', path.join(here, 'haru-native-input.ps1'),
+        '-Mode', mode, '-WindowHandle', handles.haru, '-OwnerWindowHandle', handles.owner, '-OwnerProcessId', String(handles.pid)];
+      if (mode === 'Drag') args.push('-XRatio', String(point.x), '-YRatio', String(point.y));
+      const observed = JSON.parse(await command('pwsh.exe', args, environment, 15000));
+      if (mode === 'Capture') {
+        assert.equal(observed.file, 'screens/haru-native-os-composited.png');
+        const bytes = await fs.readFile(path.join(evidence, observed.file));
+        assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+        observed.sha256 = await hash(path.join(evidence, observed.file));
+      }
+      return observed;
+    },
+  });
+  await checkpoint('haru-installed-window-flow');
+  stage = 'installed-haru-native-icon-result';
+  assert.equal(report.nativeIcons.success, true, 'Native icon diagnostics failed; observation cannot count as success');
+  assert.equal(report.nativeIcons.icons.length, 6);
+  stage = 'desktop-capability-probes';
+  report.capabilities = await probeInstalledCapabilities({ app: first.app, page: first.page,
+    directory: path.join(scratch, 'synthetic-downloads'), setStage: value => { stage = `desktop-capability-${value}`; } });
+  await checkpoint(stage);
+  stage = 'first-ui-screenshot';
+  await screenshot(first.page, '01-first-launch');
+  coverage = await createCoverage({ app: first.app, page: first.page, haru: first.haru, evidence, pin: PIN,
+    installedExeSha256: exeHashBefore, runtime: first.runtime, setStage: (value) => { stage = value; } });
+  await reloadOnceWithObserver(coverage, first.page, first.runtime);
+  await rootSweep(coverage, first.page, 'empty-before-fixtures');
+  stage = 'onboarding-create-application';
+  await first.page.getByRole('navigation', { name: '主导航', exact: true }).getByRole('button', { name: '今日', exact: true }).click();
+  await first.page.getByRole('tab', { name: '概览', exact: true }).click();
+  await first.page.getByRole('button', { name: '添加第一个投递', exact: true }).click();
+  const form = first.page.getByRole('dialog', { name: '添加投递', exact: true });
+  await form.waitFor();
+  stage = 'fill-synthetic-form';
+  await form.getByLabel('公司', { exact: true }).fill(SYNTHETIC.company_name);
+  await form.getByLabel('岗位', { exact: true }).fill(SYNTHETIC.position_name);
+  await form.getByLabel('备注', { exact: true }).fill(SYNTHETIC.notes);
+  await form.getByText('准备投递', { exact: true }).waitFor();
+  await form.getByText('稍后补充 JD', { exact: true }).waitFor();
+  stage = 'duplicate-check-required';
+  await form.getByRole('button', { name: '核对并检查重复', exact: true }).click();
+  await form.getByText('未发现符合规则的重复记录', { exact: true }).waitFor();
+  stage = 'confirm-save-ui-response';
+  const [response] = await Promise.all([first.page.waitForResponse((response) => {
+    const url = new URL(response.url());
+    return url.origin === `http://127.0.0.1:${first.info.port}` && url.pathname === '/api/applications' && response.request().method() === 'POST';
+  }), form.getByRole('button', { name: '确认保存', exact: true }).click()]);
+  assert.ok([200, 201].includes(response.status()));
+  const record = publicApplication(await response.json());
+  report.application = record; // Only these five whitelisted fields; no raw response/header/body dumps.
+  stage = 'saved-detail-content';
+  await verifyApplicationDetail(first.page, SYNTHETIC, (step) => { stage = `saved-detail-${step}`; });
+  await screenshot(first.page, '02-saved-detail');
+  await openList(first.page, record, '03-saved-list');
+  await extendedFlows(coverage, first.page, record, {
+    clipboard: options => probeInstalledClipboard({ app: first.app, page: first.page, ...options }),
+    offlineOrt: options => probeInstalledOfflineOrt({ app: first.app, page: first.page, installDir, ...options }),
+    settingsExport: options => probeSettingsExport({ app: first.app, page: first.page,
+      dataDirectory: path.join(userData, 'data'), temporaryDirectory: scratch,
+      freshProfileConfirmed: report.stages.some(item => item.name === 'fresh-real-profile' && item.freshRealProfile === true),
+      ...options }),
+  });
+  report.screenCoverage = coverage.report.summary;
+  report.screenCoverageFile = 'coverage.json';
+  await writeReport();
+  stage = 'coverage-unresolved-write-barrier';
+  assert.equal(coverage.canProceed(), true, 'unsafe UI recovery blocks further navigation and persistence checks');
+  assert.equal(first.runtime.hasPendingWrite(), false, 'unresolved UI write blocks further UI mutation/restart steps');
+  stage = 'theme-ui-toggle';
+  const oldTheme = await first.page.locator('html').getAttribute('data-theme');
+  assert.ok(['light', 'dark'].includes(oldTheme));
+  await first.page.getByRole('button', { name: '切换明暗模式', exact: true }).click();
+  const theme = oldTheme === 'light' ? 'dark' : 'light';
+  await waitUntil(async () => await first.page.locator('html').getAttribute('data-theme') === theme);
+  await checkpoint('first-launch-ui', { createdByUi: true, duplicateCheck: 'no-matches', themeSelectedByUi: theme });
+  stage = 'first-normal-close';
+  await closeNormally();
+
+  stage = 'restart-persistence';
+  const second = await launch(2);
+  stage = 'restart-process-and-origin-identity';
+  assert.equal(second.info.port, first.info.port, 'saved origin must persist');
+  assert.notEqual(second.info.mainPid, first.info.mainPid, 'relaunch must be a new main process');
+  assert.notEqual(second.info.backendPid, first.info.backendPid, 'relaunch must be a new backend process');
+  assert.notEqual(second.info.mainCreated, first.info.mainCreated);
+  assert.notEqual(second.info.backendCreated, first.info.backendCreated);
+  stage = 'restart-theme-persistence';
+  assert.equal(await second.page.locator('html').getAttribute('data-theme'), theme);
+  const row = await openList(second.page, record, '04-restarted-list');
+  stage = 'restart-detail-content';
+  await row.click();
+  await verifyApplicationDetail(second.page, SYNTHETIC, (step) => { stage = `restart-detail-${step}`; });
+  await screenshot(second.page, '05-restarted-detail');
+  stage = 'data-location';
+  assert.equal(await exists(path.join(userData, 'data', 'data.db')), true);
+  assert.equal((await treeFiles(installDir)).some((name) => /\.(db|sqlite|sqlite3)(-|$)/i.test(name)), false);
+  await checkpoint('restart-persistence', { sameUiRecordId: record.id, sameChineseContent: true, sameTheme: theme, samePort: first.info.port });
+  stage = 'second-normal-close';
+  await closeNormally();
+  stage = 'final-integrity';
+  assert.equal(await hash(exe), exeHashBefore, 'test must not modify installed executable/fuses');
+  stage = 'final-external-network';
+  report.observedExternalRendererRequests = fatalNetwork;
+  await writeReport();
+  assert.equal(fatalNetwork, false);
+  await checkpoint(stage, { executableUnchanged: true, observedExternalRendererRequests: false });
+  stage = 'expanded-screen-coverage';
+  assert.equal(coverage.report.summary.counts.FAIL, 0, 'installed screen assertions failed; lifecycle results remain independent');
+  report.status = coverage.report.summary.status === 'incomplete' || report.haruRuntime.hasLimitations
+    ? 'passed-with-coverage-limitations' : 'passed';
+} catch (error) {
+  // Keep failures failed, including launch/close/cleanup/security/persistence failures.
+  // Playwright errors may embed process logs and websocket endpoints: do not serialize them.
+  report.status = 'failed';
+  report.failedStage = stage;
+  report.failure = safeFailure(error);
+  console.error(`Installed UI validation failed at ${stage}; see whitelisted evidence.`);
+  if (current?.page && !current.page.isClosed()) {
+    try { await screenshot(current.page, 'failure'); } catch { /* Evidence unavailable is not success. */ }
+  }
+  if (current?.haru && !current.haru.isClosed()) {
+    try {
+      await fs.mkdir(path.join(evidence, 'screens'), { recursive: true });
+      await current.haru.screenshot({ path: path.join(evidence, 'screens', 'haru-failure.png'), omitBackground: await current.haru.locator('.desktop-haru.collapsed').count() === 1, timeout: 15000 });
+      report.haruFailureScreenshot = 'screens/haru-failure.png';
+    } catch { report.haruFailureCaptureFailed = true; }
+  }
+  if (current?.app) {
+    try { await Promise.race([current.app.close(), delay(10000).then(() => { throw new Error('close timeout'); })]); }
+    catch { report.cleanupNormalCloseFailed = true; }
+  }
+  if (environment) {
+    try {
+      const snapshot = await windows('snapshot');
+      // A fresh unique install path and OS-created process identities prevent unrelated PID kills.
+      // Prefer the already captured main/backend identities; permit only their exact-path children.
+      const allowed = new Map(owned.map((item) => [item.pid, item]));
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const item of snapshot.processes) if (!allowed.has(item.pid) && allowed.has(item.parentPid)) {
+          allowed.set(item.pid, item); changed = true;
+        }
+      }
+      report.cleanup = await windows('cleanup', { UI_OWNED_IDENTITIES: JSON.stringify([...allowed.values()].reverse()) });
+      report.cleanupRemainingInstalledProcesses = (await windows('snapshot')).processes.length;
+    } catch { report.cleanupFailed = true; }
+  }
+  process.exitCode = 1;
+} finally {
+  if (coverage) {
+    await coverage.finish();
+    report.screenCoverage = coverage.report.summary;
+    report.screenCoverageFile = 'coverage.json';
+  }
+  await writeReport();
+  console.log(`Installed UI result: ${report.status}. Experimental evidence only; not a release gate.`);
+}

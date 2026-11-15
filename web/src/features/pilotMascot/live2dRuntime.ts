@@ -75,6 +75,7 @@ const TRANSIENT_EXPRESSION_DURATION_MS = 1_000;
 
 interface Live2dApplication {
   stage: { addChild: (model: Live2dModelInstance) => void };
+  renderer: { resize: (width: number, height: number) => void };
   render: () => void;
   destroy: (removeView: boolean, options: Record<string, boolean>) => void;
 }
@@ -88,6 +89,10 @@ interface Live2dModelInstance {
   scale: { set: (scale: number) => void };
   motion?: (group: string, index: number, priority: number) => Promise<boolean> | boolean;
   expression?: (name: string) => Promise<boolean> | boolean;
+  internalModel?: {
+    coreModel: { update: () => void };
+    pose?: { updateParameters: (model: unknown, deltaTimeSeconds: number) => void };
+  };
   destroy: (options: { children: boolean }) => void;
 }
 
@@ -166,6 +171,7 @@ export function createLive2dPilotMascotRuntime(
     const dispose = () => {
       if (disposed) return;
       disposed = true;
+      signal?.removeEventListener('abort', dispose);
       stopThinkingLoop();
       stopTransientExpressionReset();
       observer?.disconnect();
@@ -176,6 +182,9 @@ export function createLive2dPilotMascotRuntime(
       application = undefined;
       fit = undefined;
     };
+    // Activity switches can replace the canvas while model I/O is pending.
+    // Release its GPU context now, rather than accumulating one per late load.
+    signal?.addEventListener('abort', dispose, { once: true });
 
     try {
       application = new Application({
@@ -185,21 +194,36 @@ export function createLive2dPilotMascotRuntime(
         antialias: true,
         resolution: Math.min(window.devicePixelRatio || 1, 2),
         autoDensity: true,
-        resizeTo: host,
       });
-      model = await Live2DModel.from(MODEL_URL, {
+      const loadedModel = await Live2DModel.from(MODEL_URL, {
         autoInteract: false,
         autoUpdate: !staticRender,
       });
-      if (signal?.aborted) throw new DOMException('Mascot mount aborted', 'AbortError');
+      if (signal?.aborted) {
+        // dispose may already have run before this model existed.
+        loadedModel.destroy({ children: true });
+        throw new DOMException('Mascot mount aborted', 'AbortError');
+      }
+      model = loadedModel;
+      if (staticRender && model.internalModel?.pose) {
+        // Without a ticker, Cubism never initializes mutually exclusive parts.
+        // Resolve the initial pose and drawable opacity without advancing motion.
+        const { coreModel, pose } = model.internalModel;
+        pose.updateParameters(coreModel, 0);
+        coreModel.update();
+      }
       application.stage.addChild(model);
       model.anchor.set(0.5, 0.5);
       const naturalWidth = model.width;
       const naturalHeight = model.height;
 
       fit = () => {
+        if (disposed) return;
         const width = Math.max(host.clientWidth, 1);
         const height = Math.max(host.clientHeight, 1);
+        // Resizing clears the drawing buffer. Own resize and render together:
+        // Pixi's resizeTo queues a later RAF that can erase the idle static frame.
+        application!.renderer.resize(width, height);
         const baseScale = Math.min((width * 0.94) / naturalWidth, (height * 0.96) / naturalHeight);
         const scale = baseScale * zoom;
         model!.scale.set(scale);
@@ -313,10 +337,15 @@ export function createLive2dPilotMascotRuntime(
 const unsharedLive2dPilotMascotRuntime = createLive2dPilotMascotRuntime({
   async loadModules() {
     await ensureCubismCore();
-    const [{ Application, Ticker }, { Live2DModel }] = await Promise.all([
+    const [{ Application, Ticker, ShaderSystem }, { Live2DModel }, { install }] = await Promise.all([
       import('pixi.js'),
       import('pixi-live2d-display/cubism4'),
+      import('@pixi/unsafe-eval'),
     ]);
+    // Despite its name, this official Pixi adapter removes dynamic Function use.
+    // Patch the same Pixi instance before any Application constructs a renderer;
+    // Electron keeps its strict CSP (no unsafe-eval) and sandbox unchanged.
+    install({ ShaderSystem });
     return {
       Application: Application as unknown as Live2dRuntimeModules['Application'],
       Ticker,

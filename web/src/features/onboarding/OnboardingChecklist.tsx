@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { CheckCircleOutlined, ClockCircleOutlined } from '@ant-design/icons';
 import { Button } from 'antd';
 import type { OnboardingStatus } from '@/services/onboarding';
@@ -7,31 +8,29 @@ import styles from './OnboardingChecklist.module.css';
 interface Props {
   status: OnboardingStatus;
   onCollapse: () => void;
+  collapsing?: boolean;
   onAction: (action: OnboardingAction) => void;
 }
 
 const STEPS: Array<{ key: OnboardingAction; label: string }> = [
-  { key: 'configure_ai', label: '配置 AI' },
-  { key: 'create_primary_resume', label: '创建主简历' },
-  { key: 'create_first_application', label: '添加第一条投递' },
-  { key: 'send_first_pilot_message', label: '向 Pilot 发出第一条消息' },
+  { key: 'create_first_application', get label() { return t("添加第一条投递"); } },
+  { key: 'create_primary_resume', get label() { return t("创建主简历"); } },
+  { key: 'configure_ai', get label() { return t("配置 AI"); } },
+  { key: 'send_first_pilot_message', get label() { return t("向 Pilot 发出第一条消息"); } },
 ];
 
-export default function OnboardingChecklist({ status, onCollapse, onAction }: Props) {
+export default function OnboardingChecklist({ status, onCollapse, onAction, collapsing }: Props) {
+  useLocale();
   return (
-    <section className={styles.card} aria-label="新手引导">
+    <section className={styles.card} aria-label={t("新手引导")}>
       <div className={styles.header}>
         <div>
-          <div className={styles.title}>四步开始使用 OfferPilot</div>
-          <div className={styles.subtitle}>完成这些步骤，建立你的第一条求职工作流。</div>
+          <div className={styles.title}>{t("从第一条投递开始")}</div>
+          <div className={styles.subtitle}>{t("无需配置 AI 即可记录投递。简历和 AI 能力可按需添加。")}</div>
         </div>
         <div>
-          <div className={styles.progress}>{status.completed_count} / {STEPS.length}</div>
-          {status.is_complete && (
-            <Button type="link" size="small" onClick={onCollapse}>
-              收起
-            </Button>
-          )}
+          <Button type="link" size="small" loading={collapsing} onClick={onCollapse}>
+            {t("稍后再说")}</Button>
         </div>
       </div>
       <div className={styles.steps}>
@@ -49,6 +48,7 @@ export default function OnboardingChecklist({ status, onCollapse, onAction }: Pr
                 {completed ? <CheckCircleOutlined /> : <ClockCircleOutlined />}
               </span>
               <span className={styles.stepLabel}>{step.label}</span>
+              {step.key !== 'create_first_application' && <span className={styles.subtitle}>{t("可选增强")}</span>}
             </button>
           );
         })}

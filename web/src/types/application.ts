@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 // Application status lifecycle. Mirrors the Go db.Application.Status values.
 export type ApplicationStatus =
   | 'pending'
@@ -46,12 +47,12 @@ export interface DashboardSummary {
 
 // Column definitions for the kanban board, in lifecycle order.
 export const STATUS_LABELS: Record<ApplicationStatus, string> = {
-  pending: '待投递',
-  applied: '已投递',
-  written_test: '笔试',
-  interview: '面试',
+  get pending() { return t("待投递"); },
+  get applied() { return t("已投递"); },
+  get written_test() { return t("笔试"); },
+  get interview() { return t("面试"); },
   offer: 'Offer',
-  closed: '结束',
+  get closed() { return t("结束"); },
 };
 
 export const STATUS_COLORS: Record<ApplicationStatus, string> = {

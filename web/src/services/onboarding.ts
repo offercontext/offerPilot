@@ -14,6 +14,7 @@ export interface OnboardingStatus {
   completed_count: number;
   is_complete: boolean;
   force_open: boolean;
+  dismissed?: boolean;
 }
 
 export async function getOnboarding(): Promise<OnboardingStatus> {
@@ -24,4 +25,9 @@ export async function getOnboarding(): Promise<OnboardingStatus> {
 export async function setOnboardingForceOpen(force_open: boolean): Promise<OnboardingStatus> {
   const { data } = await http.patch<OnboardingStatus>('/onboarding', { force_open });
   return data;
+}
+
+/** Explicit reopening wins; older completed users stay undisturbed. */
+export function shouldShowOnboarding(status: OnboardingStatus): boolean {
+  return status.force_open || (!status.dismissed && !status.is_complete);
 }

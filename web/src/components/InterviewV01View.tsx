@@ -1,3 +1,4 @@
+import { t, useLocale, getLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Button, Empty, List, Space, Spin, Tabs, Tag, Typography } from 'antd';
 import { SoundOutlined } from '@ant-design/icons';
@@ -14,10 +15,12 @@ import workflowStyles from './ui/WorkflowSurface.module.css';
 import type { Application } from '@/types/application';
 import type { ScheduleEvent } from '@/types/event';
 import type { Resume } from '@/types/resume';
+import type { PracticeStats } from '@/types/question';
+import InterviewPracticeHome, { type InterviewPracticeHomeFocus, type InterviewPracticeMode } from './InterviewPracticeHome';
 
 const { Paragraph, Title } = Typography;
 
-type InterviewTabKey = 'upcoming' | 'completed' | 'practice';
+type InterviewTabKey = 'upcoming' | 'completed';
 type TaskLauncher = (request: TaskLaunchRequest) => unknown;
 
 export interface InterviewV01ViewProps {
@@ -29,7 +32,12 @@ export interface InterviewV01ViewProps {
   /** Transitional exact preparation adapter; it must already target the canonical owner. */
   onOpenPreparation?: (applicationId: number, eventId: number) => void;
   onOpenEventEditor?: (applicationId: number, eventId: number) => void;
-  onOpenFreePractice?: () => void;
+  onOpenFreePractice?: (mode?: InterviewPracticeMode) => void;
+  onOpenReadinessPractice?: (focus: InterviewPracticeHomeFocus) => void;
+  onOpenQuestionPractice?: () => void;
+  practiceStats?: PracticeStats;
+  practiceLoading?: boolean;
+  practiceError?: boolean;
   /** Navigation-only story library entry; event cards never pass a note id. */
   onOpenStoryLibrary?: (reviewNoteId?: number) => void;
   onOpenVoiceCoachingGrowth?: () => void;
@@ -58,27 +66,27 @@ type InterviewListProps = {
 };
 
 const PRIMARY_LABELS: Readonly<Partial<Record<InterviewEventCardModel['primaryAction'], string>>> = Object.freeze({
-  prepare: '准备面试',
-  enter_preparation: '进入面试准备',
-  record_review: '记录复盘',
-  view_review: '查看复盘',
-  update_status: '更新事件状态',
+  get prepare() { return t("准备面试"); },
+  get enter_preparation() { return t("进入面试准备"); },
+  get record_review() { return t("记录复盘"); },
+  get view_review() { return t("查看复盘"); },
+  get update_status() { return t("更新事件状态"); },
 });
 
 const LIFECYCLE_LABELS: Readonly<Record<InterviewEventCardModel['lifecycle'], string>> = Object.freeze({
-  scheduled: '待进行',
-  in_progress: '进行中',
-  completed: '已完成',
-  cancelled: '已取消',
-  unknown: '状态待确认',
+  get scheduled() { return t("待进行"); },
+  get in_progress() { return t("进行中"); },
+  get completed() { return t("已完成"); },
+  get cancelled() { return t("已取消"); },
+  get unknown() { return t("状态待确认"); },
 });
 
 const BUCKET_LABELS: Readonly<Record<InterviewEventCardModel['bucket'], string>> = Object.freeze({
-  upcoming: '即将进行',
-  completed: '已完成',
-  cancelled: '已取消',
-  needs_status_update: '状态待更新',
-  unavailable: '暂不可用',
+  get upcoming() { return t("即将进行"); },
+  get completed() { return t("已完成"); },
+  get cancelled() { return t("已取消"); },
+  get needs_status_update() { return t("状态待更新"); },
+  get unavailable() { return t("暂不可用"); },
 });
 
 function eventSourceMap(events: readonly ScheduleEvent[] | undefined): {
@@ -164,8 +172,8 @@ export function projectInterviewEventCards(
 
 function formatCardTime(card: InterviewEventCardModel): string {
   return Number.isFinite(card.scheduledAtTimestamp)
-    ? new Date(card.scheduledAtTimestamp).toLocaleString()
-    : '时间待确认';
+    ? new Date(card.scheduledAtTimestamp).toLocaleString(getLocale())
+    : t("时间待确认");
 }
 
 function taskRequestFor(card: InterviewEventCardModel): TaskLaunchRequest | null {
@@ -220,13 +228,14 @@ function InterviewList({
   onOpenEventEditor,
   onRetryEvents,
 }: InterviewListProps) {
-  if (loading) return <Spin aria-label="正在加载面试列表" />;
-  if (error) return <Alert type="error" showIcon message="面试列表暂时无法加载，请稍后重试。" />;
+  useLocale();
+  if (loading) return <Spin aria-label={t("正在加载面试列表")} />;
+  if (error) return <Alert type="error" showIcon message={t("面试列表暂时无法加载，请稍后重试。")} />;
   if (cards.length === 0) {
     return (
       <div className="op-empty-state">
         <Empty
-          description={bucket === 'upcoming' ? '暂无即将进行的面试' : '暂无已完成或已取消的面试'}
+          description={bucket === 'upcoming' ? t("暂无即将进行的面试") : t("暂无已完成或已取消的面试")}
           image={Empty.PRESENTED_IMAGE_SIMPLE}
         />
       </div>
@@ -271,10 +280,10 @@ function InterviewList({
         }
         for (const secondary of card.secondaryActions) {
           if (secondary === 'retry' && onRetryEvents) {
-            actions.push(<Button key="retry" type="link" onClick={onRetryEvents}>重试</Button>);
+            actions.push(<Button key="retry" type="link" onClick={onRetryEvents}>{t("重试")}</Button>);
           }
           if (secondary === 'view_application' && onOpenApplication) {
-            actions.push(<Button key="application" type="link" onClick={() => onOpenApplication(card.applicationId)}>查看投递详情</Button>);
+            actions.push(<Button key="application" type="link" onClick={() => onOpenApplication(card.applicationId)}>{t("查看投递详情")}</Button>);
           }
         }
         const lifecycleLabel = LIFECYCLE_LABELS[card.lifecycle];
@@ -292,8 +301,8 @@ function InterviewList({
                   <span>{formatCardTime(card)}</span>
                   <Tag>{BUCKET_LABELS[card.bucket]}</Tag>
                   <Tag>{lifecycleLabel}</Tag>
-                  {card.noteId !== null && card.lifecycle === 'completed' ? <span>已有复盘</span> : null}
-                  {card.contractReasons.length > 0 ? <span>部分状态待确认</span> : null}
+                  {card.noteId !== null && card.lifecycle === 'completed' ? <span>{t("已有复盘")}</span> : null}
+                  {card.contractReasons.length > 0 ? <span>{t("部分状态待确认")}</span> : null}
                 </Space>
               )}
             />
@@ -325,6 +334,11 @@ export default function InterviewV01View({
   onOpenPreparation,
   onOpenEventEditor,
   onOpenFreePractice,
+  onOpenReadinessPractice,
+  onOpenQuestionPractice,
+  practiceStats,
+  practiceLoading,
+  practiceError,
   onOpenStoryLibrary,
   onOpenVoiceCoachingGrowth,
   practiceRequestToken,
@@ -333,11 +347,13 @@ export default function InterviewV01View({
   eventsError,
   onRetryEvents,
 }: InterviewV01ViewProps) {
+  useLocale();
   const [items, setItems] = useState<InterviewIndexItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [activeTab, setActiveTab] = useState<InterviewTabKey>('upcoming');
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const practiceHomeRef = useRef<HTMLDivElement>(null);
   const lastPracticeRequestTokenRef = useRef<number | undefined>(practiceRequestToken);
 
   useEffect(() => {
@@ -345,7 +361,8 @@ export default function InterviewV01View({
     const previous = lastPracticeRequestTokenRef.current;
     lastPracticeRequestTokenRef.current = practiceRequestToken;
     if (practiceRequestToken > 0 && previous !== undefined && practiceRequestToken > previous) {
-      setActiveTab('practice');
+      practiceHomeRef.current?.scrollIntoView?.({ block: 'start' });
+      practiceHomeRef.current?.focus();
     }
   }, [practiceRequestToken]);
 
@@ -379,14 +396,18 @@ export default function InterviewV01View({
     [cards],
   );
 
+  const practiceTarget = !eventsLoading && !eventsError
+    ? upcomingCards.find((card) => card.bucket === 'upcoming')
+    : undefined;
+
   const eventStateNotice = eventsLoading ? (
-    <Spin aria-label="正在确认面试状态" />
+    <Spin aria-label={t("正在确认面试状态")} />
   ) : eventsError ? (
     <Alert
       type="error"
       showIcon
-      message="面试状态暂时无法确认，请重试后查看。"
-      action={onRetryEvents ? <Button size="small" aria-label="重试面试状态" onClick={onRetryEvents}>重试</Button> : undefined}
+      message={t("面试状态暂时无法确认，请重试后查看。")}
+      action={onRetryEvents ? <Button size="small" aria-label={t("重试面试状态")} onClick={onRetryEvents}>{t("重试")}</Button> : undefined}
     />
   ) : null;
 
@@ -394,26 +415,35 @@ export default function InterviewV01View({
     <div data-testid="interview-surface" className={`${workflowStyles.surface} op-view-enter`} style={{ padding: 24 }}>
       <div className="op-section-heading" style={{ marginBottom: 18 }}>
         <div>
-          <Title level={2} style={{ margin: 0 }}>面试</Title>
+          <Title level={2} style={{ margin: 0 }}>{t("面试")}</Title>
           <Paragraph type="secondary" style={{ margin: '6px 0 0' }}>
-            围绕具体面试事件准备，完成后再进入面试练习和复盘沉淀。
-          </Paragraph>
+            {t("围绕真实面试准备，也可以直接开始独立练习。")}</Paragraph>
         </div>
+      </div>
+      <div ref={practiceHomeRef} tabIndex={-1}>
+        <InterviewPracticeHome
+          target={practiceTarget ? { applicationId: practiceTarget.applicationId, eventId: practiceTarget.eventId, label: `${practiceTarget.companyName} · ${practiceTarget.positionName}` } : undefined}
+          onOpenPractice={onOpenFreePractice}
+          onOpenFocus={onOpenReadinessPractice}
+          onOpenQuestions={onOpenQuestionPractice}
+          dueCount={practiceStats?.due}
+          dueLoading={practiceLoading}
+          dueError={practiceError}
+        />
       </div>
       <Tabs
         activeKey={activeTab}
         onChange={(key) => setActiveTab(key as InterviewTabKey)}
         items={[
-          { key: 'upcoming', label: '即将进行' },
-          { key: 'completed', label: '已完成' },
-          { key: 'practice', label: '面试练习' },
+          { key: 'upcoming', label: t("即将进行") },
+          { key: 'completed', label: t("已完成") },
         ]}
       />
 
       {activeTab === 'upcoming' ? (
         eventStateNotice ?? (
           <section aria-labelledby="upcoming-interviews-title">
-            <Title id="upcoming-interviews-title" level={3}>即将进行</Title>
+            <Title id="upcoming-interviews-title" level={3}>{t("即将进行")}</Title>
             <InterviewList
               cards={upcomingCards}
               bucket="upcoming"
@@ -435,12 +465,12 @@ export default function InterviewV01View({
           <section aria-labelledby="completed-interviews-title">
             <div className="op-section-heading" style={{ marginBottom: 20 }}>
               <div>
-                <Title id="completed-interviews-title" level={3} style={{ margin: 0 }}>已完成</Title>
-                <Paragraph type="secondary" style={{ margin: '6px 0 0' }}>查看本次面试的复盘和来源状态。</Paragraph>
+                <Title id="completed-interviews-title" level={3} style={{ margin: 0 }}>{t("已完成")}</Title>
+                <Paragraph type="secondary" style={{ margin: '6px 0 0' }}>{t("查看本次面试的复盘和来源状态。")}</Paragraph>
               </div>
               <Space wrap>
-                {onOpenVoiceCoachingGrowth ? <Button icon={<SoundOutlined />} onClick={onOpenVoiceCoachingGrowth}>表达成长</Button> : null}
-                {onOpenStoryLibrary ? <Button data-story-audit="ui-library" onClick={() => onOpenStoryLibrary()}>经历素材</Button> : null}
+                {onOpenVoiceCoachingGrowth ? <Button icon={<SoundOutlined />} onClick={onOpenVoiceCoachingGrowth}>{t("表达成长")}</Button> : null}
+                {onOpenStoryLibrary ? <Button data-story-audit="ui-library" onClick={() => onOpenStoryLibrary()}>{t("我的经历")}</Button> : null}
               </Space>
             </div>
             <InterviewList
@@ -459,22 +489,7 @@ export default function InterviewV01View({
         )
       ) : null}
 
-      {activeTab === 'practice' ? (
-        <section data-testid="free-practice-workspace" aria-labelledby="free-practice-title">
-          <div className="op-section-heading" style={{ marginBottom: 20 }}>
-            <div>
-              <Title id="free-practice-title" level={3} style={{ margin: 0 }}>面试练习</Title>
-              <Paragraph type="secondary" style={{ margin: '6px 0 0' }}>快速模拟或围绕已确认的复盘重点练习回答，开始前不会自动调用模型。</Paragraph>
-            </div>
-            <Space wrap>
-              {onOpenFreePractice ? <Button type="primary" onClick={onOpenFreePractice}>开始面试练习</Button> : null}
-            </Space>
-          </div>
-          <div className="op-empty-state" style={{ marginTop: 20 }}>
-            <Empty description="选择快速模拟，或从面试复盘中的已确认重点开始一次回答练习。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-          </div>
-        </section>
-      ) : null}
+
     </div>
   );
 }

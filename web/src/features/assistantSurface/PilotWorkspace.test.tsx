@@ -8,6 +8,12 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 import PilotWorkspace from './PilotWorkspace';
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 
 vi.mock('@/components/ChatPanel', () => ({

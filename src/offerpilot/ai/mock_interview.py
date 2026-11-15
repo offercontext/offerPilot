@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/interview-mock.md（追问与证据校验）。
+# 此处不持有 Attempt 生成权，也不写数据库；调用和提交边界在
+# MockInterviewExecutionService 与 MockInterviewRepository。
+
 import hashlib
 import json
 import unicodedata
@@ -584,6 +588,8 @@ def generate_question(
             if not isinstance(question, str) or not question.strip() or len(question) > 1000:
                 raise MockInterviewContractError("blank_value")
             refs = _expand_evidence_ids(parsed["evidence_ids"], evidence_catalog)
+            # 后续题需连到最近回答；重复比较仅覆盖规范化后的完全相同文本，
+            # 不声称能识别所有同义改写。两类语义失败都不进入格式修复重试。
             if _normalize_question_text(question) in previous_questions:
                 raise MockInterviewContractError("duplicate_question")
             if latest_turn_evidence_ids and not set(latest_turn_evidence_ids).intersection(parsed["evidence_ids"]):

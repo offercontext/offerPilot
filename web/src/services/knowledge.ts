@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type {
   KnowledgeBriefRebuildResponse,
   ConfirmedInterviewKnowledgeNote,
@@ -43,7 +44,7 @@ export function parseConfirmedInterviewKnowledgeNotesResponse(
     }
     return result;
   } catch {
-    throw new Error('经历素材来源暂时不可用');
+    throw new Error(t("经历素材来源暂时不可用"));
   }
 }
 
@@ -227,7 +228,7 @@ export function decodeKnowledgeSourceContent(content: ArrayBuffer): string {
     }
     bytes = new Uint8Array(content);
   } catch {
-    throw new Error('资料正文来源暂时不可用');
+    throw new Error(t("资料正文来源暂时不可用"));
   }
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(3));

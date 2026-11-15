@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setLocale } from '@/i18n';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -17,12 +18,13 @@ let root: Root;
 let host: HTMLDivElement;
 let client: QueryClient;
 beforeEach(() => {
+  setLocale('zh-CN');
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
   window.matchMedia = vi.fn().mockImplementation((query: string) => ({ matches: false, media: query, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   vi.mocked(getCalendar).mockResolvedValue([]);
 });
-afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); vi.clearAllMocks(); });
+afterEach(() => { act(() => root.unmount()); client.clear(); host.remove(); setLocale('zh-CN'); vi.clearAllMocks(); });
 async function mount(focusEvent?: { kind: 'event'; id: number; scheduledAt: string }) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   await act(async () => { root.render(<QueryClientProvider client={client}><CalendarView applications={[]} onOpenDetail={vi.fn()} focusEvent={focusEvent} /></QueryClientProvider>); });
@@ -71,4 +73,23 @@ it('selects the exact chip while keeping the month visible', async () => {
   expect(chip).not.toBeNull(); act(() => chip?.click());
   expect(host.querySelectorAll('[data-calendar-date]')).toHaveLength(42);
   expect(document.querySelector('[data-selected-event="5"]')).not.toBeNull();
+});
+
+
+it('switches calendar labels and stored month locale while preserving the selected day', async () => {
+  await mount();
+  const date = dayjs().date(12).format('YYYY-MM-DD');
+  act(() => host.querySelector<HTMLButtonElement>(`[data-date-select="${date}"]`)?.click());
+  const cell = host.querySelector(`[data-calendar-date="${date}"]`);
+  const calls = vi.mocked(getCalendar).mock.calls.length;
+  await act(async () => setLocale('en-US'));
+  expect(host.querySelector('[data-selected-date]')?.getAttribute('data-selected-date')).toBe(date);
+  expect(host.querySelector(`[data-calendar-date="${date}"]`)).toBe(cell);
+  expect(host.querySelectorAll('[data-calendar-date]')).toHaveLength(42);
+  expect(host.textContent).toContain('No events this day');
+  expect(host.textContent).toContain(dayjs(date).locale('en').format('MMMM YYYY'));
+  expect(getCalendar).toHaveBeenCalledTimes(calls);
+  await act(async () => setLocale('zh-CN'));
+  expect(host.querySelector('[data-selected-date]')?.getAttribute('data-selected-date')).toBe(date);
+  expect(host.textContent).toContain('当天暂无安排');
 });

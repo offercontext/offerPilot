@@ -15,9 +15,9 @@ describe('desktop task flow golden', () => {
       ...DESKTOP_TASK_FLOW_GOLDEN.primaryNavigation,
       ...DESKTOP_TASK_FLOW_GOLDEN.resourceNavigation,
       ...DESKTOP_TASK_FLOW_GOLDEN.resourceTabs,
-    ]) expect(navigation).toContain(`label: '${label}'`);
-    expect(navigation).toContain("{ view: 'board', label: '看板' }");
-    expect(navigation).toContain("{ view: 'applications-list', label: '列表' }");
+    ]) expect(navigation).toContain(label === 'Offer' ? "label: 'Offer'" : `get label() { return t("${label}"); }`);
+    expect(navigation).toContain(`{ view: 'board', get label() { return t("看板"); } }`);
+    expect(navigation).toContain(`{ view: 'applications-list', get label() { return t("列表"); } }`);
     expect(navigation).toContain("calendar: 'today'");
     expect(navigation).toContain("offers: 'offers'");
   });
@@ -26,9 +26,9 @@ describe('desktop task flow golden', () => {
     expect((appShell.match(/<AssistantSurfaceProvider>/g) ?? [])).toHaveLength(1);
     expect((appShell.match(/usePilotConversationController\(\)/g) ?? [])).toHaveLength(1);
     for (const label of DESKTOP_TASK_FLOW_GOLDEN.topBarActions.filter((label) => label !== '录入 Offer')) {
-      expect(appShell).toContain(`label: '${label}'`);
+      expect(appShell).toContain(`label: t("${label}")`);
     }
-    expect(appShell).toContain("? '添加投递' : '录入 Offer'");
+    expect(appShell).toContain('? t("添加投递") : t("录入 Offer")');
     expect(appShell).not.toContain('new EventSource');
     expect(appShell).not.toContain('streamChat(');
   });

@@ -32,6 +32,9 @@ Extraction 由持久队列异步触发。事务失败时 final 目录可能残�
 
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/knowledge-memory.md（导入、抽取、归档与异步删除）。
+# 导入服务只接纳 Source；Evidence 和删除任务的最终结果需继续观察 Worker。
+
 import json
 import re
 import secrets

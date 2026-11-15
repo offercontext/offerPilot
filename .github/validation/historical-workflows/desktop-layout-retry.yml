@@ -1,0 +1,187 @@
+name: Pinned UI layout and installer retry
+
+# Test-helper activation only. Does not rebuild or replace the independent full gate.
+on:
+  push:
+    branches: [feat/20261005-windows-desktop-validation]
+    paths: ['desktop/layout-retry/request.json']
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  PRODUCT_SHA: d853bd2eb117929e73530bb5036256801278b235
+  LITELLM_LOCAL_MODEL_COST_MAP: "True"
+  PYTHONUTF8: "1"
+  PYTHONUNBUFFERED: "1"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+  ONNXRUNTIME_NODE_INSTALL: skip
+defaults:
+  run:
+    shell: pwsh
+    working-directory: .layout-product
+jobs:
+  layout-package-retry:
+    name: Experimental installer and desktop smoke
+    runs-on: windows-2022
+    timeout-minutes: 60
+    # Intentionally independent of full-regression. Its artifact is NOT a release.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify bounded retry request
+        working-directory: .
+        run: |
+          $request = Get-Content desktop/layout-retry/request.json -Raw | ConvertFrom-Json
+          if ($request.product_sha -ne $env:PRODUCT_SHA -or $request.full_regression_run -ne 37626960710) { throw 'Unexpected product or regression identity' }
+          $parent = git rev-parse HEAD~1
+          if ($request.helper_sha -ne $parent) { throw 'Helper revision must be the reviewed parent commit' }
+          $changed = @(git diff --name-only $request.helper_sha HEAD)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'desktop/layout-retry/request.json') { throw 'Activation must change only the request' }
+          "REVIEWED_HELPER_SHA=$($request.helper_sha)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - uses: actions/checkout@v4
+        with:
+          ref: d853bd2eb117929e73530bb5036256801278b235
+          path: .layout-product
+          persist-credentials: false
+      - name: Overlay reviewed test helper without changing product files
+        run: |
+          $source = git rev-parse HEAD
+          if ($source -ne $env:PRODUCT_SHA) { throw 'Wrong product checkout' }
+          Copy-Item ../desktop/layout-retry/run.mjs web/tests/desktop-layout/run.mjs -Force
+          $changed = @(git diff --name-only)
+          if ($changed.Count -ne 1 -or $changed[0] -ne 'web/tests/desktop-layout/run.mjs') { throw 'Only browser test driver may differ from pinned product tree' }
+      - name: Record validation scope and run identity
+        run: |
+          New-Item -ItemType Directory -Force desktop/ci-evidence | Out-Null
+          @(
+            "EXPERIMENTAL WINDOWS VALIDATION ONLY. NOT RELEASE READY.",
+            "Product commit: $env:PRODUCT_SHA",
+            "Reviewed helper commit: $env:REVIEWED_HELPER_SHA",
+            "Helper activation commit: $env:GITHUB_SHA",
+            "Independent full gate: https://github.com/offercontext/offerPilot/actions/runs/37626960710",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Full regression remains independent in original run 37626960710 and is required for release readiness.",
+            "This job must pass every focused, build and frozen smoke check before uploading an installer.",
+            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
+          ) | Tee-Object -FilePath desktop/ci-evidence/scope.txt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.12.19"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            .layout-product/web/package-lock.json
+            .layout-product/desktop/package-lock.json
+      - name: Install locked validation dependencies
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/01-install.log
+          uv sync --frozen
+          if ($LASTEXITCODE -ne 0) { throw "Frozen Python install failed" }
+          npm.cmd ci --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend install failed" }
+          npm.cmd ci --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop install failed" }
+          npm.cmd ci --prefix desktop/installed-ui --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw "Isolated layout helper install failed" }
+          Stop-Transcript
+      - name: Required desktop, auth and static regression tests
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/02-focused-tests.log
+          uv run --frozen pytest -v tests/test_desktop.py tests/test_auth_api.py tests/test_static_frontend.py --durations=15 --junitxml=desktop/ci-evidence/focused-pytest.xml
+          if ($LASTEXITCODE -ne 0) { throw "Focused desktop regression tests failed" }
+          npm.cmd test --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "Desktop lifecycle tests failed" }
+          Stop-Transcript
+      - name: Required lint, desktop types and frontend build
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03-static-checks.log
+          uv run --frozen ruff check .
+          if ($LASTEXITCODE -ne 0) { throw "Ruff failed" }
+          uv run --frozen mypy src/offerpilot/desktop.py src/offerpilot/api.py
+          if ($LASTEXITCODE -ne 0) { throw "Desktop type check failed" }
+          npm.cmd run build --prefix web
+          if ($LASTEXITCODE -ne 0) { throw "Frontend build failed" }
+          Stop-Transcript
+      - name: Required rendered viewport and interaction regression
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/03b-layout.log
+          node web/node_modules/typescript/bin/tsc --project web/tests/desktop-layout/tsconfig.json
+          if ($LASTEXITCODE -ne 0) { throw "Layout fixture types failed" }
+          node web/tests/desktop-layout/run.mjs
+          if ($LASTEXITCODE -ne 0) { throw "Rendered layout regression failed" }
+          Stop-Transcript
+      - name: Freeze existing Python backend
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/04-freeze.log
+          uv run --frozen --with pyinstaller==6.16.0 --with pyinstaller-hooks-contrib==2025.9 python desktop/build-backend.py
+          if ($LASTEXITCODE -ne 0) { throw "Frozen backend build failed" }
+          Stop-Transcript
+      - name: Required frozen process persistence and security smoke
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/05-frozen-smoke.log
+          python desktop/smoke-backend.py --backend desktop/backend-dist/offerpilot-backend/offerpilot-backend.exe --static-dir web/dist
+          if ($LASTEXITCODE -ne 0) { throw "Frozen backend smoke failed" }
+          Stop-Transcript
+      - name: Build unsigned NSIS installer without publishing
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/06-nsis.log
+          npm.cmd run build:win --prefix desktop
+          if ($LASTEXITCODE -ne 0) { throw "NSIS packaging failed" }
+          Stop-Transcript
+      - name: Required packaged resource layout and backend smoke
+        run: |
+          Start-Transcript -Path desktop/ci-evidence/07-packaged-smoke.log
+          python desktop/smoke-backend.py --backend desktop/dist/win-unpacked/resources/backend/offerpilot-backend.exe --static-dir desktop/dist/win-unpacked/resources/web
+          if ($LASTEXITCODE -ne 0) { throw "Packaged resource smoke failed" }
+          Stop-Transcript
+      - name: Hash installers and disclose validation-only scope
+        run: |
+          $installers = @(Get-ChildItem -Path desktop/dist -Filter '*-setup.exe')
+          if ($installers.Count -eq 0) { throw "No Windows installer produced" }
+          foreach ($installer in $installers) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
+            "$hash  $($installer.Name)" | Set-Content -Encoding ascii -LiteralPath "$($installer.FullName).sha256"
+          }
+          @(
+            "EXPERIMENTAL, UNSIGNED WINDOWS VALIDATION BUILD. NOT RELEASE READY.",
+            "Product commit: $env:PRODUCT_SHA",
+            "Reviewed helper commit: $env:REVIEWED_HELPER_SHA",
+            "Helper activation commit: $env:GITHUB_SHA",
+            "Independent full gate: https://github.com/offercontext/offerPilot/actions/runs/37626960710",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            "Installer checks: focused desktop/auth/static tests, lifecycle tests, ruff, desktop mypy, frontend build, rendered component viewport regressions, frozen and packaged-resource smoke passed.",
+            "Full release/regression gate: original run 37626960710; NOT certified by this helper retry artifact.",
+            "Check the original full regression job for its actual result; no skipped or running gate is a pass.",
+            "Pending, failed, cancelled, timed-out or skipped full regression is not a pass.",
+            "Browser component fixtures do not validate installer execution, desktop CSP or the installed Electron UI.",
+            "Complete docs/architecture/desktop-validation.md on a clean Windows account before claiming desktop acceptance."
+          ) | Tee-Object -FilePath desktop/dist/VALIDATION-NOTES.txt
+          Get-Content desktop/dist/VALIDATION-NOTES.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Upload experimental validation installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: offerpilot-windows-ui-retry-${{ env.PRODUCT_SHA }}-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            .layout-product/desktop/dist/*-setup.exe
+            .layout-product/desktop/dist/*-setup.exe.sha256
+            .layout-product/desktop/dist/VALIDATION-NOTES.txt
+      - name: Preserve validation evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-ui-retry-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: .layout-product/desktop/ci-evidence/

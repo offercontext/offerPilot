@@ -2,15 +2,21 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from offerpilot.ai.types import Assistant
 from offerpilot.api import create_app
 from offerpilot.db import session_factory_for_data_dir
 from offerpilot.models import (
     InterviewKnowledgeCaptureAttempt,
     KnowledgeEvidence,
     KnowledgeExtractionSnapshot,
+    KnowledgeNote,
+    KnowledgeNoteEvidence,
+    KnowledgeNoteVersion,
+    KnowledgeSource,
 )
 
 
@@ -81,6 +87,63 @@ def test_confirm_requires_a_verified_preview_attempt(tmp_path) -> None:
         },
     )
     assert response.status_code == 404
+
+
+@pytest.mark.parametrize("mode", ["direct", "ai"])
+def test_empty_confirm_creates_no_knowledge_and_leaves_attempt_usable(tmp_path, mode) -> None:
+    class EmptyPreviewModel:
+        supports_json_schema = False
+        calls = 0
+
+        def complete(self, messages, tools, response_format=None):
+            self.calls += 1
+            return Assistant(content='{"title":"","blocks":[]}')
+
+    model = EmptyPreviewModel()
+    client = TestClient(create_app(data_dir=tmp_path, chat_model=model))
+    note_id = int(_create_note(client)["id"])
+    path = f"/api/notes/{note_id}/knowledge-capture"
+    preview = client.post(
+        f"{path}/preview",
+        json={"attempt_key": "empty-confirm", "mode": mode, "selected_fragments": _fragments()},
+    )
+    assert preview.status_code == 200
+    attempt = preview.json()
+    assert attempt["preview_status"] == ("safe_empty" if mode == "ai" else "direct_ready")
+    if mode == "ai":
+        assert attempt["preview"] == {"title": "", "blocks": []}
+    payload = {
+        "attempt_key": attempt["attempt_key"],
+        "note_fingerprint": attempt["note_fingerprint"],
+        "title": "Title only",
+        "blocks": [],
+    }
+    rejected = client.post(f"{path}/confirm", json=payload)
+    assert rejected.status_code == 422
+    assert client.get("/api/knowledge/notes").json() == {"items": []}
+    with session_factory_for_data_dir(tmp_path)() as session:
+        for entity in (
+            KnowledgeSource, KnowledgeExtractionSnapshot, KnowledgeEvidence,
+            KnowledgeNote, KnowledgeNoteVersion, KnowledgeNoteEvidence,
+        ):
+            assert session.scalar(select(func.count()).select_from(entity)) == 0
+        state = session.scalar(select(InterviewKnowledgeCaptureAttempt))
+        assert state is not None
+        assert state.preview_status == attempt["preview_status"]
+        assert state.confirmed_note_version_id is None
+
+    direct = _preview(client, note_id, key=attempt["attempt_key"]).json()
+    payload["blocks"] = direct["preview"]["blocks"]
+    confirmed = client.post(f"{path}/confirm", json=payload)
+    assert confirmed.status_code == 201
+    replay = client.post(f"{path}/confirm", json=payload)
+    assert replay.status_code == 200
+    assert replay.json() == confirmed.json()
+    history = client.get("/api/knowledge/notes").json()["items"]
+    assert len(history) == 1
+    assert history[0]["version_id"] == confirmed.json()["version_id"]
+    assert history[0]["content"]["blocks"] and history[0]["evidence"]
+    assert model.calls == (1 if mode == "ai" else 0)
 
 
 def test_confirm_creates_frozen_knowledge_and_is_idempotent(tmp_path) -> None:

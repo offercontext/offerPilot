@@ -1,3 +1,14 @@
+import { CompanionLifeSignals } from '@/features/companionLife/useCompanionLife';
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale, getLocale } from '@/i18n';
+import { getJobMailPendingCount, JOB_MAIL_COUNT_KEY } from '@/services/jobMail';
+import { desktopUpdateTaskGuard } from '@/features/desktopUpdates/retainedWorkSafety';
+import { readRetainedOwnerSafety } from '@/features/coreTaskSurface/registry';
+import { useApplicationJdOwnerDrafts } from '@/features/applicationTasks/useApplicationJdOwnerDrafts';
+import { useOfferNegotiationOwnerDrafts } from '@/features/offerNegotiation/useOfferNegotiationOwnerDrafts';
+import { useInterviewOwnerDrafts } from '@/features/interviewEvents/useInterviewOwnerDrafts';
+import { readDesktopUpdateSafety } from '@/features/desktopUpdates/installSafety';
+import { useDesktopUpdateSafety } from '@/features/desktopUpdates/useDesktopUpdateSafety';
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DndContext, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -34,7 +45,6 @@ import InterviewStoryDrawer, {
   type InterviewStoryDraft,
   type InterviewStoryDraftChangeContext,
 } from '@/components/InterviewStoryDrawer';
-import { type OfferNegotiationDraft } from '@/components/OfferNegotiationDrawer';
 import {
   buildOfferNegotiationPilotDraft,
   type OfferNegotiationPilotBrief,
@@ -54,7 +64,7 @@ import {
   type PipelineInsight,
 } from '@/lib/pipelineInsights';
 import { getPracticeStats } from '@/services/questions';
-import type { ApplicationJdDraft } from '@/types/applicationJdVersion';
+import { useReminderCandidates, REMINDER_CANDIDATES_QUERY_KEY } from '@/lib/useReminderCandidates';
 import type { AdaptivePracticeFocus, AdaptivePracticeOwnerDraft } from '@/types/adaptiveInterviewPractice';
 import {
   isReviewReadinessDraftPending,
@@ -101,6 +111,7 @@ import {
   usePilotConversationController,
 } from '@/features/assistantSurface/AssistantSurfaceProvider';
 import HaruDock from '@/features/assistantSurface/HaruDock';
+import { isDesktopOwner } from '@/features/assistantSurface/desktopHaru';
 import PilotWorkspace from '@/features/assistantSurface/PilotWorkspace';
 import {
   DEFAULT_APPLICATION_VIEW_STATE,
@@ -123,7 +134,7 @@ function isPilotEscapeBlocked(event: KeyboardEvent, confirmationActive: boolean)
   const target = event.target instanceof Element ? event.target : document.activeElement;
   if (!target) return false;
   if (target.closest('input, textarea, select, [contenteditable]')) return true;
-  return Boolean(target.closest('[role="dialog"], [role="group"][aria-label="AI 修改提议"]'));
+  return Boolean(target.closest('[role="dialog"], [data-pilot-proposal]'));
 }
 
 export function adaptivePracticeOwnerIdentity(focus: AdaptivePracticeFocus | undefined): string {
@@ -187,9 +198,9 @@ export function adaptivePracticeDraftGuard(
 ): { pending: boolean; unsaved: boolean } {
   const relevant = Object.values(drafts).filter((draft) => draft.ownerGeneration === ownerGeneration);
   return {
-    pending: relevant.some((draft) => draft.pendingOperation !== null || draft.resultUnknown),
+    pending: relevant.some((draft) => draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command)),
     unsaved: relevant.some((draft) => Boolean(
-      draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput,
+      draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput || draft.trainingEvidenceDraft,
     )),
   };
 }
@@ -625,15 +636,18 @@ export function adaptivePracticeGuardAfterOwnerLaunch(input: {
     const recoveryIdentity = adaptivePracticeOwnerIdentity(input.nextFocus);
     const recoverable = Object.values(input.drafts).filter((draft) => (
       draft.ownerGeneration === input.recoveryOwnerGeneration
-      && (draft.pendingOperation !== null || draft.resultUnknown || (draft.planId !== null && Boolean(draft.answer || draft.reflection || draft.assessment)))
-      && (draft.signalVersionId === null && draft.targetEventId === null
-        ? recoveryIdentity === 'three-mode'
-        : recoveryIdentity === `${draft.signalVersionId}:${draft.targetEventId}`)
+      && (draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command) || (draft.planId !== null && Boolean(draft.answer || draft.reflection || draft.assessment || draft.trainingEvidenceDraft)))
+      && (() => {
+        const host = draft.trainingEvidenceDraft && draft.trainingEvidenceHost ? draft.trainingEvidenceHost : draft;
+        return host.signalVersionId === null && host.targetEventId === null
+          ? recoveryIdentity === 'three-mode'
+          : recoveryIdentity === `${host.signalVersionId}:${host.targetEventId}`;
+      })()
     ));
     return {
-      pending: recoverable.some((draft) => draft.pendingOperation !== null || draft.resultUnknown),
+      pending: recoverable.some((draft) => draft.pendingOperation !== null || draft.resultUnknown || Boolean(draft.trainingEvidenceDraft?.command)),
       unsaved: recoverable.some((draft) => Boolean(
-        draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput,
+        draft.answer || draft.reflection || draft.assessment || draft.startInput || draft.completionInput || draft.trainingEvidenceDraft,
       )),
     };
   }
@@ -955,6 +969,7 @@ class ViewErrorBoundary extends Component<{ children: ReactNode }, { hasError: b
 }
 
 export default function AppShell() {
+  useLocale();
   return (
     <PilotAttachmentProvider>
       <AssistantSurfaceProvider>
@@ -965,6 +980,7 @@ export default function AppShell() {
 }
 
 function AppShellContent() {
+  useLocale();
   const assistantSurface = useAssistantSurface();
   const pilotController = usePilotConversationController();
   const [offerNegotiationEntryPoint, setOfferNegotiationEntryPoint] = useState<'ui' | 'pilot'>('ui');
@@ -1054,6 +1070,8 @@ function AppShellContent() {
     }
   }, [coreTaskController]);
   const [view, setView] = useState<ViewMode>(readInitialWorkspaceView);
+  const [desktopAISettingsRequest, setDesktopAISettingsRequest] = useState(0);
+  useEffect(() => { if (view !== 'settings') setDesktopAISettingsRequest(0); }, [view]);
   const isPilotView = view === 'pilot';
   const lastNonPilotViewRef = useRef<ViewMode>(isPilotView ? 'dashboard' : view);
   const [applicationViewState, setApplicationViewState] = useState<ApplicationViewState>(
@@ -1061,8 +1079,15 @@ function AppShellContent() {
   );
   const [adaptivePracticeFocus, setAdaptivePracticeFocus] = useState<AdaptivePracticeFocus | undefined>();
   const adaptivePracticeFocusRef = useRef<AdaptivePracticeFocus | undefined>();
-  const [adaptivePracticeDrafts, setAdaptivePracticeDrafts] = useState<Record<string, AdaptivePracticeOwnerDraft>>({});
-  const adaptivePracticeDraftsRef = useRef<Record<string, AdaptivePracticeOwnerDraft>>({});
+  const jdOwner = useApplicationJdOwnerDrafts();
+  const { drafts: applicationJdDrafts, updateDraft: updateApplicationJdDraft } = jdOwner;
+  const negotiationOwner = useOfferNegotiationOwnerDrafts();
+  const {
+    drafts: offerNegotiationDrafts, pilotDrafts: offerNegotiationPilotDrafts,
+    updateDraft: updateOfferNegotiationDraft, updatePilotDraft: handleOfferNegotiationDrawerDraftChange,
+  } = negotiationOwner;
+  const interviewOwner = useInterviewOwnerDrafts();
+  const { adaptivePracticeDrafts, setAdaptivePracticeDrafts, adaptivePracticeDraftsRef, interviewReviewProposalAttempts, setInterviewReviewProposalAttempts, reviewReadinessDrafts, setReviewReadinessDrafts, reviewReadinessDraftsRef, interviewKnowledgeCaptureDrafts, setInterviewKnowledgeCaptureDrafts, interviewPreparationAttempts, setInterviewPreparationAttempts, interviewPreparationDrafts, setInterviewPreparationDrafts, interviewStoryDraftsRef, interviewStoryDrafts, setInterviewStoryDrafts } = interviewOwner;
   const [addOpen, setAddOpen] = useState(false);
   const [resumeUploadRequestToken, setResumeUploadRequestToken] = useState(0);
   const [offerCreateRequestToken, setOfferCreateRequestToken] = useState(0);
@@ -1100,29 +1125,16 @@ function AppShellContent() {
       setInterviewPreparationSelection(null);
     }
   }, [coreTaskSurfaceState.active, interviewPreparationSelection]);
-  const offerNegotiationDraftsRef = useRef(new Map<number, OfferNegotiationDraft>());
-  const [offerNegotiationDrafts, setOfferNegotiationDrafts] = useState<Record<number, OfferNegotiationDraft>>({});
-  const offerNegotiationPilotDraftsRef = useRef(new Map<number, OfferNegotiationDraft>());
-  const [offerNegotiationPilotDrafts, setOfferNegotiationPilotDrafts] = useState<Record<number, OfferNegotiationDraft>>({});
   const [resumeOnboardingFocusToken, setResumeOnboardingFocusToken] = useState(0);
   const [pilotOnboardingFocusToken, setPilotOnboardingFocusToken] = useState(0);
   const nextPilotOnboardingFocusToken = useRef(0);
   const [selected, setSelected] = useState<Application | null>(null);
   const [intakeApplicationId, setIntakeApplicationId] = useState<number | null>(null);
-  const applicationJdDraftsRef = useRef(new Map<number, ApplicationJdDraft>());
-  const [applicationJdDrafts, setApplicationJdDrafts] = useState<Record<number, ApplicationJdDraft>>({});
-  const [interviewReviewProposalAttempts, setInterviewReviewProposalAttempts] = useState<Record<number, InterviewReviewProposalAttemptState>>({});
-  const [reviewReadinessDrafts, setReviewReadinessDrafts] = useState<Record<string, ReviewReadinessOwnerDraft>>({});
-  const reviewReadinessDraftsRef = useRef<Record<string, ReviewReadinessOwnerDraft>>({});
-  const [interviewKnowledgeCaptureDrafts, setInterviewKnowledgeCaptureDrafts] = useState<Record<number, InterviewKnowledgeCaptureDraft>>({});
-  const [interviewPreparationAttempts, setInterviewPreparationAttempts] = useState<Record<string, InterviewPreparationAttemptState>>({});
-  const [interviewPreparationDrafts, setInterviewPreparationDrafts] = useState<Record<string, InterviewPreparationDraft>>({});
-  const [interviewStoryLibraryOpen, setInterviewStoryLibraryOpen] = useState(false);
+  const [materialsReturnView, setMaterialsReturnView] = useState<ViewMode>('resumes');
+  const [interviewPracticeMode, setInterviewPracticeMode] = useState<'quick' | 'review'>('quick');
   const [voiceCoachingGrowthOpen, setVoiceCoachingGrowthOpen] = useState(false);
   const [interviewStoryDrawerOpen, setInterviewStoryDrawerOpen] = useState(false);
   const [interviewStoryLibraryRevision, setInterviewStoryLibraryRevision] = useState(0);
-  const interviewStoryDraftsRef = useRef(new Map<string, InterviewStoryDraft>());
-  const [interviewStoryDrafts, setInterviewStoryDrafts] = useState<Record<string, InterviewStoryDraft>>({});
   const [activeInterviewStoryDraftScope, setActiveInterviewStoryDraftScope] = useState<string | null>(null);
   const [evidenceFocus, setEvidenceFocus] = useState<Exclude<EvidenceTarget, { kind: 'application' }> | null>(null);
   const [coachOfferId, setCoachOfferId] = useState<number | undefined>(undefined);
@@ -1147,8 +1159,30 @@ function AppShellContent() {
   const kanbanSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
   );
-  const { addAttachment: addAttachmentToKey, createNewDraftWithAttachment } = usePilotAttachmentStore();
+  const { addAttachment: addAttachmentToKey, createNewDraftWithAttachment, drafts: pilotAttachmentDrafts } = usePilotAttachmentStore();
+  const readDesktopUpdateInput = () => {
+    const retained = readRetainedOwnerSafety({
+      'application.jd': jdOwner.readSafety,
+      'application.offer_review': negotiationOwner.readSafety,
+      'interview.retained': interviewOwner.readSafety,
+    });
+    return {
+      pilot: pilotControllerRef.current,
+      taskGuard: desktopUpdateTaskGuard(coreTaskController.getState().active?.ref.taskId, taskSurfaceGuardRef.current, retained),
+      hasAttachmentDrafts: Object.values(pilotAttachmentDrafts).some((draft) => Boolean(draft?.attachments.length)),
+      hasRetainedDrafts: retained.hasDraft,
+      retainedActiveRun: retained.activeRun,
+      retainedPendingApproval: retained.pendingApproval,
+    };
+  };
+  const desktopUpdateInputRef = useRef(readDesktopUpdateInput);
+  desktopUpdateInputRef.current = readDesktopUpdateInput;
+  // Both sides of an async safety read use the newest render's draft buckets.
+  // Other editors are not globally registered: main must disclose that gap
+  // and request an explicit save-and-exit confirmation.
+  useDesktopUpdateSafety(() => readDesktopUpdateSafety(() => desktopUpdateInputRef.current()));
 
+  const { data: mailPendingCount = 0 } = useQuery({ queryKey: JOB_MAIL_COUNT_KEY, queryFn: getJobMailPendingCount, retry: false, refetchInterval: 30_000 });
   const { data: applications = [], isLoading, isError: appsError } = useQuery({
     queryKey: ['applications'],
     queryFn: () => listApplications(),
@@ -1263,28 +1297,6 @@ function AppShellContent() {
     });
   };
 
-  const updateApplicationJdDraft = useCallback((applicationId: number, patch: Partial<ApplicationJdDraft> | null) => {
-    const current = applicationJdDraftsRef.current.get(applicationId) ?? {
-      jdText: '',
-      sourceUrl: '',
-      expectedCurrentVersionId: null,
-      idempotencyKey: null,
-      resultUnknown: false,
-      pendingOperation: null,
-    };
-    if (patch === null) {
-      applicationJdDraftsRef.current.delete(applicationId);
-      setApplicationJdDrafts((state) => {
-        const next = { ...state };
-        delete next[applicationId];
-        return next;
-      });
-      return;
-    }
-    const next = { ...current, ...patch };
-    applicationJdDraftsRef.current.set(applicationId, next);
-    setApplicationJdDrafts((state) => ({ ...state, [applicationId]: next }));
-  }, []);
 
   const qc = useQueryClient();
   const refreshWorkspaceData = () => {
@@ -1354,9 +1366,11 @@ function AppShellContent() {
     pushWorkspaceView(view);
   }, [view]);
 
+  const reminderCandidatesQ = useReminderCandidates();
   const pipelineActions = useMemo(
-    () => derivePipelineInsights({ apps, events: evs, offers: ofrs, practiceStats, weeklyTarget: 6, now }),
-    [apps, evs, ofrs, practiceStats, now]
+    () => derivePipelineInsights({ apps, events: evs, offers: ofrs, practiceStats,
+      reminderCandidates: reminderCandidatesQ.isError ? [] : reminderCandidatesQ.data, now }),
+    [apps, evs, ofrs, practiceStats, reminderCandidatesQ.data, reminderCandidatesQ.isError, now, getLocale()]
   );
   const actions = useMemo(() => toLegacyActionItems(pipelineActions), [pipelineActions]);
 
@@ -1402,7 +1416,7 @@ function AppShellContent() {
         selectedApplication: selectedApp ?? undefined,
         coachedOffer,
       }),
-    [view, selectedApp, coachedOffer]
+    [view, selectedApp, coachedOffer, getLocale()]
   );
   const moduleTabs = moduleTabsForView(view);
   const selectedOfferScope = selectedApp
@@ -1433,7 +1447,7 @@ function AppShellContent() {
     if (view !== 'pilot' || !pilotController.pending) return;
     const focusPending = window.setTimeout(() => {
       const proposal = document.querySelector<HTMLElement>(
-        '[data-pilot-surface-host] [role="group"][aria-label="AI 修改提议"]',
+        '[data-pilot-surface-host] [data-pilot-proposal]',
       );
       const focusable = proposal?.querySelector<HTMLElement>(
         'input:not(:disabled), textarea:not(:disabled), select:not(:disabled), button:not(:disabled), [tabindex]:not([tabindex="-1"])',
@@ -1462,7 +1476,7 @@ function AppShellContent() {
     && assistantSurface.surface === 'mascot'
     && !pilotMascotVisible;
   const contextualPilotOpen = assistantSurface.surface === 'pilot_workspace' || contextualPilotRailMode;
-  const pilotControllerTransportActive = view === 'pilot'
+  const pilotControllerTransportActive = isDesktopOwner() || view === 'pilot'
     || contextualPilotOpen
     || assistantSurface.surface === 'haru_chat'
     || pilotController.loading
@@ -1541,10 +1555,10 @@ function AppShellContent() {
       if (task.kind === 'focused_existing') return;
     }
     const initialMessage = action?.type === 'application_submission_snapshot'
-      ? '确认本次实际投递材料'
+      ? t("确认本次实际投递材料")
       : action?.type === 'application_outcome_record'
-        ? '确认记录本次投递结果'
-        : '保存岗位资料';
+        ? t("确认记录本次投递结果")
+        : t("保存岗位资料");
     setCoachOfferId(undefined);
     setChatStartRequest({
       requestKey: ++nextChatStartRequestKey.current,
@@ -1601,6 +1615,15 @@ function AppShellContent() {
     return () => window.removeEventListener('keydown', onKey);
   }, [isPilotView, navigateToView, pilotController.confirmPhase, pilotController.pending]);
 
+  useEffect(() => {
+    const bridge = window.offerpilotDesktop;
+    if (bridge?.role !== 'owner') return;
+    return bridge.onShowAISettings?.(() => {
+      navigateToView('settings');
+      setDesktopAISettingsRequest(value => value + 1);
+    });
+  }, [navigateToView]);
+
   const previousAssistantSurfaceRef = useRef(assistantSurface.surface);
   useEffect(() => {
     const becamePilot = previousAssistantSurfaceRef.current !== 'pilot_workspace'
@@ -1637,7 +1660,7 @@ function AppShellContent() {
     const active = coreTaskController.getState().active;
     if (active && active.ref.applicationId !== app.id) {
       if (taskSurfaceGuardRef.current.pending || taskSurfaceGuardRef.current.unsaved || hasLivePilotWork()) {
-        message.warning('当前任务还有未完成内容，请先处理后再切换投递');
+        message.warning(liveText(() => t("当前任务还有未完成内容，请先处理后再切换投递")));
         return;
       }
       closeCoreTaskOwnerWithGuard(coreTaskController, { pending: false, unsaved: false });
@@ -1703,6 +1726,7 @@ function AppShellContent() {
       else delete next[key];
       return next;
     });
+    if (state === null) void qc.invalidateQueries({ queryKey: REMINDER_CANDIDATES_QUERY_KEY });
   };
 
   const updateInterviewPreparationDraft = (
@@ -1744,7 +1768,7 @@ function AppShellContent() {
       ? { kind: 'choose' as const, applicationId }
       : resolvePilotInterviewReviewIntent(applicationId, eventId, evs);
     if (eventId !== undefined && intent.kind !== 'event') {
-      message.warning('指定的面试当前不可用，请从面试列表重新选择。');
+      message.warning(liveText(() => t("指定的面试当前不可用，请从面试列表重新选择。")));
       return;
     }
     const trustedEventId = intent.kind === 'event' ? intent.eventId : undefined;
@@ -1754,7 +1778,7 @@ function AppShellContent() {
       const active = coreTaskController.getState().active;
       if (active && active.ref.applicationId !== applicationId
         && (taskSurfaceGuardRef.current.pending || taskSurfaceGuardRef.current.unsaved || hasLivePilotWork())) {
-        message.warning('当前任务还有未完成内容，请先处理后再切换投递');
+        message.warning(liveText(() => t("当前任务还有未完成内容，请先处理后再切换投递")));
         return;
       }
       if (active && active.ref.applicationId !== applicationId) {
@@ -1802,7 +1826,7 @@ function AppShellContent() {
       now: now.valueOf(),
     });
     if (!app || !exactEvent.ok) {
-      message.warning('指定的面试当前不可用，请刷新面试列表后重试。');
+      message.warning(liveText(() => t("指定的面试当前不可用，请刷新面试列表后重试。")));
       return { kind: 'unavailable', reason: 'task_owner_unavailable' };
     }
     const result = launchCoreTask(request);
@@ -1837,7 +1861,6 @@ function AppShellContent() {
         setInterviewPreparationSelection(null);
         setSelected(null);
         setVoiceCoachingGrowthOpen(false);
-        setInterviewStoryLibraryOpen(false);
         setView('interview');
       }
       return result;
@@ -1867,7 +1890,7 @@ function AppShellContent() {
         ownerGeneration: active.generation,
         surfaceGuard: taskSurfaceGuardRef.current,
       })) {
-        message.warning('当前练习还有待确认或未保存内容，请先处理后再切换。');
+        message.warning(liveText(() => t("当前练习还有待确认或未保存内容，请先处理后再切换。")));
         return { kind: 'replacement_denied', reason: 'replacement_guard_denied', generation: active.generation };
       }
     }
@@ -1890,17 +1913,17 @@ function AppShellContent() {
     return result;
   };
 
-  const openFreePractice = (): CoreTaskLaunchResult => {
+  const openFreePractice = (mode: 'quick' | 'review' = 'quick'): CoreTaskLaunchResult => {
     const result = launchAdaptivePracticeOwner(undefined, {
       ref: { taskId: 'interview.free_practice' },
       source: 'deep_link',
       focus: 'current',
     });
     if (result.kind !== 'launched' && result.kind !== 'focused_existing') return result;
+    setInterviewPracticeMode(mode);
     setSelected(null);
     setEvidenceFocus(null);
     setVoiceCoachingGrowthOpen(false);
-    setInterviewStoryLibraryOpen(false);
     setView('interview');
     return result;
   };
@@ -1965,7 +1988,6 @@ function AppShellContent() {
     setSelected(null);
     setEvidenceFocus(null);
     setVoiceCoachingGrowthOpen(false);
-    setInterviewStoryLibraryOpen(false);
     setView('interview');
     return result;
   };
@@ -1974,7 +1996,7 @@ function AppShellContent() {
     const resolved = resolveUniqueInterviewEvent(applicationId, eventId, evs);
     const event = resolved.ok ? resolved.event : null;
     if (!event || typeof event.scheduled_at !== 'string' || event.scheduled_at.length === 0) {
-      message.warning('该面试日程当前不可编辑，请刷新后重试。');
+      message.warning(liveText(() => t("该面试日程当前不可编辑，请刷新后重试。")));
       return;
     }
     setEvidenceFocus({ kind: 'event', id: event.id, scheduledAt: event.scheduled_at });
@@ -1983,16 +2005,16 @@ function AppShellContent() {
 
   const openOfferNegotiation = (offer: Offer, entrypoint: 'ui' | 'pilot' = 'ui') => {
     if (listOfferBindingState(offer) === 'unbound') {
-      message.warning('历史未绑定 Offer 仅支持只读查看');
+      message.warning(liveText(() => t("历史未绑定 Offer 仅支持只读查看")));
       return;
     }
     if (!Number.isSafeInteger(offer.id) || offer.id <= 0) {
-      message.warning('当前 Offer 信息暂不可用');
+      message.warning(liveText(() => t("当前 Offer 信息暂不可用")));
       return;
     }
     const application = apps.find((item) => item.id === offer.application_id);
     if (!application) {
-      message.warning('所属投递当前不可见');
+      message.warning(liveText(() => t("所属投递当前不可见")));
       return;
     }
     const launchResult = launchCoreTaskViaController(coreTaskController, {
@@ -2017,20 +2039,20 @@ function AppShellContent() {
     brief: OfferNegotiationPilotBrief,
   ): boolean => {
     if (listOfferBindingState(offer) === 'unbound') {
-      message.warning('历史未绑定 Offer 无法进入谈薪对话');
+      message.warning(liveText(() => t("历史未绑定 Offer 无法进入谈薪对话")));
       return false;
     }
     if (!Number.isSafeInteger(offer.id) || offer.id <= 0 || !Number.isSafeInteger(offer.application_id)) {
-      message.warning('当前 Offer 信息暂不可用');
+      message.warning(liveText(() => t("当前 Offer 信息暂不可用")));
       return false;
     }
     const application = apps.find((item) => item.id === offer.application_id);
     if (!application) {
-      message.warning('所属投递当前不可见');
+      message.warning(liveText(() => t("所属投递当前不可见")));
       return false;
     }
     if (hasLivePilotWork()) {
-      message.warning('Pilot 当前有待处理内容，请先处理后再开始谈薪对话');
+      message.warning(liveText(() => t("Pilot 当前有待处理内容，请先处理后再开始谈薪对话")));
       return false;
     }
 
@@ -2053,33 +2075,6 @@ function AppShellContent() {
     return true;
   };
 
-  const updateOfferNegotiationDraft = useCallback((offerId: number, draft: OfferNegotiationDraft | null) => {
-    if (draft) {
-      offerNegotiationDraftsRef.current.set(offerId, draft);
-      setOfferNegotiationDrafts((current) => ({ ...current, [offerId]: draft }));
-    } else {
-      offerNegotiationDraftsRef.current.delete(offerId);
-      setOfferNegotiationDrafts((current) => {
-        const next = { ...current };
-        delete next[offerId];
-        return next;
-      });
-    }
-  }, []);
-
-  const handleOfferNegotiationDrawerDraftChange = useCallback((offerId: number, draft: OfferNegotiationDraft | null) => {
-    if (draft) {
-      offerNegotiationPilotDraftsRef.current.set(offerId, draft);
-      setOfferNegotiationPilotDrafts((current) => ({ ...current, [offerId]: draft }));
-    } else {
-      offerNegotiationPilotDraftsRef.current.delete(offerId);
-      setOfferNegotiationPilotDrafts((current) => {
-        const next = { ...current };
-        delete next[offerId];
-        return next;
-      });
-    }
-  }, []);
 
   const clearEvidenceFocus = (target: EvidenceTarget) => {
     setEvidenceFocus((current) => (current === target ? null : current));
@@ -2096,7 +2091,7 @@ function AppShellContent() {
         if (view === 'pilot') setView('board');
         openApplicationDetail(app);
       } else {
-        message.warning('引用的记录已不存在');
+        message.warning(liveText(() => t("引用的记录已不存在")));
       }
       return;
     }
@@ -2122,14 +2117,14 @@ function AppShellContent() {
   const openCanonicalApplication = (appId: number) => {
     const app = apps.find((item) => item.id === appId);
     if (!app) {
-      message.warning('所属投递当前不可见');
+      message.warning(liveText(() => t("所属投递当前不可见")));
       return;
     }
     const active = coreTaskController.getState().active;
     if (active
       && active.ref.applicationId !== app.id
       && (taskSurfaceGuardRef.current.pending || taskSurfaceGuardRef.current.unsaved || hasLivePilotWork())) {
-      message.warning('当前任务还有未完成内容，请先处理后再切换投递');
+      message.warning(liveText(() => t("当前任务还有未完成内容，请先处理后再切换投递")));
       return;
     }
     navigateToView('board');
@@ -2236,19 +2231,20 @@ function AppShellContent() {
     { preserveView = false }: { preserveView?: boolean } = {},
   ) => {
     const scope = interviewStoryDraftScope(input);
-    if (!preserveView) setView('interview');
+    if (!preserveView) {
+      if (view !== 'reviews') setMaterialsReturnView(view);
+      navigateToView('reviews');
+    }
     setVoiceCoachingGrowthOpen(false);
-    setInterviewStoryLibraryOpen(true);
     setActiveInterviewStoryDraftScope(scope);
     setInterviewStoryDrafts((current) => {
-      const existing = interviewStoryDraftsRef.current.get(scope);
+      const existing = interviewStoryDraftsRef.current[scope];
       const next = existing ?? createInterviewStoryDraft(input.entrypoint, input.reviewNoteId, {
         applicationId: input.applicationId,
         targetStoryId: input.targetStoryId,
         expectedCurrentVersionId: input.expectedCurrentVersionId,
         expectedStoryRevision: input.expectedStoryRevision,
       });
-      interviewStoryDraftsRef.current.set(scope, next);
       return { ...current, [scope]: next };
     });
     setInterviewStoryDrawerOpen(true);
@@ -2256,7 +2252,6 @@ function AppShellContent() {
 
   const openVoiceCoachingGrowth = () => {
     setView('interview');
-    setInterviewStoryLibraryOpen(false);
     setVoiceCoachingGrowthOpen(true);
   };
 
@@ -2270,11 +2265,9 @@ function AppShellContent() {
   ) => {
     const scope = activeInterviewStoryDraftScope;
     if (!scope) return false;
-    const currentDraft = interviewStoryDraftsRef.current.get(scope);
+    const currentDraft = interviewStoryDraftsRef.current[scope];
     if (!authorizeInterviewStoryDraftUpdate(currentDraft, draft, context)) return false;
     if (draft === null) setInterviewStoryLibraryRevision((current) => current + 1);
-    if (draft === null) interviewStoryDraftsRef.current.delete(scope);
-    else interviewStoryDraftsRef.current.set(scope, draft);
     setInterviewStoryDrafts((current) => {
       const next = { ...current };
       if (draft === null) {
@@ -2309,7 +2302,7 @@ function AppShellContent() {
     ? evs.filter((event) => event.event_type === 'interview' && dayjs(event.scheduled_at).isSame(dayjs(), 'day') && !['done', 'completed', 'cancelled', 'deleted', 'soft_deleted'].includes(event.status)).length
     : 0;
   const calendarSummary = calendarWorkspaceActive && !isLoading && !appsError && !eventsLoading && !eventsError && !offersLoading && !offersError && !practiceLoading && !practiceError
-    ? [calendarTodayInterviews ? `今天有 ${calendarTodayInterviews} 场面试` : '', actions.length ? `${actions.length} 项待处理` : ''].filter(Boolean).join(' · ')
+    ? [calendarTodayInterviews ? t("今天有 {value0} 场面试", { value0: calendarTodayInterviews }) : '', actions.length ? t("{value0} 项待处理", { value0: actions.length }) : ''].filter(Boolean).join(' · ')
     : undefined;
   const workspaceContent = selectedApp ? (
     <ApplicationDetail
@@ -2455,7 +2448,7 @@ function AppShellContent() {
           {view === 'reviews' && (
             <ExperienceMaterialsView
               key={interviewStoryLibraryRevision}
-              onBack={() => setView('resumes')}
+              onBack={() => navigateToView(materialsReturnView)}
               onOpenDraft={openInterviewStoryDraft}
               confirmedCaptures={confirmedInterviewKnowledgeNotes}
               confirmedCapturesLoading={confirmedInterviewKnowledgeNotesLoading}
@@ -2470,15 +2463,6 @@ function AppShellContent() {
                 setVoiceCoachingGrowthOpen(false);
                 openFreePractice();
               }}
-            />
-          ) : interviewStoryLibraryOpen ? (
-            <ExperienceMaterialsView
-              key={interviewStoryLibraryRevision}
-              onBack={() => setInterviewStoryLibraryOpen(false)}
-              onOpenDraft={openInterviewStoryDraft}
-              confirmedCaptures={confirmedInterviewKnowledgeNotes}
-              confirmedCapturesLoading={confirmedInterviewKnowledgeNotesLoading}
-              confirmedCapturesError={confirmedInterviewKnowledgeNotesError}
             />
           ) : activeInterviewPreparation ? (
             <InterviewReadinessCenter
@@ -2504,6 +2488,7 @@ function AppShellContent() {
             />
           ) : coreTaskSurfaceState.active?.ref.taskId === 'interview.free_practice' ? (
             <InterviewPracticeView
+              initialMode={interviewPracticeMode}
               adaptiveFocus={adaptivePracticeFocus}
               adaptiveOwnerGeneration={coreTaskSurfaceState.active.generation}
               recoveryOwnerGeneration={coreTaskSurfaceState.active.recoveryGeneration}
@@ -2537,14 +2522,23 @@ function AppShellContent() {
               }}
               onOpenEventEditor={openInterviewEventEditor}
               onOpenFreePractice={openFreePractice}
+              onOpenReadinessPractice={(focus) => openReadinessPractice({ ...focus, ownerGeneration: 0 })}
+              onOpenQuestionPractice={() => {
+                navigateToView('questions');
+                setQuestionPracticeRequestToken((current) => current + 1);
+              }}
+              practiceStats={practiceStats}
+              practiceLoading={practiceLoading}
+              practiceError={practiceError}
               events={evs}
               eventsLoading={eventsLoading}
               eventsError={eventsError}
               onRetryEvents={() => void qc.invalidateQueries({ queryKey: ['events'] })}
               onOpenStoryLibrary={(reviewNoteId) => {
                 setVoiceCoachingGrowthOpen(false);
-                setInterviewStoryLibraryOpen(true);
+                setMaterialsReturnView('interview');
                 if (reviewNoteId) openInterviewStoryDraft({ entrypoint: 'ui', reviewNoteId });
+                else navigateToView('reviews');
               }}
               onOpenVoiceCoachingGrowth={openVoiceCoachingGrowth}
             />
@@ -2580,6 +2574,7 @@ function AppShellContent() {
           )}
           {view === 'settings' && (
             <SettingsView
+              aiSettingsRequest={desktopAISettingsRequest}
               pilotMascotVisible={pilotMascotVisible}
               onPilotMascotVisibleChange={setPilotMascotPreference}
               pilotMascotZoom={pilotMascotZoom}
@@ -2599,40 +2594,40 @@ function AppShellContent() {
   if (!selectedApp) {
     if (['dashboard', 'reminders', 'board', 'applications-list'].includes(view)) {
       topBarPrimaryAction = {
-        label: '添加投递',
-        ariaLabel: '添加投递',
+        label: t("添加投递"),
+        ariaLabel: t("添加投递"),
         onClick: () => setAddOpen(true),
       };
     } else if (view === 'interview') {
       topBarPrimaryAction = {
-        label: '开始面试练习',
-        ariaLabel: '开始面试练习',
+        label: t("开始面试练习"),
+        ariaLabel: t("开始面试练习"),
         onClick: () => { openFreePractice(); },
       };
     } else if (view === 'questions') {
       topBarPrimaryAction = {
-        label: '开始刷题',
-        ariaLabel: '开始刷题',
+        label: t("开始刷题"),
+        ariaLabel: t("开始刷题"),
         onClick: () => setQuestionPracticeRequestToken((token) => token + 1),
       };
     } else if (view === 'offers') {
       topBarPrimaryAction = {
-        label: apps.length === 0 ? '添加投递' : '录入 Offer',
-        ariaLabel: apps.length === 0 ? '添加投递后录入 Offer' : '录入 Offer',
+        label: apps.length === 0 ? t("添加投递") : t("录入 Offer"),
+        ariaLabel: apps.length === 0 ? t("添加投递后录入 Offer") : t("录入 Offer"),
         onClick: apps.length === 0
           ? () => setAddOpen(true)
           : () => setOfferCreateRequestToken((token) => token + 1),
       };
     } else if (view === 'resumes') {
       topBarPrimaryAction = {
-        label: '上传简历',
-        ariaLabel: '上传简历',
+        label: t("上传简历"),
+        ariaLabel: t("上传简历"),
         onClick: () => setResumeUploadRequestToken((token) => token + 1),
       };
     } else if (view === 'reviews') {
       topBarPrimaryAction = {
-        label: '添加经历',
-        ariaLabel: '添加经历素材',
+        label: t("添加经历"),
+        ariaLabel: t("添加经历素材"),
         onClick: () => openInterviewStoryDraft({ entrypoint: 'ui' }, { preserveView: true }),
       };
     }
@@ -2649,7 +2644,7 @@ function AppShellContent() {
         <Sidebar
           view={view}
           onChange={navigateToView}
-          reminderCount={actions.length}
+          reminderCount={actions.length + mailPendingCount}
         />
       ) : null}
       <Layout
@@ -2673,7 +2668,7 @@ function AppShellContent() {
         <Content
           ref={contentRef}
           tabIndex={-1}
-          aria-label="主要内容"
+          aria-label={t("主要内容")}
           className={`op-app-content${isPilotView ? ' op-app-content-pilot' : ''}${calendarWorkspaceActive ? ' op-app-content-calendar' : ''}`}
           style={{
             padding: isPilotView ? 0 : '0 24px 24px',
@@ -2695,8 +2690,7 @@ function AppShellContent() {
             </div>
           ) : appsError ? (
             <div style={{ textAlign: 'center', padding: 48, color: 'var(--op-muted)' }}>
-              加载失败，请稍后重试
-            </div>
+              {t("加载失败，请稍后重试")}</div>
           ) : (
             <ViewErrorBoundary key={selectedApp ? `application-${selectedApp.id}` : view}>
               {workspaceContent}
@@ -2780,6 +2774,7 @@ function AppShellContent() {
         />
       ) : null}
 
+      <CompanionLifeSignals mockInterview={Boolean(interviewStudioContext)} presentationAvailable={view !== 'pilot' && !interviewStudioContext && !coreTaskSurfaceState.active && pilotMascotVisible && pilotMascotActivity === 'idle' && !assistantSurface.completionNotice} />
       {interviewStudioContext ? (
         <InterviewStudio
           context={interviewStudioContext}

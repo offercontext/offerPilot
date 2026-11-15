@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "repository": "offercontext/offerPilot",
+  "sourceSHA": "05fcd54a3bc0f3ebd792083704c6a5a861099797",
+  "runId": "38710428545",
+  "runURL": "https://github.com/offercontext/offerPilot/actions/runs/38710428545",
+  "installerArtifactId": "11961578103",
+  "evidenceArtifactId": "11961468467",
+  "evidenceArchiveSha256": "938b56ff547d9571e3dd692e9aef32db19d9ad67c005a5f789dc57c209ade3a4",
+  "installer": "OfferPilot-Desktop-localization-05fcd54a3bc0-win-x64-setup.exe",
+  "installerSha256": "614acdc2e4eae82c97ca0c699038a83ef89db7d0a32f5f269e64d4619e20d520",
+  "evidenceFiles": {
+    "result.json": "0dca6c6f6ca173e32c3f361729018f5e345e22d965e85b0f0a93a26647467f05",
+    "source-sha256.json": "ea3c9667d04072a433f15a687a9007d86a84f4f75ce91f1ed674bd83da70aabb",
+    "installed-web-sha256.json": "0c34259728d7acae6fccfc69a07faf8b179fdcbc49e74b632a3e39444cc8fbbf",
+    "installed-backend-sha256.json": "b9613df100f5a9e243cc4f4449bef3c923f5e09138f239fba5a2a9b98d3522df"
+  }
+}

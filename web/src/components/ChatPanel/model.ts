@@ -1,3 +1,4 @@
+import { t, getLocale, formatNumber, translateKnownLabel } from '@/i18n';
 import { parseTurnPresentation, type TurnPresentation } from '@/lib/pilotReplyPresentation';
 export { parseTurnPresentation } from '@/lib/pilotReplyPresentation';
 export type { TurnPresentation } from '@/lib/pilotReplyPresentation';
@@ -25,6 +26,8 @@ export type EvidenceTarget =
   | { kind: 'event'; id: number; scheduledAt: string };
 
 export interface EvidenceItem {
+  /** Display-only authored labels, evaluated without changing evidence identity. */
+  localization?: { title?: () => string; meta?: () => string | undefined };
   id: string;
   kind: EvidenceKind;
   target?: EvidenceTarget;
@@ -46,6 +49,8 @@ export interface EvidenceSelection {
 }
 
 export interface ToolStep {
+  /** Keep authored labels live while preserving the stored tool result and disclosure state. */
+  localization?: { detail?: () => string | undefined; resultText?: () => string | undefined };
   /** Backend tool name, e.g. list_offers. */
   name: string;
   /** Backend tool call id used to associate result messages. */
@@ -61,6 +66,9 @@ export interface ToolStep {
 }
 
 export interface UITurn {
+  image_attachments?: import('@/services/chatImages').ChatImageReference[];
+  /** True only for an authored fallback, never a user-supplied task title. */
+  taskTitleIsFallback?: boolean;
   id?: string;
   action?: import('@/features/actionPresentation/contracts').ActionPresentationV1;
   role: 'user' | 'assistant';
@@ -262,7 +270,7 @@ function parseToolCalls(raw?: string): ToolStep[] {
     const name = c?.function?.name ?? c?.name;
     if (!name) continue;
     const argsStr = c?.function?.arguments ?? c?.arguments ?? stringifyArgs(c?.args);
-    steps.push({ name, toolCallId: c?.id, detail: extractDetail(argsStr, name) });
+    steps.push({ name, toolCallId: c?.id, detail: extractDetail(argsStr, name), localization: { detail: () => extractDetail(argsStr, name) } });
   }
   return steps;
 }
@@ -282,7 +290,7 @@ function extractDetail(argsStr?: string, toolName?: string): string | undefined 
       }
     }
     const ids = args['ids'] ?? args['offer_ids'];
-    if (Array.isArray(ids)) return `${ids.length} 项`;
+    if (Array.isArray(ids)) return t("{count} 项", { count: ids.length });
   } catch {
     /* ignore malformed args */
   }
@@ -298,7 +306,7 @@ function stringifyArgs(args?: string | Record<string, unknown>): string | undefi
 function parseToolResult(
   content: string,
   source: string,
-): Pick<ToolStep, 'detail' | 'evidence' | 'resultText' | 'evidenceUnavailable'> {
+): Pick<ToolStep, 'detail' | 'evidence' | 'resultText' | 'evidenceUnavailable' | 'localization'> {
   const trimmed = content.trim();
   if (!trimmed) return {};
   let parsed: unknown;
@@ -312,12 +320,13 @@ function parseToolResult(
   }
   const rows = Array.isArray(parsed) ? parsed : [parsed];
   if (Array.isArray(parsed) && parsed.length === 0) {
-    return { resultText: '没有匹配结果' };
+    return { resultText: t("没有匹配结果"), localization: { resultText: () => t("没有匹配结果") } };
   }
   const evidence = rows.flatMap((row, index) => evidenceFromRecord(row, source, index));
   const resultText = evidence.length ? undefined : plainResultText(parsed);
   return {
     detail: evidence[0]?.title,
+    localization: { detail: () => evidence[0]?.localization?.title?.() ?? evidence[0]?.title },
     evidence: evidence.length ? evidence : undefined,
     resultText,
     evidenceUnavailable: evidence.length || resultText ? undefined : true,
@@ -338,11 +347,12 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
       : undefined;
     return [
       {
+        localization: { title: () => t("简历匹配 #{id}", { id: id }), meta: () => compact([numericMeta(record.resume_id, t("简历")), numericMeta(record.application_id, t("投递"))]).join(' · ') },
         id: `${source}-${id}`,
         kind: 'resume',
         ...(target ? { target } : {}),
-        title: `简历匹配 #${id}`,
-        meta: compact([numericMeta(record.resume_id, '简历'), numericMeta(record.application_id, '投递')]).join(' · '),
+        title: t("简历匹配 #{id}", { id: id }),
+        meta: compact([numericMeta(record.resume_id, t("简历")), numericMeta(record.application_id, t("投递"))]).join(' · '),
         snippet: previewText(jdSummary(record.result) || text(record.jd_text)),
         source,
       },
@@ -350,12 +360,13 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
   }
   const isResume = source.includes('resume') || recordType === 'resume';
   if (isResume) {
-    const title = text(record.name) || `简历 #${id}`;
+    const title = text(record.name) || t("简历 #{id}", { id: id });
     const target = hasCompatibleRecordType(recordType, source, ['resume'], RESUME_EVIDENCE_SOURCES)
       ? resumeTarget(record.id)
       : undefined;
     return [
       {
+        localization: { title: () => text(record.name) || t("简历 #{id}", { id: id }), meta: () => text(record.parse_status) },
         id: `${source}-${id}`,
         kind: 'resume',
         ...(target ? { target } : {}),
@@ -370,10 +381,11 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
   if (isJD) {
     return [
       {
+        localization: { title: () => t("JD 分析 #{id}", { id: id }), meta: () => compact([text(record.jd_source), numericMeta(record.application_id, t("投递"))]).join(' \u00b7 ') },
         id: `${source}-${id}`,
         kind: 'jd',
-        title: `JD 分析 #${id}`,
-        meta: compact([text(record.jd_source), numericMeta(record.application_id, '投递')]).join(' \u00b7 '),
+        title: t("JD 分析 #{id}", { id: id }),
+        meta: compact([text(record.jd_source), numericMeta(record.application_id, t("投递"))]).join(' \u00b7 '),
         snippet: previewText(jdSummary(record.result) || text(record.jd_text)),
         source,
       },
@@ -381,12 +393,18 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
   }
   const isEvent = source.includes('event') || recordType === 'event' || recordType === 'application_event';
   if (isEvent) {
-    const title = text(record.company_name) || text(record.title) || `日程 #${id}`;
+    const title = text(record.company_name) || text(record.title) || t("日程 #{id}", { id: id });
     const target = hasCompatibleRecordType(recordType, source, ['event', 'application_event'], EVENT_EVIDENCE_SOURCES)
       ? eventTarget(record)
       : undefined;
     return [
       {
+        localization: { title: () => text(record.company_name) || text(record.title) || t("日程 #{id}", { id: id }), meta: () => compact([
+          text(record.position_name),
+          text(record.event_type),
+          text(record.subtype),
+          text(record.scheduled_at),
+        ]).join(' \u00b7 ') },
         id: `${source}-${id}`,
         kind: 'event',
         ...(target ? { target } : {}),
@@ -412,6 +430,7 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
         : undefined;
       return [
         {
+        localization: { title: () => company, meta: () => compact([position, getLocale() === 'en-US' && typeof record.total_cash === 'number' ? formatNumber(record.total_cash, { maximumFractionDigits: 0 }) : amount, text(record.deadline), offerStatusLabel(record.status)]).join(' \u00b7 ') },
           id: `offer-${id}`,
           kind: 'offer',
           ...(target ? { target } : {}),
@@ -427,6 +446,7 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
       : undefined;
     return [
       {
+        localization: { title: () => company, meta: () => compact([position, applicationStatusLabel(record.status), text(record.applied_at)]).join(' \u00b7 ') },
         id: `application-${id}`,
         kind: 'application',
         ...(target ? { target } : {}),
@@ -445,6 +465,13 @@ function evidenceFromRecord(row: unknown, source: string, index: number): Eviden
       : text(record.snippet) || text(record.content) || text(record.summary) || text(record.weak_points);
     return [
       {
+        localization: { title: () => title, meta: () => compact([
+          text(record.source_name),
+          text(record.event_type),
+          text(record.subtype),
+          text(record.scheduled_at),
+          text(record.date),
+        ]).join(' \u00b7 ') },
         id: `${source}-${id}`,
         kind: isKnowledge ? 'knowledge' : source.includes('event') ? 'event' : 'note',
         title,
@@ -565,7 +592,7 @@ export function buildTurns(stored: ChatMessage[]): UITurn[] {
   let pendingMessageId: number | undefined;
   for (const m of stored) {
     if (m.role === 'user') {
-      turns.push({ id: `message:${m.id}`, role: 'user', content: m.content });
+      turns.push({ id: `message:${m.id}`, role: 'user', content: m.content, image_attachments: m.image_attachments });
       latestUserContent = m.content;
       pending = [];
       nextFallbackToolIndex = 0;
@@ -586,6 +613,7 @@ export function buildTurns(stored: ChatMessage[]): UITurn[] {
           content: presentation?.detailMarkdown ?? m.content,
           steps: hasPendingToolResults ? pending : undefined,
           taskTitle: isFinalAssistantReply ? taskTitleFor(latestUserContent) : undefined,
+          taskTitleIsFallback: isFinalAssistantReply && !latestUserContent?.trim(),
           presentation,
         });
         if (hasPendingToolResults) {
@@ -604,6 +632,10 @@ export function buildTurns(stored: ChatMessage[]): UITurn[] {
         pending[toolIndex] = {
           ...step,
           detail: parsed.detail ?? step.detail,
+          localization: {
+            detail: () => parsed.localization?.detail?.() ?? step.localization?.detail?.() ?? parsed.detail ?? step.detail,
+            resultText: () => parsed.localization?.resultText?.() ?? parsed.resultText,
+          },
           evidence: parsed.evidence,
           resultText: parsed.resultText,
           evidenceUnavailable: parsed.evidenceUnavailable,
@@ -619,7 +651,7 @@ export function buildTurns(stored: ChatMessage[]): UITurn[] {
 
 function taskTitleFor(content: string | undefined): string {
   const normalized = content?.replace(/\s+/g, ' ').trim() ?? '';
-  if (!normalized) return '本轮任务';
+  if (!normalized) return t("本轮任务");
   const codePoints = Array.from(normalized);
   if (codePoints.length <= TASK_TITLE_MAX_LENGTH) return normalized;
   return `${codePoints.slice(0, TASK_TITLE_MAX_LENGTH - 1).join('')}…`;
@@ -846,12 +878,24 @@ export function hydrateMissingPendingAction(
 export const resolveActivePendingAction = hydrateMissingPendingAction;
 
 export function pendingComposerDisabledReason(action: PendingAction | null): string {
-  if (!action) return '请先确认或取消上面的写入操作';
+  if (!action) return t("请先确认或取消上面的写入操作");
   const label = action.workflow?.current_label || toolMeta(action.tool_name).label;
   if (action.workflow?.next_label) {
-    return `请先确认“${label}”，确认后我会继续${action.workflow.next_label}。`;
+    return t("请先确认“{label}”，确认后我会继续{next_label}。", { label: label, next_label: action.workflow.next_label });
   }
-  return `请先确认或取消“${label}”。`;
+  return t("请先确认或取消“{label}”。", { label: label });
 }
 
 export { toolMeta };
+
+/** Localize UI state copy without rewriting dynamic tool summaries or reply content. */
+export function displayPilotUiMessage(message: string): string {
+  // Only fixed authored service failures; never scan reply or user content.
+  for (const source of ["当前操作的任务身份不可用，请刷新确认状态。", "对话连接中断，请稍后重试。", "对话没有返回完整结果，请重试。", "连接已断开，任务仍可能在运行。重新打开对话可查看已保存的结果。", "任务执行失败，请查看已保存的记录。", "任务已停止，已提交的更改仍保留。", "执行已中断，请查看已保存的记录。", "执行结果待核对，请查看已保存的记录。", "任务已完成，请查看已保存的结果。", "任务正在等待确认，请刷新确认状态。", "任务状态已变化，请重新读取已保存的记录。"]) {
+    const localized = translateKnownLabel(source, message);
+    if (localized !== message) return localized;
+  }
+  if (message.startsWith('正在处理：')) return t('正在处理：{summary}', { summary: message.slice('正在处理：'.length) });
+  if (message.startsWith('正在执行：')) return t('正在执行：{label}', { label: t(message.slice('正在执行：'.length)) });
+  return t(message);
+}

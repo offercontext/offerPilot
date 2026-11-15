@@ -9,11 +9,13 @@ from typing import Any, Literal, Mapping
 
 from offerpilot.ai.tool_runtime.contracts import ProviderToolContract
 from offerpilot.ai.types import Message, ToolCall
+from offerpilot.image_contracts import ImageReference, image_references
 
 ContributorStatus = Literal["ready", "not_applicable", "disabled", "unavailable"]
 
 CONTRIBUTOR_ORDER = (
     "static_policy",
+    "persona_profile",
     "current_scope",
     "active_control",
     "request_page_context",
@@ -180,12 +182,19 @@ class FrozenMessage:
     tool_call_id: str = ""
     provider_blocks_json: bytes = b"{}"
     source_message_id: int = 0
+    images: tuple[ImageReference, ...] = ()
+    # Server source-carrier constraint, not provider text. Keep it in equality:
+    # identical untrusted prose must not compare as the required evidence.
+    required_scope: bool = False
 
     @classmethod
     def freeze(cls, message: Message, *, source_message_id: int = 0) -> FrozenMessage:
         if message.role not in {"system", "user", "assistant", "tool"}:
             raise ProjectionError("invalid_message_role")
         blocks = canonical_json(message.provider_blocks)
+        images = image_references(message.images)
+        if images and message.role != "user":
+            raise ProjectionError("image_message_role_invalid")
         return cls(
             role=message.role,
             content=message.content,
@@ -195,9 +204,14 @@ class FrozenMessage:
             tool_call_id=message.tool_call_id,
             provider_blocks_json=blocks,
             source_message_id=source_message_id,
+            images=images,
+            required_scope=(message.surface_contributor == "current_scope"
+                            and message.surface_revision.startswith("companion:")),
         )
 
     def thaw(self) -> Message:
+        # Provider terminal only: projection constraints and routing stay internal.
+        # Runtime continuation reuses the original source carriers, not this output.
         blocks = json.loads(self.provider_blocks_json.decode("utf-8"))
         return Message(
             role=self.role,
@@ -205,10 +219,13 @@ class FrozenMessage:
             tool_calls=[ToolCall(call.id, call.name, call.args) for call in self.tool_calls],
             tool_call_id=self.tool_call_id,
             provider_blocks=blocks,
+            images=self.images,
         )
 
     def canonical_value(self) -> dict[str, Any]:
         value: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.images:
+            value["images"] = [image.as_dict() for image in self.images]
         if self.tool_call_id:
             value["tool_call_id"] = self.tool_call_id
         if self.tool_calls:

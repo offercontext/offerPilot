@@ -2,6 +2,7 @@
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setLocale } from '@/i18n';
 import VoiceAnswerComposer, { type VoiceAnswerBrowser } from './VoiceAnswerComposer';
 import type { SpeechRecognitionLike } from './voiceInterviewCapability';
 import type { OfflineModelState, OfflineWhisperController } from './offlineWhisperTypes';
@@ -133,9 +134,68 @@ afterEach(async () => {
   host = undefined;
   Object.defineProperty(document, 'hidden', { configurable: true, value: false });
   vi.useRealTimers();
+  setLocale('zh-CN');
 });
 
 describe('VoiceAnswerComposer', () => {
+  it('switches authored text live without changing the answer or probing voice', async () => {
+    const original = '这是我自己写的回答，不能被翻译。';
+    const onTextChange = vi.fn();
+    const { browser, SpeechRecognition, props } = await renderComposer({ textValue: original, onTextChange });
+    expect(host!.querySelector('textarea')?.value).toBe(original);
+    expect(host!.textContent).toContain('选择你的回答方式');
+
+    await act(async () => setLocale('en-US'));
+    expect(host!.textContent).toContain('Choose how to answer');
+    expect(host!.querySelector('textarea')?.value).toBe(original);
+    expect(host!.querySelector('textarea')?.getAttribute('placeholder')).toBe('Enter your answer');
+    expect(browser.getUserMedia).not.toHaveBeenCalled();
+    expect(browser.speechSynthesis.speak).not.toHaveBeenCalled();
+    expect(SpeechRecognition.available).not.toHaveBeenCalled();
+    expect(onTextChange).not.toHaveBeenCalled();
+    expect(props.onConfirmTranscript).not.toHaveBeenCalled();
+
+    await act(async () => setLocale('zh-CN'));
+    expect(host!.querySelector('textarea')?.value).toBe(original);
+    expect(host!.textContent).toContain('选择你的回答方式');
+  });
+
+  it('relocalizes an existing microphone error without retrying capture', async () => {
+    const fixture = browserFixture();
+    fixture.browser.getUserMedia = vi.fn().mockRejectedValue(new DOMException('denied', 'NotAllowedError'));
+    await renderComposer({ browser: fixture.browser });
+    click('语音回答');
+    await act(async () => { click('开始录音'); });
+    expect(host!.textContent).toContain('未获得麦克风权限');
+    expect(fixture.browser.getUserMedia).toHaveBeenCalledOnce();
+
+    await act(async () => setLocale('en-US'));
+    expect(host!.textContent).toContain('Microphone permission was not granted.');
+    expect(host!.textContent).not.toContain('未获得麦克风权限');
+    expect(fixture.browser.getUserMedia).toHaveBeenCalledOnce();
+    expect(fixture.browser.speechSynthesis.speak).not.toHaveBeenCalled();
+  });
+
+  it('keeps active recording intact across locale changes', async () => {
+    const captureRuntime = { batchOnly: false, pause: vi.fn(), resume: vi.fn(), dispose: vi.fn(async () => undefined) };
+    const { browser, recorder, track } = await renderComposer({
+      createCaptureRuntime: vi.fn(async () => captureRuntime),
+    });
+    click('语音回答');
+    await act(async () => { click('开始录音'); });
+    expect(recorder.start).toHaveBeenCalledOnce();
+    expect(recorder.state).toBe('recording');
+
+    await act(async () => setLocale('en-US'));
+    expect(host!.textContent).toContain('Finish recording');
+    expect(recorder.state).toBe('recording');
+    expect(recorder.stop).not.toHaveBeenCalled();
+    expect(recorder.pause).not.toHaveBeenCalled();
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(captureRuntime.dispose).not.toHaveBeenCalled();
+    expect(browser.getUserMedia).toHaveBeenCalledOnce();
+  });
+
   it('keeps text mode free of native voice probes across rerenders', async () => {
     const { browser, SpeechRecognition, rerender } = await renderComposer();
 
@@ -386,6 +446,29 @@ describe('VoiceAnswerComposer', () => {
     changeTextarea(textarea, '这是我核对后的手工文字。');
     click('确认使用这段文字');
     expect(props.onConfirmTranscript).toHaveBeenCalledWith('这是我核对后的手工文字。');
+  });
+
+  it('relocalizes an interpolated offline error while preserving its recording', async () => {
+    const offlineController = offlineControllerFixture();
+    const decodeAudio = vi.fn(async () => { throw new Error('录音内容为空'); });
+    const { browser, props } = await renderComposer({ offlineController, decodeAudio });
+    click('语音回答');
+    await act(async () => { click('开始录音'); });
+    await act(async () => { click('完成录音'); await Promise.resolve(); });
+    expect(host!.textContent).toContain('录音内容为空。录音仍在，可重新转写或手工整理文字。');
+    const recording = host!.querySelector('audio');
+    expect(recording).not.toBeNull();
+
+    await act(async () => setLocale('en-US'));
+    expect(host!.textContent).toContain('Recording is empty. The recording is still available.');
+    expect(host!.querySelector('audio')).toBe(recording);
+    expect(decodeAudio).toHaveBeenCalledOnce();
+    expect(browser.revokeObjectURL).not.toHaveBeenCalled();
+    expect(offlineController.transcribe).not.toHaveBeenCalled();
+    expect(props.onConfirmTranscript).not.toHaveBeenCalled();
+
+    await act(async () => setLocale('zh-CN'));
+    expect(host!.textContent).toContain('录音内容为空。录音仍在，可重新转写或手工整理文字。');
   });
 
   it('runs offline Whisper after recording and still requires explicit confirmation', async () => {

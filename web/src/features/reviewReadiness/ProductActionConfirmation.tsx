@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import type {
   ProductActionDecision,
@@ -118,13 +119,14 @@ export function ProductActionConfirmation({
   onRecoverControl,
   onUndo,
   onRestart,
-  approveLabel = '确认保存',
-  modifyLabel = '保存修改',
-  rejectLabel = '暂不保存',
-  committedLabel = '已保存为下次准备重点。',
-  rejectedLabel = '本次未保存，你可以继续修改后创建新一轮确认。',
-  failedLabel = '本次保存未完成，请重新检查来源。',
+  approveLabel = t("确认保存"),
+  modifyLabel = t("保存修改"),
+  rejectLabel = t("暂不保存"),
+  committedLabel = t("已保存为下次准备重点。"),
+  rejectedLabel = t("本次未保存，你可以继续修改后创建新一轮确认。"),
+  failedLabel = t("本次保存未完成，请重新检查来源。"),
 }: ProductActionConfirmationProps) {
+  useLocale();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [undoStatus, setUndoStatus] = useState<ProductActionCompensationResponse['status'] | null>(draft.undoStatus ?? null);
@@ -318,18 +320,18 @@ export function ProductActionConfirmation({
         : '';
 
   return (
-    <section className={styles.confirmation} aria-label="产品操作确认" aria-busy={busy}>
-      {presentationConflict ? <p role="status">{draft.status === 'committed' ? '展示状态待刷新；本次保存已由原操作确认。' : '展示状态待刷新；保留原操作确认的结果。'}</p>
+    <section className={styles.confirmation} aria-label={t("产品操作确认")} aria-busy={busy}>
+      {presentationConflict ? <p role="status">{draft.status === 'committed' ? t("展示状态待刷新；本次保存已由原操作确认。") : t("展示状态待刷新；保留原操作确认的结果。")}</p>
         : presentation ? <ActionCard action={withTransportUncertainty(presentation, draft.resultUnknown, Boolean(draft.undoResultUnknown))} busy={busy} /> : null}
       {draft.status === 'proposed' ? (
         <>
-          <h4 className={styles.heading}>确认本次保存</h4>
-          <p className={styles.supporting}>保存仅在你明确确认后执行；不会发送到聊天，也不会创建第二个确认窗口。</p>
+          <h4 className={styles.heading}>{t("确认本次保存")}</h4>
+          <p className={styles.supporting}>{t("保存仅在你明确确认后执行；不会发送到聊天，也不会创建第二个确认窗口。")}</p>
           <div className={styles.actions}>
             {draft.resultUnknown ? (
               <>
-                <button className={styles.primaryButton} type="button" disabled={busy || !allows(draft.pendingDecision?.decision ?? 'approve')} onClick={() => void submit(draft.pendingDecision?.decision ?? 'approve')}>使用原操作重试</button>
-                <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void reconcile()}>确认操作结果</button>
+                <button className={styles.primaryButton} type="button" disabled={busy || !allows(draft.pendingDecision?.decision ?? 'approve')} onClick={() => void submit(draft.pendingDecision?.decision ?? 'approve')}>{t("使用原操作重试")}</button>
+                <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void reconcile()}>{t("确认操作结果")}</button>
               </>
             ) : (
               <>
@@ -343,19 +345,19 @@ export function ProductActionConfirmation({
       ) : (
         <div className={styles.terminal} data-status={draft.status}>
           {!presentation || presentationConflict ? <strong>{terminalCopy}</strong> : null}
-          {draft.status === 'committed' && onUndo && undoStatus === null && !draft.undoRequest ? <button className={styles.secondaryButton} type="button" disabled={busy || !allows('undo')} onClick={() => void undo()}>撤销本次保存</button> : null}
-          {draft.status === 'committed' && onUndo && undoStatus === null && draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <button className={styles.secondaryButton} type="button" disabled={busy || !allows('undo')} onClick={() => void undo()}>使用原撤销操作重试</button> : null}
-          {draft.status === 'committed' && undoStatus === null && draft.undoRequest && !draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <span>撤销正在处理，请等待原操作返回。</span> : null}
-          {draft.status === 'committed' && draft.undoRequest && !exactUndoRequest(draft, draft.undoRequest) ? <span>撤销恢复状态与当前操作不匹配。</span> : null}
-          {undoStatus === 'committed' ? <span>已撤销本次保存。</span> : null}
-          {undoStatus === 'failed' ? <span>撤销未完成，原保存仍然有效。</span> : null}
-          {draft.status === 'rejected' && onRestart ? <button className={styles.primaryButton} type="button" disabled={busy} onClick={() => void restart()}>再次保存</button> : null}
+          {draft.status === 'committed' && onUndo && undoStatus === null && !draft.undoRequest ? <button className={styles.secondaryButton} type="button" disabled={busy || !allows('undo')} onClick={() => void undo()}>{t("撤销本次保存")}</button> : null}
+          {draft.status === 'committed' && onUndo && undoStatus === null && draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <button className={styles.secondaryButton} type="button" disabled={busy || !allows('undo')} onClick={() => void undo()}>{t("使用原撤销操作重试")}</button> : null}
+          {draft.status === 'committed' && undoStatus === null && draft.undoRequest && !draft.undoResultUnknown && exactUndoRequest(draft, draft.undoRequest) ? <span>{t("撤销正在处理，请等待原操作返回。")}</span> : null}
+          {draft.status === 'committed' && draft.undoRequest && !exactUndoRequest(draft, draft.undoRequest) ? <span>{t("撤销恢复状态与当前操作不匹配。")}</span> : null}
+          {undoStatus === 'committed' ? <span>{t("已撤销本次保存。")}</span> : null}
+          {undoStatus === 'failed' ? <span>{t("撤销未完成，原保存仍然有效。")}</span> : null}
+          {draft.status === 'rejected' && onRestart ? <button className={styles.primaryButton} type="button" disabled={busy} onClick={() => void restart()}>{t("再次保存")}</button> : null}
         </div>
       )}
       <div className={styles.liveStatus} role="status" aria-live="polite" aria-atomic="true">
-        {busy ? '正在处理，请稍候。' : undoStatus === 'committed' ? '撤销已完成。' : undoStatus === 'failed' ? '撤销未完成，原保存仍然有效。' : draft.resultUnknown ? '操作结果待确认。' : terminalCopy}
+        {busy ? t("正在处理，请稍候。") : undoStatus === 'committed' ? t("撤销已完成。") : undoStatus === 'failed' ? t("撤销未完成，原保存仍然有效。") : draft.resultUnknown ? t("操作结果待确认。") : terminalCopy}
       </div>
-      {error ? <p className={styles.error} role="alert">{error}</p> : null}
+      {error ? <p className={styles.error} role="alert">{t(error)}</p> : null}
     </section>
   );
 }

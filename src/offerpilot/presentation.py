@@ -193,7 +193,7 @@ def build_conversation_presentation(
                 placed.add(operation_id)
 
         for message in messages:
-            if message.role in {'user', 'assistant'} and message.content:
+            if message.role in {'user', 'assistant'} and (message.content or message.image_attachments):
                 duplicate_receipt = (
                     message.operation_id in builder.verified_receipts
                     and message.delivery_kind == 'continuation_message'
@@ -205,6 +205,7 @@ def build_conversation_presentation(
                         item_id=f'message:{message.id}', kind=(
                             'user_message' if message.role == 'user' else 'assistant_message'
                         ), message_id=message.id, content=message.content,
+                        image_attachments=message.image_attachments if message.role == 'user' else [],
                     ))
             if message.tool_calls:
                 try:

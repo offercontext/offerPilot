@@ -1,10 +1,12 @@
+
+# 业务路由导航：docs/architecture/code-map/route-coverage.md；功能链从 code-map/README.md 下钻。
+# 本文件集中 HTTP 装配，业务事务通常由 Repository/Service 持有；入口成功不等于下游写入成功。
 import hashlib
 import json
 import logging
 import os
 import re
 import sqlite3
-import zipfile
 from datetime import datetime, timezone
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -25,6 +27,8 @@ from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
+from offerpilot.companion.fact_read import freeze_fact_read
+from offerpilot.companion.chat import freeze_chat_command
 from offerpilot.ai.agent_contracts import ChatModel, PendingAction
 from offerpilot.presentation import AgentActionPresentationBuilder, build_conversation_presentation
 from offerpilot.pilot_timeline import (
@@ -48,13 +52,11 @@ from offerpilot.ai.interview_stories import (
     StoryProviderError,
     generate_interview_story_proposal,
 )
-from offerpilot.ai.mock_interview import (
-    MOCK_INTERVIEW_FEEDBACK_SCHEMA,
-    MOCK_INTERVIEW_QUESTION_OUTPUT_SCHEMA,
-    MockInterviewProviderError,
-    MockInterviewUnverifiableError,
-    generate_feedback,
-    generate_question,
+from offerpilot.mock_interview_execution import (
+    APPLICATION_EVENT_EXECUTION,
+    QUICK_PRACTICE_EXECUTION,
+    MockInterviewExecutionError,
+    MockInterviewExecutionService,
 )
 from offerpilot.ai.opportunity_fit_reviews import OpportunityFitModelError, validate_triage
 from offerpilot.ai.resume_structured_import import generate_structured_fields
@@ -62,14 +64,28 @@ from offerpilot.ai.offer_negotiation import (
     OfferNegotiationModelError,
     generate_offer_negotiation_proposal,
 )
-from offerpilot.reliability.policy import recovery_disposition, recovery_error
-from offerpilot.reliability.trace import (
-    MockInterviewTraceEnvelope,
-    hash_idempotency_key,
-    record_mock_interview_trace,
+from offerpilot.reliability.policy import recovery_error
+
+from offerpilot.ai.workflows import (
+    JDInput,
+    WorkflowError,
+    analyze_jd as analyze_jd_workflow,
+    complete_json as _complete_json,
+    generate_questions as generate_questions_workflow,
+    match_resume as match_resume_workflow,
+    normalize_difficulty as _normalize_difficulty,
+    structured_ai_system as _structured_ai_system,
+    truncate_for_prompt as _truncate_for_prompt,
 )
 from offerpilot.ai.client import ConfiguredAIClient
+from offerpilot.chat_images import ChatImageCollector, ChatImageStore
+from offerpilot.chat_image_routes import image_router, image_capability, image_error, require_image_capability
+from offerpilot.image_contracts import ImageInputError, ImageReference, image_ids, image_references
+from offerpilot.job_mail.api import job_mail_origin_guard_response, register_job_mail_routes
+from offerpilot.job_mail.transport import MailTransport
+from offerpilot.job_mail.model_adapter import Extractor
 from offerpilot.confirmed_memory.api import register_memory_routes
+from offerpilot.training_evidence.api import register_training_evidence_routes
 from offerpilot.context_sources.api import register_context_policy_routes
 from offerpilot.context_sources.readiness_api import register_readiness_context_routes
 from offerpilot.context_sources.summary_api import register_summary_routes
@@ -97,7 +113,7 @@ from offerpilot.agent_runtime.journal import (
     NullRunRecorderFactory,
     RunRecorderFactory,
 )
-from offerpilot.agent_runtime.keyring import JOURNAL_KEY_FILENAME, load_or_create_journal_key
+from offerpilot.agent_runtime.keyring import load_or_create_journal_key
 from offerpilot.application_status import application_status_options, normalize_application_status
 from offerpilot.config import (
     AIProviderProfile,
@@ -109,7 +125,7 @@ from offerpilot.config import (
 )
 from offerpilot.interview_voice.admission import InterviewAnswerIn, VoiceAdmissionError
 from offerpilot.interview_voice.routes import RUNTIME_INSPECT_PATH, register_interview_voice_routes
-from offerpilot.context_projector.loader import ContextSourceLoader, fetch_rows
+from offerpilot.context_projector.loader import ContextSourceLoader, SourceTemporarilyUnavailable, fetch_rows
 from offerpilot.context_projector.contracts import ProjectionError
 from offerpilot.context_projector.budget import PROVIDER_FRAMING_RESERVE
 from offerpilot.context_sources.binding_scope import frozen_readiness_scope
@@ -214,6 +230,14 @@ from offerpilot.knowledge import (
     KnowledgeRepository,
 )
 from offerpilot.proactive.api import register_proactive_routes
+from offerpilot.companion.api import register_companion_routes
+from offerpilot.companion.persona import companion_persona_policy, persona_profile_message, plain_pilot_safety_policy
+from offerpilot.companion.repository import companion_policy
+from offerpilot.companion.persona_contracts import PersonaSpec
+from offerpilot.companion.persona_repository import capture_persona_binding, load_persona_spec
+from offerpilot.models import PilotTurnRecord
+from offerpilot.pilot_control import current_execution_scope
+from offerpilot.companion.context import companion_context_message, read_companion_context
 from offerpilot.knowledge.note_api import register_knowledge_note_routes
 from offerpilot.knowledge.brief import (
     BriefSchemaError,
@@ -273,7 +297,7 @@ from offerpilot.repositories.evidence_bundles import (
     EvidenceBundleValidationError,
     EvidenceBundlesRepository,
 )
-from offerpilot.repositories.jd import JDAnalysesRepository, JDAnalysisCreate
+from offerpilot.repositories.jd import JDAnalysesRepository
 from offerpilot.repositories.material_kits import (
     MaterialKitCreate,
     MaterialKitSourceConflict,
@@ -339,7 +363,7 @@ from offerpilot.repositories.mock_interviews import (
     MockInterviewRepository,
     MockInterviewSourceChanged,
     MockInterviewTurnIdempotencyConflict,
-    provider_mock_interview_snapshot,
+    MockInterviewQuestionClaim,
 )
 from offerpilot.repositories.mock_interview_review_drafts import (
     MockInterviewReviewDraftAlreadyConfirmed,
@@ -369,8 +393,9 @@ from offerpilot.repositories.offer_negotiation import (
     OfferNegotiationRepository,
 )
 from offerpilot.repositories.json_contract import canonical_json, sha256_text
-from offerpilot.repositories.questions import QuestionCreate, QuestionsRepository, question_hash
-from offerpilot.repositories.resumes import ResumeCreate, ResumeMatchCreate, ResumesRepository
+from offerpilot.repositories.questions import QuestionCreate, QuestionsRepository
+from offerpilot.repositories.resumes import ResumeCreate, ResumesRepository
+from offerpilot.resume_export_routes import register_resume_export_routes
 from offerpilot.repositories.wakeups import WakeupCreate, WakeupsRepository, wakeup_payload
 from offerpilot.resume_structured_import import (
     ResumeStructureError,
@@ -409,14 +434,12 @@ from offerpilot.schemas import (
     resume_payload,
 )
 from offerpilot.skills import SkillRegistryError, register_skill, skills_payload, update_skill
+from offerpilot.resume_rules import is_empty_resume_draft, content_has_value
 from offerpilot.chat_transport import (
     execute_runtime_sync,
     outcome_http_response,
     runtime_stream_response,
 )
-
-_MOCK_INTERVIEW_TRACE_RUN_ID = uuid4().hex
-
 
 CHAT_AGENT_TIMEOUT_SECONDS = 120.0
 CHAT_TIMEOUT_MESSAGE = "这次处理时间过长，已停止。你可以重试或换一种问法。"
@@ -425,6 +448,10 @@ _KNOWLEDGE_MAIN_UPLOAD_LIMIT = 5 * 1024 * 1024
 _KNOWLEDGE_ASSET_UPLOAD_LIMIT = 10 * 1024 * 1024
 _KNOWLEDGE_BUNDLE_UPLOAD_LIMIT = 50 * 1024 * 1024
 _KNOWLEDGE_ASSET_COUNT_LIMIT = 50
+
+
+class RuntimeSourceUnavailable(RuntimeError):
+    """Source visibility could not be verified within its bounded read budget."""
 
 
 class _KnowledgeUploadLimitExceeded(ValueError):
@@ -1089,164 +1116,6 @@ def _mock_interview_live_turn_json(repository: Any, turn: Any) -> dict[str, Any]
     return _mock_interview_turn_json(turn, turns)
 
 
-def _mock_interview_question_schema_fingerprint() -> str:
-    return (
-        "qschema-"
-        + hashlib.sha256(
-            json.dumps(MOCK_INTERVIEW_QUESTION_OUTPUT_SCHEMA, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:16]
-    )
-
-
-def _mock_interview_feedback_schema_fingerprint() -> str:
-    return (
-        "fschema-"
-        + hashlib.sha256(
-            json.dumps(MOCK_INTERVIEW_FEEDBACK_SCHEMA, sort_keys=True).encode("utf-8")
-        ).hexdigest()[:16]
-    )
-
-
-def _mock_interview_trace_metadata(model: Any, data_dir: Path) -> tuple[str, str, str]:
-    """Sanitized provider/model/capability descriptors for the trace envelope."""
-    if isinstance(model, JSONResponse):
-        model = None
-    provider = type(model).__name__ if model is not None else "none"
-    model_name = str(getattr(model, "model", "") or "")
-    if isinstance(model, ConfiguredAIClient):
-        try:
-            active = load_config(data_dir).active_provider()
-            provider = active.id
-            model_name = active.model
-        except (OSError, ValueError):
-            pass
-    capability = {"supports_json_schema": bool(getattr(model, "supports_json_schema", False))}
-    capability_hash = (
-        "cap-"
-        + hashlib.sha256(json.dumps(capability, sort_keys=True).encode("utf-8")).hexdigest()[:16]
-    )
-    return provider, model_name, capability_hash
-
-
-def _emit_mock_interview_trace(
-    data_dir: Path,
-    *,
-    scenario_id: str,
-    operation_id: str,
-    attempt_id: int | None,
-    generation_revision: int | None,
-    idempotency_key: str,
-    model: Any,
-    input_fingerprint: str,
-    schema_fingerprint: str,
-    started_at: str,
-    elapsed_ms: int,
-    provider_outcome: str,
-    validator_stage: str,
-    failure_category: str,
-    repair_count: int,
-    response_error_code: str,
-) -> None:
-    """Append one sanitized trace envelope; the disposition comes from the contract."""
-    provider, model_name, capability_hash = _mock_interview_trace_metadata(model, data_dir)
-    record_mock_interview_trace(
-        data_dir,
-        MockInterviewTraceEnvelope(
-            run_id=_MOCK_INTERVIEW_TRACE_RUN_ID,
-            scenario_id=scenario_id,
-            operation_id=operation_id,
-            attempt_id=attempt_id,
-            generation_revision=generation_revision,
-            idempotency_key_hash=hash_idempotency_key(idempotency_key),
-            provider=provider,
-            model=model_name,
-            capability_snapshot_hash=capability_hash,
-            input_fingerprint=input_fingerprint[:200],
-            schema_fingerprint=schema_fingerprint[:200],
-            started_at=started_at,
-            # Mock Interview currently uses non-streaming completions, so the
-            # provider abstraction cannot observe first-byte timing honestly.
-            first_byte_ms=None,
-            completed_ms=elapsed_ms,
-            provider_outcome=provider_outcome,
-            validator_stage=validator_stage,
-            failure_category=failure_category[:120],
-            repair_count=int(repair_count),
-            final_disposition="success"
-            if not response_error_code
-            else recovery_disposition(response_error_code),
-            response_error_code=response_error_code,
-        ),
-    )
-
-
-MockInterviewFailureFinalization = Literal["recorded", "stale", "source_conflict"]
-
-
-def _mark_mock_interview_failure_state(
-    callback: Callable[[], Any],
-) -> MockInterviewFailureFinalization:
-    """Finalize an Attempt after a provider call without losing its trace on source drift."""
-    try:
-        result = callback()
-    except MockInterviewSourceChanged:
-        return "source_conflict"
-    return "recorded" if result is not None else "stale"
-
-
-def _mock_interview_failure_response_code(
-    finalization: MockInterviewFailureFinalization,
-    default_error_code: str,
-) -> str:
-    if finalization == "source_conflict":
-        return "mock_interview_source_conflict"
-    if finalization == "stale":
-        return "mock_interview_transcript_conflict"
-    return default_error_code
-
-
-def _mock_interview_failure_message(error_code: str, default_message: str) -> str:
-    if error_code == "mock_interview_source_conflict":
-        return "本次练习使用的冻结资料不可验证。"
-    if error_code == "mock_interview_transcript_conflict":
-        return "生成结果已失去当前写入所有权，请使用原 key 对账。"
-    return default_message
-
-
-def _log_mock_interview_ai_failure(
-    data_dir: Path,
-    *,
-    attempt_id: int,
-    stage: str,
-    kind: str,
-    diagnostic: dict[str, Any] | None,
-) -> None:
-    diagnostic = diagnostic or {}
-    payload = {
-        "attempt_id": attempt_id,
-        "stage": stage,
-        "failure_category": str(diagnostic.get("failure_category") or kind),
-        "repair_attempted": bool(diagnostic.get("repair_attempted", False)),
-        "repair_count": int(diagnostic.get("repair_count") or 0),
-        "elapsed_ms": int(diagnostic.get("elapsed_ms") or 0),
-        "http_status": diagnostic.get("http_status"),
-        "timeout": bool(diagnostic.get("timeout", False)),
-        "correlation_id": str(diagnostic.get("correlation_id") or ""),
-        "provider_request_id": str(diagnostic.get("provider_request_id") or ""),
-    }
-    failure_categories = diagnostic.get("failure_categories")
-    if isinstance(failure_categories, list) and all(
-        isinstance(item, str) for item in failure_categories
-    ):
-        payload["failure_categories"] = failure_categories[:2]
-    append_log_entry(
-        data_dir,
-        "WARNING",
-        f"mock_interview_{kind}_failure "
-        + json.dumps(payload, ensure_ascii=True, separators=(",", ":")),
-    )
-
-
 def create_app(
     data_dir: Optional[Path] = None,
     chat_model: Optional[ChatModel] = None,
@@ -1254,10 +1123,20 @@ def create_app(
     static_dir: Optional[Path] = None,
     *,
     run_recorder_factory: RunRecorderFactory | None = None,
+    job_mail_transport: MailTransport | None = None,
+    job_mail_extractor: Extractor | None = None,
+    job_mail_local_setup_enabled: bool = False,
+    transport_authenticator: Callable[[Request], bool] | None = None,
 ) -> FastAPI:
     resolved_data_dir = data_dir or resolve_data_dir()
+    from offerpilot.backup_install import ensure_workspace_lease, complete_startup
+    from offerpilot.backup_routes import register_backup_routes
+
+    ensure_workspace_lease(resolved_data_dir, apply_restore=True)
     resolved_static_dir = static_dir or _find_static_dir()
     session_factory = session_factory_for_data_dir(resolved_data_dir)
+    chat_images = ChatImageStore(session_factory, resolved_data_dir)
+    image_collector = ChatImageCollector(chat_images)
     app_config = load_config(resolved_data_dir)
     applications = ApplicationsRepository(session_factory)
     application_creation = ApplicationCreationService(session_factory)
@@ -1408,6 +1287,10 @@ def create_app(
     interview_knowledge_capture = InterviewKnowledgeCaptureRepository(session_factory)
     interview_index = InterviewIndexRepository(session_factory)
     mock_interviews = MockInterviewRepository(session_factory)
+    mock_execution = MockInterviewExecutionService(
+        mock_interviews, resolved_data_dir,
+        lambda: _mock_interview_chat_model(chat_model, resolved_data_dir),
+    )
     interview_practice_cases = InterviewPracticeCaseRepository(session_factory)
     mock_interview_review_drafts = MockInterviewReviewDraftRepository(session_factory)
     voice_coaching = VoiceCoachingRepository(session_factory)
@@ -1435,6 +1318,9 @@ def create_app(
         brief_worker,
     )
     app = FastAPI(title="OfferPilot")
+    register_resume_export_routes(app, resumes)
+    app.include_router(image_router(chat_images, lambda: load_config(resolved_data_dir),
+                                    _provider_for_connection_test))
     knowledge_runtime = KnowledgeWorkerRuntime(
         knowledge_runner,
         knowledge_repository,
@@ -1455,7 +1341,13 @@ def create_app(
 
     # P4 context management routes are registered at the composition root so
     # they share this app's authenticated workspace Session factory.
+    job_mail_runtime = register_job_mail_routes(
+        app, session_factory, transport=job_mail_transport, extractor=job_mail_extractor,
+        local_setup_enabled=job_mail_local_setup_enabled,
+    )
     register_memory_routes(app, session_factory)
+    register_training_evidence_routes(app, session_factory)
+    register_companion_routes(app, session_factory)
     register_context_policy_routes(app, session_factory)
     register_readiness_context_routes(app, session_factory)
     register_summary_routes(app, session_factory)
@@ -1492,11 +1384,25 @@ def create_app(
                     )
                     + "\n"
                 )
+        mail_origin_response = job_mail_origin_guard_response(request)
         if request.method == "OPTIONS":
-            response = Response(status_code=200)
+            response = mail_origin_response if mail_origin_response is not None else Response(status_code=200)
         else:
-            auth_response = _auth_guard_response(request, resolved_data_dir)
-            response = auth_response if auth_response is not None else await call_next(request)
+            # A separately secured transport may authenticate this request without
+            # changing the persisted web-login configuration. Ordinary web apps
+            # never receive this callback and keep their existing auth behavior.
+            transport_authenticated = (
+                transport_authenticator is not None and transport_authenticator(request)
+            )
+            auth_response = (
+                None if transport_authenticated else _auth_guard_response(request, resolved_data_dir)
+            )
+            if auth_response is not None:
+                response = auth_response
+            elif mail_origin_response is not None:
+                response = mail_origin_response
+            else:
+                response = await call_next(request)
         origin = request.headers.get("origin")
         same_origin = f"{request.url.scheme}://{request.url.netloc}"
         if origin == same_origin:
@@ -1509,11 +1415,27 @@ def create_app(
             )
         return response
 
+    @app.exception_handler(RuntimeSourceUnavailable)
+    async def runtime_source_unavailable_handler(
+        request: Request, exc: RuntimeSourceUnavailable,
+    ) -> JSONResponse:
+        # No cached terminal, source identifiers, or exception text may escape
+        # while the visibility check is inconclusive.
+        return JSONResponse(
+            {"error": "任务来源暂时无法核验，请稍后重试。",
+             "error_code": "runtime_source_unavailable"},
+            status_code=503,
+            headers={"Cache-Control": "no-store", "Retry-After": "1"},
+        )
+
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
         request: Request,
         exc: RequestValidationError,
     ) -> JSONResponse:
+        if request.url.path.startswith("/api/job-mail/"):
+            # Mail and credentials must not be echoed in validation diagnostics.
+            return error_response(422, "邮件请求字段无效，请检查必填字段、时间与确认内容", code="job_mail_invalid_payload")
         errors = exc.errors()
         if errors and all(
             err.get("type") == "int_parsing"
@@ -1619,15 +1541,35 @@ def create_app(
                 ref = attachment.get("id", attachment.get("ref"))
                 if isinstance(kind, str) and isinstance(ref, str):
                     normalized_attachments.append({"kind": kind, "id": ref})
-        return _load_chat_source_messages(
+        source = _load_chat_source_messages(
             context_source_loader,
             conversation,
             normalized_attachments or None,
             pending_tool_call_id=pending_tool_call_id,
+            query=getattr(request, "message", "") if not pending_tool_call_id else "",
         )
+        with session_factory() as session:
+            scope = current_execution_scope()
+            binding = None
+            admitted_enabled = None
+            if scope is not None and scope.lease is not None:
+                binding = _persona_binding_for_turn(
+                    session, scope.lease.turn_id, int(getattr(conversation, "id", 0)),
+                )
+                admitted_enabled = _companion_enabled_for_turn(session, scope.lease.turn_id)
+            # Historical/unadmitted executions explicitly use the official
+            # default, never today's mutable active pointer.
+            return _bind_persona_source(
+                replace(source, companion_enabled=admitted_enabled), session, binding,
+            )
+
+    def _companion_expression_enabled() -> bool:
+        with session_factory() as session:
+            return companion_policy(session)[1].enabled
 
     app.state.pilot_runtime = build_pilot_runtime(
         data_dir=resolved_data_dir,
+        image_reader=chat_images.read_for_model,
         chat=chat,
         applications=applications,
         application_jd_versions=application_jd_versions,
@@ -1644,6 +1586,14 @@ def create_app(
         write_coordinator=write_coordinator,
         source_loader=_runtime_source_loader,
         system_message=_chat_response_system_message,
+        companion_enabled=_companion_expression_enabled,
+        plain_system_message=lambda general: _chat_response_system_message(
+            general=general, companion_enabled=False,
+        ),
+        general_system_message=lambda: _chat_response_system_message(general=True),
+        custom_persona_system_message=lambda general: _chat_response_system_message(
+            general=general, custom_persona=True,
+        ),
         clarification_message=_chat_clarification_message,
         page_context_messages=lambda page: _chat_page_context_messages(
             dict(page) if page is not None else None
@@ -1669,8 +1619,11 @@ def create_app(
 
     @app.on_event("startup")
     def _start_knowledge_worker() -> None:
+        image_collector.start()
         knowledge_runtime.start()
         proactive_runtime.start()
+        job_mail_runtime.start()
+        complete_startup(resolved_data_dir)
 
     @app.on_event("shutdown")
     def _stop_knowledge_worker() -> None:
@@ -1684,7 +1637,9 @@ def create_app(
                 if first_error is None:
                     first_error = error
 
+        attempt_cleanup(job_mail_runtime.stop)
         attempt_cleanup(proactive_runtime.stop)
+        attempt_cleanup(image_collector.stop)
         attempt_cleanup(runtime_manager.close)
         attempt_cleanup(turn_control_registry.close)
         attempt_cleanup(lambda: knowledge_runtime.stop(timeout=5))
@@ -2393,6 +2348,7 @@ def create_app(
         return {
             "auth_enabled": cfg.auth_enabled,
             "authenticated": (not cfg.auth_enabled)
+            or (transport_authenticator is not None and transport_authenticator(request))
             or _request_has_valid_auth_token(request, cfg.auth_token),
         }
 
@@ -2407,6 +2363,7 @@ def create_app(
             return error_response(422, "force_open must be boolean")
         current = load_config(resolved_data_dir)
         current.onboarding_force_open = force_open
+        current.onboarding_dismissed = not force_open
         save_config(resolved_data_dir, current)
         return JSONResponse(onboarding_payload(current, applications, resumes, chat))
 
@@ -3281,6 +3238,9 @@ def create_app(
             )
         return JSONResponse(_interview_preparation_proposal_json(proposal))
 
+    # 业务地图：docs/architecture/code-map/interview.md（准备建议）。
+    # 此入口先解析选择并核对 JD/来源，再重放或生成 Proposal；不要从 UI
+    # 的“生成”按钮直接推定一定会调用模型，preflight 也可能返回原尝试。
     @app.post("/api/applications/{app_id}/interview-preparation-proposals")
     def create_interview_preparation_proposal(
         app_id: int,
@@ -4585,79 +4545,16 @@ def create_app(
 
     @app.post("/api/jd/analyze", status_code=201)
     def analyze_jd(payload: dict[str, Any] = Body(...)) -> JSONResponse:
-        application_id = (
-            int(payload["application_id"]) if payload.get("application_id") is not None else None
-        )
-        jd_version_id: int | None = None
-        if application_id is not None:
-            if "jd_text" in payload or type(payload.get("jd_version_id")) is not int:
-                return error_response(
-                    422,
-                    "请使用当前岗位资料版本",
-                    code="application_jd_version_required",
-                )
-            try:
-                frozen_jd = application_jd_versions.require_current_version(
-                    application_id, payload["jd_version_id"]
-                )
-            except JDVersionValidationError:
-                return error_response(
-                    422, "岗位资料版本无效", code="application_jd_version_required"
-                )
-            except JDVersionError:
-                return error_response(
-                    409, "岗位资料已变化，请重新加载", code="application_jd_source_conflict"
-                )
-            jd_text = frozen_jd.jd_text
-            jd_version_id = frozen_jd.id
-        else:
-            jd_text = str(payload.get("jd_text") or "")
-        if payload.get("jd_url"):
-            if not jd_text.strip():
-                return error_response(422, "jd_text is required", code="jd_text_required")
-            return error_response(422, "jd_url is record-only", code="jd_url_not_supported")
-        if not jd_text.strip():
-            return error_response(422, "jd_text is required", code="jd_text_required")
-        jd_source = "text"
-        model = _chat_model(chat_model, resolved_data_dir)
-        if isinstance(model, JSONResponse):
-            return model
         try:
-            result = _complete_json(
-                model,
-                system=_structured_ai_system(),
-                user=_jd_analysis_prompt(jd_text),
+            result = analyze_jd_workflow(
+                lambda: _workflow_chat_model(chat_model, resolved_data_dir),
+                jd_analyses, application_jd_versions, JDInput.from_payload(payload),
             )
-        except RuntimeError as exc:
-            return error_response(502, str(exc))
-        result_json = json.dumps(result, ensure_ascii=False)
-        try:
-            analysis = jd_analyses.create_for_current(
-                JDAnalysisCreate(
-                    application_id=application_id,
-                    jd_source=jd_source,
-                    jd_text=jd_text,
-                    result=result_json,
-                    jd_version_id=jd_version_id,
-                )
-            )
-        except JDVersionValidationError:
-            return error_response(
-                422, "JD version is invalid.", code="application_jd_version_required"
-            )
-        except JDVersionError:
-            return error_response(
-                409,
-                "JD source changed while the provider was running.",
-                code="application_jd_source_conflict",
-            )
+        except WorkflowError as exc:
+            return error_response(exc.status_code, str(exc), code=exc.code)
         return JSONResponse(
-            {
-                "id": analysis.id,
-                "application_id": application_id,
-                "jd_source": jd_source,
-                "result": result,
-            },
+            {"id": result.id, "application_id": result.application_id,
+             "jd_source": result.jd_source, "result": result.result},
             status_code=201,
         )
 
@@ -4699,46 +4596,20 @@ def create_app(
 
     @app.post("/api/questions/generate", status_code=201)
     def generate_questions(payload: dict[str, Any] = Body(...)) -> JSONResponse:
-        source = str(payload.get("source") or "notes").strip() or "notes"
-        application_id: int | None = None
-        if source == "notes":
-            raw_app = int(payload.get("application_id") or 0)
-            note_rows = notes.list(application_id=raw_app) if raw_app > 0 else notes.list()
-            label = "面试复盘真题"
-            context_text = "\n\n".join(
-                note.questions.strip() for note in note_rows if note.questions.strip()
-            )
-            source_type = "ai_notes"
-            application_id = raw_app if raw_app > 0 else None
-        else:
-            return error_response(400, "不支持的来源类型")
-        if not context_text.strip():
-            return error_response(400, "所选来源没有可用于生成题目的内容")
-        model = _chat_model(chat_model, resolved_data_dir)
-        if isinstance(model, JSONResponse):
-            return model
-        count = _clamp_question_count(int(payload.get("count") or 8))
         try:
-            result = _complete_json(
-                model,
-                system=_structured_ai_system(),
-                user=_questions_prompt(label, context_text, count),
+            result = generate_questions_workflow(
+                lambda: _workflow_chat_model(chat_model, resolved_data_dir),
+                questions, notes,
+                source=str(payload.get("source") or "notes"),
+                application_id=0 if payload.get("application_id") is None else payload["application_id"],
+                count=8 if payload.get("count") is None else payload["count"],
+                topic=str(payload.get("topic") or ""),
             )
-        except RuntimeError as exc:
-            return error_response(502, str(exc))
-        saved, skipped = _persist_generated_questions(
-            questions,
-            result.get("questions", []),
-            source_type=source_type,
-            application_id=application_id,
-            topic=str(payload.get("topic") or ""),
-        )
+        except WorkflowError as exc:
+            return error_response(exc.status_code, str(exc), code=exc.code)
         return JSONResponse(
-            {
-                "count": len(saved),
-                "skipped": skipped,
-                "questions": [_question_json(q) for q in saved],
-            },
+            {"count": result.count, "skipped": result.skipped,
+             "questions": [_question_json(q) for q in result.questions]},
             status_code=201,
         )
 
@@ -5025,6 +4896,7 @@ def create_app(
 
     @app.delete("/api/resumes/{resume_id}")
     def delete_resume(resume_id: int) -> JSONResponse:
+        # 公开 HTTP 入口禁止删除非空主简历；Repository 的主简历接任能力不代表此入口允许任意删除。
         resume = resumes.get(resume_id)
         if resume is None or resume.deleted_at is not None:
             return error_response(404, "Resume not found")
@@ -5035,85 +4907,16 @@ def create_app(
 
     @app.post("/api/resumes/{resume_id}/match", status_code=201)
     def match_resume(resume_id: int, payload: dict[str, Any] = Body(...)) -> JSONResponse:
-        resume = resumes.get(resume_id)
-        if resume is None:
-            return error_response(404, "Resume not found")
-        if not resume.parsed_data:
-            return error_response(400, "Resume has no text content")
-
-        application_id = (
-            int(payload["application_id"]) if payload.get("application_id") is not None else None
-        )
-        jd_version_id: int | None = None
-        if application_id is not None:
-            if "jd_text" in payload or type(payload.get("jd_version_id")) is not int:
-                return error_response(
-                    422,
-                    "请使用当前岗位资料版本",
-                    code="application_jd_version_required",
-                )
-            try:
-                frozen_jd = application_jd_versions.require_current_version(
-                    application_id, payload["jd_version_id"]
-                )
-            except JDVersionValidationError:
-                return error_response(
-                    422, "岗位资料版本无效", code="application_jd_version_required"
-                )
-            except JDVersionError:
-                return error_response(
-                    409, "岗位资料已变化，请重新加载", code="application_jd_source_conflict"
-                )
-            jd_text = frozen_jd.jd_text
-            jd_version_id = frozen_jd.id
-        else:
-            jd_text = str(payload.get("jd_text") or "")
-        if payload.get("jd_url"):
-            if not jd_text.strip():
-                return error_response(422, "jd_text is required", code="jd_text_required")
-            return error_response(422, "jd_url is record-only", code="jd_url_not_supported")
-        if not jd_text.strip():
-            return error_response(422, "jd_text is required", code="jd_text_required")
-
-        model = _chat_model(chat_model, resolved_data_dir)
-        if isinstance(model, JSONResponse):
-            return model
         try:
-            result = _complete_json(
-                model,
-                system=_structured_ai_system(),
-                user=_resume_match_prompt(resume.parsed_data, jd_text),
+            result = match_resume_workflow(
+                lambda: _workflow_chat_model(chat_model, resolved_data_dir),
+                resumes, application_jd_versions, resume_id, JDInput.from_payload(payload),
             )
-        except RuntimeError as exc:
-            return error_response(502, str(exc))
-        result_json = json.dumps(result, ensure_ascii=False)
-        try:
-            match = resumes.create_match_for_current(
-                ResumeMatchCreate(
-                    resume_id=resume_id,
-                    application_id=application_id,
-                    jd_text=jd_text,
-                    result=result_json,
-                    jd_version_id=jd_version_id,
-                )
-            )
-        except JDVersionValidationError:
-            return error_response(
-                422, "JD version is invalid.", code="application_jd_version_required"
-            )
-        except JDVersionError:
-            return error_response(
-                409,
-                "JD source changed while the provider was running.",
-                code="application_jd_source_conflict",
-            )
+        except WorkflowError as exc:
+            return error_response(exc.status_code, str(exc), code=exc.code)
         return JSONResponse(
-            {
-                "id": match.id,
-                "resume_id": resume_id,
-                "application_id": application_id,
-                "result": result,
-            },
+            {"id": result.id, "resume_id": result.resume_id,
+             "application_id": result.application_id, "result": result.result},
             status_code=201,
         )
 
@@ -5228,6 +5031,7 @@ def create_app(
     ) -> tuple[StartTurnRequest, PilotRuntime, TurnAdmission, str, DurableRuntimeInvocationControl] | JSONResponse:
         request_id = payload.get("request_id", str(uuid4()))
         frozen_source: list[_FrozenChatSourceMessages] = []
+        frozen_images: list[tuple[ImageReference, ...]] = []
         admission: TurnAdmission | None = None
         leases: list[ExecutionLease] = []
         control: DurableRuntimeInvocationControl | None = None
@@ -5238,6 +5042,7 @@ def create_app(
             "page_context": json.loads(json.dumps(request.page_context, default=dict)),
             "attachments": [{"kind": ref.kind, "id": ref.ref} for ref in request.attachments],
             "pilot_action": json.loads(request.pilot_action.value) if request.pilot_action is not None else None,
+            **({"image_attachment_ids": list(request.image_attachment_ids)} if request.image_attachment_ids else {}),
         }
 
         def failure(response: JSONResponse) -> JSONResponse:
@@ -5251,14 +5056,23 @@ def create_app(
 
         def freeze(session: Session, conversation: Any) -> Mapping[str, str]:
             cast(PilotRuntime, app.state.pilot_runtime).validate_start_admission(request)
+            if request.image_attachment_ids:
+                require_image_capability(load_config(resolved_data_dir))
+            frozen_images.append(chat_images.resolve_in_session(session, request.image_attachment_ids, conversation))
             loader = _TransactionChatSourceLoader(session)
             source = _load_chat_source_messages(
                 cast(Any, loader), conversation,
                 [{"kind": ref.kind, "id": ref.ref} for ref in request.attachments],
                 pending_tool_call_id=conversation.pending_tool_call_id,
+                query=request.message if not conversation.pending_tool_call_id else "",
             )
+            source = _bind_persona_source(source, session, capture_persona_binding(session))
             frozen_source.append(source)
             return {
+                **freeze_chat_command(session, conversation, request),
+                **freeze_fact_read(session, conversation, request),
+                "companion_persona_v1": json.dumps(source.persona_binding, sort_keys=True),
+                "companion_enabled_v1": json.dumps(source.companion_enabled),
                 "conversation_scope": str(source.scope_revision),
                 "current_scope": (
                     source.context_message.surface_revision or "absent"
@@ -5272,6 +5086,8 @@ def create_app(
 
         try:
             def claim(session: Session, turn: Any) -> None:
+                if frozen_images[0]:
+                    chat_images.bind_in_session(session, frozen_images[0], turn.conversation_id, turn.user_message_id)
                 leases.append(pilot_controls.claim_start_in_session(session, turn.id))
 
             admission = pilot_timeline.admit(request_id, canonical, freeze_sources=freeze, on_admitted=claim)
@@ -5286,9 +5102,13 @@ def create_app(
                 persistence=cast(Any, ChatPersistenceCoordinator(
                     chat.for_turn(admission.turn_id), admitted_user_message_id=admission.user_message_id,
                 )),
-                source_loader=cast(Any, _AdmittedChatSourceLoader(frozen_source[0])),
+                source_loader=cast(Any, _AdmittedChatSourceLoader(
+                    frozen_source[0], persona_sessions=session_factory,
+                )),
             )
-            return replace(request, conversation_id=admission.conversation_id), runtime, admission, request_id, control
+            return replace(request, conversation_id=admission.conversation_id, images=frozen_images[0]), runtime, admission, request_id, control
+        except ImageInputError as exc:
+            return failure(image_error(exc))
         except TurnControlConflict:
             return error_response(409, "当前对话已有执行中任务或待确认操作，请先处理原任务。", code="turn_execution_active")
         except AdmissionGone:
@@ -5414,6 +5234,7 @@ def create_app(
                 {"kind": item.kind, "id": item.ref} for item in request.attachments
             ],
             "pilot_action": pilot_action,
+            **({"image_attachment_ids": list(request.image_attachment_ids)} if request.image_attachment_ids else {}),
         }
 
     def _runtime_finish_control(
@@ -5592,7 +5413,15 @@ def create_app(
 
         try:
             return bool(context_source_loader.load(read, lambda value: value))
-        except Exception:
+        except SourceTemporarilyUnavailable:
+            logging.getLogger(__name__).warning(
+                "Runtime source visibility unavailable (SourceTemporarilyUnavailable)"
+            )
+            raise RuntimeSourceUnavailable() from None
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Runtime source visibility rejected (%s)", type(exc).__name__,
+            )
             return False
 
     def _runtime_stream_readable(turn_id: str, generation: int) -> bool:
@@ -5611,9 +5440,7 @@ def create_app(
         durable = pilot_controls.get_runtime_execution(turn_id, generation)
         if durable is None or not _runtime_execution_readable(durable):
             return None
-        target_generation = generation
-        if durable is not None:
-            target_generation = int(durable["execution_generation"])
+        target_generation = int(durable["execution_generation"])
         manager_status: dict[str, Any] | None = None
         try:
             manager_status = cast(
@@ -5621,7 +5448,15 @@ def create_app(
             )
         except (RuntimeTurnNotFound, RuntimeManagerError):
             manager_status = None
-        if durable is None and manager_status is None:
+        # Watchdog/control can commit a terminal state between the first
+        # durable read and the manager read. Re-read that exact generation
+        # afterward so a stale running row cannot mask its durable terminal.
+        # Sources may also have been withdrawn during the manager read.
+        durable = pilot_controls.get_runtime_execution(turn_id, target_generation)
+        if durable is None or not _runtime_execution_readable(durable):
+            return None
+        if (manager_status is not None
+                and int(manager_status["execution_generation"]) != target_generation):
             return None
         if manager_status is not None:
             status = dict(manager_status)
@@ -5789,6 +5624,7 @@ def create_app(
         bool,
     ]:
         frozen_source: list[_FrozenChatSourceMessages] = []
+        frozen_images: list[tuple[ImageReference, ...]] = []
         frozen_readiness: list[ReadinessContextBinding | None] = []
         leases: list[ExecutionLease] = []
         refs = _runtime_source_refs(request)
@@ -5802,11 +5638,15 @@ def create_app(
 
         def freeze(session: Session, conversation: Any) -> Mapping[str, str]:
             cast(PilotRuntime, app.state.pilot_runtime).validate_start_admission(request)
+            if request.image_attachment_ids:
+                require_image_capability(load_config(resolved_data_dir))
+            frozen_images.append(chat_images.resolve_in_session(session, request.image_attachment_ids, conversation))
             source = _load_chat_source_messages(
                 cast(Any, _TransactionChatSourceLoader(session)),
                 conversation,
                 [{"kind": item.kind, "id": item.ref} for item in request.attachments],
                 pending_tool_call_id=conversation.pending_tool_call_id,
+                query=request.message if not conversation.pending_tool_call_id else "",
             )
             frozen_readiness.append(
                 readiness_contexts.capture_enabled_binding_in_session(
@@ -5814,6 +5654,7 @@ def create_app(
                     conversation.id,
                 )
             )
+            source = _bind_persona_source(source, session, capture_persona_binding(session))
             frozen_source.append(source)
             if source.context_type == "application" and source.context_ref:
                 context_ref = f"context:application:{source.context_ref}"
@@ -5821,6 +5662,10 @@ def create_app(
                     refs.append(context_ref)
                 metadata["source_refs_json"] = json.dumps(refs, ensure_ascii=False, separators=(",", ":"))
             return {
+                **freeze_chat_command(session, conversation, request),
+                **freeze_fact_read(session, conversation, request),
+                "companion_persona_v1": json.dumps(source.persona_binding, sort_keys=True),
+                "companion_enabled_v1": json.dumps(source.companion_enabled),
                 "conversation_scope": str(source.scope_revision),
                 "current_scope": (
                     source.context_message.surface_revision or "absent"
@@ -5839,6 +5684,8 @@ def create_app(
             }
 
         def claim(session: Session, turn: Any) -> None:
+            if frozen_images[0]:
+                chat_images.bind_in_session(session, frozen_images[0], turn.conversation_id, turn.user_message_id)
             leases.append(
                 pilot_controls.claim_start_in_session(
                     session,
@@ -5890,7 +5737,7 @@ def create_app(
                 pilot_controls.finish(leases[0], "failed")
             raise
         return (
-            replace(request, conversation_id=admission.conversation_id),
+            replace(request, conversation_id=admission.conversation_id, images=frozen_images[0]),
             bound_runtime,
             admission,
             control,
@@ -5932,6 +5779,8 @@ def create_app(
                 typed,
                 request_id,
             )
+        except ImageInputError as exc:
+            return image_error(exc)
         except TurnControlConflict:
             return error_response(409, "当前对话已有执行中任务或待确认操作，请先处理原任务。", code="turn_execution_active")
         except AdmissionGone:
@@ -6225,6 +6074,8 @@ def create_app(
                 response["interrupt"] = result
                 return JSONResponse(response, headers={"Cache-Control": "no-store"})
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
+        except RuntimeSourceUnavailable:
+            raise
         except TurnControlConflict:
             return error_response(409, "停止命令标识已对应其他任务或代次。", code="turn_command_conflict")
         except ValueError:
@@ -6447,7 +6298,14 @@ def create_app(
             if not isinstance(command_id, str) or not isinstance(generation, int) or isinstance(generation, bool):
                 raise ValueError("Invalid interrupt identity")
             result = pilot_controls.interrupt(command_id, turn_id, generation)
-            if result["status"] == "stopped":
+            if result["status"] in {"stopped", "result_unknown"}:
+                # The UI's stable interrupt route also controls detached Runtime
+                # turns. Keep its exact-generation in-memory owner in sync with
+                # the durable receipt before the provider worker unwinds.
+                try:
+                    runtime_manager.interrupt(turn_id, generation=generation)
+                except RuntimeTurnNotFound:
+                    pass
                 turn_control_registry.interrupted(turn_id, result["execution_generation"])
             return JSONResponse(result, headers={"Cache-Control": "no-store"})
         except TurnControlConflict:
@@ -6962,6 +6820,7 @@ def create_app(
     @app.delete("/api/chat/conversations/{conversation_id}")
     def delete_conversation(conversation_id: int) -> dict[str, str]:
         chat.delete_conversation(conversation_id)
+        chat_images.collect()
         return {"status": "deleted"}
 
     @app.post("/api/interview-practice-cases")
@@ -7016,6 +6875,9 @@ def create_app(
             return recovery_error("interview_practice_case_not_found", "快速练习档案不存在。")
         return JSONResponse(_interview_practice_case_json(case))
 
+    # 模拟问答链路：docs/architecture/code-map/interview-mock.md。
+    # 快速模拟与事件绑定各自校验归属/来源；领取生成权之后才进入共享
+    # mock_execution。调查“没有下一题”时区分重放、202 与实际模型调用。
     @app.post("/api/interview-practice-cases/{case_id}/mock-interview/attempts")
     def start_quick_practice_attempt(
         case_id: int, payload: dict[str, Any] = Body(...)
@@ -7077,205 +6939,26 @@ def create_app(
                     "turn": _mock_interview_live_turn_json(mock_interviews, result.turn),
                 }
             )
-        revision, provider_token, transcript_fingerprint = result.question_claim
-        operation_id = uuid4().hex
-        trace_started_at = datetime.now(timezone.utc).isoformat()
-        trace_timer = perf_counter()
-        scenario_id = "mock_interview:quick_practice:question"
         try:
-            configured_model = _chat_model(chat_model, resolved_data_dir)
-            if isinstance(configured_model, JSONResponse):
-                raise MockInterviewProviderError("mock_interview_provider_error")
-            question_result, question_diagnostic = generate_question(
-                configured_model,
-                provider_mock_interview_snapshot(result.attempt),
-                [],
+            outcome = mock_execution.question(
+                result.attempt, 1,
+                MockInterviewQuestionClaim(*result.question_claim, turns=()),
+                initial_question_key, QUICK_PRACTICE_EXECUTION, initial=True,
             )
-            completed = mock_interviews.complete_question(
-                result.attempt.id,
-                1,
-                revision,
-                provider_token,
-                transcript_fingerprint,
-                question_result["question"],
-                question_result["evidence_refs"],
-            )
-            if completed is None:
-                _emit_mock_interview_trace(
-                    resolved_data_dir,
-                    scenario_id=scenario_id,
-                    operation_id=operation_id,
-                    attempt_id=result.attempt.id,
-                    generation_revision=revision,
-                    idempotency_key=initial_question_key,
-                    model=configured_model,
-                    input_fingerprint=result.attempt.source_fingerprint,
-                    schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                    started_at=trace_started_at,
-                    elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                    provider_outcome="success",
-                    validator_stage="question",
-                    failure_category="",
-                    repair_count=int(question_diagnostic.get("repair_count") or 0),
-                    response_error_code="mock_interview_transcript_conflict",
-                )
-                return recovery_error(
-                    "mock_interview_transcript_conflict",
-                    "快速练习回答状态已变化。",
-                    details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-                )
-            current = mock_interviews.get_turn(result.attempt.id, 1)
-            assert current is not None
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=completed.id,
-                generation_revision=revision,
-                idempotency_key=initial_question_key,
-                model=configured_model,
-                input_fingerprint=completed.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int(question_diagnostic.get("elapsed_ms") or 0),
-                provider_outcome="success_after_repair"
-                if question_diagnostic.get("repair_count")
-                else "success",
-                validator_stage="question",
-                failure_category="",
-                repair_count=int(question_diagnostic.get("repair_count") or 0),
-                response_error_code="",
-            )
-            return JSONResponse(
-                {
-                    "attempt_id": completed.id,
-                    "attempt_status": completed.attempt_status,
-                    "generation_revision": completed.generation_revision,
-                    "operation_id": operation_id,
-                    **_mock_interview_attempt_context_json(completed),
-                    "turn": _mock_interview_live_turn_json(mock_interviews, current),
-                },
-                status_code=201 if result.created else 200,
-            )
-        except MockInterviewProviderError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=result.attempt.id,
-                stage="question",
-                kind="provider",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_provider_unknown(
-                    result.attempt.id, revision, provider_token, "question"
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_question_result_unknown"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=result.attempt.id,
-                generation_revision=revision,
-                idempotency_key=initial_question_key,
-                model=configured_model,
-                input_fingerprint=result.attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="provider_error",
-                validator_stage="question",
-                failure_category=str(exc.diagnostic.get("failure_category") or "provider_error"),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_question_result_unknown":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_question_result_unknown",
-                "下一题结果待确认，请使用原 key 恢复。",
-                details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-            )
-        except MockInterviewUnverifiableError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=result.attempt.id,
-                stage="question",
-                kind="contract",
-                diagnostic=exc.diagnostic,
-            )
-            contract_failure_category = exc.category
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_contract_failure(
-                    result.attempt.id,
-                    revision,
-                    provider_token,
-                    contract_failure_category,
-                    "contract_failed",
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_unverifiable"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=result.attempt.id,
-                generation_revision=revision,
-                idempotency_key=initial_question_key,
-                model=configured_model,
-                input_fingerprint=result.attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="unverifiable",
-                validator_stage="question",
-                failure_category=str(exc.category),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_unverifiable":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_unverifiable",
-                "AI 输出未通过验证，请重新开始本次练习。",
-                details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-            )
-        except MockInterviewSourceChanged:
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=result.attempt.id,
-                generation_revision=revision,
-                idempotency_key=initial_question_key,
-                model=configured_model,
-                input_fingerprint=result.attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="success",
-                validator_stage="question",
-                failure_category="source_conflict",
-                repair_count=int(question_diagnostic.get("repair_count") or 0),
-                response_error_code="mock_interview_source_conflict",
-            )
-            return recovery_error(
-                "mock_interview_source_conflict",
-                "本次练习使用的冻结资料不可验证。",
-                details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-            )
+        except MockInterviewExecutionError as exc:
+            return recovery_error(exc.code, str(exc), details=exc.details)
+        completed = outcome.attempt
+        return JSONResponse(
+            {
+                "attempt_id": completed.id,
+                "attempt_status": completed.attempt_status,
+                "generation_revision": completed.generation_revision,
+                "operation_id": outcome.operation_id,
+                **_mock_interview_attempt_context_json(completed),
+                "turn": _mock_interview_live_turn_json(mock_interviews, outcome.turn),
+            },
+            status_code=201 if result.created else 200,
+        )
 
     @app.get("/api/interview-practice-cases/{case_id}/mock-interview/attempts/{attempt_id}")
     def get_quick_practice_attempt(case_id: int, attempt_id: int) -> JSONResponse:
@@ -7400,204 +7083,25 @@ def create_app(
                 "turn": _mock_interview_live_turn_json(mock_interviews, result.turn),
             }
             return JSONResponse(response, status_code=200)
-        revision, provider_token, transcript_fingerprint = result.question_claim
-        operation_id = uuid4().hex
-        trace_started_at = datetime.now(timezone.utc).isoformat()
-        trace_timer = perf_counter()
-        scenario_id = "mock_interview:application_event:question"
         try:
-            configured_model = _chat_model(chat_model, resolved_data_dir)
-            if isinstance(configured_model, JSONResponse):
-                raise MockInterviewProviderError("mock_interview_provider_error")
-            question_result, question_diagnostic = generate_question(
-                configured_model,
-                provider_mock_interview_snapshot(result.attempt),
-                [],
+            outcome = mock_execution.question(
+                result.attempt, 1,
+                MockInterviewQuestionClaim(*result.question_claim, turns=()),
+                question_key, APPLICATION_EVENT_EXECUTION, initial=True,
             )
-            completed = mock_interviews.complete_question(
-                result.attempt.id,
-                1,
-                revision,
-                provider_token,
-                transcript_fingerprint,
-                question_result["question"],
-                question_result["evidence_refs"],
-            )
-            if completed is None:
-                _emit_mock_interview_trace(
-                    resolved_data_dir,
-                    scenario_id=scenario_id,
-                    operation_id=operation_id,
-                    attempt_id=result.attempt.id,
-                    generation_revision=revision,
-                    idempotency_key=question_key,
-                    model=configured_model,
-                    input_fingerprint=result.attempt.source_fingerprint,
-                    schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                    started_at=trace_started_at,
-                    elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                    provider_outcome="success",
-                    validator_stage="question",
-                    failure_category="",
-                    repair_count=int(question_diagnostic.get("repair_count") or 0),
-                    response_error_code="mock_interview_transcript_conflict",
-                )
-                return recovery_error(
-                    "mock_interview_transcript_conflict",
-                    "mock interview transcript changed",
-                    details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-                )
-            current = mock_interviews.get_turn(result.attempt.id, 1)
-            assert current is not None
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=completed.id,
-                generation_revision=revision,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=completed.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int(question_diagnostic.get("elapsed_ms") or 0),
-                provider_outcome="success_after_repair"
-                if question_diagnostic.get("repair_count")
-                else "success",
-                validator_stage="question",
-                failure_category="",
-                repair_count=int(question_diagnostic.get("repair_count") or 0),
-                response_error_code="",
-            )
-            return JSONResponse(
-                {
-                    "attempt_id": completed.id,
-                    "attempt_status": completed.attempt_status,
-                    "generation_revision": completed.generation_revision,
-                    "operation_id": operation_id,
-                    "turn": _mock_interview_live_turn_json(mock_interviews, current),
-                },
-                status_code=201 if result.created else 200,
-            )
-        except MockInterviewProviderError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=result.attempt.id,
-                stage="question",
-                kind="provider",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_provider_unknown(
-                    result.attempt.id, revision, provider_token, "question"
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_provider_error"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=result.attempt.id,
-                generation_revision=revision,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=result.attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="provider_error",
-                validator_stage="question",
-                failure_category=str(exc.diagnostic.get("failure_category") or "provider_error"),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_provider_error":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_provider_error",
-                "AI service is temporarily unavailable",
-                details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-            )
-        except MockInterviewUnverifiableError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=result.attempt.id,
-                stage="question",
-                kind="contract",
-                diagnostic=exc.diagnostic,
-            )
-            contract_failure_category = exc.category
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_contract_failure(
-                    result.attempt.id,
-                    revision,
-                    provider_token,
-                    contract_failure_category,
-                    "contract_failed",
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_unverifiable"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=result.attempt.id,
-                generation_revision=revision,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=result.attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="unverifiable",
-                validator_stage="question",
-                failure_category=str(exc.category),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_unverifiable":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_unverifiable",
-                "mock interview output could not be verified; please start a new attempt",
-                details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-            )
-        except MockInterviewSourceChanged:
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=result.attempt.id,
-                generation_revision=revision,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=result.attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="success",
-                validator_stage="question",
-                failure_category="source_conflict",
-                repair_count=int(question_diagnostic.get("repair_count") or 0),
-                response_error_code="mock_interview_source_conflict",
-            )
-            return recovery_error(
-                "mock_interview_source_conflict",
-                "mock interview frozen source changed",
-                details={"attempt_id": result.attempt.id, "operation_id": operation_id},
-            )
+        except MockInterviewExecutionError as exc:
+            return recovery_error(exc.code, str(exc), details=exc.details)
+        completed = outcome.attempt
+        return JSONResponse(
+            {
+                "attempt_id": completed.id,
+                "attempt_status": completed.attempt_status,
+                "generation_revision": completed.generation_revision,
+                "operation_id": outcome.operation_id,
+                "turn": _mock_interview_live_turn_json(mock_interviews, outcome.turn),
+            },
+            status_code=201 if result.created else 200,
+        )
 
     @app.post("/api/interview-practice-cases/{case_id}/mock-interview/attempts/{attempt_id}/turns")
     def answer_quick_practice_turn(
@@ -7679,191 +7183,24 @@ def create_app(
                     },
                     status_code=202,
                 )
-            revision, provider_token, transcript_fingerprint = claim
-            operation_id = uuid4().hex
-            trace_started_at = datetime.now(timezone.utc).isoformat()
-            trace_timer = perf_counter()
-            scenario_id = "mock_interview:quick_practice:question"
-            configured_model = _chat_model(chat_model, resolved_data_dir)
-            if isinstance(configured_model, JSONResponse):
-                raise MockInterviewProviderError("mock_interview_provider_error")
-            question_result, question_diagnostic = generate_question(
-                configured_model, provider_mock_interview_snapshot(attempt), list(claim.turns)
+            outcome = mock_execution.question(
+                attempt, turn_no, claim, question_key, QUICK_PRACTICE_EXECUTION,
             )
-            completed = mock_interviews.complete_question(
-                attempt_id,
-                turn_no,
-                revision,
-                provider_token,
-                transcript_fingerprint,
-                question_result["question"],
-                question_result["evidence_refs"],
-            )
-            if completed is None:
-                _emit_mock_interview_trace(
-                    resolved_data_dir,
-                    scenario_id=scenario_id,
-                    operation_id=operation_id,
-                    attempt_id=attempt_id,
-                    generation_revision=revision,
-                    idempotency_key=question_key,
-                    model=configured_model,
-                    input_fingerprint=attempt.source_fingerprint,
-                    schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                    started_at=trace_started_at,
-                    elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                    provider_outcome="success",
-                    validator_stage="question",
-                    failure_category="",
-                    repair_count=int(question_diagnostic.get("repair_count") or 0),
-                    response_error_code="mock_interview_transcript_conflict",
-                )
-                return recovery_error(
-                    "mock_interview_transcript_conflict",
-                    "下一题写入状态已变化。",
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            current = mock_interviews.get_turn(attempt_id, turn_no)
-            assert current is not None
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=completed.id,
-                generation_revision=revision,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=completed.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int(question_diagnostic.get("elapsed_ms") or 0),
-                provider_outcome="success_after_repair"
-                if question_diagnostic.get("repair_count")
-                else "success",
-                validator_stage="question",
-                failure_category="",
-                repair_count=int(question_diagnostic.get("repair_count") or 0),
-                response_error_code="",
-            )
+            completed = outcome.attempt
             return JSONResponse(
                 {
                     "attempt_id": completed.id,
                     "attempt_status": completed.attempt_status,
-                    "operation_id": operation_id,
+                    "operation_id": outcome.operation_id,
                     **_mock_interview_attempt_context_json(completed),
-                    "turn": _mock_interview_live_turn_json(mock_interviews, current),
+                    "turn": _mock_interview_live_turn_json(mock_interviews, outcome.turn),
                 },
                 status_code=201,
             )
+        except MockInterviewExecutionError as exc:
+            return recovery_error(exc.code, str(exc), details=exc.details)
         except KeyError as exc:
             return recovery_error("mock_interview_invalid_payload", f"missing field: {exc.args[0]}")
-        except MockInterviewProviderError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="question",
-                kind="provider",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_provider_unknown(
-                    attempt_id, revision, provider_token, "question"
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_question_result_unknown"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id="mock_interview:quick_practice:question",
-                operation_id=operation_id if "operation_id" in locals() else uuid4().hex,
-                attempt_id=attempt_id,
-                generation_revision=claim[0] if "claim" in locals() and claim is not None else None,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint if "attempt" in locals() else "",
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at
-                if "trace_started_at" in locals()
-                else datetime.now(timezone.utc).isoformat(),
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000)
-                if "trace_timer" in locals()
-                else 0,
-                provider_outcome="provider_error",
-                validator_stage="question",
-                failure_category=str(exc.diagnostic.get("failure_category") or "provider_error"),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_question_result_unknown":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_question_result_unknown",
-                "下一题结果待确认，请使用原 key 恢复。",
-                details={"attempt_id": attempt_id, "operation_id": operation_id}
-                if "operation_id" in locals()
-                else {"attempt_id": attempt_id},
-            )
-        except MockInterviewUnverifiableError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="question",
-                kind="contract",
-                diagnostic=exc.diagnostic,
-            )
-            contract_failure_category = exc.category
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_contract_failure(
-                    attempt_id,
-                    revision,
-                    provider_token,
-                    contract_failure_category,
-                    "contract_failed",
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_unverifiable"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id="mock_interview:quick_practice:question",
-                operation_id=operation_id if "operation_id" in locals() else uuid4().hex,
-                attempt_id=attempt_id,
-                generation_revision=claim[0] if "claim" in locals() and claim is not None else None,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint if "attempt" in locals() else "",
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at
-                if "trace_started_at" in locals()
-                else datetime.now(timezone.utc).isoformat(),
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000)
-                if "trace_timer" in locals()
-                else 0,
-                provider_outcome="unverifiable",
-                validator_stage="question",
-                failure_category=str(exc.category),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_unverifiable":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_unverifiable",
-                "AI 输出未通过验证，请重新开始本次练习。",
-                details={"attempt_id": attempt_id, "operation_id": operation_id}
-                if "operation_id" in locals()
-                else {"attempt_id": attempt_id},
-            )
         except MockInterviewContractFailed:
             return recovery_error(
                 "mock_interview_unverifiable",
@@ -7875,31 +7212,9 @@ def create_app(
                 "mock_interview_turn_idempotency_conflict", "下一题 key 已对应其他题目。"
             )
         except MockInterviewSourceChanged:
-            details: dict[str, Any] = {"attempt_id": attempt_id}
-            if "operation_id" in locals():
-                _emit_mock_interview_trace(
-                    resolved_data_dir,
-                    scenario_id="mock_interview:quick_practice:question",
-                    operation_id=operation_id,
-                    attempt_id=attempt_id,
-                    generation_revision=revision,
-                    idempotency_key=question_key,
-                    model=configured_model,
-                    input_fingerprint=attempt.source_fingerprint,
-                    schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                    started_at=trace_started_at,
-                    elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                    provider_outcome="success",
-                    validator_stage="question",
-                    failure_category="source_conflict",
-                    repair_count=int(question_diagnostic.get("repair_count") or 0),
-                    response_error_code="mock_interview_source_conflict",
-                )
-                details["operation_id"] = operation_id
             return recovery_error(
-                "mock_interview_source_conflict",
-                "本次练习使用的冻结资料不可验证。",
-                details=details,
+                "mock_interview_source_conflict", "本次练习使用的冻结资料不可验证。",
+                details={"attempt_id": attempt_id},
             )
         except LookupError:
             return recovery_error("mock_interview_context_mismatch", "快速练习尝试不存在。")
@@ -8154,191 +7469,23 @@ def create_app(
                     },
                     status_code=202,
                 )
-            revision, provider_token, transcript_fingerprint = claim
-            operation_id = uuid4().hex
-            trace_started_at = datetime.now(timezone.utc).isoformat()
-            trace_timer = perf_counter()
-            scenario_id = "mock_interview:application_event:question"
-            configured_model = _chat_model(chat_model, resolved_data_dir)
-            if isinstance(configured_model, JSONResponse):
-                raise MockInterviewProviderError("mock_interview_provider_error")
-            snapshot = provider_mock_interview_snapshot(attempt)
-            question_result, question_diagnostic = generate_question(
-                configured_model, snapshot, list(claim.turns)
+            outcome = mock_execution.question(
+                attempt, turn_no, claim, question_key, APPLICATION_EVENT_EXECUTION,
             )
-            completed = mock_interviews.complete_question(
-                attempt_id,
-                turn_no,
-                revision,
-                provider_token,
-                transcript_fingerprint,
-                question_result["question"],
-                question_result["evidence_refs"],
-            )
-            if completed is None:
-                _emit_mock_interview_trace(
-                    resolved_data_dir,
-                    scenario_id=scenario_id,
-                    operation_id=operation_id,
-                    attempt_id=attempt_id,
-                    generation_revision=revision,
-                    idempotency_key=question_key,
-                    model=configured_model,
-                    input_fingerprint=attempt.source_fingerprint,
-                    schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                    started_at=trace_started_at,
-                    elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                    provider_outcome="success",
-                    validator_stage="question",
-                    failure_category="",
-                    repair_count=int(question_diagnostic.get("repair_count") or 0),
-                    response_error_code="mock_interview_transcript_conflict",
-                )
-                return recovery_error(
-                    "mock_interview_transcript_conflict",
-                    "mock interview transcript changed",
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            current = mock_interviews.get_turn(attempt_id, turn_no)
-            assert current is not None
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=completed.id,
-                generation_revision=revision,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=completed.source_fingerprint,
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int(question_diagnostic.get("elapsed_ms") or 0),
-                provider_outcome="success_after_repair"
-                if question_diagnostic.get("repair_count")
-                else "success",
-                validator_stage="question",
-                failure_category="",
-                repair_count=int(question_diagnostic.get("repair_count") or 0),
-                response_error_code="",
-            )
+            completed = outcome.attempt
             return JSONResponse(
                 {
                     "attempt_id": completed.id,
                     "attempt_status": completed.attempt_status,
-                    "operation_id": operation_id,
-                    "turn": _mock_interview_live_turn_json(mock_interviews, current),
+                    "operation_id": outcome.operation_id,
+                    "turn": _mock_interview_live_turn_json(mock_interviews, outcome.turn),
                 },
                 status_code=201,
             )
+        except MockInterviewExecutionError as exc:
+            return recovery_error(exc.code, str(exc), details=exc.details)
         except KeyError as exc:
             return recovery_error("mock_interview_invalid_payload", f"missing field: {exc.args[0]}")
-        except MockInterviewProviderError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="question",
-                kind="provider",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_provider_unknown(
-                    attempt_id, revision, provider_token, "question"
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_provider_error"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id="mock_interview:application_event:question",
-                operation_id=operation_id if "operation_id" in locals() else uuid4().hex,
-                attempt_id=attempt_id,
-                generation_revision=claim[0] if "claim" in locals() and claim is not None else None,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint if "attempt" in locals() else "",
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at
-                if "trace_started_at" in locals()
-                else datetime.now(timezone.utc).isoformat(),
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000)
-                if "trace_timer" in locals()
-                else 0,
-                provider_outcome="provider_error",
-                validator_stage="question",
-                failure_category=str(exc.diagnostic.get("failure_category") or "provider_error"),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_provider_error":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_provider_error",
-                "AI service is temporarily unavailable",
-                details={"attempt_id": attempt_id, "operation_id": operation_id}
-                if "operation_id" in locals()
-                else {"attempt_id": attempt_id},
-            )
-        except MockInterviewUnverifiableError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="question",
-                kind="contract",
-                diagnostic=exc.diagnostic,
-            )
-            contract_failure_category = exc.category
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_contract_failure(
-                    attempt_id,
-                    revision,
-                    provider_token,
-                    contract_failure_category,
-                    "contract_failed",
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_unverifiable"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id="mock_interview:application_event:question",
-                operation_id=operation_id if "operation_id" in locals() else uuid4().hex,
-                attempt_id=attempt_id,
-                generation_revision=claim[0] if "claim" in locals() and claim is not None else None,
-                idempotency_key=question_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint if "attempt" in locals() else "",
-                schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                started_at=trace_started_at
-                if "trace_started_at" in locals()
-                else datetime.now(timezone.utc).isoformat(),
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000)
-                if "trace_timer" in locals()
-                else 0,
-                provider_outcome="unverifiable",
-                validator_stage="question",
-                failure_category=str(exc.category),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_unverifiable":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_unverifiable",
-                "mock interview output could not be verified; please start a new attempt",
-                details={"attempt_id": attempt_id, "operation_id": operation_id}
-                if "operation_id" in locals()
-                else {"attempt_id": attempt_id},
-            )
         except MockInterviewContractFailed:
             return recovery_error(
                 "mock_interview_unverifiable",
@@ -8351,31 +7498,9 @@ def create_app(
                 "mock interview turn key belongs to another question",
             )
         except MockInterviewSourceChanged:
-            details: dict[str, Any] = {"attempt_id": attempt_id}
-            if "operation_id" in locals():
-                _emit_mock_interview_trace(
-                    resolved_data_dir,
-                    scenario_id="mock_interview:application_event:question",
-                    operation_id=operation_id,
-                    attempt_id=attempt_id,
-                    generation_revision=revision,
-                    idempotency_key=question_key,
-                    model=configured_model,
-                    input_fingerprint=attempt.source_fingerprint,
-                    schema_fingerprint=_mock_interview_question_schema_fingerprint(),
-                    started_at=trace_started_at,
-                    elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                    provider_outcome="success",
-                    validator_stage="question",
-                    failure_category="source_conflict",
-                    repair_count=int(question_diagnostic.get("repair_count") or 0),
-                    response_error_code="mock_interview_source_conflict",
-                )
-                details["operation_id"] = operation_id
             return recovery_error(
-                "mock_interview_source_conflict",
-                "mock interview frozen source changed",
-                details=details,
+                "mock_interview_source_conflict", "mock interview frozen source changed",
+                details={"attempt_id": attempt_id},
             )
         except LookupError:
             return recovery_error(
@@ -8464,178 +7589,17 @@ def create_app(
                 },
                 status_code=202,
             )
-        revision, provider_token, transcript_fingerprint = claim
-        operation_id = uuid4().hex
-        trace_started_at = datetime.now(timezone.utc).isoformat()
-        trace_timer = perf_counter()
-        scenario_id = "mock_interview:quick_practice:feedback"
         try:
-            snapshot = provider_mock_interview_snapshot(attempt)
-            configured_model = _chat_model(chat_model, resolved_data_dir)
-            legacy_model: ChatModel | None = (
-                None if isinstance(configured_model, JSONResponse) else configured_model
-            )
-            proposal, diagnostic = generate_feedback(legacy_model, snapshot, list(claim.turns))
-        except MockInterviewUnverifiableError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="feedback",
-                kind="contract",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_contract_failure(
-                    attempt_id,
-                    revision,
-                    provider_token,
-                    "contract_unverifiable",
-                    "contract_failed",
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_unverifiable"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=attempt_id,
-                generation_revision=revision,
-                idempotency_key=feedback_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_feedback_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="unverifiable",
-                validator_stage="feedback",
-                failure_category=str(exc.category),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_unverifiable":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_unverifiable",
-                "AI 输出未通过验证，请重新开始本次练习。",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-        except MockInterviewProviderError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="feedback",
-                kind="provider",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_provider_unknown(
-                    attempt_id, revision, provider_token, "feedback"
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_feedback_result_unknown"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=attempt_id,
-                generation_revision=revision,
-                idempotency_key=feedback_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_feedback_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="provider_error",
-                validator_stage="feedback",
-                failure_category=str(exc.diagnostic.get("failure_category") or "provider_error"),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_feedback_result_unknown":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_feedback_result_unknown",
-                "复盘结果待确认，请使用原 key 恢复。",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-
-        def emit_generated_feedback_trace(response_error_code: str = "") -> None:
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=attempt_id,
-                generation_revision=revision,
-                idempotency_key=feedback_key,
-                model=legacy_model,
-                input_fingerprint=attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_feedback_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome=(
-                    "success_after_repair" if diagnostic.get("repair_count") else "success"
-                ),
-                validator_stage="feedback",
-                failure_category="",
-                repair_count=int(diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-
-        try:
-            record, created = mock_interviews.complete_feedback(
-                attempt_id,
-                feedback_key,
-                revision,
-                provider_token,
-                transcript_fingerprint,
-                proposal,
-                proposal["proposal_status"],
-                str(diagnostic.get("failure_category", "")),
-            )
-        except MockInterviewSourceChanged:
-            emit_generated_feedback_trace("mock_interview_source_conflict")
-            return recovery_error(
-                "mock_interview_source_conflict",
-                "本次练习使用的冻结资料不可验证。",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-        if record is None:
-            replay, _ = mock_interviews.get_feedback(attempt_id, feedback_key)
-            if replay is not None:
-                emit_generated_feedback_trace()
-                return JSONResponse(
-                    {
-                        **_mock_interview_proposal_json(replay),
-                        "operation_id": operation_id,
-                        **_mock_interview_attempt_context_json(attempt),
-                    }
-                )
-            emit_generated_feedback_trace("mock_interview_transcript_conflict")
-            return recovery_error(
-                "mock_interview_transcript_conflict",
-                "复盘写入状态已变化，请使用原 key 对账。",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-        emit_generated_feedback_trace()
+            outcome = mock_execution.feedback(attempt, claim, feedback_key, QUICK_PRACTICE_EXECUTION)
+        except MockInterviewExecutionError as exc:
+            return recovery_error(exc.code, str(exc), details=exc.details)
         return JSONResponse(
             {
-                **_mock_interview_proposal_json(record),
-                "operation_id": operation_id,
+                **_mock_interview_proposal_json(outcome.record),
+                "operation_id": outcome.operation_id,
                 **_mock_interview_attempt_context_json(attempt),
             },
-            status_code=201 if created else 200,
+            status_code=201 if outcome.created else 200,
         )
 
     @app.post(
@@ -8689,172 +7653,16 @@ def create_app(
                 },
                 status_code=202,
             )
-        revision, provider_token, transcript_fingerprint = claim
-        operation_id = uuid4().hex
-        trace_started_at = datetime.now(timezone.utc).isoformat()
-        trace_timer = perf_counter()
-        scenario_id = "mock_interview:application_event:feedback"
         try:
-            snapshot = provider_mock_interview_snapshot(attempt)
-            turn_payload = list(claim.turns)
-            configured_model = _chat_model(chat_model, resolved_data_dir)
-            legacy_model: ChatModel | None = (
-                None if isinstance(configured_model, JSONResponse) else configured_model
-            )
-            proposal, diagnostic = generate_feedback(legacy_model, snapshot, turn_payload)
-        except MockInterviewUnverifiableError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="feedback",
-                kind="contract",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_contract_failure(
-                    attempt_id,
-                    revision,
-                    provider_token,
-                    "contract_unverifiable",
-                    "contract_failed",
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_unverifiable"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=attempt_id,
-                generation_revision=revision,
-                idempotency_key=feedback_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_feedback_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="unverifiable",
-                validator_stage="feedback",
-                failure_category=str(exc.category),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_unverifiable":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_unverifiable",
-                "mock interview output could not be verified; please start a new attempt",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-        except MockInterviewProviderError as exc:
-            _log_mock_interview_ai_failure(
-                resolved_data_dir,
-                attempt_id=attempt_id,
-                stage="feedback",
-                kind="provider",
-                diagnostic=exc.diagnostic,
-            )
-            failure_finalization = _mark_mock_interview_failure_state(
-                lambda: mock_interviews.mark_provider_unknown(
-                    attempt_id, revision, provider_token, "feedback"
-                )
-            )
-            response_error_code = _mock_interview_failure_response_code(
-                failure_finalization, "mock_interview_provider_error"
-            )
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=attempt_id,
-                generation_revision=revision,
-                idempotency_key=feedback_key,
-                model=configured_model,
-                input_fingerprint=attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_feedback_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome="provider_error",
-                validator_stage="feedback",
-                failure_category=str(exc.diagnostic.get("failure_category") or "provider_error"),
-                repair_count=int(exc.diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-            if response_error_code != "mock_interview_provider_error":
-                return recovery_error(
-                    response_error_code,
-                    _mock_interview_failure_message(response_error_code, ""),
-                    details={"attempt_id": attempt_id, "operation_id": operation_id},
-                )
-            return recovery_error(
-                "mock_interview_provider_error",
-                "AI service is temporarily unavailable",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-
-        def emit_generated_feedback_trace(response_error_code: str = "") -> None:
-            _emit_mock_interview_trace(
-                resolved_data_dir,
-                scenario_id=scenario_id,
-                operation_id=operation_id,
-                attempt_id=attempt_id,
-                generation_revision=revision,
-                idempotency_key=feedback_key,
-                model=legacy_model,
-                input_fingerprint=attempt.source_fingerprint,
-                schema_fingerprint=_mock_interview_feedback_schema_fingerprint(),
-                started_at=trace_started_at,
-                elapsed_ms=int((perf_counter() - trace_timer) * 1000),
-                provider_outcome=(
-                    "success_after_repair" if diagnostic.get("repair_count") else "success"
-                ),
-                validator_stage="feedback",
-                failure_category="",
-                repair_count=int(diagnostic.get("repair_count") or 0),
-                response_error_code=response_error_code,
-            )
-
-        try:
-            record, created = mock_interviews.complete_feedback(
-                attempt_id,
-                feedback_key,
-                revision,
-                provider_token,
-                transcript_fingerprint,
-                proposal,
-                proposal["proposal_status"],
-                str(diagnostic.get("failure_category", "")),
-            )
-        except MockInterviewSourceChanged:
-            emit_generated_feedback_trace("mock_interview_source_conflict")
-            return recovery_error(
-                "mock_interview_source_conflict",
-                "mock interview frozen source changed",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-        if record is None:
-            replay, _ = mock_interviews.get_feedback(attempt_id, feedback_key)
-            if replay is not None:
-                emit_generated_feedback_trace()
-                return JSONResponse(
-                    {**_mock_interview_proposal_json(replay), "operation_id": operation_id},
-                    status_code=200,
-                )
-            emit_generated_feedback_trace("mock_interview_transcript_conflict")
-            return recovery_error(
-                "mock_interview_transcript_conflict",
-                "mock interview transcript changed",
-                details={"attempt_id": attempt_id, "operation_id": operation_id},
-            )
-        emit_generated_feedback_trace()
+            outcome = mock_execution.feedback(attempt, claim, feedback_key, APPLICATION_EVENT_EXECUTION)
+        except MockInterviewExecutionError as exc:
+            return recovery_error(exc.code, str(exc), details=exc.details)
         return JSONResponse(
-            {**_mock_interview_proposal_json(record), "operation_id": operation_id},
-            status_code=201 if created else 200,
+            {
+                **_mock_interview_proposal_json(outcome.record),
+                "operation_id": outcome.operation_id,
+            },
+            status_code=201 if outcome.created else 200,
         )
 
     @app.post(
@@ -8928,9 +7736,14 @@ def create_app(
             ),
         )
 
+    register_backup_routes(app, resolved_data_dir)
+
     @app.get("/api/backups/export")
     def export_backup() -> Response:
-        archive = _build_backup_archive(resolved_data_dir)
+        try:
+            archive = _build_backup_archive(resolved_data_dir)
+        except (ValueError, OSError, sqlite3.Error):
+            return JSONResponse({"error": "backup_export_validation_failed"}, status_code=409)
         stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         filename = f"offerpilot-backup-{stamp}.zip"
         return Response(
@@ -8983,7 +7796,7 @@ def create_app(
         try:
             ConfiguredAIClient(
                 Config(active_provider_id=provider.id, providers=[provider]),
-            ).complete([Message(role="user", content="Reply with OK.")], [])
+            ).test_connection()
         except Exception as exc:
             message = _safe_provider_error(exc, [provider])
             append_log_entry(
@@ -9048,6 +7861,7 @@ def create_app(
             auth_token=current.auth_token,
             log_level=str(payload.get("log_level") or current.log_level).upper(),
             onboarding_force_open=current.onboarding_force_open,
+            onboarding_dismissed=current.onboarding_dismissed,
             skills=current.skills,
             confirmation_secret=current.confirmation_secret,
         )
@@ -9693,7 +8507,14 @@ def create_app(
             root = resolved_static_dir.resolve()
             requested = (root / full_path).resolve()
             if _is_relative_to(requested, root) and requested.is_file():
-                return FileResponse(requested)
+                # Host MIME databases (including the Windows registry) can label
+                # executable web assets as text/plain and block module loading.
+                media_type = {
+                    ".js": "text/javascript",
+                    ".mjs": "text/javascript",
+                    ".wasm": "application/wasm",
+                }.get(requested.suffix.lower())
+                return FileResponse(requested, media_type=media_type)
             index = root / "index.html"
             if index.is_file():
                 return FileResponse(index)
@@ -10025,6 +8846,7 @@ def _normalize_runtime_start_request(
     payload: dict[str, Any],
 ) -> StartTurnRequest | JSONResponse:
     try:
+        raw_image_ids = image_ids(payload.get("image_attachment_ids", []))
         page_context = _normalize_chat_page_context(payload.get("page_context"))
         raw_attachments = (
             _normalize_chat_attachments(payload["attachments"]) if "attachments" in payload else []
@@ -10032,7 +8854,7 @@ def _normalize_runtime_start_request(
     except ValueError as exc:
         return error_response(422, str(exc))
     message = str(payload.get("message") or "")
-    if not message:
+    if not message and not raw_image_ids:
         return error_response(400, "message is required")
     raw_conversation_id = payload.get("conversation_id", 0)
     if raw_conversation_id is None:
@@ -10109,6 +8931,7 @@ def _normalize_runtime_start_request(
             page_context=immutable_page,
             attachments=attachments,
             pilot_action=descriptor,
+            image_attachment_ids=raw_image_ids,
         )
     except (TypeError, ValueError, KeyError) as exc:
         return error_response(422, str(exc))
@@ -10225,6 +9048,7 @@ def _runtime_http_response(outcome: object) -> JSONResponse:
 
 
 def _auth_guard_response(request: Request, data_dir: Path) -> JSONResponse | None:
+    # API 登录鉴权与业务作用域校验分层：通过此处仍须通过各 Repository/工具的归属和来源检查。
     path = request.url.path
     if path == RUNTIME_INSPECT_PATH and request.method == "POST":
         # The handler checks a live, read-only, single-interview capability.
@@ -10313,25 +9137,46 @@ def _generate_conversation_title(
         )
 
 
-def _chat_response_system_message() -> Message:
+def _chat_response_system_message(
+    *, general: bool = False, custom_persona: bool = False, companion_enabled: bool = True,
+) -> Message:
+    custom_persona = custom_persona and companion_enabled
+    # General stays neutral. Only explicit work/control contexts get a default
+    # report format, and the current request's explicit structure takes priority.
+    presentation = (
+        "自然直接回应，按问题复杂度展开，需要时可用列表或小标题，不套固定汇报格式。"
+        if general else
+        "仅在用户未限定数量或结构且求职工作任务需要结论和后续行动时，"
+        "先给证据与注意事项，以 `## 结论` 收束，用 `## 下一步` 列一到三条 `- ` 行动，列表后不加正文。"
+    )
     return Message(
         role="system",
         surface_contributor="static_policy",
+        surface_revision="companion-expression" if companion_enabled else "pilot-plain",
         content=(
-            "你是 OfferPilot，一个求职领航助手。始终使用用户的语言回复。"
-            "当前对话界面支持助手文本增量流式输出。"
-            "对于实质性回答，请保持简洁，并优先按「结论、依据、下一步」组织。"
-            "对于需要结论和后续行动的实质任务，请先给出证据与注意事项，再以 `## 结论` 收束为一条简短结论，"
-            "并以 `## 下一步` 结尾，列出一到三条以 `- ` 开头的后续行动；该列表后不要追加文本。"
-            "问候语和澄清问题不需要使用这两个标题。"
-            "如果本地工具依据较少，要明确说明。"
-            "不要暴露隐藏推理。不要提到 update_application_status、create_application_event "
-            "等内部工具或 API 名称；请改用用户能理解的动作描述。"
-            "当面试复盘属于某家公司但系统里已有不同岗位投递时，"
-            "先询问用户是否要为该岗位新建投递记录。"
-            "如果写入工具提示必填信息缺失或不明确，只追问一个最关键问题，"
-            "不要继续尝试另一个写入。成功写入后，只给一个实用的下一步建议，"
-            "例如添加日程、生成改进计划，或继续补充复盘。"
+            "你是 OfferPilot 求职助手。"
+            "用用户语言完成当前任务，遵守条数、行数、篇幅和结构，可并列，内容不漏。"
+            "按指定数量给可执行建议，不另加建议或邀约。"
+            "澄清、补料及缺资料说明从简，不占名额。"
+            "仅有岗位名时给通用准备建议，标明适用范围，不当作岗位要求。"
+            "证据不足须说明。"
+            "资料未记载只说明能力待确认，缺口须有明确陈述或可靠证据。"
+            "建议用条件表述，不编造经历或匹配。"
+            + ("回答避免无关重复，详略遵循表达资料和用户当前要求。"
+               if custom_persona else "回答保持简洁。")
+            + presentation
+            + (
+                "问候语、澄清问题与日常陪伴（等待、暂停、回忆）自然回应，不套工作总结或下一步清单。"
+                if companion_enabled else
+                "问候、澄清自然回应，不套工作总结或行动清单。"
+            )
+            + "不要暴露隐藏推理或内部工具/API 名。"
+            "复盘与同公司投递岗位不同时，先问是否为复盘岗位新建投递。"
+            "写入工具必填信息缺失或不明，只追问一个关键问题，不要继续其他写入。"
+            "保留安全和写入确认。"
+            "写入成功后仅给一个实用下一步。"
+            + (companion_persona_policy(custom=custom_persona)
+               if companion_enabled else plain_pilot_safety_policy())
         ),
     )
 
@@ -10557,6 +9402,7 @@ def _stored_messages_to_ai(messages: list[Any], pending_tool_call_id: str = "") 
             tool_calls=_load_tool_calls(message.tool_calls),
             tool_call_id=message.tool_call_id,
             provider_blocks=_load_provider_blocks(message.provider_blocks),
+            images=image_references(json.loads(getattr(message, "image_refs_json", "[]") or "[]")),
             surface_contributor="conversation_history",
         )
         for message in messages
@@ -10606,6 +9452,7 @@ class _FrozenStoredMessage:
     tool_calls: str
     tool_call_id: str
     provider_blocks: str
+    image_refs_json: str = "[]"
 
 
 @dataclass(frozen=True)
@@ -10621,6 +9468,63 @@ class _FrozenChatSourceMessages:
     context_ref: str | None = None
     mode: str = ""
     scope_revision: int = -1
+    persona_binding: Mapping[str, Any] | None = None
+    persona_message: Message | None = None
+    # Separate expression admission from immutable persona identity.
+    companion_enabled: bool | None = None
+
+
+def _persona_binding_for_turn(
+    session: Session, turn_id: str, conversation_id: int,
+) -> Mapping[str, Any] | None:
+    turn = session.get(PilotTurnRecord, turn_id)
+    if turn is None or turn.conversation_id != conversation_id:
+        raise RuntimeError("persona turn binding unavailable")
+    versions = json.loads(turn.source_versions_json)
+    if not isinstance(versions, dict):
+        raise ValueError("persona source versions invalid")
+    if "companion_persona_v1" not in versions:
+        return None  # Explicit legacy official default, not active profile.
+    raw = versions["companion_persona_v1"]
+    if not isinstance(raw, str):
+        raise ValueError("persona binding invalid")
+    binding = json.loads(raw)
+    if not isinstance(binding, dict):
+        raise ValueError("persona binding invalid")
+    load_persona_spec(session, binding)
+    return binding
+
+
+
+def _companion_enabled_for_turn(session: Session, turn_id: str) -> bool | None:
+    turn = session.get(PilotTurnRecord, turn_id)
+    if turn is None:
+        raise RuntimeError("companion turn binding unavailable")
+    versions = json.loads(turn.source_versions_json)
+    if "companion_enabled_v1" not in versions:
+        return None  # Legacy turn: current opt-in still gates any expression.
+    value = versions["companion_enabled_v1"]
+    if not isinstance(value, str) or value not in ("true", "false"):
+        raise ValueError("companion enabled binding invalid")
+    return value == "true"
+
+
+def _without_companion_expression(source: _FrozenChatSourceMessages) -> _FrozenChatSourceMessages:
+    context = source.context_message
+    if context is not None and (context.surface_revision or "").startswith("companion:"):
+        context = None
+    return replace(source, companion_enabled=False, persona_message=None, context_message=context)
+
+def _bind_persona_source(
+    source: _FrozenChatSourceMessages, session: Session, binding: Mapping[str, Any] | None,
+) -> _FrozenChatSourceMessages:
+    spec = PersonaSpec() if binding is None else load_persona_spec(session, dict(binding))
+    # Never replace the frozen revision with today's active profile. A new opt-in
+    # also cannot add expression to a turn admitted while the switch was off.
+    enabled = source.companion_enabled is not False and companion_policy(session)[1].enabled
+    bound = replace(source, persona_binding=binding, companion_enabled=enabled,
+                    persona_message=persona_profile_message(spec, binding) if enabled else None)
+    return bound if enabled else _without_companion_expression(bound)
 
 
 class _TransactionChatSourceLoader:
@@ -10635,8 +9539,10 @@ class _TransactionChatSourceLoader:
 
 
 class _AdmittedChatSourceLoader:
-    def __init__(self, source: _FrozenChatSourceMessages) -> None:
+    def __init__(self, source: _FrozenChatSourceMessages, *,
+                 persona_sessions: sessionmaker[Session] | None = None) -> None:
         self.source = source
+        self.persona_sessions = persona_sessions
 
     def load(self, conversation: object, request: object, **_kwargs: object) -> object:
         scope = _canonical_source_scope(conversation)
@@ -10648,6 +9554,9 @@ class _AdmittedChatSourceLoader:
             or scope.mode != self.source.mode
         ):
             raise RuntimeError("Conversation scope changed after admission")
+        if self.persona_sessions is not None:
+            with self.persona_sessions() as session:
+                return _bind_persona_source(self.source, session, self.source.persona_binding)
         return self.source
 
 
@@ -10685,16 +9594,21 @@ class _FreshAdmittedChatSourceLoader:
             getattr(value, "scope_revision", None),
             str(context_revision),
             attachment_revisions,
+            getattr(value, "persona_binding", None),
+            getattr(value, "companion_enabled", None),
         )
 
     def load(self, conversation: object, request: object, **kwargs: object) -> object:
         current = self.loader(conversation, request, **kwargs)
-        if self._revision(current) != self._revision(self.source):
+        effective = self.source
+        if getattr(current, "companion_enabled", None) is False:
+            effective = _without_companion_expression(effective)
+        if self._revision(current) != self._revision(effective):
             raise RuntimeError("source changed after admission")
         # Return the frozen pre-user-message source.  The fresh read above is
         # validation only; returning it would feed the admitted user message
-        # into the model a second time.
-        return self.source
+        # into the model a second time. Revoked expression is the only removal.
+        return effective
 
 
 @dataclass(frozen=True, slots=True)
@@ -10756,6 +9670,7 @@ def _load_chat_source_messages(
     attachments: list[dict[str, str]] | None,
     *,
     pending_tool_call_id: str = "",
+    query: str = "",
 ) -> _FrozenChatSourceMessages:
     scope = _canonical_source_scope(conversation)
     from offerpilot.ai.tool_authority.visibility import AuthorityApplicationVisibilityQuery
@@ -10768,7 +9683,7 @@ def _load_chat_source_messages(
             raise RuntimeError("source query returned multiple rows")
         return rows[0] if rows else None
 
-    def read(connection: sqlite3.Connection) -> tuple[Any, Any, Any]:
+    def read(connection: sqlite3.Connection) -> tuple[Any, Any, Any, Any]:
         conversation_row = one(
             connection,
             "SELECT context_type, context_ref, mode, scope_revision "
@@ -10794,7 +9709,7 @@ def _load_chat_source_messages(
         history_rows = fetch_rows(
             connection.execute(
                 """
-                SELECT id, role, content, tool_calls, tool_call_id, provider_blocks
+                SELECT id, role, content, tool_calls, tool_call_id, provider_blocks, image_refs_json
                 FROM chat_messages WHERE conversation_id = ? ORDER BY id ASC
                 """,
                 (scope.conversation_id,),
@@ -10857,10 +9772,13 @@ def _load_chat_source_messages(
                     (record_id,),
                 )
             attachment_rows.append((kind, raw_id, row))
-        return history_rows, context_row, tuple(attachment_rows)
+        companion = read_companion_context(
+            connection, query, context_type=scope.context_type, conversation_id=scope.conversation_id,
+        ) if not attachments and not pending_tool_call_id and scope.mode == "general" else None
+        return history_rows, context_row, tuple(attachment_rows), companion
 
-    def freeze(raw: tuple[Any, Any, Any]) -> _FrozenChatSourceMessages:
-        history_rows, context_row, attachment_rows = raw
+    def freeze(raw: tuple[Any, Any, Any, Any]) -> _FrozenChatSourceMessages:
+        history_rows, context_row, attachment_rows, companion = raw
         frozen_history = [
             _FrozenStoredMessage(
                 id=int(str(row[0])),
@@ -10869,13 +9787,14 @@ def _load_chat_source_messages(
                 tool_calls=str(row[3] or ""),
                 tool_call_id=str(row[4] or ""),
                 provider_blocks=str(row[5] or ""),
+                image_refs_json=str(row[6] or "[]"),
             )
             for row in history_rows
         ]
         history = tuple(
             _stored_messages_to_ai(frozen_history, pending_tool_call_id=pending_tool_call_id)
         )
-        context_message = _snapshot_context_message(context_row)
+        context_message = _snapshot_context_message(context_row) or companion_context_message(companion)
         attachment_messages = tuple(_snapshot_attachment_messages(attachment_rows))
         return _FrozenChatSourceMessages(
             history,
@@ -11276,6 +10195,18 @@ def _chat_model(injected: Optional[ChatModel], data_dir: Path) -> ChatModel | JS
         return error_response(503, str(exc))
 
 
+def _mock_interview_chat_model(injected: Optional[ChatModel], data_dir: Path) -> ChatModel | None:
+    model = _chat_model(injected, data_dir)
+    return None if isinstance(model, JSONResponse) else model
+
+
+def _workflow_chat_model(injected: Optional[ChatModel], data_dir: Path) -> ChatModel:
+    model = _chat_model(injected, data_dir)
+    if isinstance(model, JSONResponse):
+        raise WorkflowError(str(json.loads(bytes(model.body))["error"]), model.status_code)
+    return model
+
+
 def _find_static_dir() -> Path | None:
     candidates = [
         Path.cwd() / "web" / "dist",
@@ -11316,6 +10247,7 @@ def _settings_payload(cfg: Config, data_dir: Path | None = None) -> dict[str, An
         "data_dir": str((data_dir or resolve_data_dir()).resolve()),
         "chat_auto_approve_writes": cfg.chat_auto_approve_writes,
         "active_provider_id": active.id,
+        "image_capability": image_capability(cfg),
         "fallback_provider_ids": cfg.fallback_provider_ids,
         "providers": [_provider_payload(profile) for profile in cfg.provider_profiles()],
         "base_url": active.base_url,
@@ -11381,6 +10313,10 @@ def _provider_from_payload(
 ) -> AIProviderProfile:
     api_key = payload.get("api_key")
     preserved_key = current.api_key if current is not None else ""
+    same_vision_target = current is not None and all(
+        str(payload.get(field) or getattr(current, field)) == getattr(current, field)
+        for field in ("provider", "base_url", "model")
+    )
     return AIProviderProfile(
         id=str(payload.get("id") or (current.id if current is not None else "default")),
         label=str(payload.get("label") or (current.label if current is not None else "Default")),
@@ -11400,6 +10336,7 @@ def _provider_from_payload(
             )
             is True
         ),
+        supports_vision=(payload.get("supports_vision", current.supports_vision if same_vision_target and current is not None else False) is True),
     )
 
 
@@ -11540,6 +10477,7 @@ def _provider_payload(profile: AIProviderProfile) -> dict[str, Any]:
         "model": profile.model,
         "enabled": profile.enabled,
         "supports_json_schema": profile.supports_json_schema,
+        "supports_vision": profile.supports_vision,
         "context_window": profile.context_window,
         "max_output_tokens": profile.max_output_tokens,
         "has_api_key": bool(profile.api_key),
@@ -11587,22 +10525,9 @@ def _safe_provider_error(error: Exception, providers: list[AIProviderProfile]) -
 
 
 def _build_backup_archive(data_dir: Path) -> bytes:
-    buffer = BytesIO()
-    data_dir.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for path in sorted(data_dir.rglob("*")):
-            if not path.is_file() or path.is_symlink():
-                continue
-            archive_path = path.relative_to(data_dir).as_posix()
-            if archive_path == JOURNAL_KEY_FILENAME or archive_path.startswith(
-                f".{JOURNAL_KEY_FILENAME}."
-            ):
-                continue
-            if archive_path == "config.json":
-                archive.writestr(archive_path, _redacted_backup_config(data_dir))
-                continue
-            archive.write(path, archive_path)
-    return buffer.getvalue()
+    from offerpilot.backup_export import export_archive
+
+    return export_archive(data_dir, _redacted_backup_config(data_dir))
 
 
 def _redacted_backup_config(data_dir: Path) -> str:
@@ -12958,16 +11883,11 @@ def _content_json_from_payload(value: Any) -> dict[str, Any] | JSONResponse:
 
 
 def _resume_is_empty_draft(resume: Any) -> bool:
-    content = normalize_resume_content(resume.content_json)
-    return not str(resume.parsed_data or "").strip() and not _resume_content_has_value(content)
+    return is_empty_resume_draft(resume)
 
 
 def _resume_content_has_value(value: Any) -> bool:
-    if isinstance(value, dict):
-        return any(_resume_content_has_value(item) for item in value.values())
-    if isinstance(value, list):
-        return any(_resume_content_has_value(item) for item in value)
-    return bool(str(value or "").strip())
+    return content_has_value(value)
 
 
 def _resume_sample(sample_id: str) -> dict[str, Any] | None:
@@ -13033,46 +11953,6 @@ def _extract_pdf_text(data: bytes) -> str:
     return "\n".join(page_text).strip()
 
 
-def _structured_ai_system() -> str:
-    return (
-        "你是一名专业的招聘求职分析师。只输出 JSON，不要使用 markdown 代码块。"
-        "所有文字使用简体中文，数组字段为空时返回 []。"
-    )
-
-
-def _jd_analysis_prompt(jd_text: str) -> str:
-    return f"""请分析以下岗位描述（JD），输出如下 JSON：
-{{
-  "summary": "一句话总结这个岗位",
-  "requirements": ["关键要求点，每条一句话"],
-  "tech_stack": ["涉及的技术栈/工具"],
-  "experience_years": "要求的年限，如 3-5 年，无要求填 不限",
-  "education": "学历要求，如 本科及以上，无要求填 不限",
-  "highlights": ["这个岗位吸引人的亮点"],
-  "suggestions": ["针对求职者的准备建议，每条一句话"]
-}}
-
-JD 内容：
-{_truncate_for_prompt(jd_text)}"""
-
-
-def _resume_match_prompt(resume_text: str, jd_text: str) -> str:
-    return f"""请对比以下简历和岗位 JD，评估匹配度，输出如下 JSON：
-{{
-  "match_score": 0到100的整数匹配度,
-  "matched": ["简历中与 JD 匹配的点"],
-  "gaps": ["简历中相对 JD 缺失或薄弱的点"],
-  "suggestions": ["针对这份 JD 该如何优化简历/补足能力的建议"],
-  "summary": "一句话总评"
-}}
-
-简历内容：
-{_truncate_for_prompt(resume_text)}
-
-JD 内容：
-{_truncate_for_prompt(jd_text)}"""
-
-
 def _material_kit_prompt(company: str, position: str, resume_text: str, jd_text: str) -> str:
     return f"""Create an application material kit for this role. Return only JSON with:
 {{
@@ -13101,116 +11981,8 @@ JD:
 {_truncate_for_prompt(jd_text)}"""
 
 
-def _questions_prompt(source_label: str, context_text: str, count: int) -> str:
-    return f"""你是一名资深技术面试官。请基于以下【{source_label}】设计 {count} 道面试题。
-严格输出如下 JSON，不要输出多余文字：
-{{
-  "questions": [
-    {{
-      "category": "分类",
-      "difficulty": "easy|medium|hard",
-      "question": "题目",
-      "reference_answer": "参考答案要点",
-      "tags": ["关键词"]
-    }}
-  ]
-}}
-
-材料内容：
-{_truncate_for_prompt(context_text)}"""
-
-
-def _persist_generated_questions(
-    repo: QuestionsRepository,
-    generated: Any,
-    source_type: str,
-    application_id: int | None,
-    topic: str = "",
-) -> tuple[list[Any], int]:
-    if not isinstance(generated, list):
-        return [], 0
-    existing = repo.hashes()
-    seen = set(existing)
-    to_create: list[QuestionCreate] = []
-    skipped = 0
-    for item in generated:
-        if not isinstance(item, dict):
-            continue
-        text = str(item.get("question") or "").strip()
-        if not text:
-            continue
-        digest = question_hash(text)
-        if digest in seen:
-            skipped += 1
-            continue
-        seen.add(digest)
-        tags_value = item.get("tags") or []
-        tags = [str(tag) for tag in tags_value] if isinstance(tags_value, list) else []
-        to_create.append(
-            QuestionCreate(
-                application_id=application_id,
-                topic=topic,
-                category=str(item.get("category") or "").strip(),
-                difficulty=_normalize_difficulty(str(item.get("difficulty") or "medium")),
-                question=text,
-                reference_answer=str(item.get("reference_answer") or "").strip(),
-                tags=tags,
-                source_type=source_type,
-                status="new",
-            )
-        )
-    return repo.bulk_create(to_create), skipped
-
-
-def _normalize_difficulty(value: str) -> str:
-    normalized = value.strip().lower()
-    if normalized in {"easy", "简单"}:
-        return "easy"
-    if normalized in {"hard", "困难", "难"}:
-        return "hard"
-    return "medium"
-
-
-def _clamp_question_count(count: int) -> int:
-    if count <= 0:
-        return 8
-    return min(count, 20)
-
-
-def _complete_json(model: ChatModel, system: str, user: str) -> dict[str, Any]:
-    try:
-        assistant = model.complete(
-            [Message(role="system", content=system), Message(role="user", content=user)],
-            [],
-        )
-        return _parse_json_reply(assistant.content)
-    except Exception as exc:
-        raise RuntimeError(str(exc)) from exc
-
-
-def _parse_json_reply(reply: str) -> dict[str, Any]:
-    text = reply.strip()
-    if text.startswith("```"):
-        first_newline = text.find("\n")
-        if first_newline >= 0:
-            text = text[first_newline + 1 :].strip()
-        fence = text.rfind("```")
-        if fence >= 0:
-            text = text[:fence].strip()
-    value = json.loads(text)
-    if not isinstance(value, dict):
-        raise RuntimeError("AI response must be a JSON object")
-    return value
-
-
 def _compact_json_value(value: Any) -> str:
     try:
         return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
     except TypeError as exc:
         raise ValueError("invalid json") from exc
-
-
-def _truncate_for_prompt(value: str, max_chars: int = 12000) -> str:
-    if len(value) <= max_chars:
-        return value
-    return value[:max_chars] + "\n...(已截断)"

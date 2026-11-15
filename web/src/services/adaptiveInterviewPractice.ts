@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import axios from 'axios';
 import type {
   AdaptivePracticeCompleteInput,
@@ -10,16 +11,16 @@ import { createApiClient } from './http';
 const http = createApiClient({ baseURL: '/api', timeout: 15000 });
 
 const COPY: Record<string, string> = {
-  adaptive_practice_not_found: '练习或来源已不可见，请重新打开页面。',
-  adaptive_practice_source_conflict: '复盘来源已变化，请重新核对后再开始。',
-  adaptive_practice_idempotency_conflict: '本次操作内容已变化，请重新开始。',
-  adaptive_practice_revision_conflict: '练习状态已变化，请重新加载。',
-  adaptive_practice_invalid_payload: '练习内容不完整，请检查后重试。',
+  get adaptive_practice_not_found() { return t("练习或来源已不可见，请重新打开页面。"); },
+  get adaptive_practice_source_conflict() { return t("复盘来源已变化，请重新核对后再开始。"); },
+  get adaptive_practice_idempotency_conflict() { return t("本次操作内容已变化，请重新开始。"); },
+  get adaptive_practice_revision_conflict() { return t("练习状态已变化，请重新加载。"); },
+  get adaptive_practice_invalid_payload() { return t("练习内容不完整，请检查后重试。"); },
 };
 
 export class AdaptivePracticeError extends Error {
   constructor(public readonly code?: string, public readonly status?: number) {
-    super(code && COPY[code] ? COPY[code] : '复盘训练暂时不可用，请稍后重试。');
+    super(code && COPY[code] ? COPY[code] : t("复盘训练暂时不可用，请稍后重试。"));
     this.name = 'AdaptivePracticeError';
   }
 }

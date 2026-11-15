@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { LogEntry, Settings } from '@/services/chat';
 
 export function buildDiagnosticsText(settings: Settings, logs: LogEntry[]): string {
@@ -10,13 +11,13 @@ export function buildDiagnosticsText(settings: Settings, logs: LogEntry[]): stri
   });
   return [
     `OfferPilot ${settings.version}`,
-    `运行模式: ${settings.runtime_mode}`,
-    `访问控制: ${settings.auth_enabled ? 'enabled' : 'disabled'}`,
-    `日志级别: ${settings.log_level}`,
-    `数据目录: ${settings.data_dir}`,
-    '供应商:',
+    t("运行模式: {value0}", { value0: settings.runtime_mode }),
+    t("访问控制: {value0}", { value0: settings.auth_enabled ? 'enabled' : 'disabled' }),
+    t("日志级别: {value0}", { value0: settings.log_level }),
+    t("数据目录: {value0}", { value0: settings.data_dir }),
+    t("供应商:"),
     ...providers,
-    '最近日志:',
+    t("最近日志:"),
     ...logs.map((entry) => `${entry.level} ${entry.message}`),
   ].join('\n');
 }

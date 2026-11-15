@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import dayjs from 'dayjs';
 import type { Application, ApplicationStatus } from '@/types/application';
 import type { ScheduleEvent } from '@/types/event';
@@ -77,9 +78,9 @@ export function computeFunnel(apps: Application[]): FunnelStage[] {
   const inOffer = apps.filter((a) => a.status === 'offer').length;
   const ratio = (n: number) => (total === 0 ? 0 : n / total);
   return [
-    { key: 'applied', label: '投递', count: total, ratio: 1 },
-    { key: 'screen', label: '初筛', count: inScreen, ratio: ratio(inScreen) },
-    { key: 'interview', label: '面试', count: inInterview, ratio: ratio(inInterview) },
+    { key: 'applied', label: t("投递"), count: total, ratio: 1 },
+    { key: 'screen', label: t("初筛"), count: inScreen, ratio: ratio(inScreen) },
+    { key: 'interview', label: t("面试"), count: inInterview, ratio: ratio(inInterview) },
     { key: 'offer', label: 'Offer', count: inOffer, ratio: ratio(inOffer) },
   ];
 }
@@ -87,7 +88,7 @@ export function computeFunnel(apps: Application[]): FunnelStage[] {
 export function computeMomentum(apps: Application[], weeks = 4, now = dayjs()): MomentumBucket[] {
   const buckets: MomentumBucket[] = [];
   for (let i = weeks - 1; i >= 0; i--) {
-    const start = now.subtract(i, 'week').startOf('week');
+    const start = now.locale('en').subtract(i, 'week').startOf('week');
     const end = start.add(1, 'week');
     const count = apps.filter((a) => {
       if (!a.applied_at) return false;
@@ -119,7 +120,7 @@ export function deriveReminders(
       kind: 'stale',
       severity: days >= STALE_RED_DAYS ? 'red' : 'amber',
       title: `${a.company_name} · ${a.position_name}`,
-      detail: `已投 ${days} 天无回音，建议跟进`,
+      detail: t("已投 {days} 天无回音，建议跟进", { days: days }),
       appId: a.id,
       target: 'board',
       sortKey: 10000 - days, // 停滞越久越靠前
@@ -132,13 +133,13 @@ export function deriveReminders(
     const when = dayjs(e.scheduled_at);
     const hours = when.diff(now, 'hour', true);
     if (hours < 0 || hours > INTERVIEW_SOON_HOURS) continue;
-    const label = e.company_name ? `${e.company_name} · ${e.position_name ?? ''}` : '面试安排';
+    const label = e.company_name ? `${e.company_name} · ${e.position_name ?? ''}` : t("面试安排");
     out.push({
       id: `event-${e.id}`,
       kind: 'interview',
       severity: hours < 24 ? 'red' : 'amber',
       title: label.trim(),
-      detail: `${when.format('M月D日 HH:mm')} 面试，去准备`,
+      detail: t("{value} 面试，去准备", { value: when.format(t("M月D日 HH:mm")) }),
       appId: e.application_id,
       eventId: e.id,
       target: 'calendar',
@@ -158,7 +159,7 @@ export function deriveReminders(
       kind: 'offer_deadline',
       severity: days <= 2 ? 'red' : 'amber',
       title: `${o.company_name} Offer`,
-      detail: `还剩 ${days} 天答复期`,
+      detail: t("还剩 {days} 天答复期", { days: days }),
       offerId: o.id,
       appId: o.application_id,
       target: 'offers',
@@ -179,7 +180,7 @@ export function deriveReminders(
       kind: 'no_next',
       severity: 'amber',
       title: `${a.company_name} · ${a.position_name}`,
-      detail: '面试进行中，未安排下一场',
+      detail: t("面试进行中，未安排下一场"),
       appId: a.id,
       target: 'calendar',
       sortKey: 5000,

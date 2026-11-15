@@ -17,7 +17,7 @@ describe('top bar actions', () => {
   });
 
   it('routes the gear through the unified settings label', () => {
-    expect(source).toContain('aria-label="设置"');
+    expect(source).toContain('aria-label={t("设置")}');
     expect(source).not.toContain('aria-label="AI 设置"');
   });
 

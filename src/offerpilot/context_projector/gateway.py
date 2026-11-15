@@ -28,8 +28,8 @@ from offerpilot.context_projector.budget import (
     DEFAULT_OUTPUT_RESERVE,
     PROVIDER_FRAMING_RESERVE,
     ProviderBudget,
-    canonical_messages,
     conservative_units,
+    message_input_units,
 )
 from offerpilot.context_projector.contracts import (
     FrozenModelSurface,
@@ -37,6 +37,7 @@ from offerpilot.context_projector.contracts import (
     canonical_json,
     sha256_hex,
 )
+from offerpilot.image_contracts import VISION_ADAPTERS, require_image_call_limits
 
 ENDPOINT_NORMALIZATION_VERSION = "provider-endpoint-v1"
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
@@ -85,6 +86,7 @@ class FrozenProviderCandidate:
     output_reserve: int
     supports_json_schema: bool
     credential: str = field(repr=False)
+    supports_vision: bool = False
 
     @classmethod
     def freeze(cls, profile: AIProviderProfile) -> FrozenProviderCandidate:
@@ -104,6 +106,7 @@ class FrozenProviderCandidate:
             output_reserve=output_reserve,
             supports_json_schema=profile.supports_json_schema,
             credential=profile.api_key,
+            supports_vision=profile.supports_vision,
         )
 
     def budget(self) -> ProviderBudget:
@@ -137,6 +140,7 @@ class FrozenProviderExecutionChain:
                 "context_window": candidate.context_window,
                 "output_reserve": candidate.output_reserve,
                 "supports_json_schema": candidate.supports_json_schema,
+                "supports_vision": candidate.supports_vision,
             }
             for candidate in candidates
         ]
@@ -235,6 +239,11 @@ class SingleCandidateAgentTransport:
         normalized = normalize_provider_endpoint(candidate.endpoint)
         if normalized != candidate.endpoint:
             raise ProjectionError("provider_endpoint_changed")
+        images = tuple(image for message in surface.messages for image in message.images)
+        if images:
+            if not candidate.supports_vision or candidate.provider_kind not in VISION_ADAPTERS:
+                raise ProjectionError("provider_vision_required")
+            require_image_call_limits(images)
         tool_payloads = materialize_provider_payloads(surface.tools)
         body = canonical_json(
             {
@@ -247,7 +256,7 @@ class SingleCandidateAgentTransport:
         )
         if len(body) > ADAPTER_REQUEST_BODY_BYTE_CAP:
             raise ProjectionError("adapter_request_body_byte_cap_exceeded")
-        estimated = conservative_units(canonical_messages(surface.messages)) + conservative_units(
+        estimated = message_input_units(surface.messages) + conservative_units(
             canonical_json(tool_payloads)
         )
         if estimated > candidate.budget().input_limit:

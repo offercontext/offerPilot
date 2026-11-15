@@ -1,3 +1,4 @@
+import { t, useLocale, getLocale } from '@/i18n';
 import { useEffect, useMemo, useState } from 'react';
 import { Modal, Input, List } from 'antd';
 import type { Application } from '@/types/application';
@@ -9,7 +10,23 @@ export interface Command {
   key: string;
   label: string;
   hint?: string;
+  destination?: ViewMode;
+  aliases?: string[];
   run: () => void;
+}
+
+export function mergeDestinationCommands(commands: Command[]): Command[] {
+  const merged: Command[] = [];
+  for (const command of commands) {
+    const existing = command.destination && merged.find((item) => item.destination === command.destination);
+    if (existing) existing.aliases = [...new Set([...(existing.aliases ?? []), command.label, ...(command.aliases ?? [])])];
+    else merged.push({ ...command });
+  }
+  return merged;
+}
+
+export function matchesCommand(command: Command, keyword: string): boolean {
+  return [command.label, ...(command.aliases ?? [])].some((text) => text.toLowerCase().includes(keyword.trim().toLowerCase()));
 }
 
 function commandOptionId(key: string): string {
@@ -19,7 +36,7 @@ function commandOptionId(key: string): string {
 function pipelineInsightMatches(item: PipelineInsight, keyword: string): boolean {
   if (!keyword) return true;
 
-  const hint = `流程提醒 - ${item.priority.toUpperCase()}`;
+  const hint = t("流程提醒 - {value0}", { value0: item.priority.toUpperCase() });
   return [
     item.title,
     hint,
@@ -53,7 +70,7 @@ export function buildApplicationSearchCommands(
     .map((a) => ({
       key: `app-${a.id}`,
       label: `${a.company_name} · ${a.position_name}`,
-      hint: '投递',
+      hint: t("投递"),
       run: () => {
         onOpenDetail(a);
         onClose();
@@ -66,15 +83,16 @@ export function buildPipelineNavigationCommands(
   onClose: () => void
 ): Command[] {
   return [
-    { key: 'pipeline-board', label: '打开投递看板', hint: '投递', view: 'board' },
-    { key: 'pipeline-list', label: '打开投递列表', hint: '投递', view: 'applications-list' },
-    { key: 'pipeline-calendar', label: '打开事件日历', hint: '今日', view: 'calendar' },
-    { key: 'pipeline-reminders', label: '打开今日提醒', hint: '今日', view: 'reminders' },
-    { key: 'pipeline-offers', label: '打开 Offer 中心', hint: 'Offer', view: 'offers' },
+    { key: 'pipeline-board', label: t("打开投递看板"), hint: t("投递"), view: 'board' },
+    { key: 'pipeline-list', label: t("打开投递列表"), hint: t("投递"), view: 'applications-list' },
+    { key: 'pipeline-calendar', label: t("打开事件日历"), hint: t("今日"), view: 'calendar' },
+    { key: 'pipeline-reminders', label: t("打开今日提醒"), hint: t("今日"), view: 'reminders' },
+    { key: 'pipeline-offers', label: t("打开 Offer 中心"), hint: 'Offer', view: 'offers' },
   ].map((item) => ({
     key: item.key,
     label: item.label,
     hint: item.hint,
+    destination: item.view as ViewMode,
     run: () => {
       onNavigate(item.view as ViewMode);
       onClose();
@@ -113,6 +131,7 @@ export default function CommandPalette({
   pipelineActions,
   onRunPipelineAction,
 }: Props) {
+  useLocale();
   const [q, setQ] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -125,26 +144,26 @@ export default function CommandPalette({
   }, [open, q]);
 
   const actions: Command[] = useMemo(
-    () => [
-      { key: 'add', label: '添加投递', hint: '动作', run: () => { onAddApplication(); onClose(); } },
-      { key: 'resume-library', label: '打开简历库', hint: '简历', run: () => { onOpenResume(); onClose(); } },
-      { key: 'new-resume', label: '新建简历', hint: '在简历库创建薄版', run: () => { onOpenResume(); onClose(); } },
-      { key: 'uploadResume', label: '上传简历', hint: 'PDF 到简历库', run: () => { onUploadResume?.(); onClose(); } },
-      { key: 'haru', label: '问 Haru', hint: '助手', run: () => { onOpenChat(); onClose(); } },
-      { key: 'pilot', label: '打开 Pilot 工作区', hint: '助手', run: () => { onOpenPilot?.(); onClose(); } },
-      { key: 'settings', label: '打开设置', hint: '设置', run: () => { onOpenSettings(); onClose(); } },
+    () => mergeDestinationCommands([
+      { key: 'add', label: t("添加投递"), hint: t("动作"), run: () => { onAddApplication(); onClose(); } },
+      { key: 'resume-library', label: t("打开简历库"), hint: t("简历"), destination: 'resumes', aliases: [t("新建简历")], run: () => { onOpenResume(); onClose(); } },
+      ...(onUploadResume ? [{ key: 'uploadResume', label: t("上传简历"), hint: t("PDF 到简历库"), run: () => { onUploadResume(); onClose(); } }] : []),
+      { key: 'haru', label: t("问 Haru"), hint: t("助手"), run: () => { onOpenChat(); onClose(); } },
+      ...(onOpenPilot ? [{ key: 'pilot', label: t("打开 Pilot 工作区"), hint: t("助手"), run: () => { onOpenPilot(); onClose(); } }] : []),
+      { key: 'settings', label: t("打开设置"), hint: t("设置"), destination: 'settings', run: () => { onOpenSettings(); onClose(); } },
       ...buildPipelineNavigationCommands(onNavigate, onClose),
       ...MODULE_NAV.map((item) => ({
         key: `nav-${item.key}`,
-        label: `前往 ${item.label}`,
-        hint: '导航',
+        label: t("前往 {value0}", { value0: item.label }),
+        hint: t("导航"),
+        destination: item.defaultView,
         run: () => {
           onNavigate(item.defaultView);
           onClose();
         },
       })),
-    ],
-    [onAddApplication, onOpenResume, onUploadResume, onOpenChat, onOpenPilot, onOpenSettings, onNavigate, onClose]
+    ]),
+    [onAddApplication, onOpenResume, onUploadResume, onOpenChat, onOpenPilot, onOpenSettings, onNavigate, onClose, getLocale()]
   );
 
   const kw = q.trim().toLowerCase();
@@ -156,18 +175,18 @@ export default function CommandPalette({
         .map((item) => ({
           key: `pipeline-${item.id}`,
           label: item.title,
-          hint: `流程提醒 - ${item.priority.toUpperCase()}`,
+          hint: t("流程提醒 - {value0}", { value0: item.priority.toUpperCase() }),
           run: () => {
             onRunPipelineAction(item);
             onClose();
           },
         })),
-    [pipelineActions, kw, onRunPipelineAction, onClose]
+    [pipelineActions, kw, onRunPipelineAction, onClose, getLocale()]
   );
   const appMatches = buildApplicationSearchCommands(applications, kw, onOpenDetail, onClose);
 
   const actionMatches = kw
-    ? actions.filter((c) => c.label.toLowerCase().includes(kw))
+    ? actions.filter((c) => matchesCommand(c, kw))
     : actions;
 
   const items = [...appMatches, ...pipelineCommands, ...actionMatches];
@@ -202,7 +221,7 @@ export default function CommandPalette({
         aria-activedescendant={activeItem ? commandOptionId(activeItem.key) : undefined}
         size="large"
         variant="borderless"
-        placeholder="快速打开页面、投递或助手…"
+        placeholder={t("快速打开页面、投递或助手…")}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={onKeyDown}
@@ -211,14 +230,14 @@ export default function CommandPalette({
       <div
         id="command-palette-listbox"
         role="listbox"
-        aria-label="命令结果"
+        aria-label={t("命令结果")}
         data-testid="command-palette-results"
         className={workflowStyles.scrollRegion}
         style={{ maxHeight: 360, borderTop: '1px solid var(--op-border)' }}
       >
         <List
           dataSource={items}
-          locale={{ emptyText: '无匹配结果' }}
+          locale={{ emptyText: t("无匹配结果") }}
           renderItem={(c, index) => (
             <List.Item
               id={commandOptionId(c.key)}

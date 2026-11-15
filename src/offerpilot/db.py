@@ -3,13 +3,14 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, text
+from sqlalchemy import DateTime, create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.schema import CreateIndex, CreateTable
 
 from offerpilot.models import Base
+from offerpilot.job_mail import models as _job_mail_models  # noqa: F401
 # Import feature model modules before ``Base.metadata.create_all`` so their
 # tables are registered on the shared declarative metadata.  These imports are
 # intentionally kept here (the database composition root) rather than relying
@@ -17,7 +18,12 @@ from offerpilot.models import Base
 from offerpilot.confirmed_memory import models as _confirmed_memory_models  # noqa: F401
 from offerpilot.context_sources import models as _context_sources_models  # noqa: F401
 from offerpilot.proactive import models as _proactive_models  # noqa: F401
+from offerpilot.companion import models as _companion_models  # noqa: F401
+from offerpilot.companion import persona_models as _persona_models  # noqa: F401
 from offerpilot.knowledge import note_lifecycle as _knowledge_note_lifecycle  # noqa: F401
+from offerpilot.external_agents import models as _external_agent_models  # noqa: F401
+from offerpilot.external_agents.migration import ensure_business_schema
+from offerpilot.training_evidence import models as _training_evidence_models  # noqa: F401
 
 SessionFactory = sessionmaker[Session]
 
@@ -54,7 +60,45 @@ def _remove_recovery_path(path: Path) -> None:
         pass
 
 
+def _chat_image_schema_state(connection) -> tuple[bool, bool]:  # type: ignore[no-untyped-def]
+    # Consume every row before releasing the connection or running later DDL.
+    columns = connection.exec_driver_sql("PRAGMA table_info(chat_messages)").fetchall()
+    has_column = any(row[1] == "image_refs_json" for row in columns)
+    has_trigger = connection.exec_driver_sql(
+        "SELECT 1 FROM sqlite_master WHERE type='trigger' "
+        "AND name='chat_attachment_immutable' AND tbl_name='chat_attachments'"
+    ).scalar() is not None
+    return has_column, has_trigger
+
+
+def _ensure_chat_image_schema(engine: Engine) -> None:
+    # Normal startup must not contend with an existing application writer just
+    # to inspect an already complete schema. Release this read before locking.
+    with engine.connect() as connection:
+        if all(_chat_image_schema_state(connection)):
+            return
+    with engine.begin() as connection:
+        # Another initializer may repair the schema between the read and lock.
+        connection.exec_driver_sql("BEGIN IMMEDIATE")
+        has_column, has_trigger = _chat_image_schema_state(connection)
+        if not has_column:
+            connection.exec_driver_sql(
+                "ALTER TABLE chat_messages ADD COLUMN "
+                "image_refs_json TEXT NOT NULL DEFAULT '[]'"
+            )
+        if not has_trigger:
+            connection.execute(text("""
+                CREATE TRIGGER IF NOT EXISTS chat_attachment_immutable
+                BEFORE UPDATE OF id, sha256, mime_type, size_bytes, width, height,
+                                 normalization_version, context_type, context_ref ON chat_attachments
+                BEGIN SELECT RAISE(ABORT, 'immutable image resource'); END
+            """))
+
+
 def init_database(db_path: Path) -> SessionFactory:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(db_path.parent)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         f"sqlite:///{db_path}",
@@ -86,6 +130,21 @@ def init_database(db_path: Path) -> SessionFactory:
         engine, "0033_interview_voice_sessions",
         "Add scoped voice session ownership and answer acceptance provenance",
     )
+    _record_migration(engine, "0039_training_evidence", "Add opt-in plan-local training evidence and content-free command receipts")
+    from offerpilot.training_evidence.migration import ensure_decision_schema
+    ensure_decision_schema(engine)
+    _ensure_chat_image_schema(engine)
+    _record_migration(engine, "0034_chat_image_messages", "Add immutable image resources and message references")
+    _record_migration(engine, "0035_external_agent_requests", "Add scoped external Agent grants and scheduling request receipts")
+    ensure_business_schema(engine)
+    _record_migration(engine, "0033_job_mail_review", "Add isolated mail evidence, proposals, previews and atomic receipts")
+    _record_migration(engine, "0034_companion_life", "Add isolated virtual life, sourced participation and idempotent commands")
+    _ensure_column(engine, "companion_participation", "origin", "TEXT NOT NULL DEFAULT 'control'")
+    _record_migration(engine, "0035_companion_chat", "Ground bounded companion chat actions in actual admitted user messages")
+    _ensure_column(engine, "companion_events", "template_id", "TEXT")
+    _record_migration(engine, "0036_companion_activity_binding", "Bind virtual objects to sourced activity identities without guessing legacy history")
+    _record_migration(engine, "0038_companion_fact_read", "Add refs-only atomic companion fact read receipts")
+    _record_migration(engine, "0037_companion_persona", "Add isolated immutable companion persona revisions and command receipts")
     runtime_columns_changed = [
         _ensure_column(engine, "pilot_executions", "protocol", "TEXT NOT NULL DEFAULT 'legacy'"),
         _ensure_column(engine, "pilot_executions", "runtime_epoch", "TEXT"),
@@ -114,6 +173,7 @@ def init_database(db_path: Path) -> SessionFactory:
         "Add atomic Application creation receipts and local workspace identity",
     )
     _ensure_context_projector_manifest_v2_schema(engine)
+    _record_migration(engine, "0038_persona_context_manifest", "Permit persona source manifests while preserving historical snapshots")
     confirmation_receipt_migrations = [
         _ensure_column(
             engine,
@@ -1006,26 +1066,31 @@ def _recover_knowledge_runtime(engine, data_dir: Path) -> None:  # type: ignore[
         }
         if "knowledge_jobs" not in tables:
             return
-        # 用 Python 端 now.isoformat() 与写入侧 datetime.now(timezone.utc) 保持时区与
-        # 格式一致；CURRENT_TIMESTAMP 在 SQLite 返回无 tz 的 "YYYY-MM-DD HH:MM:SS"，
-        # 与带 +00:00 的 ISO 字符串按字节比较时结果不稳定。
-        now_iso = datetime.now(timezone.utc).isoformat()
+        # 先锁定 writer，再采样时刻与读取 lease，不能覆盖并发续租。
+        # SQLite raw adapter/ORM 的日期文本格式不同，使用 typed datetime 精确比较。
+        conn.execute(text("BEGIN IMMEDIATE"))
+        moment = datetime.now(timezone.utc)
+        now_iso = moment.isoformat()
         stale_jobs = conn.execute(
             text(
                 """
-                SELECT id, kind, source_id, attempt_id, snapshot_id
+                SELECT id, kind, source_id, attempt_id, snapshot_id, lease_expires_at
                 FROM knowledge_jobs
                 WHERE status = 'running'
                   AND kind != 'delete'
                   AND lease_expires_at IS NOT NULL
-                  AND lease_expires_at < :now
                 """
-            ),
-            {"now": now_iso},
+            ).columns(lease_expires_at=DateTime(timezone=True)),
         ).fetchall()
         if not stale_jobs:
             return
-        for job_id, kind, source_id, attempt_id, snapshot_id in stale_jobs:
+        for job_id, kind, source_id, attempt_id, snapshot_id, expiry in stale_jobs:
+            expiry = (
+                expiry.replace(tzinfo=timezone.utc)
+                if expiry.tzinfo is None else expiry.astimezone(timezone.utc)
+            )
+            if expiry > moment:
+                continue
             conn.execute(
                 text(
                     """
@@ -1291,7 +1356,7 @@ def _record_migration(engine, version: str, description: str) -> None:  # type: 
 
 
 def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignore[no-untyped-def]
-    """Preserve snapshot rows while adding the P4 manifest version to V1/V2 checks."""
+    """Preserve snapshot rows while adding persona manifests to historical V1/V2/V3 checks."""
 
     with engine.begin() as conn:
         row = conn.execute(
@@ -1303,22 +1368,35 @@ def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignor
         if row is None or row[0] is None:
             return
         create_sql = str(row[0])
-        if "manifest_schema_version IN (1, 2, 3)" in create_sql:
+        if "manifest_schema_version IN (1, 2, 3, 4)" in create_sql:
             return
-        if "manifest_schema_version IN (1, 2)" in create_sql:
+        if "manifest_schema_version IN (1, 2, 3)" in create_sql:
             rebuilt_sql = create_sql.replace(
-                "manifest_schema_version IN (1, 2)", "manifest_schema_version IN (1, 2, 3)",
-            ).replace("manifest_schema_version = 2", "manifest_schema_version IN (2, 3)")
+                "manifest_schema_version IN (1, 2, 3)", "manifest_schema_version IN (1, 2, 3, 4)",
+            ).replace("manifest_schema_version IN (2, 3)", "manifest_schema_version IN (2, 3, 4)")
+        elif "manifest_schema_version IN (1, 2)" in create_sql:
+            rebuilt_sql = create_sql.replace(
+                "manifest_schema_version IN (1, 2)", "manifest_schema_version IN (1, 2, 3, 4)",
+            ).replace("manifest_schema_version = 2", "manifest_schema_version IN (2, 3, 4)")
         elif "manifest_schema_version = 1" in create_sql:
             rebuilt_sql = create_sql.replace(
-                "manifest_schema_version = 1", "manifest_schema_version IN (1, 2, 3)",
+                "manifest_schema_version = 1", "manifest_schema_version IN (1, 2, 3, 4)",
             ).replace(
                 "length(CAST(manifest_json AS BLOB)) <= 16384",
                 "((manifest_schema_version = 1 AND length(CAST(manifest_json AS BLOB)) <= 16384) "
-                "OR (manifest_schema_version IN (2, 3) AND length(CAST(manifest_json AS BLOB)) <= 65536))",
+                "OR (manifest_schema_version IN (2, 3, 4) AND length(CAST(manifest_json AS BLOB)) <= 65536))",
             )
         else:
             raise RuntimeError("unsupported agent_context_snapshots schema")
+        # Preserve explicit indexes and triggers as well as the table's inline
+        # foreign-key/unique/check constraints. Capture SQL before ALTER rewrites
+        # its table references, then recreate only after the old table is gone.
+        dependent_sql = [
+            str(item[0]) for item in conn.execute(text(
+                "SELECT sql FROM sqlite_master WHERE tbl_name = 'agent_context_snapshots' "
+                "AND type IN ('index', 'trigger') AND sql IS NOT NULL ORDER BY type, name"
+            ))
+        ]
         columns = [
             str(item[1])
             for item in conn.execute(text("PRAGMA table_info(agent_context_snapshots)"))
@@ -1333,6 +1411,8 @@ def _ensure_context_projector_manifest_v2_schema(engine) -> None:  # type: ignor
             f"SELECT {quoted} FROM agent_context_snapshots_0027"
         )
         conn.exec_driver_sql("DROP TABLE agent_context_snapshots_0027")
+        for statement in dependent_sql:
+            conn.exec_driver_sql(statement)
         conn.exec_driver_sql(
             "CREATE INDEX IF NOT EXISTS idx_agent_context_segment_step "
             "ON agent_context_snapshots (run_id, execution_segment_id, model_step)"
@@ -1851,6 +1931,10 @@ def _ensure_scoped_tool_authority_schema(engine) -> None:  # type: ignore[no-unt
     )
 
     with engine.begin() as conn:
+        # sqlite3's legacy mode does not BEGIN for DDL. Hold the database write
+        # lock across the entire guard replacement so concurrent initializers
+        # cannot interleave DROP/CREATE, and failures restore the old guard set.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
         conversation_triggers = (
             "trg_conversations_scope_insert",
             "trg_conversations_scope_update",
@@ -2969,6 +3053,7 @@ def _rebuild_chat_messages_for_write_operation_integrity(engine) -> None:  # typ
                 tool_calls VARCHAR NOT NULL DEFAULT '',
                 tool_call_id VARCHAR NOT NULL DEFAULT '',
                 provider_blocks VARCHAR NOT NULL DEFAULT '',
+                image_refs_json TEXT NOT NULL DEFAULT '[]',
                 operation_id VARCHAR(36),
                 delivery_kind VARCHAR,
                 delivery_ordinal INTEGER,
@@ -2995,11 +3080,13 @@ def _rebuild_chat_messages_for_write_operation_integrity(engine) -> None:  # typ
             """
             INSERT INTO chat_messages_0026 (
                 id, conversation_id, role, content, tool_calls, tool_call_id,
-                provider_blocks, operation_id, delivery_kind, delivery_ordinal, created_at
+                provider_blocks, image_refs_json, operation_id, delivery_kind,
+                delivery_ordinal, created_at
             )
             SELECT id, conversation_id, role, coalesce(content, ''),
                    coalesce(tool_calls, ''), coalesce(tool_call_id, ''),
-                   coalesce(provider_blocks, ''), operation_id, delivery_kind,
+                   coalesce(provider_blocks, ''), coalesce(image_refs_json, '[]'),
+                   operation_id, delivery_kind,
                    delivery_ordinal, coalesce(created_at, CURRENT_TIMESTAMP)
             FROM chat_messages
             """

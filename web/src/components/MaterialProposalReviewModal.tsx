@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useState } from 'react';
 import { Alert, Button, Checkbox, Modal, Space, Tag, Typography } from 'antd';
 import type { MaterialRevisionProposal } from '@/types/materialRevisionProposal';
@@ -6,7 +7,7 @@ import {
   isMaterialFlowSourceConflict,
   MATERIAL_FLOW_COPY,
   materialEvidenceSourceLabel,
-  materialFlowErrorMessage,
+  materialFlowErrorKey,
 } from './materialFlowCopy';
 import styles from './MaterialProposalReviewModal.module.css';
 import { evidenceLocationLabel, resumeEvidenceLocation } from '@/lib/evidencePresentation';
@@ -142,6 +143,7 @@ export default function MaterialProposalReviewModal({
   onClose,
   onAccepted,
 }: Props) {
+  useLocale();
   const [selected, setSelected] = useState<string[]>([]);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -205,7 +207,7 @@ export default function MaterialProposalReviewModal({
       const conflict = isMaterialFlowSourceConflict(reason);
       if (conflict) setSourceConflict(true);
       reportOperation({ pending: false, resultUnknown: !conflict, sourceConflict: conflict });
-      setError(materialFlowErrorMessage(reason, 'proposal'));
+      setError(materialFlowErrorKey(reason, 'proposal'));
     } finally {
       setBusy(false);
     }
@@ -225,7 +227,7 @@ export default function MaterialProposalReviewModal({
       const conflict = isMaterialFlowSourceConflict(reason);
       if (conflict) setSourceConflict(true);
       reportOperation({ pending: false, resultUnknown: !conflict, sourceConflict: conflict });
-      setError(materialFlowErrorMessage(reason, 'proposal'));
+      setError(materialFlowErrorKey(reason, 'proposal'));
     } finally {
       setBusy(false);
     }
@@ -266,7 +268,7 @@ export default function MaterialProposalReviewModal({
             </div>
           ) : null}
           {!proposalValid ? (
-            <Alert type="error" showIcon message="提案来源无效，已停止写入" />
+            <Alert type="error" showIcon message={t("提案来源无效，已停止写入")} />
           ) : proposal.changes.length === 0 ? (
             <Alert type="info" showIcon message={MATERIAL_FLOW_COPY.proposal.empty} />
           ) : (
@@ -305,7 +307,7 @@ export default function MaterialProposalReviewModal({
               {MATERIAL_FLOW_COPY.proposal.userAssertion}：{assertion.text}
             </Typography.Text>
           ))}
-          {error ? <Alert className={styles.error} type="error" showIcon message={error} /> : null}
+          {error ? <Alert className={styles.error} type="error" showIcon message={t(error)} /> : null}
         </div>
       </Modal>
       <Modal

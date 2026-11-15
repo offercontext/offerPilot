@@ -1,3 +1,5 @@
+import { pipelineActionId } from '@/lib/pipelineInsights';
+import { t, useLocale } from '@/i18n';
 import { Button, List, Space, Tag, Typography } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import type { ActionCommand, PipelineInsight } from '@/lib/pipelineInsights';
@@ -23,11 +25,10 @@ const PRIORITY_LABEL: Record<PipelineInsight['priority'], string> = {
   p2: 'P2',
 };
 
-function getActionId(insight: PipelineInsight, action: DetailAction, kind: 'primary' | 'secondary') {
-  return action.id ?? `${insight.id}:${kind}:${action.label}`;
-}
+const getActionId = pipelineActionId;
 
 export default function ActionDetailDrawer({ insight, open, onClose, onRunAction }: Props) {
+  useLocale();
   const detail = insight as DetailInsight | null;
   const primaryAction = detail?.primaryAction as DetailAction | undefined;
   const secondaryActions = detail?.secondaryActions ?? [];
@@ -40,23 +41,21 @@ export default function ActionDetailDrawer({ insight, open, onClose, onRunAction
       <Typography.Text strong>{detail.title}</Typography.Text>
     </Space>
   ) : (
-    '流程行动'
+    t("流程行动")
   );
 
   if (!open) return null;
 
   return (
-    <section data-testid="action-detail-surface" className={`${styles.detailWorkspace} op-long-text`} aria-label="流程行动详情">
+    <section data-testid="action-detail-surface" className={`${styles.detailWorkspace} op-long-text`} aria-label={t("流程行动详情")}>
       {detail && primaryAction ? (
         <div className={styles.drawerBody}>
           <div className={styles.detailHeader}>
-            <Button type="link" className={styles.backButton} icon={<ArrowLeftOutlined />} onClick={onClose}>
-              返回工作台
-            </Button>
+            <Button type="link" className={styles.backButton} icon={<ArrowLeftOutlined />} onClick={onClose}>{t("返回工作台")}</Button>
             <div className={styles.detailTitle}>{title}</div>
           </div>
           <section className={styles.section}>
-            <Typography.Title level={5}>为什么出现</Typography.Title>
+            <Typography.Title level={5}>{t("为什么出现")}</Typography.Title>
             <Typography.Paragraph>{detail.reason}</Typography.Paragraph>
             {detail.evidence.length > 0 && (
               <List
@@ -69,13 +68,13 @@ export default function ActionDetailDrawer({ insight, open, onClose, onRunAction
 
           {detail.impact && (
             <section className={styles.section}>
-              <Typography.Title level={5}>影响</Typography.Title>
+              <Typography.Title level={5}>{t("影响")}</Typography.Title>
               <Typography.Paragraph>{detail.impact}</Typography.Paragraph>
             </section>
           )}
 
           <section className={styles.section}>
-            <Typography.Title level={5}>建议下一步</Typography.Title>
+            <Typography.Title level={5}>{t("建议下一步")}</Typography.Title>
             <Space direction="vertical" size={12} className="op-control-actions">
               <Button type="primary" onClick={() => onRunAction(detail, getActionId(detail, primaryAction, 'primary'))}>
                 {primaryAction.label}

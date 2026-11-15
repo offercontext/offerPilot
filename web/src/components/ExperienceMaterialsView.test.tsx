@@ -50,7 +50,8 @@ describe('ExperienceMaterialsView', () => {
     expect(markup).toContain('经历故事');
     expect(markup).toContain('接口迁移片段');
     expect(markup).not.toContain('损坏片段');
-    expect(markup).toContain('经历素材');
+    expect(markup).toContain('我的经历');
+    expect(markup).not.toContain('管理已确认的知识笔记');
   });
 
   it('keeps source loading, error, and empty states explicit', () => {

@@ -914,7 +914,7 @@ def _run_http_smoke(
                     _run_named_real_ai_smoke_stage(
                         "interview_knowledge_capture",
                         lambda: _run_real_ai_interview_knowledge_capture_smoke(
-                            client, steps, application_id
+                            client, steps, application_id, data_dir
                         ),
                     )
                     _run_named_real_ai_smoke_stage(
@@ -1712,10 +1712,28 @@ def _run_real_ai_interview_review_smoke(
     )
 
 
+def _knowledge_capture_asset_counts(data_dir: Path) -> tuple[int | None, ...]:
+    session_factory = session_factory_for_data_dir(data_dir)
+    try:
+        with session_factory() as session:
+            return tuple(
+                session.scalar(select(func.count()).select_from(entity))
+                for entity in (
+                    KnowledgeSource, KnowledgeCapturedSourceMetadata, KnowledgeExtractionSnapshot,
+                    KnowledgeEvidence, KnowledgeNote, KnowledgeNoteVersion, KnowledgeNoteEvidence,
+                )
+            )
+    finally:
+        bind = session_factory.kw.get("bind")
+        if bind is not None:
+            bind.dispose()
+
+
 def _run_real_ai_interview_knowledge_capture_smoke(
     client: httpx.Client,
     steps: list[SmokeStep],
     application_id: int,
+    data_dir: Path,
 ) -> None:
     event = client.post(
         "/api/application-events",
@@ -1765,36 +1783,57 @@ def _run_real_ai_interview_knowledge_capture_smoke(
             "text": "I should have stated the tradeoff before the implementation detail.",
         },
     ]
-    preview = client.post(
-        f"/api/notes/{note_id}/knowledge-capture/preview",
-        json={"attempt_key": "real-ai-interview-knowledge", "mode": "ai", "selected_fragments": selected},
-    )
+    path = f"/api/notes/{note_id}/knowledge-capture"
+    selection = {"attempt_key": "real-ai-interview-knowledge", "selected_fragments": selected}
+    preview = client.post(f"{path}/preview", json={**selection, "mode": "ai"})
     _assert_status(preview.status_code, 200, "http_interview_knowledge_preview")
     preview_body = preview.json()
     if not isinstance(preview_body, dict) or not isinstance(preview_body.get("preview"), dict):
         raise RuntimeError("interview knowledge smoke preview was not an object")
     if "input_snapshot" in preview_body or "source_fields" in preview_body:
         raise RuntimeError("interview knowledge smoke exposed the input snapshot")
-    confirm = client.post(
-        f"/api/notes/{note_id}/knowledge-capture/confirm",
-        json={
-            "attempt_key": preview_body["attempt_key"],
-            "note_fingerprint": preview_body["note_fingerprint"],
-            "title": "Interview rollback reflection",
-            "blocks": preview_body["preview"].get("blocks", []),
-        },
-    )
+    confirmation = {
+        "attempt_key": preview_body["attempt_key"],
+        "note_fingerprint": preview_body["note_fingerprint"],
+        "title": "Interview rollback reflection",
+    }
+    blocks = preview_body["preview"].get("blocks")
+    detail = "real AI preview was reviewed and confirmed into frozen interview knowledge"
+    if preview_body.get("preview_status") == "safe_empty" and blocks == []:
+        before = _knowledge_capture_asset_counts(data_dir)
+        rejected = client.post(f"{path}/confirm", json={**confirmation, "blocks": blocks})
+        _assert_status(rejected.status_code, 422, "http_interview_knowledge_empty_confirm")
+        if _knowledge_capture_asset_counts(data_dir) != before:
+            raise RuntimeError("interview knowledge smoke empty confirmation changed knowledge assets")
+        direct = client.post(f"{path}/preview", json={**selection, "mode": "direct"})
+        _assert_status(direct.status_code, 200, "http_interview_knowledge_direct_fallback")
+        direct_body = direct.json()
+        if (
+            direct_body.get("preview_status") != "direct_ready"
+            or direct_body.get("attempt_key") != confirmation["attempt_key"]
+            or direct_body.get("note_fingerprint") != confirmation["note_fingerprint"]
+        ):
+            raise RuntimeError("interview knowledge smoke did not recover the same direct preview")
+        blocks = direct_body.get("preview", {}).get("blocks")
+        detail = "real AI returned safe_empty; empty confirmation was rejected; selected original fragments were confirmed"
+    elif preview_body.get("preview_status") != "ai_ready":
+        raise RuntimeError("interview knowledge smoke did not return a confirmable AI preview")
+    if not isinstance(blocks, list) or not blocks:
+        raise RuntimeError("interview knowledge smoke confirmation requires nonempty blocks")
+    confirm = client.post(f"{path}/confirm", json={**confirmation, "blocks": blocks})
     _assert_status(confirm.status_code, 201, "http_interview_knowledge_confirm")
+    receipt = confirm.json()
     confirmed = client.get("/api/knowledge/notes")
     _assert_status(confirmed.status_code, 200, "http_interview_knowledge_history")
-    if not confirmed.json().get("items"):
-        raise RuntimeError("interview knowledge smoke did not return confirmed history")
-    steps.append(
-        SmokeStep(
-            "http_interview_knowledge_capture",
-            "real AI preview was reviewed and confirmed into frozen interview knowledge",
+    if (
+        type(receipt.get("version_id")) is not int or type(receipt.get("source_id")) is not int
+        or not any(
+            item.get("version_id") == receipt["version_id"] and item.get("source_id") == receipt["source_id"]
+            for item in confirmed.json().get("items", [])
         )
-    )
+    ):
+        raise RuntimeError("interview knowledge smoke did not return confirmed history")
+    steps.append(SmokeStep("http_interview_knowledge_capture", detail))
 
 
 def _run_real_ai_mock_interview_smoke(

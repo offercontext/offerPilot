@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -5,9 +6,12 @@ import type { EvidenceTarget, UITurn } from './model';
 import ProcessTimeline from './ProcessTimeline';
 import PilotTaskCard from './PilotTaskCard';
 import styles from './ChatPanel.module.css';
+import ChatImagePreview from './ChatImagePreview';
+import type { ChatImageReference } from '@/services/chatImages';
 
 /** Code block with a hover copy button. */
 function Pre({ children }: { children?: React.ReactNode }) {
+  useLocale();
   const ref = useRef<HTMLPreElement>(null);
   const [copied, setCopied] = useState(false);
   return (
@@ -15,7 +19,7 @@ function Pre({ children }: { children?: React.ReactNode }) {
       <button
         type="button"
         className={styles.copyBtn}
-        aria-label="复制代码"
+        aria-label={t("复制代码")}
         onClick={async () => {
           const text = ref.current?.querySelector('code')?.textContent ?? '';
           try {
@@ -27,7 +31,7 @@ function Pre({ children }: { children?: React.ReactNode }) {
           }
         }}
       >
-        {copied ? '已复制' : '复制'}
+        {copied ? t("已复制") : t("复制")}
       </button>
       {children}
     </pre>
@@ -35,6 +39,7 @@ function Pre({ children }: { children?: React.ReactNode }) {
 }
 
 function MarkdownTable({ children }: { children?: React.ReactNode }) {
+  useLocale();
   return <table className={styles.markdownTable}>{children}</table>;
 }
 
@@ -45,6 +50,7 @@ interface Props {
   actionsDisabled?: boolean;
   onAction?: (action: string) => void;
   taskCardsEnabled?: boolean;
+  onReferenceImage?: (image: ChatImageReference) => void;
 }
 
 export default function MessageBubble({
@@ -54,7 +60,9 @@ export default function MessageBubble({
   actionsDisabled = false,
   onAction = () => undefined,
   taskCardsEnabled = true,
+  onReferenceImage,
 }: Props) {
+  useLocale();
   const isUser = turn.role === 'user';
   const hasTaskCard = taskCardsEnabled && !isUser && Boolean(turn.steps?.length || turn.presentation);
   return (
@@ -66,12 +74,12 @@ export default function MessageBubble({
         className={`${styles.msgAvatar} ${isUser ? styles.msgAvatarUser : styles.msgAvatarAssistant}`}
         aria-hidden="true"
       >
-        {isUser ? '我' : '✦'}
+        {isUser ? t("我") : '✦'}
       </div>
       <div className={styles.msgCol}>
         {hasTaskCard ? (
         <PilotTaskCard
-            title={turn.taskTitle ?? '本轮任务'}
+            title={turn.taskTitleIsFallback ? t("本轮任务") : turn.taskTitle ?? t("本轮任务")}
             steps={turn.steps ?? []}
             presentation={turn.presentation}
             disabled={actionsDisabled}
@@ -82,7 +90,13 @@ export default function MessageBubble({
         {(isUser || turn.content.trim()) ? (
           <div className={`${styles.bubble} ${isUser ? styles.bubbleUser : styles.bubbleAssistant}`}>
             {isUser ? (
-              turn.content
+              <>
+                {turn.content}
+                {turn.image_attachments?.length ? <div className={styles.imageRail}>
+                  {turn.image_attachments.map((image, imageIndex) => <ChatImagePreview key={image.id} image={image} label={t("图片 {index}", { index: imageIndex + 1 })}
+                    onReference={!actionsDisabled && onReferenceImage ? () => onReferenceImage(image) : undefined} />)}
+                </div> : null}
+              </>
             ) : (
               <div className={styles.markdown}>
                 <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ pre: Pre, table: MarkdownTable }}>

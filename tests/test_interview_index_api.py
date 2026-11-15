@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 import pytest
@@ -182,10 +182,14 @@ def test_interview_index_uses_latest_bound_note_before_pagination_and_list_get_a
 
 
 def test_interview_index_breaks_equal_note_timestamp_by_note_id(tmp_path) -> None:
-    client, _applications, application, event, _first_note = _ready(tmp_path)
+    client, _applications, application, event, initial_note = _ready(tmp_path)
     timestamp = datetime(2026, 9, 30, 10, tzinfo=timezone.utc)
     with session_factory_for_data_dir(tmp_path)() as session:
         session.execute(text("DROP INDEX IF EXISTS uq_interview_notes_event_main"))
+        initial_note_row = session.get(InterviewNote, initial_note.id)
+        assert initial_note_row is not None
+        # Keep the initial note older than the tied pair, regardless of the wall clock.
+        initial_note_row.created_at = timestamp - timedelta(days=1)
         first = InterviewNote(
             application_id=application.id,
             application_event_id=event.id,
@@ -207,7 +211,10 @@ def test_interview_index_breaks_equal_note_timestamp_by_note_id(tmp_path) -> Non
         session.commit()
         expected_id = max(first.id, second.id)
 
-    assert client.get(f"/api/interviews/{event.id}").json()["note_id"] == expected_id
+    listed = client.get("/api/interviews").json()["items"]
+    detail = client.get(f"/api/interviews/{event.id}").json()
+    assert listed == [detail]
+    assert detail["note_id"] == expected_id
 
 
 def test_interview_index_paginates_unique_events_and_excludes_application_level_notes(tmp_path) -> None:

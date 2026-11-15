@@ -227,8 +227,14 @@ def test_generated_typescript_module_matches_contract_json() -> None:
 
 
 def test_every_api_mock_interview_error_code_has_a_contract_entry() -> None:
-    api_source = (REPO_ROOT / "src" / "offerpilot" / "api.py").read_text(encoding="utf-8")
-    emitted = set(re.findall(r'(?:code=|, )"((?:mock_interview|interview_practice_case|application_jd_version)[a-z0-9_]*)"', api_source))
+    api_source = "\n".join(
+        (REPO_ROOT / "src" / "offerpilot" / name).read_text(encoding="utf-8")
+        for name in ("api.py", "mock_interview_execution.py")
+    )
+    emitted = set(re.findall(
+        r'"((?:mock_interview|interview_practice_case|application_jd_version)_[a-z0-9_]+)"',
+        api_source,
+    ))
     assert emitted, "api.py must still emit coded mock-interview errors"
     assert emitted <= set(CONTRACT_BY_CODE), sorted(emitted - set(CONTRACT_BY_CODE))
 

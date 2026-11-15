@@ -1,3 +1,4 @@
+import { UiTextError } from '@/i18n';
 import axios from 'axios';
 import type {
   ConfirmedInterviewKnowledge,
@@ -11,16 +12,16 @@ import { createApiClient } from './http';
 const http = createApiClient({ baseURL: '/api', timeout: 130000 });
 
 const SAFE_ERRORS: Record<string, string> = {
-  interview_note_not_found: '该复盘已不可用。',
-  interview_knowledge_source_changed: '复盘内容已变化，请重新选择原始片段。',
-  interview_knowledge_attempt_conflict: '当前沉淀草稿已变化，请重新开始。',
-  interview_knowledge_attempt_expired: '沉淀草稿已过期，请重新选择片段。',
-  interview_knowledge_selection_invalid: '所选片段无法验证，请重新选择。',
-  interview_knowledge_preview_provider_error: 'AI 预览暂不可用，可直接保存选中原文。',
-  capture_attempt_confirmed: '该沉淀已保存，可在知识库查看。',
+  interview_note_not_found: "该复盘已不可用。",
+  interview_knowledge_source_changed: "复盘内容已变化，请重新选择原始片段。",
+  interview_knowledge_attempt_conflict: "当前沉淀草稿已变化，请重新开始。",
+  interview_knowledge_attempt_expired: "沉淀草稿已过期，请重新选择片段。",
+  interview_knowledge_selection_invalid: "所选片段无法验证，请重新选择。",
+  interview_knowledge_preview_provider_error: "AI 预览暂不可用，可直接保存选中原文。",
+  capture_attempt_confirmed: "该沉淀已保存，可在知识库查看。",
 };
 
-export class InterviewKnowledgeCaptureError extends Error {
+export class InterviewKnowledgeCaptureError extends UiTextError {
   readonly code?: string;
   readonly status?: number;
   readonly resultUnknown: boolean;
@@ -53,15 +54,15 @@ function toSafeError(error: unknown, operation: 'preview' | 'confirm' | 'delete'
     return new InterviewKnowledgeCaptureError(SAFE_ERRORS.capture_attempt_confirmed, 'capture_attempt_confirmed', status, false);
   }
   if (operation === 'delete') {
-    return new InterviewKnowledgeCaptureError('操作结果未知，请重新打开复盘确认状态。', 'capture_delete_unknown', status, true);
+    return new InterviewKnowledgeCaptureError("操作结果未知，请重新打开复盘确认状态。", 'capture_delete_unknown', status, true);
   }
   if (status === 502) {
-    return new InterviewKnowledgeCaptureError('AI 预览暂不可用，可直接保存选中原文。', 'interview_knowledge_preview_provider_error', status, true);
+    return new InterviewKnowledgeCaptureError("AI 预览暂不可用，可直接保存选中原文。", 'interview_knowledge_preview_provider_error', status, true);
   }
   if (status === 404) {
     return new InterviewKnowledgeCaptureError(SAFE_ERRORS.interview_note_not_found, 'interview_note_not_found', status, false);
   }
-  return new InterviewKnowledgeCaptureError('复盘知识沉淀暂时不可用，请稍后重试。', undefined, status, status === undefined || (status >= 500));
+  return new InterviewKnowledgeCaptureError("复盘知识沉淀暂时不可用，请稍后重试。", undefined, status, status === undefined || (status >= 500));
 }
 
 export async function createInterviewKnowledgePreview(

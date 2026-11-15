@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { CloseOutlined, InboxOutlined } from '@ant-design/icons';
 import { useState, type DragEvent } from 'react';
 import type { PilotContextAttachment, PilotAttachmentKind } from '@/types/chat';
@@ -6,9 +7,9 @@ import styles from './ChatPanel.module.css';
 const NATIVE_ATTACHMENT_TYPE = 'application/x-offerpilot-context-attachment';
 
 const KIND_LABELS: Record<PilotAttachmentKind, string> = {
-  application: '投递',
+  get application() { return t("投递"); },
   offer: 'Offer',
-  resume: '简历',
+  get resume() { return t("简历"); },
 };
 
 interface Props {
@@ -48,6 +49,7 @@ export default function ContextAttachmentRail({
   onRemove,
   onNativeDrop,
 }: Props) {
+  useLocale();
   const [dragging, setDragging] = useState(false);
 
   function handleDrop(event: DragEvent<HTMLDivElement>) {
@@ -84,10 +86,10 @@ export default function ContextAttachmentRail({
       {attachments.length === 0 ? (
         <div className={styles.contextAttachmentEmpty}>
           <InboxOutlined aria-hidden="true" />
-          <span>拖入投递、Offer 或简历，作为本次对话的参考</span>
+          <span>{t("拖入投递、Offer 或简历，作为本次对话的参考")}</span>
         </div>
       ) : (
-        <div className={styles.contextAttachmentList} aria-label="当前上下文附件">
+        <div className={styles.contextAttachmentList} aria-label={t("当前上下文附件")}>
           {attachments.map((attachment) => (
             <div key={`${attachment.kind}:${attachment.id}`} className={styles.contextAttachmentChip}>
               <span className={styles.contextAttachmentKind}>{KIND_LABELS[attachment.kind]}</span>
@@ -98,7 +100,7 @@ export default function ContextAttachmentRail({
                 type="button"
                 className={styles.contextAttachmentRemove}
                 aria-label={`Remove ${attachment.label} from context`}
-                title={`移除${attachment.label}`}
+                title={t("移除{label}", { label: attachment.label })}
                 disabled={disabled}
                 onClick={() => onRemove(attachment)}
               >

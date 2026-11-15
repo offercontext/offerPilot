@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Resume } from '@/types/resume';
 import { diffResumeContent, type DiffModule, type DiffText, type ResumeDiffItem } from '@/lib/resumeVersionDiff';
@@ -13,19 +14,19 @@ export type ResumeVersionCompareDrawerProps = {
 };
 
 const MODULE_LABELS: Record<DiffModule, string> = {
-  contact: '联系方式',
-  education: '教育经历',
-  experience: '工作经历',
-  projects: '项目经历',
-  skills: '技能',
-  career_intent: '求职意向',
-  other: '其他结构化字段',
+  get contact() { return t("联系方式"); },
+  get education() { return t("教育经历"); },
+  get experience() { return t("工作经历"); },
+  get projects() { return t("项目经历"); },
+  get skills() { return t("技能"); },
+  get career_intent() { return t("求职意向"); },
+  get other() { return t("其他结构化字段"); },
 };
 
 const KIND_LABELS = {
-  added: '新增',
-  removed: '删除',
-  changed: '修改',
+  get added() { return t("新增"); },
+  get removed() { return t("删除"); },
+  get changed() { return t("修改"); },
 } as const;
 
 export default function ResumeVersionCompareDrawer({
@@ -34,6 +35,7 @@ export default function ResumeVersionCompareDrawer({
   candidates,
   onClose,
 }: ResumeVersionCompareDrawerProps) {
+  useLocale();
   const [baselineId, setBaselineId] = useState<number | null>(null);
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
   const previousOpen = useRef(false);
@@ -124,24 +126,23 @@ export default function ResumeVersionCompareDrawer({
 
   return (
     <div className={styles.compareBackdrop} data-resume-version-compare>
-      <aside ref={dialogRef} tabIndex={-1} className={styles.compareDrawer} role="dialog" aria-modal="true" aria-label="简历版本对比">
+      <aside ref={dialogRef} tabIndex={-1} className={styles.compareDrawer} role="dialog" aria-modal="true" aria-label={t("简历版本对比")}>
         <div className={styles.compareHeader}>
           <div>
-            <div className={styles.compareEyebrow}>已保存内容审阅</div>
-            <h2 className={styles.compareTitle}>对比版本</h2>
+            <div className={styles.compareEyebrow}>{t("已保存内容审阅")}</div>
+            <h2 className={styles.compareTitle}>{t("对比版本")}</h2>
             <p className={styles.compareSubtitle}>
-              当前目标：{resumeDisplayTitle(target)}
+              {t("当前目标：")}{resumeDisplayTitle(target)}
             </p>
           </div>
-          <button type="button" className={styles.compareClose} aria-label="关闭版本对比" onClick={onClose}>×</button>
+          <button type="button" className={styles.compareClose} aria-label={t("关闭版本对比")} onClick={onClose}>×</button>
         </div>
 
         <div className={styles.compareBody}>
-          <p className={styles.compareNotice}>仅比较当前已保存的简历内容，不读取编辑器中尚未保存的草稿。</p>
+          <p className={styles.compareNotice}>{t("仅比较当前已保存的简历内容，不读取编辑器中尚未保存的草稿。")}</p>
           <label className={styles.compareLabel}>
-            基准版本
-            <select
-              aria-label="基准版本"
+            {t("基准版本")}<select
+              aria-label={t("基准版本")}
               className={styles.compareSelect}
               value={baselineId === null ? '' : String(baselineId)}
               onChange={(event) => {
@@ -151,7 +152,7 @@ export default function ResumeVersionCompareDrawer({
               }}
             >
               <option value="">
-                {sortedCandidates.length ? '请选择基准版本' : '暂无可比较版本'}
+                {sortedCandidates.length ? t("请选择基准版本") : t("暂无可比较版本")}
               </option>
               {sortedCandidates.map((candidate) => (
                 <option key={candidate.id} value={candidate.id}>
@@ -163,22 +164,22 @@ export default function ResumeVersionCompareDrawer({
 
           {baseline && (
             <div className={styles.compareBaselineSummary}>
-              基准：{resumeDisplayTitle(baseline)}
+              {t("基准：")}{resumeDisplayTitle(baseline)}
             </div>
           )}
 
           {!baseline ? (
-            <div className={styles.compareEmptyState}>请选择一个基准版本</div>
+            <div className={styles.compareEmptyState}>{t("请选择一个基准版本")}</div>
           ) : diff?.identical ? (
-            <div className={styles.compareEmptyState}>暂无差异</div>
+            <div className={styles.compareEmptyState}>{t("暂无差异")}</div>
           ) : (
             <>
-              <div className={styles.compareSummary} aria-label="差异摘要">
-                <span>新增 {diff?.counts.added ?? 0}</span>
-                <span>删除 {diff?.counts.removed ?? 0}</span>
-                <span>修改 {diff?.counts.changed ?? 0}</span>
+              <div className={styles.compareSummary} aria-label={t("差异摘要")}>
+                <span>{t("新增 ")}{diff?.counts.added ?? 0}</span>
+                <span>{t("删除 ", undefined, "resume.diff.removed")}{diff?.counts.removed ?? 0}</span>
+                <span>{t("修改 ")}{diff?.counts.changed ?? 0}</span>
               </div>
-              <p className={styles.compareArrayNote}>数组按位置比较，不推断经历、公司或项目是否为同一项。</p>
+              <p className={styles.compareArrayNote}>{t("数组按位置比较，不推断经历、公司或项目是否为同一项。")}</p>
               <div className={styles.compareGroups}>
                 {Object.entries(groupedItems).map(([module, items]) => (
                   <section key={module} className={styles.compareGroup}>
@@ -223,6 +224,7 @@ function DiffItemView({
   expandedKeys: Set<string>;
   onToggle: (key: string, expanded: boolean) => void;
 }) {
+  useLocale();
   return (
     <article className={styles.compareItem} data-diff-module={item.module}>
       <div className={styles.compareItemMeta}>
@@ -231,10 +233,10 @@ function DiffItemView({
       </div>
       <div className={styles.compareValues}>
         {item.kind !== 'added' && (
-          <ValueView label="修改前" value={item.before} keyPrefix={`${item.path}:before`} resetKey={resetKey} expandedKeys={expandedKeys} onToggle={onToggle} />
+          <ValueView label={t("修改前")} value={item.before} keyPrefix={`${item.path}:before`} resetKey={resetKey} expandedKeys={expandedKeys} onToggle={onToggle} />
         )}
         {item.kind !== 'removed' && (
-          <ValueView label="修改后" value={item.after} keyPrefix={`${item.path}:after`} resetKey={resetKey} expandedKeys={expandedKeys} onToggle={onToggle} />
+          <ValueView label={t("修改后")} value={item.after} keyPrefix={`${item.path}:after`} resetKey={resetKey} expandedKeys={expandedKeys} onToggle={onToggle} />
         )}
       </div>
     </article>
@@ -256,8 +258,9 @@ function ValueView({
   expandedKeys: Set<string>;
   onToggle: (key: string, expanded: boolean) => void;
 }) {
+  useLocale();
   if (!value) {
-    return <div className={styles.compareValue}><span className={styles.compareValueLabel}>{label}</span><span className={styles.compareMissing}>不存在</span></div>;
+    return <div className={styles.compareValue}><span className={styles.compareValueLabel}>{label}</span><span className={styles.compareMissing}>{t("不存在")}</span></div>;
   }
   const text: DiffText = value.text;
   const isExpanded = expandedKeys.has(keyPrefix);
@@ -268,7 +271,7 @@ function ValueView({
         <>
           {!isExpanded && <pre>{text.preview}</pre>}
           <details key={`${resetKey}:${keyPrefix}`} open={isExpanded} onToggle={(event) => onToggle(keyPrefix, event.currentTarget.open)}>
-            <summary>展开完整内容</summary>
+            <summary>{t("展开完整内容")}</summary>
             {isExpanded && <pre>{text.full}</pre>}
           </details>
         </>

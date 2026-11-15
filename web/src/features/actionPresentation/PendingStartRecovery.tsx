@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { getPilotRequest } from '@/services/chat';
 import { forgetPendingStart, listPendingStarts, pendingStartsSnapshot, subscribePendingStarts } from '@/services/chatSubmission';
@@ -11,6 +12,7 @@ interface Props {
 
 /** Persisted IDs recover display through GET only, including after a reload. */
 export function PendingStartRecovery({ busy, conversationId, onOpen }: Props) {
+  useLocale();
   useSyncExternalStore(subscribePendingStarts, pendingStartsSnapshot, () => '[]');
   const pending = listPendingStarts();
   const [reading, setReading] = useState<string | null>(null);
@@ -27,7 +29,7 @@ export function PendingStartRecovery({ busy, conversationId, onOpen }: Props) {
   async function recover(requestId: string) {
     const epoch = ownerEpoch.current;
     setReading(requestId);
-    setFeedback('正在读取已保存的任务…');
+    setFeedback("正在读取已保存的任务…");
     try {
       const turn = await getPilotRequest(requestId);
       if (epoch !== ownerEpoch.current) return;
@@ -35,16 +37,16 @@ export function PendingStartRecovery({ busy, conversationId, onOpen }: Props) {
       if (['completed', 'failed', 'interrupted', 'stopped', 'waiting_confirmation'].includes(turn.state)) {
         forgetPendingStart(requestId);
       } else {
-        setFeedback('任务已接纳，尚无最终状态记录。已显示保存的消息，可稍后再次读取。');
+        setFeedback("任务已接纳，尚无最终状态记录。已显示保存的消息，可稍后再次读取。");
       }
     } catch (error) {
       if (epoch !== ownerEpoch.current) return;
       const status = (error as { response?: { status?: number } })?.response?.status;
       if (status === 410) {
         forgetPendingStart(requestId);
-        setFeedback('原对话已删除。');
+        setFeedback("原对话已删除。");
       } else {
-        setFeedback(status === 404 ? '暂未找到已接纳任务，请稍后再次查询。' : '任务暂时无法读取，请重试。');
+        setFeedback(status === 404 ? "暂未找到已接纳任务，请稍后再次查询。" : "任务暂时无法读取，请重试。");
       }
     } finally {
       if (epoch === ownerEpoch.current) setReading(null);
@@ -52,16 +54,16 @@ export function PendingStartRecovery({ busy, conversationId, onOpen }: Props) {
   }
 
   return (
-    <section className={styles.card} aria-label="恢复未确认的提交" aria-busy={reading !== null}>
-      <div>有 {pending.length} 次提交的结果尚未确认。</div>
+    <section className={styles.card} aria-label={t("恢复未确认的提交")} aria-busy={reading !== null}>
+      <div>{t("有")}{pending.length} {t("次提交的结果尚未确认。")}</div>
       <div className={styles.actions}>
         {pending.map((item, index) => (
           <button key={item.requestId} type="button" disabled={reading !== null} onClick={() => void recover(item.requestId)}>
-            {reading === item.requestId ? '正在读取…' : `读取原任务${pending.length > 1 ? ` ${index + 1}` : ''}`}
+            {reading === item.requestId ? t("正在读取…") : t("读取原任务{value0}", { value0: pending.length > 1 ? ` ${index + 1}` : '' })}
           </button>
         ))}
       </div>
-      {feedback ? <p className={styles.summary} role="status">{feedback}</p> : null}
+      {feedback ? <p className={styles.summary} role="status">{t(feedback)}</p> : null}
     </section>
   );
 }

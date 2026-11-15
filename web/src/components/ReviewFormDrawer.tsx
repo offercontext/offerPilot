@@ -1,3 +1,5 @@
+import { useLocalizedValidation } from '@/components/applicationUiText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useState } from 'react';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Select, Space } from 'antd';
@@ -7,9 +9,9 @@ import type { ScheduleEvent } from '@/types/event';
 import { listEvents } from '@/services/events';
 
 const MOOD_OPTIONS = [
-  { value: 'good', label: '好' },
-  { value: 'normal', label: '一般' },
-  { value: 'bad', label: '差' },
+  { value: 'good', get label() { return t("好"); } },
+  { value: 'normal', get label() { return t("一般"); } },
+  { value: 'bad', get label() { return t("差"); } },
 ];
 
 interface Props {
@@ -33,7 +35,9 @@ export default function ReviewFormDrawer({
   onSubmit,
   onClose,
 }: Props) {
+  useLocale();
   const [form] = Form.useForm<CreateNoteInput>();
+  useLocalizedValidation(form);
   const [interviewEvents, setInterviewEvents] = useState<ScheduleEvent[]>([]);
   const editing = !!note;
 
@@ -111,7 +115,7 @@ export default function ReviewFormDrawer({
 
     const eventChanged = input.application_event_id !== note?.application_event_id;
     if (eventChanged && note?.application_event_id != null) {
-      const confirmed = window.confirm('解除或更换绑定的面试事件？已有 AI 建议将标记为来源已变化。');
+      const confirmed = window.confirm(t("解除或更换绑定的面试事件？已有 AI 建议将标记为来源已变化。"));
       if (!confirmed) return;
       update.application_event_id = input.application_event_id ?? null;
     } else if (eventChanged && input.application_event_id != null) {
@@ -123,7 +127,7 @@ export default function ReviewFormDrawer({
   if (!open) return null;
 
   return (
-    <section aria-label={editing ? '编辑面试复盘' : '新建面试复盘'}>
+    <section aria-label={editing ? t("编辑面试复盘") : t("新建面试复盘")}>
       <div style={{ display: 'grid', gap: 8, marginBottom: 18 }}>
         <Button
           type="link"
@@ -131,24 +135,22 @@ export default function ReviewFormDrawer({
           onClick={onClose}
           style={{ width: 'fit-content', height: 'auto', padding: 0 }}
         >
-          返回上一层
-        </Button>
+          {t("返回上一层")}</Button>
         <Space style={{ width: '100%', justifyContent: 'space-between' }} align="center" wrap>
-          <h2 style={{ margin: 0 }}>{editing ? '编辑面试复盘' : '新建面试复盘'}</h2>
+          <h2 style={{ margin: 0 }}>{editing ? t("编辑面试复盘") : t("新建面试复盘")}</h2>
           <Space>
-            <Button onClick={onClose}>取消</Button>
+            <Button onClick={onClose}>{t("取消")}</Button>
             <Button type="primary" loading={saving} onClick={() => form.submit()}>
-              保存复盘
-            </Button>
+              {t("保存复盘")}</Button>
           </Space>
         </Space>
       </div>
       <Form form={form} layout="vertical" onFinish={handleSubmit}>
-        <Form.Item name="application_id" label="关联投递">
+        <Form.Item name="application_id" label={t("关联投递")}>
           <Select
             allowClear
             showSearch
-            placeholder="可选"
+            placeholder={t("可选")}
             optionFilterProp="label"
             onChange={handleApplicationChange}
             disabled={editing}
@@ -159,14 +161,14 @@ export default function ReviewFormDrawer({
           />
         </Form.Item>
 
-        <Form.Item name="application_event_id" label="绑定面试事件">
+        <Form.Item name="application_event_id" label={t("绑定面试事件")}>
           <Select
             allowClear
             disabled={!form.getFieldValue('application_id')}
-            placeholder="可选，仅支持面试事件"
+            placeholder={t("可选，仅支持面试事件")}
             options={interviewEvents.map((event) => ({
               value: event.id,
-              label: `${event.subtype || '面试'} / ${event.scheduled_at}`,
+              label: t("{type} / {date}", { type: event.subtype || t('面试', undefined, 'interview.event'), date: event.scheduled_at }),
             }))}
           />
         </Form.Item>
@@ -174,37 +176,37 @@ export default function ReviewFormDrawer({
         <Space style={{ width: '100%' }} align="start" wrap>
           <Form.Item
             name="company"
-            label="公司"
-            rules={[{ required: true, message: '请输入公司' }]}
+            label={t("公司")}
+            rules={[{ required: true, message: t("请输入公司") }]}
             style={{ flex: '1 1 220px', minWidth: 220 }}
           >
-            <Input placeholder="公司" />
+            <Input placeholder={t("公司")} />
           </Form.Item>
-          <Form.Item name="position" label="岗位" style={{ flex: '1 1 220px', minWidth: 220 }}>
-            <Input placeholder="岗位" />
+          <Form.Item name="position" label={t("岗位")} style={{ flex: '1 1 220px', minWidth: 220 }}>
+            <Input placeholder={t("岗位")} />
           </Form.Item>
         </Space>
 
         <Space style={{ width: '100%' }} align="start" wrap>
-          <Form.Item name="round" label="轮次" style={{ flex: '1 1 140px', minWidth: 140 }}>
-            <Input placeholder="一面" />
+          <Form.Item name="round" label={t("轮次")} style={{ flex: '1 1 140px', minWidth: 140 }}>
+            <Input placeholder={t("一面")} />
           </Form.Item>
-          <Form.Item name="date" label="日期" style={{ flex: '1 1 140px', minWidth: 140 }}>
+          <Form.Item name="date" label={t("日期")} style={{ flex: '1 1 140px', minWidth: 140 }}>
             <Input placeholder="2026-07-01" />
           </Form.Item>
-          <Form.Item name="mood" label="心情" style={{ flex: '1 1 140px', minWidth: 140 }}>
-            <Select options={MOOD_OPTIONS} allowClear placeholder="选择" />
+          <Form.Item name="mood" label={t("心情")} style={{ flex: '1 1 140px', minWidth: 140 }}>
+            <Select options={MOOD_OPTIONS.map((option) => ({ ...option }))} allowClear placeholder={t("选择")} />
           </Form.Item>
         </Space>
 
-        <Form.Item name="questions" label="面试问题">
-          <Input.TextArea rows={4} placeholder="记录被问到的问题" />
+        <Form.Item name="questions" label={t("面试问题")}>
+          <Input.TextArea rows={4} placeholder={t("记录被问到的问题")} />
         </Form.Item>
-        <Form.Item name="self_reflection" label="自我反思">
-          <Input.TextArea rows={4} placeholder="表现如何，哪里可以改进" />
+        <Form.Item name="self_reflection" label={t("自我反思")}>
+          <Input.TextArea rows={4} placeholder={t("表现如何，哪里可以改进")} />
         </Form.Item>
-        <Form.Item name="difficulty_points" label="难点/薄弱点">
-          <Input.TextArea rows={4} placeholder="哪些知识点没答好" />
+        <Form.Item name="difficulty_points" label={t("难点/薄弱点")}>
+          <Input.TextArea rows={4} placeholder={t("哪些知识点没答好")} />
         </Form.Item>
       </Form>
     </section>

@@ -1,3 +1,4 @@
+import { t, useLocale, getLocale } from '@/i18n';
 import {
   normalizeOpportunityFitHistoryDate,
   type OpportunityFitHistoryItem,
@@ -24,23 +25,23 @@ export interface PilotOpportunityFitV2CardProps {
 }
 
 const STATUS_COPY: Readonly<Record<PilotOpportunityFitProjectionStatus, string>> = Object.freeze({
-  idle: '开始',
-  pending: '等待确认',
-  result_unknown: '结果待确认',
-  ready: '查看结果',
-  source_conflict: '结果待确认',
-  unavailable: '暂时不可用',
+  get idle() { return t("开始"); },
+  get pending() { return t("等待确认"); },
+  get result_unknown() { return t("结果待确认"); },
+  get ready() { return t("查看结果"); },
+  get source_conflict() { return t("结果待确认"); },
+  get unavailable() { return t("暂时不可用"); },
 });
 
 function sourceStateCopy(state: OpportunityFitHistoryItem['sourceState']): string {
-  if (state === 'source_changed') return '来源已更新，已有结果仍保留';
-  if (state === 'unavailable') return '历史记录暂时不可用';
-  return '当前来源';
+  if (state === 'source_changed') return t("来源已更新，已有结果仍保留");
+  if (state === 'unavailable') return t("历史记录暂时不可用");
+  return t("当前来源");
 }
 
 function displayDate(value: string): string {
   const canonical = normalizeOpportunityFitHistoryDate(value);
-  return canonical ? new Date(canonical).toLocaleString() : '时间暂不可用';
+  return canonical ? new Date(canonical).toLocaleString(getLocale()) : t("时间暂不可用");
 }
 
 /**
@@ -54,26 +55,27 @@ export default function PilotOpportunityFitV2Card({
   historyState = 'ready',
   onOpenTask,
 }: PilotOpportunityFitV2CardProps) {
+  useLocale();
   const safeStatus = Object.prototype.hasOwnProperty.call(STATUS_COPY, status) ? status : 'unavailable';
   return (
     <section aria-labelledby="pilot-opportunity-fit-v2-title">
       <header>
-        <h2 id="pilot-opportunity-fit-v2-title">岗位判断</h2>
-        <p>查看带依据的岗位判断；需要开始或继续时，请打开岗位判断工作区。</p>
+        <h2 id="pilot-opportunity-fit-v2-title">{t("岗位判断")}</h2>
+        <p>{t("查看带依据的岗位判断；需要开始或继续时，请打开岗位判断工作区。")}</p>
       </header>
 
-      <section aria-label="当前判断">
+      <section aria-label={t("当前判断")}>
         <p role="status">{STATUS_COPY[safeStatus]}</p>
         {summary ? <p>{summary}</p> : null}
-        <button type="button" onClick={onOpenTask}>打开岗位判断</button>
+        <button type="button" onClick={onOpenTask}>{t("打开岗位判断")}</button>
       </section>
 
-      <section aria-label="历史记录">
-        <h3>历史记录</h3>
-        {historyState === 'loading' ? <p role="status">历史记录加载中</p> : null}
-        {historyState === 'error' ? <p role="alert">部分历史暂时不可用</p> : null}
-        {historyState === 'absent' ? <p role="status">暂时没有可查看的历史记录</p> : null}
-        {history.length === 0 && historyState === 'ready' ? <p>暂无历史记录</p> : null}
+      <section aria-label={t("历史记录")}>
+        <h3>{t("历史记录")}</h3>
+        {historyState === 'loading' ? <p role="status">{t("历史记录加载中")}</p> : null}
+        {historyState === 'error' ? <p role="alert">{t("部分历史暂时不可用")}</p> : null}
+        {historyState === 'absent' ? <p role="status">{t("暂时没有可查看的历史记录")}</p> : null}
+        {history.length === 0 && historyState === 'ready' ? <p>{t("暂无历史记录")}</p> : null}
         {history.map((item) => (
           <article key={item.internalKey}>
             <p>{item.summary}</p>

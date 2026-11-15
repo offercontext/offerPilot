@@ -2,6 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
+import { setLocale } from '@/i18n';
 import { usePilotExecution } from './usePilotExecution';
 import type { PilotExecution, PilotInterruptResult } from '@/types/chat';
 
@@ -23,6 +24,7 @@ afterEach(() => {
   root = undefined as unknown as Root;
   vi.clearAllMocks();
   localStorage.clear();
+  setLocale('zh-CN');
   vi.useRealTimers();
 });
 
@@ -164,4 +166,21 @@ it.each(['completed', 'waiting_confirmation', 'failed'] as const)('refreshes per
   await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
   expect(stopped).toHaveBeenCalledTimes(1);
   expect(interrupt).not.toHaveBeenCalled();
+});
+
+
+it('translates an existing stop failure without retrying or changing its exact target', async () => {
+  read.mockResolvedValue(first);
+  interrupt.mockRejectedValue(new Error('offline'));
+  await render();
+  await act(async () => { await controller.stop(); });
+  const execution = controller.execution;
+  const originalCommand = interrupt.mock.calls[0];
+  expect(controller.stopMessage).toBe('停止结果未确认，请重试原停止命令。');
+  act(() => setLocale('en-US'));
+  expect(controller.stopMessage).toBe('The stop result is unconfirmed. Retry the original stop command.');
+  expect(controller.execution).toBe(execution);
+  expect(controller.retryingStop).toBe(true);
+  expect(interrupt).toHaveBeenCalledTimes(1);
+  expect(interrupt.mock.calls[0]).toEqual(originalCommand);
 });

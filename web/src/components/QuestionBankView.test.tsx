@@ -86,7 +86,7 @@ describe('QuestionBankView', () => {
   it('keeps the brush page limited to the bank and spaced review', () => {
     expect(source).toContain("value: 'question_bank'");
     expect(source).toContain("value: 'review'");
-    expect(source).toContain("label: '今日复习'");
+    expect(source).toContain("label: t(\"今日复习\")");
     expect(source).not.toContain('AdaptiveInterviewPracticeWorkspace');
     expect(source).not.toContain('InterviewReadinessCenter');
     expect(source).not.toContain('quick_practice');
@@ -107,9 +107,9 @@ describe('QuestionBankView', () => {
   it('does not offer unsupported knowledge generation as executable', () => {
     expect(source).toContain('generateQuestions');
     expect(source).toContain("source,");
-    expect(source).toContain("label: '参考资料（暂未开放）', value: 'knowledge', disabled: true");
+    expect(source).toContain("label: t(\"参考资料（暂未开放）\"), value: 'knowledge', disabled: true");
     expect(source).toContain("useState<'knowledge' | 'notes'>('notes')");
-    expect(source).toContain("label: '面试复盘真题'");
+    expect(source).toContain("label: t(\"面试复盘真题\")");
     expect(source).toContain('已存在的题目会自动去重');
   });
 

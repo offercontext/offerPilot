@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Button, Card, Checkbox, Empty, Input, Spin, Tag, Tooltip } from 'antd';
 import type { Offer, OfferComparisonDimension } from '@/types/offer';
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export default function OfferComparisonDimensionPanel({ offers, onSelectionChange, onChanged, selectedDimensionIds }: Props) {
+  useLocale();
   const [dimensions, setDimensions] = useState<OfferComparisonDimension[]>([]);
   const [localSelectedIds, setSelectedIds] = useState<number[]>([]);
   const selectedIds = selectedDimensionIds ?? localSelectedIds;
@@ -106,32 +108,32 @@ export default function OfferComparisonDimensionPanel({ offers, onSelectionChang
   };
 
   if (loadState === 'loading') {
-    return <section className={styles.panel} aria-label="自定义比较维度"><div className={styles.loading} role="status"><Spin size="small" /> 正在加载比较维度</div></section>;
+    return <section className={styles.panel} aria-label={t("自定义比较维度")}><div className={styles.loading} role="status"><Spin size="small" />{t(" 正在加载比较维度")}</div></section>;
   }
 
   if (loadState === 'error') {
-    return <section className={styles.panel} aria-label="自定义比较维度"><Alert message="比较维度暂时无法加载" type="error" action={<Button size="small" onClick={() => void reload()}>重试</Button>} /></section>;
+    return <section className={styles.panel} aria-label={t("自定义比较维度")}><Alert message={t("比较维度暂时无法加载")} type="error" action={<Button size="small" onClick={() => void reload()}>{t("重试")}</Button>} /></section>;
   }
 
   return (
-    <section className={styles.panel} aria-label="自定义比较维度">
+    <section className={styles.panel} aria-label={t("自定义比较维度")}>
       <div className={styles.panelHeader}>
         <div>
-          <h3 className={styles.title}>管理比较维度</h3>
-          <p className={styles.help}>最多选择 8 个比较维度。空白值表示尚未填写，不代表负面判断。</p>
+          <h3 className={styles.title}>{t("管理比较维度")}</h3>
+          <p className={styles.help}>{t("最多选择 8 个比较维度。空白值表示尚未填写，不代表负面判断。")}</p>
         </div>
-        <Tag color="blue">已选择 {selectedIds.length}/8</Tag>
+        <Tag color="blue">{t("已选择 ")}{selectedIds.length}/8</Tag>
       </div>
       <div className={styles.createRow}>
         <Input
-          aria-label="新比较维度"
-          placeholder="新比较维度"
+          aria-label={t("新比较维度")}
+          placeholder={t("新比较维度")}
           value={draftLabel}
           onChange={(event) => setDraftLabel(event.target.value)}
         />
-        <Button data-action="create-dimension" onClick={() => void createDimension()}>新增维度</Button>
+        <Button data-action="create-dimension" onClick={() => void createDimension()}>{t("新增维度")}</Button>
       </div>
-      {dimensions.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有自定义比较维度" /> : dimensions.map((dimension) => {
+      {dimensions.length === 0 ? <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("还没有自定义比较维度")} /> : dimensions.map((dimension) => {
         const active = dimension.archived_at === null;
         const selected = selectedIds.includes(dimension.id);
         const selectionBlocked = !selected && selectedIds.length >= 8;
@@ -144,9 +146,9 @@ export default function OfferComparisonDimensionPanel({ offers, onSelectionChang
                   {dimension.label}
                 </Checkbox>
               )}
-              {!active && <><span>{dimension.label}</span><Tag className={styles.archiveTag}>已归档，仅历史可读</Tag></>}
+              {!active && <><span>{dimension.label}</span><Tag className={styles.archiveTag}>{t("已归档，仅历史可读")}</Tag></>}
               </label>
-              {active ? <Tag color="green">可用于比较</Tag> : null}
+              {active ? <Tag color="green">{t("可用于比较")}</Tag> : null}
             </div>
             <div className={styles.offerValues}>
               {offers.map((offer) => {
@@ -162,21 +164,21 @@ export default function OfferComparisonDimensionPanel({ offers, onSelectionChang
                           data-dimension-id={dimension.id}
                           aria-label={`${offer.company_name}-${dimension.label}`}
                           value={draftValues[key] ?? ''}
-                          placeholder="尚未填写"
+                          placeholder={t("尚未填写")}
                           onChange={(event) => setDraftValues((current) => ({ ...current, [key]: event.target.value }))}
                         />
                         <div className={styles.valueActions}>
-                          <Button size="small" data-action="save-value" data-offer-id={offer.id} onClick={() => void saveValue(offer.id, dimension.id)}>保存</Button>
-                          <Tooltip title="恢复为尚未填写，不会写入‘未知’等伪事实"><Button size="small" data-action="clear-value" data-offer-id={offer.id} onClick={() => void clearValue(offer.id, dimension.id)}>清除值</Button></Tooltip>
+                          <Button size="small" data-action="save-value" data-offer-id={offer.id} onClick={() => void saveValue(offer.id, dimension.id)}>{t("保存")}</Button>
+                          <Tooltip title={t("恢复为尚未填写，不会写入‘未知’等伪事实")}><Button size="small" data-action="clear-value" data-offer-id={offer.id} onClick={() => void clearValue(offer.id, dimension.id)}>{t("清除值")}</Button></Tooltip>
                         </div>
                       </>
                     ) : (
-                      <span data-testid="archived-dimension-value" className={styles.archivedValue}>{draftValues[key] || '尚未填写'}{active ? ' · 历史未绑定，仅可查看' : ''}</span>
+                      <span data-testid="archived-dimension-value" className={styles.archivedValue}>{draftValues[key] || t("尚未填写")}{active ? t(" · 历史未绑定，仅可查看") : ''}</span>
                     )}
                   </div>
                 );
               })}
-              {active && <Button type="link" danger data-action="archive-dimension" data-dimension-id={dimension.id} onClick={() => void archiveDimension(dimension.id)}>归档维度</Button>}
+              {active && <Button type="link" danger data-action="archive-dimension" data-dimension-id={dimension.id} onClick={() => void archiveDimension(dimension.id)}>{t("归档维度")}</Button>}
             </div>
           </Card>
         );

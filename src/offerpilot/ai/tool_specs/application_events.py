@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import fields as dataclass_fields
 from datetime import datetime, timedelta, timezone
 from typing import Any, TypedDict, cast
 
@@ -202,6 +203,9 @@ def _update(args: EventArgs, context: ToolExecutionContext) -> dict[str, Any]:
         context.scope_constraint,
         event_id,
         _event_create(args, context, "update_application_event"),
+        provided_fields=frozenset(args).intersection(
+            field.name for field in dataclass_fields(ApplicationEventCreate)
+        ),
     )
     if event is None:
         raise ToolRecordNotFound("application event not found")

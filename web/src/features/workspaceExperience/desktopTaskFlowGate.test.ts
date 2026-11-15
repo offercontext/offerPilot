@@ -130,9 +130,9 @@ describe('Desktop Task Flow independent frontend gate', () => {
     const topBarSource = appShell.slice(topBarStart, appShell.indexOf('return (', topBarStart));
 
     for (const label of ['添加投递', '开始面试练习', '开始刷题', '上传简历', '添加经历']) {
-      expect(topBarSource).toContain(`label: '${label}'`);
+      expect(topBarSource).toContain(`label: t("${label}")`);
     }
-    expect(topBarSource).toContain("? '添加投递' : '录入 Offer'");
+    expect(topBarSource).toContain('? t("添加投递") : t("录入 Offer")');
     expect(topBarSource).toContain('if (!selectedApp) {');
     expect(appShell).toContain('primaryAction={topBarPrimaryAction}');
     expect(topBarSource).toContain('setResumeUploadRequestToken((token) => token + 1)');
@@ -182,7 +182,7 @@ describe('Desktop Task Flow independent frontend gate', () => {
     const root = repoRoot();
     const haru = read(root, 'web/src/features/assistantSurface/HaruChatWindow.tsx');
     const haruTest = read(root, 'web/src/features/assistantSurface/HaruChatWindow.test.tsx');
-    const expandStart = haru.indexOf('aria-label="展开到 Pilot 工作区"');
+    const expandStart = haru.indexOf('aria-label={t("展开到 Pilot 工作区")}');
     const expandEnd = haru.indexOf('onExpand?.();', expandStart);
     const expansion = haru.slice(expandStart, expandEnd);
 

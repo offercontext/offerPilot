@@ -31,14 +31,14 @@ describe('ChatPanel docked layout contract', () => {
     expect(component).toContain('styles.workspaceDocked');
     expect(component).toContain('<ThreadRail');
     expect(component).toContain('PlusOutlined');
-    expect(component).toContain('aria-label="新建对话"');
+    expect(component).toContain('aria-label={t("新建对话")}');
     expect(component).toContain('docked &&');
   });
 
   it('lets the docked Pilot expose an action that opens the Pilot tab', () => {
     expect(component).toContain('onExpand');
     expect(component).toContain('ExpandAltOutlined');
-    expect(component).toContain('aria-label="打开 Pilot tab"');
+    expect(component).toContain('aria-label={t("打开 Pilot tab")}');
   });
 
   it('supports a normal Pilot tab page variant that reuses the expanded workspace', () => {
@@ -126,7 +126,7 @@ describe('ChatPanel docked layout contract', () => {
     expect(component).toContain('stopActiveRequest');
     expect(controller).toContain('activeRequest.controller.abort()');
     expect(component).toContain('isAbortError');
-    expect(component).toContain('aria-label="停止当前回复"');
+    expect(component).toContain('aria-label={t("停止当前回复")}');
     expect(component).toContain('已停止当前回复');
   });
 
@@ -182,7 +182,7 @@ describe('ChatPanel docked layout contract', () => {
     expect(proposalCard).toContain('FIELD_LABELS');
     expect(proposalCard).toContain('STATUS_LABELS');
     expect(proposalCard).toContain('EVENT_TYPE_LABELS');
-    expect(proposalCard).toContain("duration_minutes: '时长'");
+    expect(proposalCard).toContain('get duration_minutes() { return t("时长"); }' );
     expect(proposalCard).toContain('参考依据较少');
   });
 
@@ -206,7 +206,7 @@ describe('ChatPanel docked layout contract', () => {
 
   it('summarizes multi-step write cards and long review fields', () => {
     expect(proposalCard).toContain('action.workflow');
-    expect(proposalCard).toContain('第 {action.workflow.current_step} / {action.workflow.total_steps} 步');
+    expect(proposalCard).toContain('第 {current_step} / {total_steps} 步');
     expect(proposalCard).toContain('summarizeLongValue');
     expect(proposalCard).toContain('longDraftFields');
     expect(proposalCard).toContain('action.draft_summary');
@@ -363,7 +363,7 @@ describe('ChatPanel docked layout contract', () => {
     expect(component).toContain('pageContext: requestPageContext');
     expect(component).toContain('pageContextChips(activePageContext)');
     expect(component).toContain("type: 'remove', contextKey: incomingPageContextKey, chipKey");
-    expect(component).toContain('aria-label={`\u79fb\u9664${chip.label}`}');
+    expect(component).toContain('aria-label={t("移除{label}", { label: chip.label })}');
     expect(component).toContain('disabled={loading}');
     expect(component).toContain('styles.requestContextRow');
     expect(component).toContain('styles.contextBadge');
@@ -422,13 +422,13 @@ describe('ChatPanel docked layout contract', () => {
     expect(threadRail).toContain('onKeyDown={stopActionPropagation}');
     expect(component).toContain('updateConversation');
     expect(component).toContain('clearActiveContext');
-    expect(component).toContain('aria-label="移除当前上下文"');
+    expect(component).toContain('aria-label={t("移除当前上下文")}');
   });
 
   it('supports searchable active and archive conversation views with recovery actions', async () => {
     const css = await loadCss();
 
-    expect(threadRail).toContain('aria-label="搜索对话"');
+    expect(threadRail).toContain('aria-label={t("搜索对话")}');
     expect(threadRail).toContain("view === 'archived'");
     expect(threadRail).toContain('待确认');
     expect(threadRail).toContain('该对话有待确认操作，完成或取消后才能归档');
@@ -579,14 +579,14 @@ describe('ChatPanel docked layout contract', () => {
     expect(component).toContain('lastUndo');
     expect(component).toContain('undoLastWrite');
     expect(component).toContain('撤销最近一次 AI 写入');
-    expect(component).toContain("confirmError || '保存失败'");
+    expect(component).toContain('displayPilotUiMessage(confirmError) : t("保存失败")' );
     expect(component).toContain('当前记录已被修改，无法安全撤销。现有内容已保留。');
   });
 
   it('keeps the context evidence panel fully localized for Chinese users', () => {
     expect(contextPanel).toContain('当前参考依据');
     expect(contextPanel).toContain('暂无参考依据');
-    expect(evidenceList).toContain('aria-label="参考依据"');
+    expect(evidenceList).toContain('aria-label={t("参考依据")}');
     expect(contextPanel).not.toContain('Current evidence');
     expect(contextPanel).not.toContain('No evidence collected yet');
     expect(evidenceList).not.toContain('Evidence sources');
@@ -632,14 +632,14 @@ describe('ChatPanel docked layout contract', () => {
   it('renders expandable evidence and timeline limits with native controls', async () => {
     const css = await loadCss();
 
-    expect(evidenceList).toContain('`另有 ${similar.length} 条同类依据`');
+    expect(evidenceList).toContain('t("另有 {count} 条同类依据", { count: similar.length })');
     expect(evidenceList).toContain('aria-expanded={expanded}');
     expect(evidenceList).toContain('...remaining');
-    expect(evidenceList).toContain('formatEvidenceMeta(item.meta)');
-    expect(evidenceList).toContain('title={item.meta}');
+    expect(evidenceList).toContain('formatEvidenceMeta(meta)');
+    expect(evidenceList).toContain('title={meta}');
     expect(evidenceList).toContain('evidenceSetIdentity(items, similar, remaining)');
     expect(evidenceList).toContain('remaining = similar');
-    expect(evidenceList).toContain("{expanded ? '收起依据' : '展开依据'}");
+    expect(evidenceList).toContain('{expanded ? t("收起依据") : t("展开依据")}' );
     expect(processTimeline).toContain('const visibleSteps = expandedSteps ? steps : steps.slice(0, 8);');
     expect(processTimeline).toContain('const evidenceSelection = selectEvidence(step.evidence ?? [], 8);');
     expect(processTimeline).toContain('similar={evidenceSelection.similar}');
@@ -649,7 +649,7 @@ describe('ChatPanel docked layout contract', () => {
     expect(processTimeline).toContain('const stepSetIdentity = toolStepSetIdentity(steps);');
     expect(processTimeline).toContain('useLayoutEffect(() => {');
     expect(processTimeline).toContain('}, [stepSetIdentity]);');
-    expect(processTimeline).toContain('`还有 ${remainingSteps} 步`');
+    expect(processTimeline).toContain('t("还有 {remainingSteps} 步", { remainingSteps: remainingSteps })');
     expect(processTimeline).toContain('aria-expanded={expandedSteps}');
     expect(processTimeline).toContain('<button');
     expect(processTimeline).not.toContain('role="button"');

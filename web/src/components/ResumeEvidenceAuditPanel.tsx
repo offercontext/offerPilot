@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import type { Resume } from '@/types/resume';
 import {
   auditResume,
@@ -17,40 +18,39 @@ const STATUS_ORDER: readonly ResumeAuditStatus[] = ['present', 'review', 'unknow
 const CATEGORY_ORDER: readonly ResumeAuditCategory[] = ['structure', 'experience', 'facts', 'format'];
 
 const STATUS_LABELS: Record<ResumeAuditStatus, string> = {
-  present: '已具备',
-  review: '建议检查',
-  unknown: '无法判断',
+  get present() { return t("已具备"); },
+  get review() { return t("建议检查"); },
+  get unknown() { return t("无法判断"); },
 };
 
 const CATEGORY_LABELS: Record<ResumeAuditCategory, string> = {
-  structure: '核心结构',
-  experience: '经历内容',
-  facts: '可补充事实',
-  format: '版式能力边界',
+  get structure() { return t("核心结构"); },
+  get experience() { return t("经历内容"); },
+  get facts() { return t("可补充事实"); },
+  get format() { return t("版式能力边界"); },
 };
 
 export default function ResumeEvidenceAuditPanel({ resume, onSupplement }: Props) {
+  useLocale();
   const result = auditResume(resume);
   const findingsByCategory = groupFindings(result.findings);
 
   return (
-    <article className={styles.auditPanel} aria-label="简历事实体检">
+    <article className={styles.auditPanel} aria-label={t("简历事实体检")}>
       <div className={styles.auditHeader}>
         <div>
-          <div className={styles.auditTitle}>简历事实体检</div>
+          <div className={styles.auditTitle}>{t("简历事实体检")}</div>
           <p className={styles.auditIntro}>
-            只检查当前简历中可观察的信息，不会修改简历，也不会调用 AI。
-          </p>
+            {t("只检查当前简历中可观察的信息，不会修改简历，也不会调用 AI。")}</p>
         </div>
       </div>
 
       {resume.parse_status === 'parse-failed' && (
         <p className={styles.auditParseNotice} role="status">
-          原始文本解析失败；这里只能检查已经保存的结构化字段。
-        </p>
+          {t("原始文本解析失败；这里只能检查已经保存的结构化字段。")}</p>
       )}
 
-      <div className={styles.auditSummary} aria-label="体检结果摘要">
+      <div className={styles.auditSummary} aria-label={t("体检结果摘要")}>
         {STATUS_ORDER.map((status) => (
           <div key={status} className={styles.auditSummaryItem} data-audit-status={status}>
             <span className={`${styles.auditStatus} ${styles[`auditStatus${capitalize(status)}`]}`}>
@@ -62,7 +62,7 @@ export default function ResumeEvidenceAuditPanel({ resume, onSupplement }: Props
       </div>
 
       {result.findings.length === 0 ? (
-        <div className={styles.auditEmptyState}>暂无可展示的体检结果。</div>
+        <div className={styles.auditEmptyState}>{t("暂无可展示的体检结果。")}</div>
       ) : (
         <div className={styles.auditCategories}>
           {CATEGORY_ORDER.map((category) => {
@@ -93,6 +93,7 @@ function FindingDetails({
   finding: ResumeAuditFinding;
   onSupplement?: (finding: ResumeAuditFinding) => void;
 }) {
+  useLocale();
   const statusClass = styles[`auditStatus${capitalize(finding.status)}`];
   return (
     <details className={styles.auditFinding}>
@@ -106,11 +107,11 @@ function FindingDetails({
         <p>{finding.explanation}</p>
         {finding.source && (
           <div className={styles.auditSource}>
-            <div className={styles.auditSourceLabel}>字段路径</div>
+            <div className={styles.auditSourceLabel}>{t("字段路径")}</div>
             <code className={styles.auditSourcePath}>{finding.source.path}</code>
             {finding.source.excerpt !== undefined && (
               <>
-                <div className={styles.auditSourceLabel}>原文摘录</div>
+                <div className={styles.auditSourceLabel}>{t("原文摘录")}</div>
                 <blockquote className={styles.auditExcerpt}>{finding.source.excerpt}</blockquote>
               </>
             )}
@@ -122,8 +123,7 @@ function FindingDetails({
             className={styles.auditSupplementButton}
             onClick={() => onSupplement(finding)}
           >
-            补充真实事实
-            <span aria-hidden="true">→</span>
+            {t("补充真实事实")}<span aria-hidden="true">→</span>
           </button>
         )}
       </div>

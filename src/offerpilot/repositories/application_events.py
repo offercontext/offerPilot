@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/applications.md（日程、日历与事件删除）。
+# 事件语义为 event_type + subtype + tags；测评属于 written_test 的 subtype。
+
 import json
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -121,6 +124,7 @@ class ApplicationEventsRepository:
         constraint: ApplicationScopeConstraint,
         data: ApplicationEventCreate,
     ) -> ApplicationEvent:
+        # restricted 写入将授权父投递及其可见性纳入 INSERT；不把参数里的 application_id 当授权。
         binding = self._require_scoped(constraint)
         application_id = require_scoped_positive_int64(
             data.application_id, "application_id"
@@ -198,6 +202,7 @@ class ApplicationEventsRepository:
         application_id: int | None = None,
         event_type: str = "",
     ) -> BuiltinList[ApplicationEventWithApplication]:
+        # restricted 分支以可见父投递为锚点做外连接，区分“有权但没有事件”和“范围已不可用”。
         binding = self._require_scoped(constraint)
         require_scoped_optional_id(application_id, "application_id")
         session = binding.session
@@ -309,7 +314,11 @@ class ApplicationEventsRepository:
         constraint: ApplicationScopeConstraint,
         event_id: int,
         data: ApplicationEventCreate,
+        *,
+        provided_fields: frozenset[str] | None = None,
     ) -> Optional[ApplicationEvent]:
+        """Write an explicit field set atomically, or retain full replacement when omitted."""
+        # 原事件必须落在授权范围，目标 application_id 也必须满足约束；防止借更新把事件移出范围。
         binding = self._require_scoped(constraint)
         event_id = require_scoped_positive_int64(event_id, "application event id")
         application_id = require_scoped_positive_int64(
@@ -331,8 +340,19 @@ class ApplicationEventsRepository:
             if application_id != allowed_id:
                 raise ScopeAccessDenied("application scope denied")
             statement = statement.where(ApplicationEvent.application_id == allowed_id)
+        values = _event_values(data, tags_key="_tags")
+        if provided_fields is not None:
+            public_fields = frozenset("tags" if key == "_tags" else key for key in values)
+            if not provided_fields or not provided_fields.issubset(public_fields):
+                raise ValueError("invalid application event update fields")
+            # Omitted columns stay in the database, including concurrently changed values.
+            values = {
+                key: value
+                for key, value in values.items()
+                if ("tags" if key == "_tags" else key) in provided_fields
+            }
         statement = (
-            statement.values(**_event_values(data, tags_key="_tags"))
+            statement.values(**values)
             .returning(ApplicationEvent)
             .execution_options(populate_existing=True)
         )
@@ -366,6 +386,7 @@ class ApplicationEventsRepository:
         constraint: ApplicationScopeConstraint,
         event_id: int,
     ) -> bool:
+        # 将作用域条件传给统一删除 helper，让解绑笔记和删除事件使用同一组所有权谓词。
         binding = self._require_scoped(constraint)
         event_id = require_scoped_positive_int64(event_id, "application event id")
         active_parent = exists(
@@ -430,6 +451,8 @@ def _delete_application_event_owned(
 ) -> bool:
     """Unbind surviving Notes and delete one exact Event under caller ownership."""
 
+    # 删除事件前在同一事务中解除仍绑定它的笔记，并递增笔记修订号。
+    # 解绑和删除共用 exact_event 条件，避免条件删除失败却先修改了关联笔记。
     exact_event = and_(ApplicationEvent.id == event_id, *predicates)
     event_still_matches = exists(select(ApplicationEvent.id).where(exact_event))
     connection = session.connection()

@@ -27,7 +27,7 @@ vi.mock('@/services/adaptiveInterviewPractice', () => ({
 }));
 vi.mock('@/features/reviewReadiness/service', () => ({ getReadinessPracticeFocus: service.focus }));
 
-const { default: AdaptiveInterviewPracticeWorkspace } = await import('./AdaptiveInterviewPracticeWorkspace');
+const { default: AdaptiveInterviewPracticeWorkspace, recoverAdaptivePracticeDrafts, replaceTrainingEvidenceDraft, PracticeHistoryDetails } = await import('./AdaptiveInterviewPracticeWorkspace');
 const { createCoreTaskSurfaceController } = await import('@/features/coreTaskSurface/controller');
 const ControlledAdaptiveInterviewPracticeWorkspace = AdaptiveInterviewPracticeWorkspace as unknown as ComponentType<Record<string, unknown>>;
 
@@ -636,5 +636,50 @@ describe('AdaptiveInterviewPracticeWorkspace', () => {
     await act(async () => { resolveStart(plan); await Promise.resolve(); await Promise.resolve(); });
     expect(container?.textContent).toContain('替换后的重点');
     expect(container?.textContent).not.toContain('精确目标练习');
+  });
+});
+
+
+describe('completed training evidence owner recovery', () => {
+  const training = { scenario: 'original' as const, answer: 'private answer', assistance: 'unknown' as const, editingId: null, command: { action: 'withdraw' as const, expected_revision: 1, idempotency_key: 'same-key', record_id: 1 } };
+  function owned(host: { signalVersionId: number | null; targetEventId: number | null }): AdaptivePracticeOwnerDraft {
+    return { ownerKey: 'practice:7:201:202:plan:8', ownerGeneration: 7, signalVersionId: 201, targetEventId: 202, planId: 8, answer: '', reflection: '', assessment: null, startInput: null, completionInput: null, resultUnknown: false, pendingOperation: null, trainingEvidenceDraft: training, trainingEvidenceHost: host };
+  }
+  it.each([undefined, { ownerGeneration: 8, signalVersionId: 91, targetEventId: 103 }])('restores a historical V2 plan in its original host scope', (focus) => {
+    const draft = owned({ signalVersionId: focus?.signalVersionId ?? null, targetEventId: focus?.targetEventId ?? null });
+    const result = recoverAdaptivePracticeDrafts({ [draft.ownerKey]: draft }, 8, 7, focus);
+    expect(result.recovered).toHaveLength(1);
+    expect(result.recovered[0]).toMatchObject({ ownerKey: 'practice:8:201:202:plan:8', signalVersionId: 201, targetEventId: 202, trainingEvidenceDraft: training, trainingEvidenceHost: draft.trainingEvidenceHost });
+    expect(recoverAdaptivePracticeDrafts({ [draft.ownerKey]: draft }, 8, 7, { ownerGeneration: 8, signalVersionId: 301, targetEventId: 302 }).recovered).toHaveLength(0);
+  });
+  it('clears only training fields and preserves the original completion recovery command', () => {
+    const draft = { ...owned({ signalVersionId: null, targetEventId: null }), resultUnknown: true, completionInput: { expected_revision: 1, response_text: 'original answer', reflection_text: '', self_assessment: 'clearer' as const, idempotency_key: 'completion-key' } };
+    const remaining = replaceTrainingEvidenceDraft(draft, null, { signalVersionId: null, targetEventId: null });
+    expect(remaining?.resultUnknown).toBe(true); expect(remaining?.completionInput).toEqual(draft.completionInput); expect(remaining?.trainingEvidenceDraft).toBeUndefined();
+  });
+});
+
+describe('completed history disclosure', () => {
+  it('keeps saved evidence visible and lets the user close a restored draft', () => {
+    const render = (restoreOpen: boolean) => act(() => root?.render(<PracticeHistoryDetails restoreOpen={restoreOpen}><summary>History</summary><p>Evidence and next exercise</p></PracticeHistoryDetails>));
+    render(false);
+    const details = container!.querySelector('details')!;
+    expect(details.open).toBe(false);
+    act(() => { details.open = true; }); // Native summary toggle.
+    render(true); // User edits training evidence.
+    render(false); // Successful save clears the draft.
+    expect(details.open).toBe(true);
+    act(() => { details.open = false; });
+    render(false);
+    expect(details.open).toBe(false);
+    render(true); // A recovered draft is made visible.
+    expect(details.open).toBe(true);
+    act(() => { details.open = false; });
+    render(true); // Editing/rerendering the same draft must not fight manual close.
+    expect(details.open).toBe(false);
+  });
+  it('opens an already recovered draft on mount', () => {
+    act(() => root?.render(<PracticeHistoryDetails restoreOpen><summary>History</summary><p>Pending retry</p></PracticeHistoryDetails>));
+    expect(container!.querySelector('details')!.open).toBe(true);
   });
 });

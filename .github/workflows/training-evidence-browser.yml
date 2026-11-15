@@ -1,0 +1,65 @@
+name: Training evidence synthetic Chromium acceptance
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'web/src/components/TrainingEvidencePanel*'
+      - 'web/src/components/AdaptiveInterviewPracticeWorkspace*'
+      - 'web/src/types/trainingEvidence.ts'
+      - 'web/src/types/adaptiveInterviewPractice.ts'
+      - 'web/src/services/trainingEvidence.ts'
+      - 'web/src/layout/AppShell*'
+      - 'web/src/features/desktopUpdates/retainedWorkSafety*'
+      - 'web/src/i18n/**'
+      - 'web/tests/training-evidence/**'
+      - 'web/tests/localization/fixture-api.mjs'
+      - 'web/package.json'
+      - 'web/package-lock.json'
+      - '.github/workflows/training-evidence-browser.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: training-evidence-browser-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  training-evidence-browser:
+    # This one feature's draft PR only; no fork, arbitrary branch, or master dispatch.
+    if: >-
+      (github.event_name == 'pull_request' && github.event.pull_request.number == 66 &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       github.event.pull_request.head.ref == 'feat/20261109-interview-training-memory') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feat/20261109-interview-training-memory')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - name: Validate fixture and network-denial contract offline
+        run: node --test web/tests/training-evidence/fixture-contract.mjs
+      - name: Build actual production UI
+        run: npm run build --prefix web
+      - name: Install Chromium and CJK fonts
+        working-directory: web
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Exercise feature with synthetic local responses only
+        run: node web/tests/training-evidence/run.mjs artifacts/training-evidence-browser
+      - name: Preserve exact-source report and rendered screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: training-evidence-browser-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/training-evidence-browser
+          if-no-files-found: warn
+          retention-days: 14

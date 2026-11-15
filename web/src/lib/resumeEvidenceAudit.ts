@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { Resume } from '@/types/resume';
 
 export type ResumeAuditStatus = 'present' | 'review' | 'unknown';
@@ -55,12 +56,12 @@ const MAX_BULLET_CODE_POINTS = 240;
 const MAX_EXCERPT_CODE_POINTS = 160;
 
 const CORE_FIELD_LABELS: Record<CoreField, string> = {
-  contact: '联系方式',
-  education: '教育经历',
-  experience: '工作经历',
-  projects: '项目经历',
-  skills: '技能清单',
-  career_intent: '求职意向',
+  get contact() { return t("联系方式"); },
+  get education() { return t("教育经历"); },
+  get experience() { return t("工作经历"); },
+  get projects() { return t("项目经历"); },
+  get skills() { return t("技能清单"); },
+  get career_intent() { return t("求职意向"); },
 };
 
 const CORE_FIELD_IDS: Record<CoreField, string> = {
@@ -81,6 +82,8 @@ const CORE_FIELD_SHAPES: Record<CoreField, 'record' | 'array' | 'flexible'> = {
   career_intent: 'record',
 };
 
+// 业务地图：docs/architecture/code-map/materials.md。只检查已保存结构中的可观察信息；
+// unknown 表示证据不足，不是“缺失”结论，也不能据此判断 PDF 视觉版式或事实真实性。
 export function auditResume(resume: Resume): ResumeAuditResult {
   const rawContent = resume && (typeof resume === 'object' || typeof resume === 'function')
     ? readProperty(resume as unknown as Record<string, unknown>, 'content_json')
@@ -91,8 +94,8 @@ export function auditResume(resume: Resume): ResumeAuditResult {
         id: 'structure-content-json',
         category: 'structure',
         status: 'unknown',
-        title: '简历内容结构',
-        explanation: '当前简历内容不足，暂时无法完成结构化体检。',
+        title: t("简历内容结构"),
+        explanation: t("当前简历内容不足，暂时无法完成结构化体检。"),
       },
       formatBoundaryFinding(),
     ]);
@@ -117,10 +120,10 @@ function auditCoreField(content: Record<string, unknown>, field: CoreField): Res
   const status = classifyCoreField(value, CORE_FIELD_SHAPES[field]);
   const label = CORE_FIELD_LABELS[field];
   const explanation = status === 'present'
-    ? `已检测到可识别的${label}信息。`
+    ? t("已检测到可识别的{label}信息。", { label: label })
     : status === 'review'
-      ? `当前${label}字段为空，建议检查是否需要补充。`
-      : `当前${label}字段结构无法安全识别。`;
+      ? t("当前{label}字段为空，建议检查是否需要补充。", { label: label })
+      : t("当前{label}字段结构无法安全识别。", { label: label });
 
   return {
     id: `structure-${CORE_FIELD_IDS[field]}`,
@@ -221,8 +224,8 @@ function auditExperienceFindings(value: unknown, scan: ExperienceScan): ResumeAu
         id: 'experience-empty-bullet',
         category: 'experience',
         status: 'review',
-        title: '空白经历要点',
-        explanation: '存在纯空白的经历要点，建议检查这条内容是否需要补充或删除。',
+        title: t("空白经历要点"),
+        explanation: t("存在纯空白的经历要点，建议检查这条内容是否需要补充或删除。"),
         source: sourceFor(blankBullet),
       }
     : null);
@@ -244,8 +247,8 @@ function auditExperienceFindings(value: unknown, scan: ExperienceScan): ResumeAu
         id: 'experience-duplicate-bullet',
         category: 'experience',
         status: 'review',
-        title: '重复经历要点',
-        explanation: '检测到内容完全相同的经历要点，建议检查是否需要合并或区分。',
+        title: t("重复经历要点"),
+        explanation: t("检测到内容完全相同的经历要点，建议检查是否需要合并或区分。"),
         source: sourceFor(duplicateBullet),
       }
     : null);
@@ -256,8 +259,8 @@ function auditExperienceFindings(value: unknown, scan: ExperienceScan): ResumeAu
         id: 'experience-long-bullet',
         category: 'experience',
         status: 'review',
-        title: '异常长经历要点',
-        explanation: `这条经历要点超过 ${MAX_BULLET_CODE_POINTS} 个 Unicode code point，建议检查是否包含过长段落。`,
+        title: t("异常长经历要点"),
+        explanation: t("这条经历要点超过 {MAX_BULLET_CODE_POINTS} 个 Unicode code point，建议检查是否包含过长段落。", { MAX_BULLET_CODE_POINTS: MAX_BULLET_CODE_POINTS }),
         source: sourceFor(longBullet),
       }
     : null);
@@ -267,8 +270,8 @@ function auditExperienceFindings(value: unknown, scan: ExperienceScan): ResumeAu
       id: 'experience-bullets-missing',
       category: 'experience',
       status: 'review',
-      title: '缺少可识别经历要点',
-      explanation: '经历项存在，但当前没有可识别的 bullet、achievement 或 highlight 字符串集合。',
+      title: t("缺少可识别经历要点"),
+      explanation: t("经历项存在，但当前没有可识别的 bullet、achievement 或 highlight 字符串集合。"),
       source: { path: scan.missingBulletPath },
     });
   } else {
@@ -280,8 +283,8 @@ function auditExperienceFindings(value: unknown, scan: ExperienceScan): ResumeAu
         id: 'experience-bullets-unknown',
         category: 'experience',
         status: 'unknown',
-        title: '经历要点结构无法判断',
-        explanation: '当前经历结构中混入无法安全识别的元素，暂时无法完整判断经历要点。',
+        title: t("经历要点结构无法判断"),
+        explanation: t("当前经历结构中混入无法安全识别的元素，暂时无法完整判断经历要点。"),
         source: { path: scan.unknownPath },
       }
     : null);
@@ -301,8 +304,8 @@ function auditQuantificationFinding(scan: ExperienceScan): ResumeAuditFinding[] 
       id: 'facts-quantification',
       category: 'facts',
       status: 'present',
-      title: '存在量化表达',
-      explanation: '当前可识别经历要点中出现了阿拉伯数字，仅表示存在量化表达，不代表真实或充分。',
+      title: t("存在量化表达"),
+      explanation: t("当前可识别经历要点中出现了阿拉伯数字，仅表示存在量化表达，不代表真实或充分。"),
       source: sourceFor(quantifiedBullet),
     }];
   }
@@ -311,8 +314,8 @@ function auditQuantificationFinding(scan: ExperienceScan): ResumeAuditFinding[] 
     id: 'facts-quantification',
     category: 'facts',
     status: 'review',
-    title: '可补充真实事实',
-    explanation: '当前可识别经历要点中没有出现阿拉伯数字；如有真实数据，可以补充数量、规模、频率、时间或结果。',
+    title: t("可补充真实事实"),
+    explanation: t("当前可识别经历要点中没有出现阿拉伯数字；如有真实数据，可以补充数量、规模、频率、时间或结果。"),
     ...(evidenceBullet ? { source: sourceFor(evidenceBullet) } : {}),
   }];
 }
@@ -322,8 +325,8 @@ function formatBoundaryFinding(): ResumeAuditFinding {
     id: 'format-visual-unknown',
     category: 'format',
     status: 'unknown',
-    title: '版式能力边界',
-    explanation: '当前结构化内容无法判断原始文件的字体、表格、图片、页眉页脚、分页和 ATS 解析效果。',
+    title: t("版式能力边界"),
+    explanation: t("当前结构化内容无法判断原始文件的字体、表格、图片、页眉页脚、分页和 ATS 解析效果。"),
   };
 }
 

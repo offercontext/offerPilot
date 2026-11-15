@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import {
   AppstoreOutlined,
   BulbOutlined,
@@ -36,6 +37,7 @@ interface Props {
 }
 
 export default function Sidebar({ view, onChange, reminderCount }: Props) {
+  useLocale();
   const { mode, toggle } = useThemeMode();
   const activeModule = resolveModuleForView(view);
   const businessNav = MODULE_NAV.filter((item) => item.key !== 'settings');
@@ -44,7 +46,7 @@ export default function Sidebar({ view, onChange, reminderCount }: Props) {
   return (
     <nav
       className={`${styles.sidebar} op-sidebar`}
-      aria-label="主导航"
+      aria-label={t("主导航")}
     >
       <div className={styles.brand}>
         <span className={styles.brandMark} aria-hidden="true" />
@@ -82,27 +84,29 @@ export default function Sidebar({ view, onChange, reminderCount }: Props) {
         );
       })}
 
+      <div className={styles.mascotSlot} data-pilot-mascot-sidebar-dock aria-hidden="true" />
+
       <section className={styles.utility} aria-labelledby="sidebar-group-utility">
-        <h2 id="sidebar-group-utility" className={styles.groupLabel}>辅助</h2>
+        <h2 id="sidebar-group-utility" className={styles.groupLabel}>{t("辅助")}</h2>
         <button
           type="button"
           data-navigation-tier="utility"
-          aria-label={settingsItem?.label ?? '设置'}
+          aria-label={settingsItem?.label ?? t("设置")}
           aria-current={activeModule === 'settings' ? 'page' : undefined}
           onClick={() => onChange('settings')}
           className={`${styles.utilityButton} ${activeModule === 'settings' ? styles.active : ''}`}
         >
           <span className={styles.icon} aria-hidden="true"><SettingOutlined /></span>
-          <span className={styles.label}>{settingsItem?.label ?? '设置'}</span>
+          <span className={styles.label}>{settingsItem?.label ?? t("设置")}</span>
         </button>
         <button
           type="button"
           onClick={toggle}
-          aria-label="切换明暗模式"
+          aria-label={t("切换明暗模式")}
           className={styles.utilityButton}
         >
           <span className={styles.icon} aria-hidden="true"><BulbOutlined /></span>
-          <span className={styles.label}>{mode === 'dark' ? '亮色模式' : '暗色模式'}</span>
+          <span className={styles.label}>{mode === 'dark' ? t("亮色模式") : t("暗色模式")}</span>
         </button>
       </section>
     </nav>

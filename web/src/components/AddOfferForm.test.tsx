@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setLocale } from '@/i18n';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { App as AntApp } from 'antd';
@@ -85,6 +86,7 @@ async function selectApplication(optionText: string) {
 }
 
 afterEach(() => {
+  act(() => setLocale('zh-CN'));
   act(() => root?.unmount());
   host?.remove();
   document.body.querySelectorAll('.ant-modal-root').forEach((node) => node.remove());
@@ -149,3 +151,57 @@ it('prefills a new Offer from its application while preserving manually edited f
   expect(field('company_name').value).toBe('星云数据');
   expect(field('position_name').value).toBe('后端工程师');
 }, 15_000);
+
+
+it('switches labels and enum options live without resetting edited offer fields', async () => {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  await act(async () => {
+    root?.render(<QueryClientProvider client={client}><AntApp><AddOfferForm open onClose={vi.fn()} applications={applications} /></AntApp></QueryClientProvider>);
+  });
+  await selectApplication('星云数据');
+  setField('company_name', '用户保留的公司名称');
+  const companyInput = field('company_name');
+  await act(async () => setLocale('en-US'));
+  expect(field('company_name')).toBe(companyInput);
+  expect(companyInput.value).toBe('用户保留的公司名称');
+  expect(document.body.textContent).toContain('Monthly salary');
+  expect(document.body.textContent).toContain('Company');
+  expect(document.body.textContent).not.toContain('月薪（元）');
+  await act(async () => setLocale('zh-CN'));
+  expect(field('company_name')).toBe(companyInput);
+  expect(companyInput.value).toBe('用户保留的公司名称');
+  expect(document.body.textContent).toContain('月薪（元）');
+  expect(createOffer).not.toHaveBeenCalled();
+  expect(updateOffer).not.toHaveBeenCalled();
+  client.clear();
+}, 15_000);
+
+it('updates existing validation errors on a locale switch without submitting or replacing the form', async () => {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  await act(async () => {
+    root?.render(<QueryClientProvider client={client}><AntApp><AddOfferForm open onClose={vi.fn()} applications={applications} /></AntApp></QueryClientProvider>);
+  });
+  const companyInput = field('company_name');
+  await act(async () => {
+    document.body.querySelector<HTMLButtonElement>('.ant-modal-footer .ant-btn-primary')?.click();
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+  expect(document.body.textContent).toContain('请输入公司');
+  await act(async () => {
+    setLocale('en-US');
+  });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+  expect(field('company_name')).toBe(companyInput);
+  expect(companyInput.value).toBe('');
+  expect(document.body.textContent).not.toContain('请输入公司');
+  expect(document.body.querySelector('.ant-form-item-explain-error')?.textContent).toMatch(/company/i);
+  expect(createOffer).not.toHaveBeenCalled();
+  expect(updateOffer).not.toHaveBeenCalled();
+  client.clear();
+});

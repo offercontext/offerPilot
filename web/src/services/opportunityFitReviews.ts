@@ -1,5 +1,4 @@
 import type {
-  CreateOpportunityFitReviewInput,
   OpportunityFitReview,
   OpportunityFitReviewSummary,
   CreateOpportunityFitV2Input,
@@ -10,17 +9,6 @@ import type {
 import { createApiClient } from './http';
 
 const http = createApiClient({ baseURL: '/api', timeout: 180000 });
-
-export async function createOpportunityFitReview(
-  applicationID: number,
-  input: CreateOpportunityFitReviewInput,
-): Promise<OpportunityFitReview> {
-  const { data } = await http.post<OpportunityFitReview>(
-    `/applications/${applicationID}/opportunity-fit-reviews`,
-    input,
-  );
-  return data;
-}
 
 export async function createOpportunityFitV2Triage(
   applicationID: number,
@@ -77,16 +65,6 @@ export async function getOpportunityFitReview(
 ): Promise<OpportunityFitReview> {
   const { data } = await http.get<OpportunityFitReview>(
     `/applications/${applicationID}/opportunity-fit-reviews/${reviewID}`,
-  );
-  return data;
-}
-
-export async function createOpportunityFitDeepReview(
-  applicationID: number,
-  reviewID: number,
-): Promise<OpportunityFitReview> {
-  const { data } = await http.post<OpportunityFitReview>(
-    `/applications/${applicationID}/opportunity-fit-reviews/${reviewID}/deep-review`,
   );
   return data;
 }

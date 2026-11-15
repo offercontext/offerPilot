@@ -35,21 +35,27 @@ if (Test-Path -LiteralPath $aggregatePath) {
 
 function Get-TestFiles {
     @(
-        Get-ChildItem -Path (Join-Path $webRoot 'src') -Recurse -File |
-            Where-Object { $_.Name -match '\.(test|spec)\.[cm]?[jt]sx?$' } |
-            ForEach-Object {
-                Get-RelativePathWithinRoot $_.FullName $webRoot
-            } |
-            Sort-Object
-    )
+        foreach ($directory in @('src', 'tests')) {
+            $root = Join-Path $webRoot $directory
+            if (Test-Path -LiteralPath $root -PathType Container) {
+                Get-ChildItem -LiteralPath $root -Recurse -File |
+                    Where-Object { $_.Name -match '\.(test|spec)\.[cm]?[jt]sx?$' } |
+                    ForEach-Object { Get-RelativePathWithinRoot $_.FullName $webRoot }
+            }
+        }
+    ) | Sort-Object
 }
 
 function Get-GroupForFile([string]$File) {
     $parts = $File.Replace('/', '\').Split('\')
+    $normalized = $File.Replace('/', '\').ToLowerInvariant()
+    # Localization primitives and their mounted regressions share the lib owner.
+    if ($normalized.StartsWith('src\i18n\') -or $normalized.StartsWith('tests\localization\')) {
+        return 'lib'
+    }
     if ($parts.Count -lt 3 -or $parts[0] -ne 'src') {
         throw "Frontend test is outside src/<group>: $File"
     }
-    $normalized = $File.Replace('/', '\').ToLowerInvariant()
     if ($normalized.StartsWith('src\components\chatpanel\')) {
         $group = 'components-chat'
     } elseif ($normalized.StartsWith('src\components\k')) {
@@ -115,8 +121,13 @@ function Get-RepoRelativePath([string]$Path) {
 
 function Get-FingerprintFiles {
     $files = @(
-        Get-ChildItem -Path (Join-Path $webRoot 'src') -Recurse -File |
-            ForEach-Object { Get-RepoRelativePath $_.FullName }
+        foreach ($directory in @('src', 'tests')) {
+            $root = Join-Path $webRoot $directory
+            if (Test-Path -LiteralPath $root -PathType Container) {
+                Get-ChildItem -LiteralPath $root -Recurse -File |
+                    ForEach-Object { Get-RepoRelativePath $_.FullName }
+            }
+        }
     )
     $webMetadataNames = @(
         'package.json',

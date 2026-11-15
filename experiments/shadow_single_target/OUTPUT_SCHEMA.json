@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "properties": {
+      "id": {
+        "type": "string"
+      },
+      "fact_gate": {
+        "enum": [
+          "eligible",
+          "nonfactual",
+          "ambiguous",
+          "out_of_scope",
+          "split_required"
+        ]
+      },
+      "surface_form_tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "speech_act_tags": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "conditionality": {
+        "enum": [
+          "conditional",
+          "unconditional",
+          "unspecified"
+        ]
+      },
+      "tag_uncertainty": {
+        "type": "string"
+      },
+      "interpretation": {
+        "type": "string"
+      },
+      "alternatives": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "relation_expectation": {
+        "enum": [
+          "supported",
+          "contradicted",
+          "insufficient",
+          null
+        ]
+      },
+      "deliverable_relation": {
+        "enum": [
+          "supported",
+          "contradicted",
+          "insufficient",
+          null
+        ]
+      },
+      "decision_state": {
+        "enum": [
+          "decided",
+          "blocked",
+          "abstain",
+          "not_executed",
+          "split"
+        ]
+      },
+      "reason": {
+        "type": "string"
+      },
+      "citations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "source_id": {
+              "type": "string"
+            },
+            "quote": {
+              "type": "string"
+            },
+            "mechanical": {
+              "enum": [
+                "pass",
+                "fail",
+                "not_evaluated"
+              ]
+            },
+            "relevance": {
+              "type": "string"
+            },
+            "entailment": {
+              "type": "string"
+            },
+            "sufficiency": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source_id",
+            "quote",
+            "mechanical",
+            "relevance",
+            "entailment",
+            "sufficiency"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "review_status": {
+        "enum": [
+          "resolved",
+          "unresolved"
+        ]
+      },
+      "children": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "target_span": {
+              "type": "array",
+              "items": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "minItems": 2,
+              "maxItems": 2
+            },
+            "shared_scope_spans": {
+              "type": "array",
+              "items": {
+                "type": "array",
+                "items": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "minItems": 2,
+                "maxItems": 2
+              }
+            },
+            "assessment": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "fact_gate": {
+                  "enum": [
+                    "eligible",
+                    "nonfactual",
+                    "ambiguous",
+                    "out_of_scope",
+                    "split_required"
+                  ]
+                },
+                "surface_form_tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "speech_act_tags": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "conditionality": {
+                  "enum": [
+                    "conditional",
+                    "unconditional",
+                    "unspecified"
+                  ]
+                },
+                "tag_uncertainty": {
+                  "type": "string"
+                },
+                "interpretation": {
+                  "type": "string"
+                },
+                "alternatives": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "relation_expectation": {
+                  "enum": [
+                    "supported",
+                    "contradicted",
+                    "insufficient",
+                    null
+                  ]
+                },
+                "deliverable_relation": {
+                  "enum": [
+                    "supported",
+                    "contradicted",
+                    "insufficient",
+                    null
+                  ]
+                },
+                "decision_state": {
+                  "enum": [
+                    "decided",
+                    "blocked",
+                    "abstain",
+                    "not_executed",
+                    "split"
+                  ]
+                },
+                "reason": {
+                  "type": "string"
+                },
+                "citations": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "source_id": {
+                        "type": "string"
+                      },
+                      "quote": {
+                        "type": "string"
+                      },
+                      "mechanical": {
+                        "enum": [
+                          "pass",
+                          "fail",
+                          "not_evaluated"
+                        ]
+                      },
+                      "relevance": {
+                        "type": "string"
+                      },
+                      "entailment": {
+                        "type": "string"
+                      },
+                      "sufficiency": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "source_id",
+                      "quote",
+                      "mechanical",
+                      "relevance",
+                      "entailment",
+                      "sufficiency"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "review_status": {
+                  "enum": [
+                    "resolved",
+                    "unresolved"
+                  ]
+                }
+              },
+              "required": [
+                "id",
+                "fact_gate",
+                "surface_form_tags",
+                "speech_act_tags",
+                "conditionality",
+                "tag_uncertainty",
+                "interpretation",
+                "alternatives",
+                "relation_expectation",
+                "deliverable_relation",
+                "decision_state",
+                "reason",
+                "citations",
+                "review_status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "target",
+            "target_span",
+            "shared_scope_spans",
+            "assessment"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "required": [
+      "id",
+      "fact_gate",
+      "surface_form_tags",
+      "speech_act_tags",
+      "conditionality",
+      "tag_uncertainty",
+      "interpretation",
+      "alternatives",
+      "relation_expectation",
+      "deliverable_relation",
+      "decision_state",
+      "reason",
+      "citations",
+      "review_status",
+      "children"
+    ],
+    "additionalProperties": false
+  },
+  "minItems": 1,
+  "maxItems": 1
+}

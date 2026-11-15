@@ -7,7 +7,10 @@ const state = vi.hoisted(() => ({
   confirmed: [] as unknown[],
   sources: [] as unknown,
   search: vi.fn(),
+  notes: vi.fn(),
 }));
+
+vi.mock('@/services/knowledgeNoteLifecycle', () => ({ listManagedKnowledgeNotes: state.notes, mutateKnowledgeNote: vi.fn() }));
 
 vi.mock('@/services/knowledge', () => ({
   archiveKnowledgeSource: vi.fn(),
@@ -82,6 +85,7 @@ beforeEach(() => {
   state.confirmed = [];
   state.sources = [];
   state.search.mockReset();
+  state.notes.mockReset().mockResolvedValue([]);
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     value: () => ({ matches: false, addListener: () => undefined, removeListener: () => undefined }),
@@ -96,6 +100,19 @@ afterEach(() => {
 });
 
 describe('KnowledgeSourcesView mounted source states', () => {
+  it('owns notes beside sources and retains the note owner when switching sections', async () => {
+    renderView(); await flush();
+    expect(state.notes).not.toHaveBeenCalled();
+    const switchTab = (text: string) => act(() => [...(container?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])].find((tab) => tab.textContent === text)?.click());
+    switchTab('已确认的知识笔记'); await flush();
+    const owner = container?.querySelector('[data-testid="confirmed-knowledge-notes"]');
+    expect(owner).not.toBeNull();
+    expect(state.notes).toHaveBeenCalledOnce();
+    switchTab('资料来源'); switchTab('已确认的知识笔记'); await flush();
+    expect(container?.querySelector('[data-testid="confirmed-knowledge-notes"]')).toBe(owner);
+    expect(state.notes).toHaveBeenCalledOnce();
+  });
+
   it('retains a search target until asynchronously loaded evidence is present', async () => {
     const source = { id: 3, source_kind: 'markdown', lifecycle: 'active',
       title: '搜索测试资料', extraction_status: 'extracted', brief_status: 'pending' };

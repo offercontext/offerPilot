@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
 
@@ -38,3 +40,10 @@ class ProactivePolicyUpdate(BaseModel):
     expected_revision: StrictInt = Field(ge=0)
     confirmed: StrictBool
     settings: ProactivePolicy
+
+
+class CompanionBidRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    identity: UUID
+    expected_revision: StrictInt = Field(ge=0)
+    client_id: UUID

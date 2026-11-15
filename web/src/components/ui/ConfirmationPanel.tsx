@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import type { ReactNode } from 'react';
 import { SourceStateTag, type SourceState } from './SourceStateTag';
 import styles from './ConfirmationPanel.module.css';
@@ -16,6 +17,7 @@ export interface ConfirmationPanelProps {
 }
 
 export function ConfirmationPanel({ title, description, sources = [], children, className }: ConfirmationPanelProps) {
+  useLocale();
   return (
     <section className={[styles.panel, className].filter(Boolean).join(' ')} aria-label={title}>
       <div className={styles.copy}>
@@ -23,7 +25,7 @@ export function ConfirmationPanel({ title, description, sources = [], children, 
         <p className={styles.description}>{description}</p>
       </div>
       {sources.length > 0 ? (
-        <div className={styles.sources} aria-label="确认来源">
+        <div className={styles.sources} aria-label={t("确认来源")}>
           {sources.map((source, index) => (
             <SourceStateTag key={`${source.state}-${source.detail ?? index}`} {...source} />
           ))}

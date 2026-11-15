@@ -1,3 +1,5 @@
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Row, Col, Button, Space, Spin, Empty, Typography, message } from 'antd';
@@ -41,6 +43,7 @@ export default function OfferCenterView({
   onEvidenceFocusConsumed,
   onOpenNegotiation,
 }: Props) {
+  useLocale();
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<Offer | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -83,7 +86,7 @@ export default function OfferCenterView({
   }, [applications.length, createRequestToken, onAddApplication]);
   const handleOpenNegotiation = (offer: Offer) => {
     if (listOfferBindingState(offer) === 'unbound') {
-      message.warning('历史未绑定 Offer 仅支持只读查看');
+      message.warning(liveText(() => t("历史未绑定 Offer 仅支持只读查看")));
       return;
     }
     setCompareOpen(false);
@@ -104,7 +107,7 @@ export default function OfferCenterView({
       setEditing(offer);
       setAddOpen(true);
     } else {
-      message.warning('引用的记录已不存在');
+      message.warning(liveText(() => t("引用的记录已不存在")));
     }
     onEvidenceFocusConsumed?.();
   }, [focusOfferId, isLoading, isError, isFetching, offers, onEvidenceFocusConsumed]);
@@ -122,10 +125,10 @@ export default function OfferCenterView({
   };
 
   if (isLoading) {
-    return <div role="status" style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /><div>正在加载 Offer</div></div>;
+    return <div role="status" style={{ textAlign: 'center', padding: 48 }}><Spin size="large" /><div>{t("正在加载 Offer")}</div></div>;
   }
   if (isError) {
-    return <div role="alert" style={{ textAlign: 'center', padding: 48 }}><Empty description="加载 Offer 失败"><Button onClick={() => void refetch()}>重试</Button></Empty></div>;
+    return <div role="alert" style={{ textAlign: 'center', padding: 48 }}><Empty description={t("加载 Offer 失败")}><Button onClick={() => void refetch()}>{t("重试")}</Button></Empty></div>;
   }
   if (compareOpen) {
     return (
@@ -154,15 +157,14 @@ export default function OfferCenterView({
       <Row justify="space-between" align="middle">
         <Col>
           <Typography.Title level={2} style={{ margin: 0 }}>Offer</Typography.Title>
-          {mode === 'selection' ? <Typography.Text type="secondary">选择至少两份 Offer 进行比较</Typography.Text> : null}
+          {mode === 'selection' ? <Typography.Text type="secondary">{t("选择至少两份 Offer 进行比较")}</Typography.Text> : null}
         </Col>
         <Col>
           {mode === 'selection' ? (
             <Space>
-              <Button icon={<SwapOutlined />} disabled={selectedIds.length < 2} onClick={() => setCompareOpen(true)}>
-                开始比较（已选 {selectedIds.length}）
+              <Button icon={<SwapOutlined />} disabled={selectedIds.length < 2} onClick={() => setCompareOpen(true)}>{t("开始比较（已选 {count}）", { count: selectedIds.length })}
               </Button>
-                <Button icon={<PlusOutlined />} onClick={openCreateOffer}>录入 Offer</Button>
+                <Button icon={<PlusOutlined />} onClick={openCreateOffer}>{t("录入 Offer")}</Button>
             </Space>
           ) : null}
         </Col>
@@ -170,11 +172,11 @@ export default function OfferCenterView({
       {mode === 'entry' ? (
         <Empty
           description={applications.length === 0
-            ? 'Offer 必须绑定所属投递，请先添加投递。'
-            : '先录入 Offer，再逐步补齐薪酬、截止时间和沟通安排'}
+            ? t("Offer 必须绑定所属投递，请先添加投递。")
+            : t("先录入 Offer，再逐步补齐薪酬、截止时间和沟通安排")}
         >
           <Button icon={<PlusOutlined />} onClick={openCreateOffer} disabled={applications.length === 0 && !onAddApplication}>
-            {applications.length === 0 ? '先添加投递' : '录入第一份 Offer'}
+            {applications.length === 0 ? t("先添加投递") : t("录入第一份 Offer")}
           </Button>
         </Empty>
       ) : null}
@@ -183,8 +185,8 @@ export default function OfferCenterView({
           <Alert
             type="info"
             showIcon
-            message={`待确认：${listMissingOfferFacts(offers[0]).join('、') || '关键信息已补齐'}`}
-            description={`截止时间：${offers[0].deadline || '待确认'} · 下一次沟通：待安排`}
+            message={t("待确认：{value1}", { value1: listMissingOfferFacts(offers[0]).join('、') || t("关键信息已补齐") })}
+            description={t("截止时间：{value1} · 下一次沟通：待安排", { value1: offers[0].deadline || t("待确认") })}
           />
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={12}>
@@ -203,7 +205,7 @@ export default function OfferCenterView({
               />
             </Col>
           </Row>
-          <Button style={{ justifySelf: 'start' }} icon={<PlusOutlined />} onClick={openCreateOffer}>录入另一份 Offer</Button>
+          <Button style={{ justifySelf: 'start' }} icon={<PlusOutlined />} onClick={openCreateOffer}>{t("录入另一份 Offer")}</Button>
         </>
       ) : null}
       {mode === 'selection' ? (

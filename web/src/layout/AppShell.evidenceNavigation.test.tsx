@@ -12,6 +12,7 @@ const app = {
 };
 
 const queryClientState = vi.hoisted(() => ({
+  getQueryCache: () => ({ subscribe: () => () => undefined }),
   invalidateQueries: vi.fn(),
 }));
 

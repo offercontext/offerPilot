@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Button, Empty, Space, Tag } from 'antd';
 import {
   CalendarOutlined,
@@ -23,17 +24,18 @@ interface Props {
 }
 
 export default function FocusWorkspace({ application, readiness, onOpenDetail, onNavigate }: Props) {
+  useLocale();
   if (!application || !readiness) {
     return (
-      <aside className={styles.focusWorkspace} aria-label="当前焦点">
-        <Empty description="选择一个投递，查看关联材料、日程和准备入口。" />
+      <aside className={styles.focusWorkspace} aria-label={t("当前焦点")}>
+        <Empty description={t("选择一个投递，查看关联材料、日程和准备入口。")} />
       </aside>
     );
   }
 
   return (
     <aside className={styles.focusWorkspace} aria-labelledby="focus-workspace-title">
-      <div className={styles.commandEyebrow}>当前焦点</div>
+      <div className={styles.commandEyebrow}>{t("当前焦点")}</div>
       <h2 id="focus-workspace-title" className={styles.sectionHeading}>
         {application.company_name}
       </h2>
@@ -42,7 +44,7 @@ export default function FocusWorkspace({ application, readiness, onOpenDetail, o
       <div className={styles.focusTags}>
         <Tag>{STATUS_LABELS[application.status]}</Tag>
         <Tag>{READINESS_STATE_LABELS[readiness.readiness]}</Tag>
-        <Tag>材料：{READINESS_MATERIAL_STATUS_LABELS[readiness.materialStatus]}</Tag>
+        <Tag>{t("材料：")}{READINESS_MATERIAL_STATUS_LABELS[readiness.materialStatus]}</Tag>
       </div>
 
       <div className={styles.focusEvidence}>
@@ -55,17 +57,13 @@ export default function FocusWorkspace({ application, readiness, onOpenDetail, o
 
       <Space direction="vertical" className={styles.focusActions}>
         <Button icon={<FolderOpenOutlined />} onClick={() => onOpenDetail(application.id)} block>
-          打开投递详情
-        </Button>
+          {t("打开投递详情")}</Button>
         <Button icon={<FileTextOutlined />} onClick={() => onOpenDetail(application.id)} block>
-          查看材料包
-        </Button>
+          {t("查看材料包")}</Button>
         <Button icon={<CalendarOutlined />} onClick={() => onNavigate('calendar')} block>
-          查看日程
-        </Button>
+          {t("查看日程")}</Button>
         <Button icon={<ReadOutlined />} onClick={() => onNavigate('questions')} block>
-          练习题目
-        </Button>
+          {t("练习题目")}</Button>
       </Space>
     </aside>
   );

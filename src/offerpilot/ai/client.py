@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import os
+import sys
 import time
 import uuid
 from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlparse
 
-from litellm import completion
-
 from offerpilot.ai.types import Assistant, Message, ToolCall
+from offerpilot.ai.provider_stream import interruptible_stream, provider_control
+from offerpilot.ai.control import AgentLoopControlError
 from offerpilot.ai.tool_runtime.contracts import (
     ProviderToolContract,
     materialize_provider_payloads,
@@ -37,6 +39,27 @@ from offerpilot.context_projector.gateway import (
     SingleCandidateAgentTransport,
     normalize_provider_endpoint,
 )
+from offerpilot.image_contracts import (
+    ImageReference, ImageInputError, VISION_ADAPTERS, IMAGE_REQUEST_BODY_CAP,
+    require_image_call_limits,
+)
+
+
+def _load_provider_sdk() -> Any:
+    """Keep the fixed SDK import lazy and confined to one adapter-owned location."""
+    import litellm
+
+    return litellm
+
+
+def completion(*args: Any, **kwargs: Any) -> Any:
+    """Load the SDK at first use, preserving this module's patchable call boundary."""
+    return _load_provider_sdk().completion(*args, **kwargs)
+
+
+async def acompletion(*args: Any, **kwargs: Any) -> Any:
+    """Keep the async stream boundary lazy as well as patchable."""
+    return await _load_provider_sdk().acompletion(*args, **kwargs)
 
 
 class ProviderCallError(RuntimeError):
@@ -48,8 +71,10 @@ class ProviderCallError(RuntimeError):
 
 
 class ConfiguredAIClient:
-    def __init__(self, config: Config, on_provider_event: Callable[[str, str], None] | None = None):
+    def __init__(self, config: Config, on_provider_event: Callable[[str, str], None] | None = None,
+                 *, image_reader: Callable[[ImageReference], bytes] | None = None):
         self._providers = config.ordered_provider_profiles()
+        self._image_reader = image_reader
         self._on_provider_event = on_provider_event
         if not any(provider.enabled and provider.api_key for provider in self._providers):
             raise ValueError("AI is not configured: run `oc config` to set your API key")
@@ -76,6 +101,30 @@ class ConfiguredAIClient:
                 self._stream_with_frozen_candidate,
             ),
         )
+
+    def new_image_provider_session(self, *, primary_only: bool = False) -> AgentProviderGatewaySession:
+        profiles = self._providers[:1] if primary_only else self._vision_providers()
+        return AgentProviderGatewaySession(
+            FrozenProviderExecutionChain.freeze(profiles),
+            SingleCandidateAgentTransport(self._complete_with_frozen_candidate,
+                                          self._stream_with_frozen_candidate),
+        )
+
+    def _vision_providers(self) -> list[AIProviderProfile]:
+        primary = self._providers[0]
+        if not primary.enabled or not primary.api_key or not primary.supports_vision or primary.provider not in VISION_ADAPTERS:
+            raise ImageInputError("provider_vision_required")
+        return [profile for profile in self._providers
+                if profile.supports_vision and profile.provider in VISION_ADAPTERS
+                and profile.enabled and profile.api_key]
+
+    def _messages_payload(self, provider: AIProviderProfile, messages: list[Message]) -> list[dict[str, Any]]:
+        refs = tuple(image for message in messages for image in message.images)
+        if refs:
+            if not provider.supports_vision or provider.provider not in VISION_ADAPTERS:
+                raise ImageInputError("provider_vision_required")
+            require_image_call_limits(refs)
+        return [_openai_message(message, self._image_reader) for message in messages]
 
     @property
     def supports_json_schema(self) -> bool:
@@ -185,7 +234,7 @@ class ConfiguredAIClient:
         response_format: dict[str, Any] | None = None,
     ) -> Assistant:
         last_error: Exception | None = None
-        providers = self._candidate_providers()
+        providers = self._vision_providers() if any(message.images for message in messages) else self._candidate_providers()
         for index, provider in enumerate(providers):
             if not provider.api_key:
                 continue
@@ -208,13 +257,18 @@ class ConfiguredAIClient:
                 return assistant
             except Exception as exc:
                 last_error = exc
+                diagnostic = (exc.diagnostic if isinstance(exc, ProviderCallError) else
+                              _provider_failure_diagnostic(
+                                  provider, exc, correlation_id=correlation_id,
+                                  elapsed_ms=int((time.perf_counter() - started) * 1000),
+                              ))
                 _try_audit_provider_result(
                     provider,
                     status="error",
                     elapsed_ms=int((time.perf_counter() - started) * 1000),
-                    http_status=_provider_status_code(exc),
-                    provider_request_id_hash=_provider_request_id(exc),
-                    failure_category=_classify_provider_failure(exc),
+                    http_status=diagnostic["http_status"],
+                    provider_request_id_hash=diagnostic["provider_request_id"],
+                    failure_category=diagnostic["failure_category"],
                 )
                 if index + 1 < len(providers):
                     self._emit(
@@ -222,17 +276,13 @@ class ConfiguredAIClient:
                         f"AI provider {provider.id} failed; trying fallback {providers[index + 1].id}",
                     )
                     continue
-                diagnostic = _provider_failure_diagnostic(
-                    provider,
-                    exc,
-                    correlation_id=correlation_id,
-                    elapsed_ms=int((time.perf_counter() - started) * 1000),
-                )
                 self._emit(
                     "WARNING",
                     "ai_provider_failure "
                     + json.dumps(diagnostic, ensure_ascii=True, separators=(",", ":")),
                 )
+                if isinstance(exc, ProviderCallError):
+                    raise
                 raise ProviderCallError(diagnostic) from exc
         if last_error is not None:
             raise last_error
@@ -245,7 +295,7 @@ class ConfiguredAIClient:
         on_delta: Callable[[str], None],
     ) -> Assistant:
         last_error: Exception | None = None
-        providers = self._candidate_providers()
+        providers = self._vision_providers() if any(message.images for message in messages) else self._candidate_providers()
         for index, provider in enumerate(providers):
             if not provider.api_key:
                 continue
@@ -261,6 +311,8 @@ class ConfiguredAIClient:
                 if index > 0:
                     self._emit("INFO", f"AI fallback provider {provider.id} succeeded")
                 return assistant
+            except AgentLoopControlError:
+                raise
             except Exception as exc:
                 last_error = exc
                 if emitted_delta:
@@ -290,6 +342,20 @@ class ConfiguredAIClient:
             timeout_seconds=timeout_seconds, output_limit=1024,
             disable_thinking=_is_deepseek_v4_provider(provider))
 
+    def test_connection(self) -> Assistant:
+        """Probe the selected provider once, without tools or fallback."""
+        provider = next((item for item in self._candidate_providers() if item.api_key), None)
+        if provider is None:
+            raise ValueError("AI provider unavailable")
+        return self._complete_with_provider(
+            provider,
+            [Message(role="user", content="Reply with OK.")],
+            [],
+            timeout_seconds=15,
+            output_limit=64,
+            disable_thinking=_is_deepseek_v4_provider(provider),
+        )
+
     def _complete_with_provider(
         self,
         provider: AIProviderProfile,
@@ -304,7 +370,7 @@ class ConfiguredAIClient:
     ) -> Assistant:
         payload: dict[str, Any] = {
             "model": _litellm_model(provider),
-            "messages": [_openai_message(message) for message in messages],
+            "messages": self._messages_payload(provider, messages),
             "api_key": provider.api_key,
         }
         api_base = provider.base_url.rstrip("/") if force_api_base else _litellm_api_base(provider)
@@ -319,15 +385,14 @@ class ConfiguredAIClient:
         if timeout_seconds is not None:
             payload["timeout"] = timeout_seconds
             payload["num_retries"] = 0
-        if output_limit is not None:
-            payload["max_tokens"] = min(output_limit, provider.max_output_tokens or output_limit)
+        payload["max_tokens"] = _effective_output_limit(provider, output_limit)
         if disable_thinking:
             payload["extra_body"] = {"thinking": {"type": "disabled"}}
 
-        _adapter_preflight_payload(provider, payload)
+        _adapter_preflight_payload(provider, payload, messages=messages)
         _try_audit_provider_endpoint(provider.base_url)
         _try_audit_provider_request(provider, payload)
-        response = completion(**payload)
+        response = _private_image_completion(provider, payload, private=any(message.images for message in messages))
         message = _first_choice_message(response)
         calls = []
         for call in _get(message, "tool_calls") or []:
@@ -360,9 +425,10 @@ class ConfiguredAIClient:
     ) -> Assistant:
         payload: dict[str, Any] = {
             "model": _litellm_model(provider),
-            "messages": [_openai_message(message) for message in messages],
+            "messages": self._messages_payload(provider, messages),
             "api_key": provider.api_key,
             "stream": True,
+            "max_tokens": _effective_output_limit(provider),
         }
         api_base = provider.base_url.rstrip("/") if force_api_base else _litellm_api_base(provider)
         if api_base:
@@ -371,37 +437,68 @@ class ConfiguredAIClient:
             payload["tools"] = [_openai_tool(tool) for tool in tools]
             payload["tool_choice"] = "auto"
 
-        _adapter_preflight_payload(provider, payload)
+        _adapter_preflight_payload(provider, payload, messages=messages)
         _try_audit_provider_endpoint(provider.base_url)
         _try_audit_provider_request(provider, payload)
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
         provider_blocks: dict[str, Any] = {}
-        for chunk in completion(**payload):
-            delta = _first_choice_delta(chunk)
-            piece = _get(delta, "content")
-            if piece:
-                text = str(piece)
-                content_parts.append(text)
-                on_delta(text)
-            reasoning_content = _get(delta, "reasoning_content")
-            if reasoning_content:
-                provider_blocks["reasoning_content"] = str(
-                    provider_blocks.get("reasoning_content") or ""
-                ) + str(reasoning_content)
-            for raw_call in _get(delta, "tool_calls") or []:
-                index = int(_get(raw_call, "index") or 0)
-                current = tool_calls.setdefault(index, {"id": "", "name": "", "args": ""})
-                call_id = _get(raw_call, "id")
-                if call_id:
-                    current["id"] = str(call_id)
-                function = _get(raw_call, "function") or {}
-                name = _get(function, "name")
-                if name:
-                    current["name"] = str(name)
-                arguments = _get(function, "arguments")
-                if arguments:
-                    current["args"] = str(current["args"]) + str(arguments)
+        check_active = provider_control()
+
+        def invoke_stream() -> Any:
+            if check_active is None:
+                return completion(**payload)
+            check_active()
+            # SDK initialization can block. Keep it on the Agent worker so
+            # the shared transport loop can still cancel other requests.
+            _load_provider_sdk()
+            check_active()
+            return interruptible_stream(lambda: acompletion(**payload), check_active)
+
+        stream = _private_image_completion(
+            provider, payload, private=any(message.images for message in messages),
+            invoke=invoke_stream,
+        )
+        try:
+            for chunk in stream:
+                delta = _first_choice_delta(chunk)
+                piece = _get(delta, "content")
+                if piece:
+                    text = str(piece)
+                    content_parts.append(text)
+                    on_delta(text)
+                reasoning_content = _get(delta, "reasoning_content")
+                if reasoning_content:
+                    provider_blocks["reasoning_content"] = str(
+                        provider_blocks.get("reasoning_content") or ""
+                    ) + str(reasoning_content)
+                for raw_call in _get(delta, "tool_calls") or []:
+                    index = int(_get(raw_call, "index") or 0)
+                    current = tool_calls.setdefault(index, {"id": "", "name": "", "args": ""})
+                    call_id = _get(raw_call, "id")
+                    if call_id:
+                        current["id"] = str(call_id)
+                    function = _get(raw_call, "function") or {}
+                    name = _get(function, "name")
+                    if name:
+                        current["name"] = str(name)
+                    arguments = _get(function, "arguments")
+                    if arguments:
+                        current["args"] = str(current["args"]) + str(arguments)
+
+        finally:
+            # LiteLLM's synchronous wrapper exposes its SDK stream but has no
+            # close method of its own. Closing that stream releases the HTTP
+            # response on success, callback failure and control cancellation.
+            underlying = getattr(stream, "completion_stream", stream)
+            close = getattr(underlying, "close", None)
+            active_error = sys.exc_info()[0] is not None
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    if not active_error:
+                        raise AgentLoopControlError("provider stream cleanup failed") from None
 
         calls = [
             ToolCall(
@@ -423,6 +520,50 @@ class ConfiguredAIClient:
             self._on_provider_event(level, message)
 
 
+def _private_image_completion(
+    provider: AIProviderProfile, payload: dict[str, Any], *, private: bool,
+    invoke: Callable[[], Any] | None = None,
+) -> Any:
+    call = invoke if invoke is not None else lambda: completion(**payload)
+    if not private:
+        return call()
+    started = time.monotonic()
+
+    def safe_error(error: Exception) -> ProviderCallError:
+        return ProviderCallError(_provider_failure_diagnostic(
+            provider, error, correlation_id=uuid.uuid4().hex,
+            elapsed_ms=int((time.monotonic() - started) * 1000),
+        ))
+
+    try:
+        result = call()
+    except AgentLoopControlError:
+        raise
+    except Exception as exc:
+        raise safe_error(exc) from None
+    if not payload.get("stream"):
+        return result
+
+    def chunks() -> Any:
+        try:
+            yield from result
+        except AgentLoopControlError:
+            raise
+        except Exception as exc:
+            raise safe_error(exc) from None
+        finally:
+            underlying = getattr(result, "completion_stream", result)
+            close = getattr(underlying, "close", None)
+            active_error = sys.exc_info()[0] is not None
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    if not active_error:
+                        raise AgentLoopControlError("provider stream cleanup failed") from None
+    return chunks()
+
+
 def _litellm_model(provider: AIProviderProfile) -> str:
     if "/" in provider.model:
         return provider.model
@@ -436,7 +577,15 @@ def _litellm_model(provider: AIProviderProfile) -> str:
 def _is_deepseek_v4_provider(provider: AIProviderProfile) -> bool:
     hostname = (urlparse(provider.base_url).hostname or "").lower()
     model = provider.model.rsplit("/", 1)[-1].strip().lower()
-    return hostname == "api.deepseek.com" and model in {"deepseek-v4-flash", "deepseek-v4-pro"}
+    return hostname == "api.deepseek.com" and model in {
+        "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro",
+    }
+
+
+def _effective_output_limit(provider: AIProviderProfile, output_limit: int | None = None) -> int:
+    # Match the output reserve used by preflight, including legacy zero-valued profiles.
+    configured_limit = provider.max_output_tokens or DEFAULT_OUTPUT_RESERVE
+    return min(configured_limit, output_limit) if output_limit is not None else configured_limit
 
 
 def _profile_from_frozen_candidate(candidate: FrozenProviderCandidate) -> AIProviderProfile:
@@ -450,6 +599,7 @@ def _profile_from_frozen_candidate(candidate: FrozenProviderCandidate) -> AIProv
         context_window=candidate.context_window,
         max_output_tokens=candidate.output_reserve,
         supports_json_schema=candidate.supports_json_schema,
+        supports_vision=candidate.supports_vision,
     )
 
 
@@ -597,7 +747,8 @@ def _json_bytes(value: Any) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
 
 
-def _adapter_preflight_payload(provider: AIProviderProfile, payload: dict[str, Any]) -> None:
+def _adapter_preflight_payload(provider: AIProviderProfile, payload: dict[str, Any],
+                               *, messages: list[Message] | None = None) -> None:
     frozen_endpoint = normalize_provider_endpoint(provider.base_url)
     actual_base = str(payload.get("api_base") or "")
     if actual_base and normalize_provider_endpoint(actual_base) != frozen_endpoint:
@@ -605,9 +756,18 @@ def _adapter_preflight_payload(provider: AIProviderProfile, payload: dict[str, A
     public_payload = {
         key: value for key, value in payload.items() if key not in {"api_key", "api_base"}
     }
-    if _json_bytes(public_payload) > ADAPTER_REQUEST_BODY_BYTE_CAP:
+    refs = tuple(image for message in messages or () for image in message.images)
+    cap = IMAGE_REQUEST_BODY_CAP if refs else ADAPTER_REQUEST_BODY_BYTE_CAP
+    if _json_bytes(public_payload) > cap:
         raise ProjectionError("adapter_request_body_byte_cap_exceeded")
-    input_units = _json_bytes(payload.get("messages", [])) + _json_bytes(payload.get("tools", []))
+    if refs:
+        from offerpilot.context_projector.contracts import FrozenMessage
+        from offerpilot.context_projector.budget import message_input_units
+        require_image_call_limits(refs)
+        input_units = message_input_units(tuple(FrozenMessage.freeze(message) for message in messages or ()))
+        input_units += _json_bytes(payload.get("tools", []))
+    else:
+        input_units = _json_bytes(payload.get("messages", [])) + _json_bytes(payload.get("tools", []))
     context_window = 32_768 if provider.context_window == 0 else provider.context_window
     output_reserve = (
         DEFAULT_OUTPUT_RESERVE if provider.max_output_tokens == 0 else provider.max_output_tokens
@@ -717,18 +877,30 @@ def _get(value: Any, key: str) -> Any:
     return getattr(value, key, None)
 
 
-def _openai_message(message: Message) -> dict[str, Any]:
+def _openai_message(message: Message, image_reader: Callable[[ImageReference], bytes] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {"role": message.role}
+    if message.provider_blocks.get("images"):
+        raise ImageInputError("unmanaged_images_unsupported")
     if message.role == "user":
-        images = message.provider_blocks.get("images") or []
+        images = message.images
         if images:
-            content_parts: list[dict[str, Any]] = [{"type": "text", "text": message.content}]
-            for url in images:
+            if image_reader is None:
+                raise ImageInputError("image_reader_unavailable")
+            content_parts: list[dict[str, Any]] = []
+            if message.content:
+                content_parts.append({"type": "text", "text": message.content})
+            for ref in images:
+                content = image_reader(ref)
+                if len(content) != ref.size_bytes or hashlib.sha256(content).hexdigest() != ref.sha256:
+                    raise ImageInputError("image_content_changed")
+                url = f"data:{ref.mime_type};base64," + base64.b64encode(content).decode("ascii")
                 content_parts.append({"type": "image_url", "image_url": {"url": url}})
             out["content"] = content_parts
         else:
             out["content"] = message.content
     else:
+        if message.images:
+            raise ImageInputError("image_message_role_invalid")
         out["content"] = message.content
     if message.role == "assistant":
         reasoning_content = message.provider_blocks.get("reasoning_content")

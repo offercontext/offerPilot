@@ -1,3 +1,8 @@
+import { pipelineActionId } from '@/lib/pipelineInsights';
+import { t, useLocale, getLocale } from '@/i18n';
+import ProactiveInbox from '@/components/ProactiveInbox';
+import { useReminderCandidates } from '@/lib/useReminderCandidates';
+import JobMailInbox from '@/features/jobMail/JobMailInbox';
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Input, Select } from 'antd';
@@ -23,9 +28,9 @@ interface Props {
 }
 
 const GROUPS: { key: PipelinePriority; label: string }[] = [
-  { key: 'p0', label: '今日紧急' },
-  { key: 'p1', label: '本周重点' },
-  { key: 'p2', label: '跟进队列' },
+  { key: 'p0', get label() { return t("今日紧急"); } },
+  { key: 'p1', get label() { return t("本周重点"); } },
+  { key: 'p2', get label() { return t("跟进队列"); } },
 ];
 
 function defineKindFilterOptions<const Options extends readonly { value: PipelineInsightKind | 'all'; label: string }[]>(
@@ -36,15 +41,18 @@ function defineKindFilterOptions<const Options extends readonly { value: Pipelin
 }
 
 const KIND_FILTER_OPTIONS = defineKindFilterOptions([
-  { value: 'all', label: '全部行动' },
-  { value: 'offer_deadline', label: 'Offer 截止' },
-  { value: 'interview_soon', label: '面试临近' },
-  { value: 'stale_application', label: '投递待跟进' },
-  { value: 'no_next_event', label: '缺少下一步' },
-  { value: 'material_kit_incomplete', label: '材料待完善' },
-  { value: 'question_due', label: '题目待复习' },
-  { value: 'pipeline_bottleneck', label: '流程瓶颈' },
-  { value: 'weekly_goal_gap', label: '本周目标差距' },
+  { value: 'all', get label() { return t("全部行动"); } },
+  { value: 'offer_deadline', get label() { return t("Offer 截止"); } },
+  { value: 'application_deadline', get label() { return t("截止提醒"); } },
+  { value: 'interview_review', get label() { return t("面试复盘提醒"); } },
+  { value: 'event_upcoming', get label() { return t("日程临近"); } },
+  { value: 'interview_soon', get label() { return t("面试临近"); } },
+  { value: 'stale_application', get label() { return t("投递待跟进"); } },
+  { value: 'no_next_event', get label() { return t("缺少下一步"); } },
+  { value: 'material_kit_incomplete', get label() { return t("材料待完善"); } },
+  { value: 'question_due', get label() { return t("题目待复习"); } },
+  { value: 'pipeline_bottleneck', get label() { return t("流程瓶颈"); } },
+  { value: 'weekly_goal_gap', get label() { return t("本周目标差距"); } },
 ] satisfies { value: PipelineInsightKind | 'all'; label: string }[]);
 
 type DetailAction = ActionCommand & { id?: string };
@@ -53,9 +61,7 @@ type DetailInsight = PipelineInsight & {
   secondaryActions?: DetailAction[];
 };
 
-function getActionId(insight: PipelineInsight, action: DetailAction, kind: 'primary' | 'secondary') {
-  return action.id ?? `${insight.id}:${kind}:${action.label}`;
-}
+const getActionId = pipelineActionId;
 
 function findInsightAction(item: PipelineInsight, actionId: string): DetailAction {
   const detail = item as DetailInsight;
@@ -67,6 +73,7 @@ function findInsightAction(item: PipelineInsight, actionId: string): DetailActio
 }
 
 export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
+  useLocale();
   const [now, setNow] = useState(() => dayjs());
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
   const [kind, setKind] = useState<PipelineInsightKind | 'all'>('all');
@@ -80,6 +87,7 @@ export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
   const { data: rawApps = [] } = useQuery({ queryKey: ['applications'], queryFn: () => listApplications() });
   const { data: rawEvents = [] } = useQuery({ queryKey: ['events'], queryFn: () => listEvents() });
   const { data: rawOffers = [] } = useQuery({ queryKey: ['offers'], queryFn: () => listOffers() });
+  const reminderCandidatesQ = useReminderCandidates();
   const practiceStatsQ = useQuery({
     queryKey: ['questions', 'stats'],
     queryFn: () => getPracticeStats(),
@@ -92,8 +100,8 @@ export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
   const offers = rawOffers ?? [];
 
   const insights = useMemo(
-    () => deriveActionHints({ apps, events, offers, practiceStats: practiceStatsQ.data, weeklyTarget: 6, now }),
-    [apps, events, offers, practiceStatsQ.data, now],
+    () => deriveActionHints({ apps, events, offers, practiceStats: practiceStatsQ.data, reminderCandidates: reminderCandidatesQ.isError ? [] : reminderCandidatesQ.data, now }),
+    [apps, events, offers, practiceStatsQ.data, reminderCandidatesQ.data, reminderCandidatesQ.isError, now, getLocale()],
   );
 
   const filteredInsights = useMemo(() => {
@@ -150,21 +158,29 @@ export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
 
   return (
     <div className={styles.wrap}>
+      <JobMailInbox onNavigate={onNavigate} onOpenDetailById={onOpenDetailById} />
+      <ProactiveInbox representedCandidateIds={filteredInsights.filter((item) => item.candidate).map((item) => item.id)} />
+      {reminderCandidatesQ.isPending && <div role="status">{t("正在加载提醒")}</div>}
+      {reminderCandidatesQ.isError && <div role="alert">
+        {t("提醒加载失败，请重试")}
+        <button type="button" onClick={() => void reminderCandidatesQ.refetch()}>{t("重试")}</button>
+      </div>}
       <div className={styles.toolbar}>
         <Input.Search
           allowClear
-          placeholder="搜索流程行动"
+          placeholder={t("搜索流程行动")}
           value={keyword}
           onChange={(event) => setKeyword(event.target.value)}
           onSearch={setKeyword}
         />
-        <Select value={kind} options={KIND_FILTER_OPTIONS} onChange={setKind} aria-label="筛选行动类型" />
+        <Select value={kind} options={KIND_FILTER_OPTIONS.map((option) => ({ ...option }))} onChange={setKind} aria-label={t("筛选行动类型")} />
       </div>
 
       {filteredInsights.length === 0 ? (
+        reminderCandidatesQ.isPending || reminderCandidatesQ.isError ? null : (
         <div className={styles.empty}>
-          暂无匹配的流程行动。可以新增投递、复习到期题目，或整理一次复盘来保持节奏。
-        </div>
+          {t("暂无匹配的流程行动。可以新增投递、复习到期题目，或整理一次复盘来保持节奏。")}</div>
+        )
       ) : (
         GROUPS.map(({ key, label }) => {
           const items = filteredInsights.filter((item) => item.priority === key);

@@ -1,0 +1,261 @@
+name: Windows desktop localization (unsigned)
+
+# Independent, focused validation of a NEW build. Never reuses an installer PIN.
+on:
+  push:
+    branches: [feat/20261019-localization-integration, feat/20261021-product-simplification]
+    paths:
+      - 'desktop/*.cjs'
+      - 'desktop/*.py'
+      - 'desktop/*.spec'
+      - 'desktop/package*.json'
+      - 'desktop/assets/**'
+      - 'desktop/test/**'
+      - 'web/**'
+      - 'src/offerpilot/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'LICENSE'
+      - '.github/workflows/desktop-localization.yml'
+      - 'docs/architecture/desktop-localization-validation.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# No concurrency cancellation, release, full-regression shards or real services.
+# Harness-only changes do not rebuild the package; same-artifact retries are separate.
+env:
+  LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+  PYTHONUTF8: '1'
+  PYTHONUNBUFFERED: '1'
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+  ONNXRUNTIME_NODE_INSTALL: skip
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  localization-package:
+    name: Focused localization tests and new unsigned installer
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record exact source and limited validation scope
+        run: |
+          New-Item -ItemType Directory -Force desktop/localization-ci-evidence | Out-Null
+          @(
+            'NEW LOCALIZATION VALIDATION BUILD. UNSIGNED. NOT RELEASE READY.',
+            "Commit: $env:GITHUB_SHA",
+            "Ref: $env:GITHUB_REF",
+            "Run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID",
+            "Attempt: $env:GITHUB_RUN_ATTEMPT",
+            'Full release/regression gate: NOT RUN. Focused installed UI: required against this new build; see final result.',
+            'No old installer PIN/helper, real AI, real mail, release or publishing.',
+            "Started (UTC): $([DateTime]::UtcNow.ToString('o'))"
+          ) | Tee-Object -FilePath desktop/localization-ci-evidence/scope.txt
+          git rev-parse HEAD | Set-Content desktop/localization-ci-evidence/checkout-sha.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Could not record checkout SHA' }
+          Get-FileHash -Algorithm SHA256 uv.lock, web/package-lock.json, desktop/package-lock.json |
+            Format-List | Out-File desktop/localization-ci-evidence/lockfile-sha256.txt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          architecture: x64
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            web/package-lock.json
+            desktop/package-lock.json
+      - name: Install locked application and build dependencies
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/01-install.log
+          try {
+            uv sync --frozen
+            if ($LASTEXITCODE -ne 0) { throw 'Frozen Python install failed' }
+            npm.cmd ci --prefix web
+            if ($LASTEXITCODE -ne 0) { throw 'Frontend install failed' }
+            npm.cmd ci --prefix desktop
+            if ($LASTEXITCODE -ne 0) { throw 'Desktop install failed' }
+          } finally { Stop-Transcript }
+      - name: Required native locale, IPC and desktop regression tests
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/02-native-tests.log
+          try {
+            npm.cmd test --prefix desktop
+            if ($LASTEXITCODE -ne 0) { throw 'Native locale and desktop regression failed' }
+            node --test desktop/localization-ui/test/*.test.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Installed-UI harness contract regression failed' }
+          } finally { Stop-Transcript }
+      - name: Required renderer locale, IPC and mounted localization tests
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/03-renderer-tests.log
+          try {
+            $tests = @(
+              'src/i18n',
+              'src/features/assistantSurface/DesktopHaruWindow.test.tsx',
+              'src/features/assistantSurface/useDesktopHaruOwner.test.tsx',
+              'src/features/assistantSurface/ConversationControlsLocalization.test.tsx',
+              'src/features/desktopUpdates/useDesktopUpdateSafety.test.tsx',
+              'src/components/ChatPanel/localization.test.tsx',
+              'tests/localization/mounted.test.tsx'
+            )
+            npm.cmd test --prefix web -- @tests --maxWorkers=2 --minWorkers=1 --reporter=default --reporter=junit --outputFile.junit=../desktop/localization-ci-evidence/renderer-vitest.xml
+            if ($LASTEXITCODE -ne 0) { throw 'Renderer locale and IPC regression failed' }
+          } finally { Stop-Transcript }
+      - name: Required combined desktop, mail Origin and auth regression
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/04-python-tests.log
+          try {
+            uv run --frozen pytest -v tests/test_desktop.py tests/test_auth_api.py tests/test_static_frontend.py tests/test_desktop_mail_localization_integration.py tests/test_job_mail_api.py tests/test_job_mail_secure_setup.py --durations=15 --junitxml=desktop/localization-ci-evidence/focused-pytest.xml
+            if ($LASTEXITCODE -ne 0) { throw 'Desktop, mail Origin and auth regression failed' }
+          } finally { Stop-Transcript }
+      - name: Required static checks and production frontend build
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/05-static-build.log
+          try {
+            uv run --frozen ruff check src/offerpilot/desktop.py src/offerpilot/api.py src/offerpilot/job_mail tests/test_desktop.py tests/test_auth_api.py tests/test_static_frontend.py tests/test_desktop_mail_localization_integration.py tests/test_job_mail_api.py tests/test_job_mail_secure_setup.py
+            if ($LASTEXITCODE -ne 0) { throw 'Focused Python lint failed' }
+            uv run --frozen mypy src/offerpilot/desktop.py src/offerpilot/api.py src/offerpilot/job_mail
+            if ($LASTEXITCODE -ne 0) { throw 'Desktop and mail type checks failed' }
+            npm.cmd run build --prefix web
+            if ($LASTEXITCODE -ne 0) { throw 'TypeScript or production frontend build failed' }
+          } finally { Stop-Transcript }
+      - name: Freeze the current checkout Python backend
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/06-freeze.log
+          try {
+            uv run --frozen --with pyinstaller==6.16.0 --with pyinstaller-hooks-contrib==2025.9 python desktop/build-backend.py
+            if ($LASTEXITCODE -ne 0) { throw 'Frozen backend build failed' }
+          } finally { Stop-Transcript }
+      - name: Required frozen process persistence and security smoke
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/07-frozen-smoke.log
+          try {
+            python desktop/smoke-backend.py --backend desktop/backend-dist/offerpilot-backend/offerpilot-backend.exe --static-dir web/dist
+            if ($LASTEXITCODE -ne 0) { throw 'Frozen backend smoke failed' }
+          } finally { Stop-Transcript }
+      - name: Build a new unsigned NSIS installer without publishing
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/08-nsis.log
+          try {
+            $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+            $artifactName = "OfferPilot-Desktop-localization-$shortSha-win-x64-setup.exe"
+            npm.cmd run build:win --prefix desktop -- "--config.win.artifactName=$artifactName"
+            if ($LASTEXITCODE -ne 0) { throw 'NSIS packaging failed' }
+          } finally { Stop-Transcript }
+      - name: Required packaged resource layout and backend smoke
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/09-packaged-smoke.log
+          try {
+            python desktop/smoke-backend.py --backend desktop/dist/win-unpacked/resources/backend/offerpilot-backend.exe --static-dir desktop/dist/win-unpacked/resources/web
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged resource smoke failed' }
+          } finally { Stop-Transcript }
+      - name: Hash the exact new localization installer
+        id: installer_hash
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          $installers = @(Get-ChildItem -Path desktop/dist -Filter "OfferPilot-Desktop-localization-$shortSha-win-x64-setup.exe")
+          if ($installers.Count -ne 1) { throw 'Expected exactly one new localization installer' }
+          $installer = $installers[0]
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
+          "$hash  $($installer.Name)" | Set-Content -Encoding ascii -LiteralPath "$($installer.FullName).sha256"
+          Copy-Item "$($installer.FullName).sha256" desktop/localization-ci-evidence/
+      - name: Required same-package installed localization UI checks
+        id: installed_ui
+        timeout-minutes: 15
+        run: |
+          Start-Transcript -Path desktop/localization-ci-evidence/10-installed-ui.log
+          try {
+            $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+            $installer = Get-Item "desktop/dist/OfferPilot-Desktop-localization-$shortSha-win-x64-setup.exe"
+            $env:LOCALIZATION_INSTALLER = $installer.FullName
+            $env:LOCALIZATION_SOURCE_SHA = $env:GITHUB_SHA
+            $env:LOCALIZATION_BUILD_DIR = (Resolve-Path desktop/dist/win-unpacked).Path
+            $env:LOCALIZATION_EVIDENCE_DIR = Join-Path $env:GITHUB_WORKSPACE 'desktop/localization-ci-evidence/installed-ui'
+            $env:LOCALIZATION_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "OfferPilot-localization-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+            node desktop/localization-ui/smoke.mjs
+            if ($LASTEXITCODE -ne 0) { throw 'Same-package installed localization UI checks failed' }
+          } finally { Stop-Transcript }
+      - name: Record exact package and installed UI acceptance status
+        id: package_status
+        if: ${{ always() && steps.installer_hash.outcome == 'success' }}
+        env:
+          LOCALIZATION_UI_OUTCOME: ${{ steps.installed_ui.outcome }}
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 12)
+          $installer = Get-Item "desktop/dist/OfferPilot-Desktop-localization-$shortSha-win-x64-setup.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $installer.FullName).Hash.ToLowerInvariant()
+          $expectedHash = ((Get-Content -Raw -LiteralPath "$($installer.FullName).sha256") -split '\s+')[0]
+          if ($hash -ne $expectedHash) { throw 'Installer changed after its original build hash was recorded' }
+          $uiPassed = $env:LOCALIZATION_UI_OUTCOME -eq 'success'
+          $uiStatus = "NOT ACCEPTED: focused installed UI outcome is '$env:LOCALIZATION_UI_OUTCOME'; inspect evidence and retry this same package before acceptance."
+          if ($uiPassed) {
+            $uiStatus = 'Focused installed UI checks passed against this exact new installer; comprehensive desktop/release acceptance remains NOT RUN.'
+          }
+          $notes = @(Get-Content desktop/localization-ci-evidence/scope.txt) + @(
+            'EXPERIMENTAL ARTIFACT RETAINED FOR SAME-PACKAGE VALIDATION. ITS PRESENCE DOES NOT MEAN INSTALLED UI PASSED.',
+            'Passed: native desktop tests; selected renderer locale/IPC/mounted tests; selected desktop/mail/auth Python tests; focused lint/types; TypeScript and frontend build; frozen backend and packaged-resource smoke; unsigned NSIS build.',
+            $uiStatus,
+            'NOT RUN: comprehensive installed desktop acceptance, complete regression/release gate, real AI and real mailbox acceptance, signing, updater publication or production release.',
+            'Installer checksum: SHA256, in the adjacent .sha256 file.'
+          )
+          $notes | Set-Content desktop/dist/LOCALIZATION-VALIDATION-NOTES.txt
+          @{
+            schemaVersion = 1
+            sourceSha = $env:GITHUB_SHA
+            runUrl = "$env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            runAttempt = $env:GITHUB_RUN_ATTEMPT
+            installer = $installer.Name
+            installerSha256 = $hash
+            buildAndPackagedSmoke = 'success'
+            installedUiOutcome = $env:LOCALIZATION_UI_OUTCOME
+            focusedInstalledUiAccepted = $uiPassed
+            comprehensiveInstalledUi = 'not-run'
+            fullReleaseGate = 'not-run'
+            realAiAndMail = 'not-run'
+            releaseReady = $false
+          } | ConvertTo-Json | Set-Content desktop/dist/LOCALIZATION-VALIDATION-STATUS.json
+          Copy-Item desktop/dist/LOCALIZATION-VALIDATION-NOTES.txt desktop/localization-ci-evidence/
+          Copy-Item desktop/dist/LOCALIZATION-VALIDATION-STATUS.json desktop/localization-ci-evidence/
+      - name: Preserve experimental localization installer for same-package validation
+        if: ${{ always() && steps.installer_hash.outcome == 'success' && steps.package_status.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: offerpilot-windows-localization-experimental-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            desktop/dist/OfferPilot-Desktop-localization-*-setup.exe
+            desktop/dist/OfferPilot-Desktop-localization-*-setup.exe.sha256
+            desktop/dist/LOCALIZATION-VALIDATION-NOTES.txt
+            desktop/dist/LOCALIZATION-VALIDATION-STATUS.json
+      - name: Record result even on failure
+        if: ${{ always() }}
+        env:
+          LOCALIZATION_RESULT: ${{ job.status }}
+        run: |
+          New-Item -ItemType Directory -Force desktop/localization-ci-evidence | Out-Null
+          "Result before evidence upload: $env:LOCALIZATION_RESULT" | Set-Content desktop/localization-ci-evidence/result.txt
+          if (Test-Path desktop/localization-ci-evidence/LOCALIZATION-VALIDATION-NOTES.txt) {
+            Get-Content desktop/localization-ci-evidence/LOCALIZATION-VALIDATION-NOTES.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+          } elseif (Test-Path desktop/localization-ci-evidence/scope.txt) {
+            Get-Content desktop/localization-ci-evidence/scope.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+          }
+          Get-Content desktop/localization-ci-evidence/result.txt | Add-Content $env:GITHUB_STEP_SUMMARY
+      - name: Preserve localization evidence even on failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-localization-evidence-${{ github.sha }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: desktop/localization-ci-evidence/

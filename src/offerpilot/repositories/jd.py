@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（JD 分析）。
+# JDAnalysis 是模型分析产物，不是 repositories/application_jd_versions.py 的原始 JD 版本。
+
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
@@ -93,6 +96,7 @@ class JDAnalysesRepository:
             return analysis
 
     def create_for_current(self, data: JDAnalysisCreate) -> JDAnalysis:
+        # 关联投递的分析入库前再次检查当前 JD 版本；模型成功不代表旧来源结果仍可保存。
         if data.application_id is None or data.jd_version_id is None:
             return self.create(data)
         with self._session_factory() as session:

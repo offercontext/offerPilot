@@ -1,0 +1,97 @@
+import { t } from '@/i18n';
+import type { JobMailFields, JobMailSuggestion } from '@/types/jobMail';
+import { EVENT_TYPE_LABELS } from '@/types/event';
+
+export const MAIL_FIELD_LABELS: Record<string, string> = {
+  get id() { return t("事件 ID"); }, get application_id() { return t("投递 ID"); }, get event_type() { return t("事件类型"); }, get subtype() { return t("子类型"); },
+  get scheduled_at() { return t("开始时间（含时区）"); }, get duration_minutes() { return t("时长（分钟）"); }, get location() { return t("地点／会议链接"); },
+  get notes() { return t("备注"); }, get round() { return t("轮次"); }, get tags() { return t("标签"); }, get remind_at() { return t("提醒时间"); }, get status() { return t("状态"); },
+  get created_at() { return t("创建时间"); }, get updated_at() { return t("更新时间"); }, get company_name() { return t("公司"); }, get position_name() { return t("岗位"); },
+};
+export function fieldLabel(field: string) { return MAIL_FIELD_LABELS[field] ?? field; }
+export function displayMailValue(value: unknown): string {
+  if (value === null || value === undefined || value === '') return t("未提供");
+  if (Array.isArray(value)) return value.map(displayMailValue).join('、') || t("无");
+  if (typeof value === 'object') return JSON.stringify(value);
+  return String(value);
+}
+// Keep the source's wall time, offset and precision; never infer the browser's timezone.
+export function displayMailTime(value: unknown): string {
+  if (typeof value !== 'string') return displayMailValue(value);
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:\d{2})$/.exec(value);
+  return match ? `${match[1]} ${match[2]} (${match[3] === 'Z' ? 'UTC' : `UTC${match[3]}`})` : displayMailValue(value);
+}
+export function displayMailField(field: string, value: unknown): string {
+  if (['scheduled_at', 'remind_at', 'created_at', 'updated_at', 'received_at'].includes(field)) return displayMailTime(value);
+  if (field === 'event_type' && typeof value === 'string') return EVENT_TYPE_LABELS[value as keyof typeof EVENT_TYPE_LABELS] ?? value;
+  if (field === 'subtype' && value === 'assessment') return t("测评");
+  if (field === 'duration_minutes' && typeof value === 'number') return t("{value} 分钟", { value: value });
+  return displayMailValue(value);
+}
+export function mergeMailFields(proposed: JobMailFields, edited: JobMailFields, existing?: JobMailFields): JobMailFields {
+  // Match the server: proposal placeholders must not become explicit user clears.
+  const populated = Object.fromEntries(Object.entries(proposed).filter(([, value]) => value !== null && value !== undefined && value !== ''));
+  return { ...existing, ...populated, ...edited };
+}
+export function mailStatusLabel(status: JobMailSuggestion['status']): string {
+  return { pending: t("待确认"), manual_required: t("待补充／人工处理"), applied: t("已处理"), ignored: t("已忽略") }[status];
+}
+export function mailActionLabel(action: JobMailSuggestion['action']): string {
+  return { create_event: t("新增安排"), update_event: t("更新已有安排"), manual_only: t("需要人工处理") }[action];
+}
+export function mailFieldErrors(fields: JobMailFields): Partial<Record<keyof JobMailFields, string>> {
+  const errors: Partial<Record<keyof JobMailFields, string>> = {};
+  if (!fields.event_type || !['interview', 'written_test', 'custom'].includes(fields.event_type)) errors.event_type = t("首批仅支持完整时间的面试、笔试／测评或自定义事件。");
+  if (!fields.scheduled_at || !/T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/.test(fields.scheduled_at) || !Number.isFinite(Date.parse(fields.scheduled_at))) {
+    errors.scheduled_at = t("请填写明确年份、日期、时间及时区，例如 2026-10-15T15:00:00+08:00。");
+  }
+  if (!Number.isInteger(fields.duration_minutes) || (fields.duration_minutes ?? 0) <= 0) errors.duration_minutes = t("请核实并填写正整数时长；不会默认补成 60 分钟。");
+  return errors;
+}
+export function validateMailFields(fields: JobMailFields): string | null {
+  return Object.values(mailFieldErrors(fields))[0] ?? null;
+}
+
+const RECOVERY_KEY = 'offerpilot:job-mail:pending-operations';
+export function readMailRecovery(): Record<string, string> {
+  try {
+    const raw: unknown = JSON.parse(sessionStorage.getItem(RECOVERY_KEY) ?? '{}');
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return Object.fromEntries(Object.entries(raw).filter(([id, operation]) => /^[a-f\d-]{36}$/i.test(id) && typeof operation === 'string' && /^[a-f\d-]{36}$/i.test(operation)));
+  } catch { return {}; }
+}
+export function saveMailRecovery(suggestionId: string, operationId: string | null): boolean {
+  try {
+    const next = readMailRecovery();
+    if (operationId === null) delete next[String(suggestionId)];
+    else next[String(suggestionId)] = operationId;
+    sessionStorage.setItem(RECOVERY_KEY, JSON.stringify(next));
+    return true;
+  } catch { return false; }
+}
+export function isDefiniteMailRejection(error: unknown): boolean {
+  const status = (error as { response?: { status?: number } })?.response?.status;
+  return [400, 401, 403, 404, 409, 422].includes(status ?? 0);
+}
+export function mailErrorText(error: unknown, fallback: string): string {
+  const response = (error as { response?: { status?: number; data?: { error_code?: string } } })?.response;
+  const code = response?.data?.error_code;
+  const status = response?.status;
+  if (code === 'mail_scope_changed') return t("邮箱已断开或读取范围已改变，旧建议不能确认。请重新导入或同步，再核对新的建议。");
+  if (code === 'mail_evidence_unavailable') return t("原文已清理，不能使用旧建议确认。请重新提供邮件原文后核对。");
+  if (status === 409) return t("建议、投递、目标记录或邮箱范围已变化。本次未应用，请关闭后重新审阅最新内容。");
+  if (status === 422 || status === 400) return t("输入或预览已失效，请核对完整时间、时长与目标后重新预览。");
+  if (status === 401 || status === 403) return t("没有权限执行此操作，请检查当前工作区登录状态。");
+  return fallback;
+}
+
+// Only backend-authored review warnings are UI text. Unknown server text stays verbatim.
+export function displayMailWarning(warning: string): string {
+  switch (warning) {
+    case '本次仅写入事件，不改变投递阶段，不发送邮件。':
+      return t("本次仅写入事件，不改变投递阶段，不发送邮件。");
+    case '开始时间变化后，旧提醒将清除；请按新安排另设提醒。':
+      return t("开始时间变化后，旧提醒将清除；请按新安排另设提醒。");
+    default: return warning;
+  }
+}

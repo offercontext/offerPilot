@@ -19,7 +19,7 @@ describe('ResumeEditorDrawer structured editor contract', () => {
   it('blocks ordinary overwrite when recovery is required and confirms dirty close', () => {
     expect(source).toContain("parsed.mode === 'recovery'");
     expect(source).toContain('无法安全使用结构化表单');
-    expect(source).toContain('Modal.confirm');
+    expect(source).toContain("localizedModal('confirm'");
     expect(source).toContain('有未保存的更改');
     expect(source).toContain("parseStructuredResume(content).mode !== 'structured'");
   });

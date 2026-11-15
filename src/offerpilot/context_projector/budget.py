@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from offerpilot.context_projector.contracts import FrozenMessage, ProjectionError, canonical_json
 
-BUDGET_POLICY_VERSION = "model-surface-budget-v2"
+BUDGET_POLICY_VERSION = "model-surface-budget-v3-images"
 COMPAT_CONTEXT_WINDOW = 32_768
 DEFAULT_OUTPUT_RESERVE = 4_096
 PROVIDER_FRAMING_RESERVE = 1_024
@@ -48,6 +48,12 @@ def conservative_units(raw: bytes) -> int:
 
 def canonical_messages(messages: tuple[FrozenMessage, ...]) -> bytes:
     return canonical_json([message.canonical_value() for message in messages])
+
+
+def message_input_units(messages: tuple[FrozenMessage, ...]) -> int:
+    return len(canonical_messages(messages)) + sum(
+        image.input_units for message in messages for image in message.images
+    )
 
 
 def surface_input_limit(providers: tuple[ProviderBudget, ...]) -> int:

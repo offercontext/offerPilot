@@ -1,3 +1,5 @@
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
 import { useMemo, useState } from 'react';
 import {
   DragOverlay,
@@ -35,6 +37,7 @@ interface KanbanBoardProps {
 }
 
 export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilot, viewState }: KanbanBoardProps) {
+  useLocale();
   const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
   const [pendingMove, setPendingMove] = useState<{ app: Application; status: ApplicationStatus } | null>(null);
@@ -87,7 +90,7 @@ export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilo
   const confirmStatusChange = async () => {
     if (!pendingMove) return;
     if (requiresClosedReason(pendingMove.app.status, pendingMove.status) && !closedReason.trim()) {
-      message.error('请填写关闭原因');
+      message.error(liveText(() => t("请填写关闭原因")));
       return;
     }
     setSaving(true);
@@ -98,11 +101,11 @@ export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilo
       );
       queryClient.invalidateQueries({ queryKey: ['applications'] });
       queryClient.invalidateQueries({ queryKey: ['events'] });
-      message.success(`已移至「${STATUS_LABELS[pendingMove.status]}」`);
+      message.success(liveText(() => t("已移至「{value1}」", { value1: STATUS_LABELS[pendingMove.status] })));
       setPendingMove(null);
       setClosedReason('');
     } catch {
-      message.error('状态更新失败，请重试');
+      message.error(liveText(() => t("状态更新失败，请重试")));
     } finally {
       setSaving(false);
     }
@@ -120,7 +123,7 @@ export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilo
 
   return (
     <>
-      <div className={styles.board}>
+      <div className={styles.board} data-kanban-board>
         {KANBAN_COLUMNS.map((status) => (
           <KanbanColumn
             key={status}
@@ -138,10 +141,10 @@ export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilo
         {activeRecord ? <KanbanCard record={activeRecord} overlay /> : null}
       </DragOverlay>
       <Modal
-        title="确认更新投递状态"
+        title={t("确认更新投递状态")}
         open={!!pendingMove}
-        okText="确认更新"
-        cancelText="取消"
+        okText={t("确认更新")}
+        cancelText={t("取消")}
         confirmLoading={saving}
         onOk={confirmStatusChange}
         onCancel={() => {
@@ -154,18 +157,17 @@ export default function KanbanBoard({ applications, onOpenDetail, onAttachToPilo
             <Typography.Paragraph>
               {pendingMove.app.company_name} · {pendingMove.app.position_name}
             </Typography.Paragraph>
-            <Typography.Paragraph type="secondary">
-              从「{STATUS_LABELS[pendingMove.app.status]}」移动到「{STATUS_LABELS[pendingMove.status]}」。
+            <Typography.Paragraph type="secondary">{t("从「")}{STATUS_LABELS[pendingMove.app.status]}{t("」移动到「")}{STATUS_LABELS[pendingMove.status]}」。
               {willRecordFirstStatusTimestamp(pendingMove.app, pendingMove.status)
-                ? '首次进入该状态，将记录对应时间。'
-                : '该状态已有首次时间记录，本次不会覆盖。'}
+                ? t("首次进入该状态，将记录对应时间。")
+                : t("该状态已有首次时间记录，本次不会覆盖。")}
             </Typography.Paragraph>
             {requiresClosedReason(pendingMove.app.status, pendingMove.status) && (
               <Input.TextArea
                 rows={3}
                 value={closedReason}
                 onChange={(event) => setClosedReason(event.target.value)}
-                placeholder="填写关闭原因，例如：岗位关闭、主动放弃、已接受其他 offer"
+                placeholder={t("填写关闭原因，例如：岗位关闭、主动放弃、已接受其他 offer")}
               />
             )}
           </div>

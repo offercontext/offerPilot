@@ -9,6 +9,31 @@
 
 - [ADR-0013: 用受限会话接入实时面试语音](./0013-scope-realtime-interview-voice.md) — Accepted（实验功能）
 
+### 简历与材料
+
+- [ADR-0018: 导出已保存的简历文档](0018-export-saved-resume-documents.md) — Implementation candidate
+
+### 面试训练证据
+
+- [ADR-0017: 将训练证据限定在用户选择的练习计划](0017-bound-interview-training-evidence.md) — Implementation candidate
+
+### 外部 Agent 接入
+
+- [ADR-0016: 以受限 MCP 提案连接外部 Agent](./0016-expose-scoped-external-agent-mcp.md) — Accepted for implementation
+
+### 产品入口与草稿
+
+- [ADR-0015: 精简入口并保留领域草稿所有权](./0015-simplify-product-entry-and-draft-ownership.md) — Accepted
+
+### 陪伴日常
+
+- [ADR-0016: 隔离且有界的陪伴日常](./0016-bound-companion-life.md) — Implemented on feature branch; real-dialogue acceptance pending
+
+### 界面语言
+
+- [ADR-0014: 在展示边界切换中英文界面](./0014-localize-authored-interface-copy.md) — Implemented on feature branch; pending acceptance
+
+
 ### 投递录入
 
 - [ADR-0006: 单条岗位录入的原子创建与恢复](./0006-reliable-single-application-intake.md) — Accepted
@@ -32,6 +57,7 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 - [ADR-0010: 由 Runtime 持有 Pilot 执行，客户端只订阅进度](./0010-own-pilot-execution-in-runtime.md) — Accepted
 - [ADR-0011: 按确认、范围和预算装配可选上下文](./0011-bound-optional-context-sources.md) — Accepted
 - [ADR-0012: 持久化有界的本地主动任务](./0012-bound-local-proactive-jobs.md) — Accepted
+- [ADR-0013: 持久化受当前模型能力约束的原生图片消息](./0013-persist-native-image-messages.md) — Accepted
 
 ### 决策链
 

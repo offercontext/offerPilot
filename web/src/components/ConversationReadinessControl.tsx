@@ -1,3 +1,4 @@
+import { t, useLocale, formatDate, formatNumber } from '@/i18n';
 import { Alert, Button, Checkbox, Select, Space, Tag, Typography } from 'antd';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -32,13 +33,13 @@ function newMutationId(): string {
 }
 
 function eventLabel(event: ScheduleEvent): string {
-  const kind = event.subtype?.trim() || `第 ${event.round || 1} 轮`;
-  const when = event.scheduled_at ? ` · ${new Date(event.scheduled_at).toLocaleString()}` : '';
+  const kind = event.subtype?.trim() || t('第 {round} 轮', { round: formatNumber(event.round || 1) });
+  const when = event.scheduled_at ? ` · ${formatDate(event.scheduled_at, { dateStyle: 'medium', timeStyle: 'short' })}` : '';
   return `${kind}${when}`;
 }
 
 function resumeLabel(resume: Resume): string {
-  return resume.title?.trim() || resume.name?.trim() || `简历 #${resume.id}`;
+  return resume.title?.trim() || resume.name?.trim() || t('简历 #{id}', { id: resume.id });
 }
 
 function safeTargetEvents(events: ScheduleEvent[]): ScheduleEvent[] {
@@ -59,6 +60,7 @@ export default function ConversationReadinessControl({
   busy = false,
   onChanged,
 }: ConversationReadinessControlProps) {
+  useLocale();
   const [context, setContext] = useState<ConversationReadinessContext>();
   const [events, setEvents] = useState<ScheduleEvent[]>([]);
   const [resumes, setResumes] = useState<Resume[]>([]);
@@ -169,10 +171,10 @@ export default function ConversationReadinessControl({
     && !loadingOptions;
 
   const statusSummary = context?.state === 'confirmed'
-    ? `面试 ${context.target_event_id} · 简历 ${context.resume_id} · ${context.ordered_version_ids.length ? `已选 ${context.ordered_version_ids.length} 个重点` : '明确空选择'}`
+    ? t('面试 {event} · 简历 {resume} · {selection}', { event: context.target_event_id ?? '', resume: context.resume_id ?? '', selection: context.ordered_version_ids.length ? t('已选 {count} 个重点', { count: formatNumber(context.ordered_version_ids.length) }) : t('明确空选择') })
     : context?.state === 'withdrawn'
-      ? '本次回复不会使用准备重点。'
-      : '尚未绑定准备重点。';
+      ? t('本次回复不会使用准备重点。')
+      : t('尚未绑定准备重点。');
 
   function chooseTarget(value: number) {
     setChosenTarget(value);
@@ -247,28 +249,28 @@ export default function ConversationReadinessControl({
           onClick={() => setExpanded((value) => !value)}
           style={{ paddingInline: 0, fontWeight: 600 }}
         >
-          本次面试的准备重点
+          {t("本次面试的准备重点")}
         </Button>
         <div role="status" style={{ marginTop: 4 }}>
           <Space wrap>
-            {context?.state === 'confirmed' && <Tag color="green">已确认</Tag>}
-            {context?.state === 'withdrawn' && <Tag>已撤回</Tag>}
+            {context?.state === 'confirmed' && <Tag color="green">{t("已确认")}</Tag>}
+            {context?.state === 'withdrawn' && <Tag>{t("已撤回")}</Tag>}
             <Typography.Text type="secondary">{statusSummary}</Typography.Text>
           </Space>
         </div>
       </div>
-      {error && <Alert type="error" showIcon message={error} />}
+      {error && <Alert type="error" showIcon message={t(error)} />}
       {expanded && (
         <div id="conversation-readiness-panel" style={{ display: 'grid', gap: 12 }}>
           <Typography.Text type="secondary">
-            先选择目标面试和简历，再从当前有效的复盘重点中明确勾选；不会自动猜测目标。
+            {t("先选择目标面试和简历，再从当前有效的复盘重点中明确勾选；不会自动猜测目标。")}
           </Typography.Text>
           <Space direction="vertical" style={{ width: '100%' }}>
-            <label htmlFor="readiness-target-event">目标面试</label>
+            <label htmlFor="readiness-target-event">{t("目标面试")}</label>
             <Select
               id="readiness-target-event"
-              aria-label="目标面试"
-              placeholder="选择一次即将进行的面试"
+              aria-label={t("目标面试")}
+              placeholder={t("选择一次即将进行的面试")}
               value={chosenTarget}
               options={targetChoices.map((event) => ({ label: eventLabel(event), value: event.id }))}
               loading={loadingOptions && events.length === 0}
@@ -276,11 +278,11 @@ export default function ConversationReadinessControl({
               onChange={chooseTarget}
               style={{ width: '100%' }}
             />
-            <label htmlFor="readiness-resume">本次使用的简历</label>
+            <label htmlFor="readiness-resume">{t("本次使用的简历")}</label>
             <Select
               id="readiness-resume"
-              aria-label="本次使用的简历"
-              placeholder="选择一份简历"
+              aria-label={t("本次使用的简历")}
+              placeholder={t("选择一份简历")}
               value={chosenResume}
               options={resumeChoices.map((resume) => ({ label: resumeLabel(resume), value: resume.id }))}
               loading={loadingOptions && resumes.length === 0}
@@ -290,7 +292,7 @@ export default function ConversationReadinessControl({
             />
           </Space>
           {chosenTarget && feedbackChoices.length > 0 && (
-            <div aria-label="可选的准备重点版本" style={{ display: 'grid', gap: 8 }}>
+            <div aria-label={t("可选的准备重点版本")} style={{ display: 'grid', gap: 8 }}>
               {feedbackChoices.map((item) => (
                 <Checkbox
                   key={item.versionId}
@@ -305,19 +307,19 @@ export default function ConversationReadinessControl({
             </div>
           )}
           {chosenTarget && feedbackChoices.length === 0 && fallbackVersionIds.length === 0 && !loadingOptions && (
-            <Typography.Text type="secondary">当前面试没有可用的已确认准备重点。仍需点击确认，明确选择空的准备重点。</Typography.Text>
+            <Typography.Text type="secondary">{t("当前面试没有可用的已确认准备重点。仍需点击确认，明确选择空的准备重点。")}</Typography.Text>
           )}
           <Space wrap>
             <Button type="primary" loading={working} disabled={!canConfirm} onClick={() => void confirm()}>
-              确认绑定准备重点
+              {t("确认绑定准备重点")}
             </Button>
             {active && (
               <Button loading={working} disabled={busy || working} onClick={() => void clear()}>
-                撤回绑定
+                {t("撤回绑定")}
               </Button>
             )}
           </Space>
-          {visibleVersionIds.length > 8 && <Typography.Text type="secondary">最多选择 8 个准备重点。</Typography.Text>}
+          {visibleVersionIds.length > 8 && <Typography.Text type="secondary">{t("最多选择 8 个准备重点。")}</Typography.Text>}
         </div>
       )}
     </section>

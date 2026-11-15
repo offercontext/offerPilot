@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 export type ViewMode =
   | 'dashboard'
   | 'board'
@@ -42,44 +43,44 @@ export interface ModuleTabItem {
 }
 
 export const NAVIGATION_GROUPS: NavigationGroup[] = [
-  { key: 'primary', label: '主要任务' },
-  { key: 'resources', label: '常用资料' },
-  { key: 'utility', label: '辅助' },
+  { key: 'primary', get label() { return t("主要任务"); } },
+  { key: 'resources', get label() { return t("常用资料"); } },
+  { key: 'utility', get label() { return t("辅助"); } },
 ];
 
 export const MODULE_NAV: ModuleNavItem[] = [
-  { key: 'today', label: '今日', defaultView: 'dashboard', group: 'primary' },
-  { key: 'applications', label: '投递', defaultView: 'board', group: 'primary' },
-  { key: 'interview', label: '面试', defaultView: 'interview', group: 'primary' },
+  { key: 'today', get label() { return t("今日"); }, defaultView: 'dashboard', group: 'primary' },
+  { key: 'applications', get label() { return t("投递"); }, defaultView: 'board', group: 'primary' },
+  { key: 'interview', get label() { return t("面试"); }, defaultView: 'interview', group: 'primary' },
   { key: 'offers', label: 'Offer', defaultView: 'offers', group: 'primary' },
-  { key: 'resources', label: '素材库', defaultView: 'resumes', group: 'resources' },
-  { key: 'settings', label: '设置', defaultView: 'settings', group: 'utility' },
+  { key: 'resources', get label() { return t("素材库"); }, defaultView: 'resumes', group: 'resources' },
+  { key: 'settings', get label() { return t("设置"); }, defaultView: 'settings', group: 'utility' },
 ];
 
 export const MODULE_TABS: Record<ModuleKey, ModuleTabItem[]> = {
   today: [
-    { view: 'dashboard', label: '概览' },
-    { view: 'reminders', label: '提醒' },
-    { view: 'calendar', label: '日历' },
+    { view: 'dashboard', get label() { return t("概览"); } },
+    { view: 'reminders', get label() { return t("今日待办"); } },
+    { view: 'calendar', get label() { return t("日历"); } },
   ],
   applications: [
-    { view: 'board', label: '看板' },
-    { view: 'applications-list', label: '列表' },
+    { view: 'board', get label() { return t("看板"); } },
+    { view: 'applications-list', get label() { return t("列表"); } },
   ],
   interview: [
-    { view: 'interview', label: '面试' },
-    { view: 'questions', label: '刷题' },
+    { view: 'interview', get label() { return t("面试"); } },
+    { view: 'questions', get label() { return t("刷题"); } },
   ],
   offers: [
     { view: 'offers', label: 'Offer' },
   ],
   resources: [
-    { view: 'resumes', label: '简历' },
-    { view: 'reviews', label: '经历素材' },
-    { view: 'knowledge', label: '参考资料' },
+    { view: 'resumes', get label() { return t("简历"); } },
+    { view: 'reviews', get label() { return t("我的经历"); } },
+    { view: 'knowledge', get label() { return t("参考知识"); } },
   ],
-  pilot: [{ view: 'pilot', label: '会话中心' }],
-  settings: [{ view: 'settings', label: '设置' }],
+  pilot: [{ view: 'pilot', get label() { return t("会话中心"); } }],
+  settings: [{ view: 'settings', get label() { return t("设置"); } }],
 };
 
 const VIEW_TO_MODULE: Partial<Record<ViewMode, ModuleKey>> = {

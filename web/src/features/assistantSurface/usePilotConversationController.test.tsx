@@ -2,8 +2,9 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import type { PilotExecution } from '@/types/chat';
-import { usePilotConversationControllerState } from './usePilotConversationController';
+import { setLocale } from '@/i18n';
+import type { Conversation, PilotExecution } from '@/types/chat';
+import { contextDisplayLabel, usePilotConversationControllerState } from './usePilotConversationController';
 
 const mocks = vi.hoisted(() => ({
   messages: vi.fn(), summaries: vi.fn(), refresh: vi.fn(), accept: vi.fn(),
@@ -48,7 +49,7 @@ beforeEach(async () => {
     controller.lastSubmissionRef.current = { requestId, message: '原消息', conversationId: 1, context: {} };
   });
 });
-afterEach(() => { act(() => root.unmount()); localStorage.clear(); });
+afterEach(() => { act(() => root.unmount()); localStorage.clear(); setLocale('zh-CN'); });
 
 it.each(['completed', 'waiting_confirmation'] as const)('clears the matching recovered submission error after reading %s records', async (state) => {
   await act(async () => { mocks.onStopped?.({ ...target, state }); });
@@ -94,4 +95,21 @@ it('keeps record-reload failure visible even when the execution completed', asyn
   await act(async () => { mocks.onStopped?.(target); });
   expect(controller.lastError).toContain('暂时无法读取记录');
   expect(controller.lastFailedText).toBe('原消息');
+});
+
+
+it('translates only generated fallback contexts without changing the stored context or custom names', async () => {
+  await act(async () => controller.setConversations([
+    { id: 1, context_type: 'application', context_ref: '42', context_label: '' },
+    { id: 2, context_type: 'workspace', context_label: '今日' },
+  ] as Conversation[]));
+  await act(async () => controller.activateConversationContext(1));
+  const original = controller.pinnedContext;
+  expect(contextDisplayLabel(original)).toBe('投递 #42');
+  act(() => setLocale('en-US'));
+  expect(contextDisplayLabel(controller.pinnedContext)).toBe('Application #42');
+  expect(controller.pinnedContext).toBe(original);
+  expect(original?.label).toBe('投递 #42');
+  await act(async () => controller.activateConversationContext(2));
+  expect(contextDisplayLabel(controller.pinnedContext)).toBe('今日');
 });

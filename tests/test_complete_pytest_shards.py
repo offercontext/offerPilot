@@ -1,0 +1,1197 @@
+"""Full coverage and failure propagation of the real isolated pytest gate."""
+from __future__ import annotations
+
+import copy
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import zipfile
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts/test_shards/gate.py"
+spec = importlib.util.spec_from_file_location("complete_pytest_gate", SCRIPT)
+gate = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gate)
+
+
+@pytest.mark.parametrize("character,units", [("x", 1), ("\U0001f600", 2)],
+                         ids=["ascii", "utf16-surrogate-pair"])
+def test_node_ids_are_bounded_for_windows_environment_without_echoing_data(character, units):
+    prefix = "tests/test_fixture.py::test_case["
+    count = (gate.MAX_NODE_ID_UTF16_UNITS - len(prefix) - 1) // units
+    gate.validate_node_id(prefix + character * count + "]")
+    with pytest.raises(ValueError, match="explicit short parameter ids") as error:
+        gate.validate_node_id(prefix + character * (count + 1) + "]")
+    assert str(error.value).startswith("tests/test_fixture.py::test_case:")
+    assert character * 20 not in str(error.value)
+
+
+def test_manifest_rejects_nonportable_node_ids_before_partitioning(tmp_path):
+    manifest, _ = evidence(tmp_path)
+    manifest["nodes"][0] += "x" * gate.MAX_NODE_ID_UTF16_UNITS
+    with pytest.raises(ValueError, match="portable Windows limit"):
+        gate.validate_manifest(manifest)
+
+
+def test_deterministic_complete_balanced_partitions():
+    nodes = [f"tests/test_suite_{i % 284}.py::test_{i}[Unicode 空格 {i}]" for i in range(6384)]
+    shards = gate.partition(nodes, 12)
+    assert shards == gate.partition(list(reversed(nodes)), 12)
+    assert sorted(sum(shards, [])) == sorted(nodes)
+    assert len(set(sum(shards, []))) == len(nodes)
+    assert max(map(len, shards)) - min(map(len, shards)) <= 23
+
+
+def test_measured_cost_balances_slow_files_instead_of_equal_node_counts(monkeypatch):
+    costs = {"tests/test_a.py::test_slow": 100_000, "tests/test_b.py::test_fast": 1_000,
+             "tests/test_c.py::test_slow": 90_000, "tests/test_d.py::test_fast": 1_000}
+    monkeypatch.setattr(gate, "load_duration_history", lambda: {
+        "duration_ms": costs, "fallback_ms": 100_000,
+    }, raising=False)
+    shards = gate.partition(list(costs), 2)
+    assert max(sum(costs[node] for node in shard) for shard in shards) == 100_000
+    assert shards == gate.partition(list(reversed(costs)), 2)
+    assert sorted(sum(shards, [])) == sorted(costs)
+
+
+@pytest.mark.parametrize("nodes,count", [([], 1), (["a", "a"], 1), (["a"], 2), (["a"], 0)])
+def test_invalid_partition_rejected(nodes, count):
+    with pytest.raises(ValueError):
+        gate.partition(nodes, count)
+
+
+def evidence(tmp_path):
+    nodes = ["tests/test_a.py::test_a", "tests/test_b.py::test_b"]
+    manifest = {"version": 4, "partition": gate.partition_policy(),
+                "identity": {"commit": "abc"}, "nodes": nodes,
+                "shards": gate.partition(nodes, 2), "allowed_skips": None}
+    results = []
+    for index, shard in enumerate(manifest["shards"]):
+        result = {"identity": manifest["identity"], "index": index, "exit_code": 0,
+                  "manifest": gate.digest(manifest), "selected": shard,
+                  "reports": {node: [
+                      {"when": phase, "outcome": "passed", "reason": "", "xfail": False}
+                      for phase in ["setup", "call", "teardown"]] for node in shard}}
+        gate.write(tmp_path / f"shard-{index}.json", result)
+        results.append(result)
+    return manifest, results
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "exit", "failed", "xfail",
+                                      "selection", "identity", "digest", "no_call", "extra"])
+def test_aggregate_fails_closed(tmp_path, mutation):
+    manifest, results = evidence(tmp_path)
+    result = copy.deepcopy(results[0])
+    node = manifest["nodes"][0]
+    phases = result["reports"][node]
+    if mutation == "missing":
+        del result["reports"][node]
+    elif mutation == "duplicate":
+        phases.append(phases[1])
+    elif mutation == "exit":
+        result["exit_code"] = 1
+    elif mutation == "failed":
+        phases[2]["outcome"] = "failed"
+    elif mutation == "xfail":
+        phases[1]["xfail"] = True
+    elif mutation == "selection":
+        result["selected"] = []
+    elif mutation == "identity":
+        result["identity"] = {"commit": "old"}
+    elif mutation == "digest":
+        result["manifest"] = "stale"
+    elif mutation == "no_call":
+        phases.pop(1)
+    elif mutation == "extra":
+        gate.write(tmp_path / "shard-999.json", result)
+    gate.write(tmp_path / "shard-0.json", result)
+    with pytest.raises(ValueError):
+        gate.aggregate(manifest, tmp_path)
+
+
+def test_missing_shard_and_manifest_duplicates_fail(tmp_path):
+    manifest, _ = evidence(tmp_path)
+    (tmp_path / "shard-1.json").unlink()
+    with pytest.raises(ValueError):
+        gate.aggregate(manifest, tmp_path)
+    manifest["nodes"].append(manifest["nodes"][0])
+    with pytest.raises(ValueError):
+        gate.validate_manifest(manifest)
+
+
+def test_skips_disclosed_without_counting_as_passed(tmp_path):
+    manifest, results = evidence(tmp_path)
+    node = manifest["nodes"][0]
+    phases = results[0]["reports"][node]
+    phases.pop(1)
+    phases[0].update(outcome="skipped", reason="Platform unavailable")
+    gate.write(tmp_path / "shard-0.json", results[0])
+    summary = gate.aggregate(manifest, tmp_path)
+    assert summary["skipped"] == [{"node": node, "reason": "Platform unavailable"}]
+    assert summary["tests"] == 2
+    manifest["allowed_skips"] = {}
+    results[0]["manifest"] = gate.digest(manifest)
+    with pytest.raises(ValueError, match="unexpected skip"):
+        gate.validate_result(manifest, results[0], 0)
+
+
+@pytest.fixture
+def tiny_repo(tmp_path):
+    (tmp_path / "uv.lock").write_text("test lock")
+    # Every synthetic child pytest also starts offline, without process-global
+    # PYTEST_ADDOPTS/PYTEST_PLUGINS that would alter nested selection semantics.
+    (tmp_path / "pytest.ini").write_text(
+        "[pytest]\ntestpaths = tests\npythonpath = .\naddopts = -p offline_guard\n")
+    shutil.copyfile(ROOT / "tests/_offline_network_guard.py", tmp_path / "offline_guard.py")
+    (tmp_path / "tests").mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "--allow-empty", "-qm", "fixture"], cwd=tmp_path, check=True)
+    return tmp_path
+
+
+def invoke(repo, command, *args):
+    result = subprocess.run([sys.executable, str(SCRIPT), command, "--manifest", "manifest.json",
+                             "--output", "evidence", *args], cwd=repo, capture_output=True,
+                            text=True, timeout=45)
+    return result
+
+
+def test_real_subprocess_complete_and_nested_pytest_unchanged(tiny_repo):
+    (tiny_repo / "tests/test_sample.py").write_text('''import os, subprocess, sys
+from pathlib import Path
+import pytest
+@pytest.fixture(scope="module", autouse=True)
+def module_setup():
+    marker = Path("module-setups.txt")
+    marker.write_text(marker.read_text() + "setup\\n" if marker.exists() else "setup\\n")
+@pytest.mark.parametrize("value", ["空格 a", "b"])
+def test_ok(value):
+    assert value
+
+def test_nested(tmp_path):
+    (tmp_path / "test_inner.py").write_text("def test_inner(): pass")
+    result = subprocess.run([sys.executable, "-m", "pytest", "-p", "offline_guard", "--collect-only", "-q", str(tmp_path)], capture_output=True, text=True)
+    assert result.returncode == 0
+    assert "test_inner.py::test_inner" in result.stdout
+    assert "PYTEST_ADDOPTS" not in os.environ
+    assert "PYTEST_PLUGINS" not in os.environ
+
+def test_skip():
+    pytest.skip("Known platform condition")
+''', encoding="utf-8")
+    (tiny_repo / "tests/test_other.py").write_text("def test_other(): pass")
+    collected = invoke(tiny_repo, "collect", "--count", "2")
+    assert collected.returncode == 0, collected.stdout + collected.stderr
+    for index in range(2):
+        ran = invoke(tiny_repo, "run", "--index", str(index))
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+        evidence = json.loads((tiny_repo / f"evidence/shard-{index}.json").read_text())
+        for phases in evidence["reports"].values():
+            for phase in phases:
+                assert isinstance(phase["duration_seconds"], (int, float))
+                assert phase["duration_seconds"] >= 0
+    assert (tiny_repo / "module-setups.txt").read_text().splitlines() == ["setup"]
+    result = invoke(tiny_repo, "aggregate")
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["skipped"][0]["reason"] == "Known platform condition"
+    (tiny_repo / "evidence/shard-1.json").unlink()
+    assert invoke(tiny_repo, "aggregate").returncode != 0
+
+
+@pytest.mark.parametrize("body", [
+    "def test_bad(): assert False",
+    "import pytest\n@pytest.fixture\ndef bad(): raise RuntimeError('setup')\n"
+    "def test_bad(bad): pass",
+    "import pytest\n@pytest.fixture\ndef bad():\n yield\n raise RuntimeError('teardown')\n"
+    "def test_bad(bad): pass",
+    "import pytest\n@pytest.mark.xfail\ndef test_bad(): assert False",
+])
+def test_real_failed_shard_never_aggregates(tiny_repo, body):
+    (tiny_repo / "tests/test_bad.py").write_text(body)
+    assert invoke(tiny_repo, "collect", "--count", "1").returncode == 0
+    assert invoke(tiny_repo, "run").returncode != 0
+    assert invoke(tiny_repo, "aggregate").returncode != 0
+
+
+def test_collection_failure_removes_stale_manifest(tiny_repo):
+    (tiny_repo / "manifest.json").write_text("stale")
+    (tiny_repo / "tests/test_bad.py").write_text("raise RuntimeError('collection')")
+    assert invoke(tiny_repo, "collect", "--count", "1").returncode != 0
+    assert not (tiny_repo / "manifest.json").exists()
+
+
+def test_workflow_keeps_complete_gate_and_bounded_non_cancelling_shards():
+    workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
+    assert "      max-parallel: 4" in workflow.splitlines()
+    assert "fail-fast: false" in workflow
+    shards = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
+    assert "cancel-in-progress:" not in shards
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+    assert "timeout-minutes: 90" in workflow
+    assert "needs: [pr-feedback, pytest-manifest, pytest-shards, simplification-helper-safety]" in workflow
+    assert "-Install -PytestEvidence pytest-evidence" in workflow
+    assert "  pull_request:\n    branches: [master]" in workflow
+    assert "paths-ignore:" not in workflow
+    release = (ROOT / "scripts/release-gate.ps1").read_text()
+    assert release.index("gate.py aggregate") < release.index("uv run ruff check .")
+    assert "Full pytest evidence verification failed" in release
+    for command in ["uv run pytest -q", "uv run mypy src", "npm.cmd test",
+                    "npm.cmd run build", "local-smoke.ps1", "oc verify --profile local",
+                    "install-gate.ps1"]:
+        assert command in release
+
+
+def test_untracked_same_node_source_change_rejects_stale_manifest(tiny_repo):
+    test_file = tiny_repo / "tests/test_sample.py"
+    test_file.write_text("def test_same_node(): pass")
+    assert invoke(tiny_repo, "collect", "--count", "1").returncode == 0
+    test_file.write_text("def test_same_node(): assert False")
+    result = invoke(tiny_repo, "run")
+    assert result.returncode != 0
+    assert "another source/environment/run" in result.stderr
+
+
+def test_collection_skips_are_disclosed_and_drift_rejected(tiny_repo):
+    (tiny_repo / "tests/test_ok.py").write_text("def test_ok(): pass")
+    (tiny_repo / "tests/test_skip.py").write_text(
+        "import pytest\npytest.skip('Optional platform', allow_module_level=True)")
+    assert invoke(tiny_repo, "collect", "--count", "1").returncode == 0
+    assert invoke(tiny_repo, "run").returncode == 0
+    result = invoke(tiny_repo, "aggregate")
+    assert result.returncode == 0, result.stderr
+    skipped = json.loads(result.stdout)["collection_skips"]
+    assert len(skipped) == 1
+    assert "Optional platform" in skipped[0]["reason"]
+
+
+def test_partition_preserves_module_fixture_scope_and_handles_large_files():
+    nodes = [f"tests/test_big.py::test_{i}" for i in range(100)]
+    nodes += ["tests/test_small.py::test_one", "tests/test_other.py::test_one"]
+    shards = gate.partition(nodes, 2)
+    assert shards == gate.partition(nodes[::-1], 2)
+    assert sorted(sum(shards, [])) == sorted(nodes)
+    for filename in {node.split("::")[0] for node in nodes}:
+        assert sum(any(node.split("::")[0] == filename for node in shard)
+                   for shard in shards) == 1
+    assert sorted(map(len, shards)) == [2, 100]
+    with pytest.raises(ValueError, match="preserve fixture scope"):
+        gate.partition(nodes, 4)
+
+
+def test_reviewed_chat_module_spreads_without_splitting_other_modules():
+    chat = [f"tests/test_chat_api.py::test_case[{i}]" for i in range(390)]
+    other = [f"tests/test_other_{i % 24}.py::test_case_{i}" for i in range(6039)]
+    nodes = chat + other
+    shards = gate.partition(nodes, 12)
+    assert gate.NODE_SPLIT_FILES == {"tests/test_chat_api.py"}
+    assert shards == gate.partition(nodes[::-1], 12)
+    assert sorted(sum(shards, [])) == sorted(nodes)
+    assert len(set(sum(shards, []))) == len(nodes)
+    chat_counts = [sum(node in set(chat) for node in shard) for shard in shards]
+    assert min(chat_counts) > 0
+    costs = gate.estimated_costs(nodes, gate.load_duration_history())
+    loads = [sum(costs[node] for node in shard) for shard in shards]
+    assert max(loads) - min(loads) <= max(costs[node] for node in chat)
+    for filename in {node.split("::")[0] for node in other}:
+        assert sum(any(node.split("::")[0] == filename for node in shard)
+                   for shard in shards) == 1
+
+
+def test_node_split_source_change_requires_a_new_isolation_review():
+    # This is an audit gate, not runtime caching. Review globals, dynamic fixture
+    # acquisition and fixture scopes again before updating these digests.
+    # Re-reviewed after 0256ba70: ProviderGapClock, models and diagnostic lists
+    # belong to each test; only its provider worker advances that clock, before
+    # the completed HTTP/SSE response is inspected. Database/key paths are local.
+    # Existing catalog/golden globals are read-only; the legacy spy resets its
+    # slots per invocation and exposes its callback only via function monkeypatch.
+    # Neither module has xunit/shared fixture state or dynamic fixture requests;
+    # conftest's app_client remains function-scoped. Keep the runtime scope guards.
+    # Re-reviewed timeout probes: each call owns its Events, real Future callback
+    # and executor subclass; function monkeypatch restores the transport after
+    # the changed tests release and observe their Agent worker's completion.
+    # The remaining confirmation probes now share that real-Future helper;
+    # retries restore only the executor after the timed-out worker has exited.
+    # Re-reviewed short provider waits: perf_counter adds no shared state. The
+    # coarse-clock regression owns its clock/iterator/list and function monkeypatch
+    # restores only this module's time binding; process-wide time is untouched.
+    # Independently re-reviewed CAS/timeout probes: all counters are per-test
+    # closures; function monkeypatch restores the model, delivery and control
+    # methods. The provider exits via Future.result before timeout recovery;
+    # the busy SQLite writer is closed after finally rolling back its lock.
+    # Independently re-reviewed the merged host and busy-recovery probes: their
+    # Events, executors, SQLite writer and counters are invocation-local, and
+    # function monkeypatch restores all three observed methods. The provider
+    # host's caller releases and observes its worker in finally. The selection
+    # plugin adds collection/reporting only, with no fixture or setup hooks;
+    # its process-global reports are diagnostic, under one pytest.main per
+    # official shard process. Shared globals and runtime scope guards are intact.
+    # Include the shared helper, since its state is part of chat node isolation.
+    # Independently re-reviewed selector registration: without selection options,
+    # the plugin adds priority markers and appends per-process observation reports,
+    # but never filters/reorders nodes or changes fixture lifetimes. Each shard
+    # owns its worker; exact-node and static/dynamic scope guards remain active.
+    # A real plugin-loaded two-shard probe passed all four nodes; an injected
+    # autouse session fixture still refused splitting. Bind the plugin source too.
+    # Re-reviewed context-policy parametrization: both workspace/application
+    # nodes create their own model, client, context and application under the
+    # function-scoped tmp_path. No globals or fixture scopes changed; a real
+    # two-shard probe passed both nodes with exact coverage and no skips.
+    # Normalize only checkout CRLF so the same reviewed source works on Windows.
+    reviewed = {
+        "tests/test_chat_api.py":
+            "8f0aa82abb4cea49106c76456fdb46c2f6347156bc9dd72cf66b33978c85c0b9",
+        "tests/_agent_timeout.py":
+            "5bb1054018aeb6153bd6f0a0bb8e5fe3ace2203df1e8fa375c43d3dac9edd735",
+        "tests/conftest.py":
+            "68f662a1cf68d40c9389c91d00f3c44b05936ea927de545c34aa38a0680e6e1f",
+        "scripts/test_selection/pytest_plugin.py":
+            "bdf8a6bcb52a6b77c8ab586a842266789f40ba3c56aaff36cfc4391a23e8fdef",
+    }
+    for name, expected in reviewed.items():
+        source = (ROOT / name).read_bytes().replace(b"\r\n", b"\n")
+        assert hashlib.sha256(source).hexdigest() == expected, (
+            f"{name}: review node-split state/fixture isolation before updating the digest"
+        )
+
+
+def test_real_reviewed_split_keeps_function_state_and_exact_execution(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text('''import pytest
+@pytest.mark.parametrize("value", range(4))
+def test_isolated(tmp_path, value):
+    marker = tmp_path / "isolated.txt"
+    assert not marker.exists()
+    marker.write_text(str(value))
+''')
+    assert invoke(tiny_repo, "collect", "--count", "2").returncode == 0
+    manifest = json.loads((tiny_repo / "manifest.json").read_text())
+    assert manifest["version"] == 4
+    assert manifest["partition"] == gate.partition_policy()
+    assert list(map(len, manifest["shards"])) == [2, 2]
+    for index in range(2):
+        ran = invoke(tiny_repo, "run", "--index", str(index))
+        assert ran.returncode == 0, ran.stdout + ran.stderr
+    summary = invoke(tiny_repo, "aggregate")
+    assert summary.returncode == 0, summary.stderr
+    assert json.loads(summary.stdout)["passed"] == 4
+
+
+@pytest.mark.parametrize("scope", ["module", "class", "package", "session"])
+def test_new_custom_shared_fixture_prevents_reviewed_node_split(tiny_repo, scope):
+    (tiny_repo / "tests/conftest.py").write_text(
+        f"import pytest\n@pytest.fixture(scope={scope!r})\ndef shared(): return 1\n")
+    (tiny_repo / "tests/test_chat_api.py").write_text(
+        "def test_one(shared): assert shared\ndef test_two(shared): assert shared\n")
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "forbids node splitting" in result.stdout + result.stderr
+    assert not (tiny_repo / "manifest.json").exists()
+
+
+def test_xunit_module_setup_prevents_reviewed_node_split(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text(
+        "def setup_module(): pass\ndef test_one(): pass\ndef test_two(): pass\n")
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "forbids node splitting" in result.stdout + result.stderr
+
+
+def test_indirect_parametrization_cannot_broaden_split_fixture_scope(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text('''import pytest
+@pytest.fixture
+def shared(request): return request.param
+@pytest.mark.parametrize("shared", [1, 2], indirect=True, scope="module")
+def test_one(shared): assert shared
+''')
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "shared parameter shared forbids node splitting" in result.stdout + result.stderr
+
+
+def test_direct_shared_parameter_scope_prevents_node_split(tiny_repo):
+    (tiny_repo / "tests/test_chat_api.py").write_text('''import pytest
+@pytest.mark.parametrize("shared", [1, 2], scope="module")
+def test_one(shared): assert shared
+''')
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "shared parameter shared forbids node splitting" in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("scope", ["module", "session"])
+def test_dynamic_or_cached_shared_fixture_prevents_split_manifest(tiny_repo, scope):
+    (tiny_repo / "tests/conftest.py").write_text(
+        f"import pytest\n@pytest.fixture(scope={scope!r})\ndef shared(): return 1\n")
+    (tiny_repo / "tests/test_chat_api.py").write_text(
+        "def test_one(request): assert request.getfixturevalue('shared')\n"
+        "def test_two(request): assert request.getfixturevalue('shared')\n")
+    # An unsplit file could initialize a session fixture before a dynamic chat
+    # request; reject its applicability before any cache can be populated.
+    (tiny_repo / "tests/test_aaa.py").write_text("def test_prime(shared): assert shared\n")
+    result = invoke(tiny_repo, "collect", "--count", "2")
+    assert result.returncode != 0
+    assert "shared fixture shared forbids node splitting" in result.stdout + result.stderr
+    assert not (tiny_repo / "manifest.json").exists()
+
+
+def test_previous_whole_file_manifest_cannot_use_new_partition_rule(tmp_path):
+    manifest, _ = evidence(tmp_path)
+    manifest["version"] = 2
+    with pytest.raises(ValueError, match="Unsupported manifest"):
+        gate.validate_manifest(manifest)
+
+
+def test_previous_count_balanced_manifest_cannot_use_duration_policy(tmp_path):
+    manifest, _ = evidence(tmp_path)
+    manifest["version"] = 3
+    with pytest.raises(ValueError, match="Unsupported manifest"):
+        gate.validate_manifest(manifest)
+
+
+def test_frozen_history_provenance_and_all_6773_nodes_keep_exact_coverage(monkeypatch):
+    # Preserve every original baseline/refresh assertion against immutable v1.
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v1.json"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256",
+                        "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77")
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 1)
+    history = gate.load_duration_history()
+    assert {key: value for key, value in history["source"]["baseline"].items()
+            if key != "history_sha256"} == {
+        "run_id": 38500952016, "artifact_id": 11881026619,
+        "artifact_sha256": "7c84e85cf0b7106a5d0a452ea50ca79a49295bb6a2cb601f68d80d1627222826",
+        "commit": "9c245314e570f1d6de034e4d52deb46979874416",
+        "manifest_sha256": "4718beecb6018522d28719526e61778a1f2a1aa68326c4880f3aca0e89f8349d",
+        "nodes_sha256": "8fec4f9f84fdaa5ec102cdab343b8efd97ab3fcff58409e03fb6fd8f6aadc01d",
+        "lock_sha256": "456ac277ffbb355ca96fc68b54d05b104f42fd96b5a0b258decab35ff30456f8",
+        "platform": "Windows", "python": "3.12.10",
+    }
+    assert history["source"]["baseline"]["history_sha256"] == (
+        "f1be4a8e1d53de9aab21b8a9a3fa23276f4326c56788a4350e23d772c1132cbe"
+    )
+    refresh = history["source"]["refresh"]
+    assert refresh["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    assert refresh["run_id"] == 38922100985 and refresh["run_attempt"] == 1
+    assert refresh["commit"] == "9c1a5909f3a1cc3790a85bf02dde7072f9cccd3a"
+    assert refresh["tree"] == "bd1c54e887c4dcc6fe1f7ccc2eb4005032b6153b"
+    assert refresh["lock_sha256"] == history["source"]["baseline"]["lock_sha256"]
+    assert (refresh["platform"], refresh["python"]) == ("Windows", "3.12.10")
+    assert refresh["manifest_nodes"] == 7127
+    assert refresh["manifest_artifact_id"] == 12054832212
+    assert refresh["manifest_artifact_sha256"] == (
+        "6975c982338ee9342339bcfe18272dad5c8e382ca258598118cd1178418149ee"
+    )
+    sources = refresh["result_artifacts"]
+    assert [(source["shard"], source["artifact_id"], source["complete_passed_nodes"])
+            for source in sources] == [
+        (0, 12055067112, 80), (1, 12055592757, 56), (2, 12055148733, 45),
+        (3, 12056261114, 39), (4, 12059455916, 734),
+    ]
+    updates = history["source"]["node_updates"]
+    assert (refresh["added_nodes"], refresh["raised_nodes"]) == (241, 145)
+    assert len(updates) == 386
+    assert sum(update["previous_ms"] is None for update in updates.values()) == 241
+    for node, update in updates.items():
+        assert update["artifact_id"] in {source["artifact_id"] for source in sources}
+        previous = update["previous_ms"]
+        assert previous is None or (type(previous) is int and previous >= 1)
+        assert type(update["observed_ms"]) is int and update["observed_ms"] >= 1
+        assert previous is None or update["observed_ms"] > previous
+        assert history["duration_ms"][node] == max(previous or 0, update["observed_ms"])
+    # Retain the original 6,773-node baseline and add only complete passed observations.
+    assert len(history["duration_ms"]) == 6760 + 241
+    assert len(history["historical_skips"]) == 13
+    assert history["fallback_ms"] == 257834 == max(history["duration_ms"].values())
+    nodes = sorted(history["duration_ms"] | history["historical_skips"])
+    assert len(nodes) == 6773 + 241
+    shards = gate.partition(nodes, 12)
+    assert shards == gate.partition(nodes[::-1], 12)
+    assert sorted(sum(shards, [])) == nodes
+    assert len(set(sum(shards, []))) == 6773 + 241
+    for filename in {node.split("::", 1)[0] for node in nodes} - gate.NODE_SPLIT_FILES:
+        assert sum(any(node.split("::", 1)[0] == filename for node in shard)
+                   for shard in shards) == 1
+    manifest = {"version": 4, "partition": gate.partition_policy(), "nodes": nodes,
+                "shards": shards, "allowed_skips": None}
+    gate.validate_manifest(manifest)
+    repeated = {**manifest, "shards": gate.partition(nodes[::-1], 12)}
+    assert gate.digest(manifest) == gate.digest(repeated)
+
+    collection = refresh["collection"]
+    known = set(nodes)
+    extra = collection["not_in_history"]
+    absent = collection["history_not_collected"]
+    assert len(extra) == len(set(extra)) and not set(extra) & known
+    assert len(absent) == len(set(absent)) and set(absent) <= known
+    actual = sorted((known - set(absent)) | set(extra))
+    assert len(actual) == 7127
+    assert gate.digest(actual) == collection["nodes_sha256"] == (
+        "ea0873e835206e2cf6af845a139e78bdf4cd0a337e45d2998c4cc9b4d4d90d25"
+    )
+    predicted = gate.partition(actual, 12)
+    assert predicted == gate.partition(actual[::-1], 12)
+    assert sorted(sum(predicted, [])) == actual
+    assert len(set(sum(predicted, []))) == 7127
+    for filename in {node.split("::", 1)[0] for node in actual} - gate.NODE_SPLIT_FILES:
+        assert sum(any(node.split("::", 1)[0] == filename for node in shard)
+                   for shard in predicted) == 1
+    costs = gate.estimated_costs(actual, history)
+    loads = [sum(costs[node] for node in shard) for shard in predicted]
+    assert list(map(len, predicted)) == refresh["prediction"]["node_counts"]
+    assert loads == refresh["prediction"]["phase_ms"]
+    assert max(loads) == 5_316_970 and max(loads) - min(loads) == 258
+    assert refresh["prediction"]["scope"] == "scheduling-only; not completed execution evidence"
+
+    # The historical twelve-shard prediction above stays immutable. The current
+    # twenty-shard layout must preserve the same exact collection and fixtures.
+    current = gate.partition(actual, 20)
+    assert len(current) == 20 and all(current)
+    assert current == gate.partition(actual[::-1], 20)
+    assert sorted(sum(current, [])) == actual
+    assert len(set(sum(current, []))) == len(actual)
+    for filename in {node.split("::", 1)[0] for node in actual} - gate.NODE_SPLIT_FILES:
+        assert sum(any(node.split("::", 1)[0] == filename for node in shard)
+                   for shard in current) == 1
+    current_manifest = {**manifest, "nodes": actual, "shards": current}
+    gate.validate_manifest(current_manifest)
+    assert gate.digest(current_manifest) == gate.digest({
+        **current_manifest, "shards": gate.partition(actual[::-1], 20),
+    })
+
+
+def test_unknown_and_historically_skipped_nodes_use_conservative_frozen_cost(monkeypatch):
+    costs = {"tests/test_a.py::test_known": 1, "tests/test_b.py::test_known": 1000}
+    unknown = "tests/test_a.py::test_new"
+    skipped = "tests/test_skipped.py::test_platform"
+    history = {"duration_ms": costs, "historical_skips": {skipped: "Other platform"},
+               "fallback_ms": 1000}
+    monkeypatch.setattr(gate, "load_duration_history", lambda: history)
+    shards = gate.partition([*costs, unknown, skipped], 2)
+    assert shards[0] == sorted([*costs, unknown])
+    assert shards[1] == [skipped]
+    assert history["duration_ms"] == costs  # No learned state or runtime timing feedback.
+
+
+@pytest.mark.parametrize("filename,skipped,expected", [
+    ("tests/test_known.py", False, 20),  # New node in a measured file.
+    ("tests/test_known.py", True, 20),  # Previously skipped body was never measured.
+    ("tests/test_new.py", False, 1000),  # Entirely new file.
+    ("tests/test_all_skipped.py", True, 1000),  # No complete passed body in this file.
+])
+def test_missing_cost_uses_file_passed_max_then_global_max(filename, skipped, expected):
+    node = f"{filename}::test_missing"
+    history = {
+        "duration_ms": {"tests/test_known.py::test_fast": 1,
+                        "tests/test_known.py::test_slow": 20,
+                        "tests/test_other.py::test_slow": 1000},
+        "historical_skips": {node: "Other platform"} if skipped else {},
+        "fallback_ms": 1000,
+    }
+    before = copy.deepcopy(history)
+    # Historical siblings need not be selected to supply the conservative max.
+    assert gate.estimated_costs([node], history) == {node: expected}
+    assert history == before
+
+
+def test_equal_cost_file_and_shard_ties_are_stable(monkeypatch):
+    nodes = [f"tests/test_{name}.py::test_one" for name in "dcba"]
+    history = {"duration_ms": dict.fromkeys(nodes, 10), "fallback_ms": 10}
+    monkeypatch.setattr(gate, "load_duration_history", lambda: history)
+    expected = [[nodes[3], nodes[1]], [nodes[2], nodes[0]]]
+    assert gate.partition(nodes, 2) == expected
+    assert gate.partition(nodes[::-1], 2) == expected
+
+
+@pytest.mark.parametrize("field,value", [
+    ("strategy", "count-v3"), ("history_version", 1), ("history_sha256", "0" * 64),
+    ("fallback_ms", 0), ("fallback_strategy", "global-max-only"),
+])
+def test_manifest_duration_policy_is_bound_and_cannot_be_overridden(tmp_path, field, value):
+    manifest, _ = evidence(tmp_path)
+    manifest["partition"][field] = value
+    with pytest.raises(ValueError, match="duration policy"):
+        gate.validate_manifest(manifest)
+
+
+def test_manifest_without_policy_or_with_a_different_assignment_fails_closed(tmp_path):
+    manifest, _ = evidence(tmp_path)
+    policy = manifest.pop("partition")
+    with pytest.raises(ValueError, match="duration policy"):
+        gate.validate_manifest(manifest)
+    manifest["partition"] = policy
+    manifest["shards"].reverse()
+    with pytest.raises(ValueError, match="partition"):
+        gate.validate_manifest(manifest)
+
+
+def test_frozen_history_digest_rejects_edits_but_allows_checkout_crlf(tmp_path, monkeypatch):
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v2.json"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256",
+                        "8d8ae33673e05619c70e69846c3bdb4014e5fe38e4ed6d774fe4b110744324d9")
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 2)
+    original = gate.DURATION_HISTORY_PATH.read_bytes().replace(b"\r\n", b"\n")
+    path = tmp_path / "history.json"
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", path)
+    path.write_bytes(original.replace(b"\n", b"\r\n"))
+    assert gate.load_duration_history()["fallback_ms"] == 309160
+    path.write_bytes(original + b" ")
+    with pytest.raises(ValueError, match="digest mismatch"):
+        gate.load_duration_history()
+    path.unlink()
+    with pytest.raises(FileNotFoundError):
+        gate.load_duration_history()
+
+
+@pytest.mark.parametrize("bad_cost", [0, -1, True, 1.5, float("nan"), "10"])
+def test_invalid_frozen_duration_cost_cannot_silently_fall_back(
+        tmp_path, monkeypatch, bad_cost, duration_refresh):
+    history = gate.load_duration_history()
+    history["duration_ms"][next(iter(history["duration_ms"]))] = bad_cost
+    raw = json.dumps(history).encode()
+    path = tmp_path / "history.json.gz"
+    packed = duration_refresh.canonical_history_gzip(raw)
+    path.write_bytes(packed)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256", hashlib.sha256(packed).hexdigest())
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", path)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256", hashlib.sha256(raw).hexdigest())
+    with pytest.raises(ValueError, match="Invalid duration history"):
+        gate.load_duration_history()
+
+
+def test_workflow_preserves_120_minute_shard_budget():
+    workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
+    shard_job = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
+    assert "timeout-minutes: 120" in shard_job
+    assert "      max-parallel: 4" in shard_job.splitlines()
+    assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]" in shard_job
+
+
+@pytest.fixture
+def duration_refresh(monkeypatch):
+    spec = importlib.util.spec_from_file_location("duration_refresh", SCRIPT.with_name("refresh_durations.py"))
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, "gate", gate)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_windows_v2_refresh_preserves_frozen_v1_and_maximum_observations(monkeypatch):
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v2.json"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256",
+                        "8d8ae33673e05619c70e69846c3bdb4014e5fe38e4ed6d774fe4b110744324d9")
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 2)
+    baseline_path = SCRIPT.with_name("durations-v1.json")
+    assert hashlib.sha256(baseline_path.read_bytes().replace(b"\r\n", b"\n")).hexdigest() == (
+        "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77"
+    )
+    baseline, history = gate.read(baseline_path), gate.load_duration_history()
+    source = history["source"]
+    assert history["version"] == 2
+    assert source["previous_history_sha256"] == (
+        "ced3340e064ca8a5fffb1621d2b4a07593f9dd1095c2595d02873c78ff62fe77"
+    )
+    assert source["scope"] == "scheduling-only; not completed execution evidence"
+    assert source["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    assert history["historical_skips"] == baseline["historical_skips"]
+    assert source["added_nodes"] == 494 and source["raised_nodes"] == 3102
+    assert len(source["node_observations"]) == 7482
+    assert [(r["run_id"], r["artifact_id"], r["artifact_sha256"]) for r in source["runs"]] == [
+        ("40059938410", 12556478824, "9b2007beee66f412dc3da75540e4f34b29503631ed72c7f235d25bb3d9e6fb13"),
+        ("40085762532", 12567269333, "1c707cab7b97dd2660ed682e9ff16f5a60feb2ce64bb81b6c1963f5f668466bb"),
+    ]
+    for run, expected_count in zip(source["runs"], (7477, 7265), strict=True):
+        assert run["identity"]["platform"] == "Windows"
+        assert run["identity"]["run"] == run["run_id"]
+        assert [s["shard"] for s in run["shards"]] == list(range(20))
+        assert sum(s["complete_passed_nodes"] for s in run["shards"]) == expected_count
+        assert sum(s["selected_nodes"] for s in run["shards"]) == run["manifest_nodes"]
+        for shard in run["shards"]:
+            assert shard["selected_nodes"] == shard["complete_passed_nodes"] + shard["excluded_or_missing_nodes"]
+    assert source["runs"][1]["shards"][19]["exit_code"] == 2
+    expected = dict(baseline["duration_ms"])
+    for node, audit in source["node_observations"].items():
+        assert audit["previous_ms"] == baseline["duration_ms"].get(node)
+        assert audit["observations"]
+        for observation in audit["observations"]:
+            assert observation["run_id"] in {"40059938410", "40085762532"}
+            assert 0 <= observation["shard"] < 20
+            assert type(observation["observed_ms"]) is int and observation["observed_ms"] > 0
+        expected[node] = max(audit["previous_ms"] or 0, *(o["observed_ms"] for o in audit["observations"]))
+        assert audit["effective_ms"] == expected[node]
+    assert history["duration_ms"] == expected
+    assert all(history["duration_ms"][node] >= cost for node, cost in baseline["duration_ms"].items())
+    assert history["fallback_ms"] == max(expected.values()) == 309160
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "failed", "skipped", "xfail",
+                                      "no_xfail", "negative", "nan", "infinite", "boolean"])
+def test_refresh_excludes_incomplete_or_nonpassed_nodes(duration_refresh, mutation):
+    phases = [{"when": phase, "outcome": "passed", "xfail": False, "duration_seconds": 0.0011}
+              for phase in ("setup", "call", "teardown")]
+    assert duration_refresh.complete_passed_ms(phases) == 4  # Ceil total, not ceil each phase.
+    if mutation == "missing":
+        phases.pop()
+    elif mutation == "duplicate":
+        phases.append(phases[1].copy())
+    elif mutation in {"failed", "skipped"}:
+        phases[1]["outcome"] = mutation
+    elif mutation == "xfail":
+        phases[1]["xfail"] = True
+    elif mutation == "no_xfail":
+        del phases[1]["xfail"]
+    else:
+        phases[1]["duration_seconds"] = {"negative": -1, "nan": float("nan"),
+                                         "infinite": float("inf"), "boolean": True}[mutation]
+    assert duration_refresh.complete_passed_ms(phases) is None
+
+
+def test_refresh_accepts_only_complete_nodes_from_failed_or_timed_out_shard(tmp_path, duration_refresh):
+    nodes = [f"tests/test_synthetic_{i:02}.py::test_case" for i in range(20)]
+    baseline = {"duration_ms": dict.fromkeys(nodes, 10), "historical_skips": {},
+                "fallback_ms": 10, "unit": "ceil_total_phase_milliseconds"}
+    source = {"run_id": "synthetic"}
+    manifest = {"version": 4, "identity": {"run": "synthetic", "platform": "Windows"},
+                "nodes": nodes, "shards": gate._partition(nodes, 20, baseline),
+                "partition": {"history_sha256": duration_refresh.BASELINE_SHA256}}
+    gate.write(tmp_path / "manifest.json", manifest)
+    for index, selected in enumerate(manifest["shards"]):
+        phases = [{"when": phase, "outcome": "passed", "xfail": False, "duration_seconds": 0.02}
+                  for phase in ("setup", "call", "teardown")]
+        if index == 19:
+            phases.pop()  # A timed-out call without teardown is not a complete measurement.
+        gate.write(tmp_path / f"shard-{index}.json", {
+            "identity": manifest["identity"], "manifest": gate.digest(manifest), "index": index,
+            "exit_code": 2, "selected": selected, "reports": {selected[0]: phases},
+        })
+    result = duration_refresh.refresh(baseline, [tmp_path], [source])
+    assert len(result["source"]["node_observations"]) == 19
+    assert result["duration_ms"][manifest["shards"][19][0]] == 10
+    assert set(result["duration_ms"].values()) == {10, 60}
+    assert result == duration_refresh.refresh(baseline, [tmp_path], [source])
+    bad = gate.read(tmp_path / "shard-0.json")
+    bad["identity"] = {"run": "another", "platform": "Windows"}
+    gate.write(tmp_path / "shard-0.json", bad)
+    with pytest.raises(ValueError, match="identity"):
+        duration_refresh.refresh(baseline, [tmp_path], [source])
+
+
+def test_refreshed_history_partition_keeps_exact_nodes_and_module_lifecycles():
+    history = gate.load_duration_history()
+    # Include retained historical skips and new, unmeasured nodes: none may be dropped.
+    nodes = sorted(history["duration_ms"] | history["historical_skips"])
+    nodes += ["tests/test_future_module.py::test_first", "tests/test_future_module.py::test_second"]
+    shards = gate.partition(nodes, 20)
+    assert len(shards) == 20 and all(shards)
+    assert shards == gate.partition(list(reversed(nodes)), 20)
+    assert sorted(sum(shards, [])) == sorted(nodes)
+    assert len(set(sum(shards, []))) == len(nodes)
+    for filename in {node.split("::", 1)[0] for node in nodes} - gate.NODE_SPLIT_FILES:
+        assert sum(any(node.split("::", 1)[0] == filename for node in shard) for shard in shards) == 1
+    manifest = {"version": 4, "partition": gate.partition_policy(), "nodes": nodes,
+                "shards": shards, "allowed_skips": None}
+    gate.validate_manifest(manifest)
+    assert manifest["allowed_skips"] is None
+    assert gate.digest(manifest) == gate.digest({**manifest, "shards": gate.partition(nodes[::-1], 20)})
+
+
+def test_windows_v3_conservatively_preserves_v2_and_full_source_audit(frozen_v3_history, duration_refresh):
+    baseline_path = SCRIPT.with_name("durations-v2.json")
+    assert duration_refresh.file_digest(baseline_path) == duration_refresh.V3_BASELINE_SHA256
+    baseline, history = gate.read(baseline_path), gate.load_duration_history()
+    source = history["source"]
+    assert history["version"] == 3
+    assert source["previous_history_sha256"] == duration_refresh.V3_BASELINE_SHA256
+    assert source["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    assert source["scope"] == "scheduling-only; not completed execution evidence"
+    assert "same-run" in source["estimate_scope"] and "no guaranteed" in source["estimate_scope"]
+    run, = source["runs"]
+    for key, value in duration_refresh.V3_SOURCE.items():
+        assert run[key] == value
+    assert run["identity"]["commit"] == "0f2acfe6fed0ed078350fbc8c99c354f38ae276f"
+    assert run["identity"]["lock"] == "fd66d754f0fd317d3a850e66d34ec6c7a59bd8bd88c2c527256c3415c1e67447"
+    assert run["identity"]["platform"] == "Windows" and run["identity"]["python"] == "3.12.10"
+    assert run["identity"]["run"] == "41788302769" and run["identity"]["attempt"] == "1"
+    assert run["manifest_nodes"] == 8934
+    assert [s["shard"] for s in run["shards"]] == list(range(20))
+    assert all(s["exit_code"] == 0 for s in run["shards"])
+    assert sum(s["selected_nodes"] for s in run["shards"]) == 8934
+    assert sum(s["complete_passed_nodes"] for s in run["shards"]) == 8914
+    assert sum(s["excluded_or_missing_nodes"] for s in run["shards"]) == 20
+    assert source["added_nodes"] == 1460 and source["raised_nodes"] == 978
+    assert len(source["node_observations"]) == 8914
+    expected = dict(baseline["duration_ms"])
+    for node, audit in source["node_observations"].items():
+        assert audit["previous_ms"] == baseline["duration_ms"].get(node)
+        observation, = audit["observations"]
+        assert observation["run_id"] == "41788302769" and 0 <= observation["shard"] < 20
+        assert type(observation["observed_ms"]) is int and observation["observed_ms"] > 0
+        expected[node] = max(audit["previous_ms"] or 0, observation["observed_ms"])
+        assert audit["effective_ms"] == expected[node]
+    assert history["duration_ms"] == expected
+    assert history["fallback_ms"] == max(expected.values()) == 322436
+    assert history["historical_skips"] == baseline["historical_skips"]
+    audit = source["execution_audit"]
+    assert audit["passed"] == 8914 and len(audit["skipped"]) == 20
+    assert audit["allowed_skips"] is None and audit["collection_skips"] == []
+    assert len({s["node"] for s in audit["skipped"]}) == 20
+    assert all(s["reason"] and s["node"] not in source["node_observations"] for s in audit["skipped"])
+    assert not set(source["node_observations"]) & set(baseline["historical_skips"])
+
+
+@pytest.fixture
+def v3_archive(tmp_path, monkeypatch, duration_refresh):
+    baseline = gate.read(SCRIPT.with_name("durations-v2.json"))
+    nodes = [f"tests/test_synthetic_{i:02}.py::test_case" for i in range(20)]
+    manifest = {"version": 4, "identity": {"run": "synthetic", "platform": "Windows"},
+                "nodes": nodes, "shards": gate._partition(nodes, 20, baseline),
+                "partition": {"history_sha256": duration_refresh.V3_BASELINE_SHA256},
+                "allowed_skips": None, "collection_skips": []}
+    results = []
+    for index, selected in enumerate(manifest["shards"]):
+        results.append({"identity": manifest["identity"], "manifest": gate.digest(manifest),
+                        "index": index, "exit_code": 0, "selected": selected,
+                        "reports": {selected[0]: [
+                            {"when": phase, "outcome": "passed", "xfail": False,
+                             "reason": "", "duration_seconds": .02}
+                            for phase in ("setup", "call", "teardown")]}})
+
+    def package(*, omitted=None, duplicate=None, extra=None):
+        contents = {"manifest.json": (json.dumps(manifest) + "\n").encode()}
+        contents.update({f"shard-{i}.json": json.dumps(r).encode() for i, r in enumerate(results)})
+        archive_path = tmp_path / "evidence.zip"
+        with zipfile.ZipFile(archive_path, "w") as archive:
+            for name, content in contents.items():
+                if name != omitted:
+                    archive.writestr(f"pytest-evidence/{name}", content)
+            if duplicate:
+                with pytest.warns(UserWarning, match="Duplicate name"):
+                    archive.writestr(f"pytest-evidence/{duplicate}", contents[duplicate])
+            if extra:
+                archive.writestr(f"pytest-evidence/{extra}", b"{}")
+        source = {"run_id": "synthetic", "artifact_id": 1,
+                  "artifact_sha256": hashlib.sha256(archive_path.read_bytes()).hexdigest(),
+                  "manifest_sha256": gate.digest(manifest),
+                  "manifest_file_sha256": hashlib.sha256(contents["manifest.json"]).hexdigest()}
+        monkeypatch.setattr(duration_refresh, "V3_SOURCE", source)
+        return archive_path
+    return manifest, results, package
+
+
+def test_v3_archive_refresh_is_reproducible_and_does_not_mutate_baseline(v3_archive, duration_refresh):
+    _, _, package = v3_archive
+    path = package()
+    baseline_before = SCRIPT.with_name("durations-v2.json").read_bytes()
+    first = duration_refresh.refresh_v3(path)
+    assert first == duration_refresh.refresh_v3(path)
+    assert first["version"] == 3 and first["source"]["execution_audit"]["passed"] == 20
+    assert first["source"]["added_nodes"] == 20
+    assert SCRIPT.with_name("durations-v2.json").read_bytes() == baseline_before
+    path.write_bytes(path.read_bytes() + b"changed")
+    with pytest.raises(ValueError, match="artifact digest"):
+        duration_refresh.refresh_v3(path)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "extra", "path_traversal"])
+def test_v3_archive_rejects_wrong_evidence_file_set(v3_archive, duration_refresh, mutation):
+    _, _, package = v3_archive
+    options = {"missing": {"omitted": "shard-0.json"},
+               "duplicate": {"duplicate": "shard-0.json"},
+               "extra": {"extra": "shard-20.json"},
+               "path_traversal": {"extra": "../../outside.json"}}[mutation]
+    with pytest.raises(ValueError, match="evidence files"):
+        duration_refresh.refresh_v3(package(**options))
+
+
+@pytest.mark.parametrize("mutation", ["exit", "identity", "missing_node", "selection", "duplicate_phase",
+                                      "failed", "xfail", "negative", "nan", "no_xfail", "skip_no_reason"])
+def test_v3_archive_requires_complete_successful_execution(v3_archive, duration_refresh, mutation):
+    _, results, package = v3_archive
+    result = results[0]
+    phases = next(iter(result["reports"].values()))
+    if mutation == "exit":
+        result["exit_code"] = 2
+    elif mutation == "identity":
+        result["identity"] = {"run": "other", "platform": "Windows"}
+    elif mutation == "missing_node":
+        result["reports"] = {}
+    elif mutation == "selection":
+        result["selected"] = []
+    elif mutation == "duplicate_phase":
+        phases.append(phases[1].copy())
+    elif mutation == "failed":
+        phases[1]["outcome"] = "failed"
+    elif mutation == "xfail":
+        phases[1]["xfail"] = True
+    elif mutation == "no_xfail":
+        phases[1]["xfail"] = None
+    elif mutation == "skip_no_reason":
+        phases[1]["outcome"] = "skipped"
+    else:
+        phases[1]["duration_seconds"] = -1 if mutation == "negative" else float("nan")
+    with pytest.raises(ValueError):
+        duration_refresh.refresh_v3(package())
+
+
+def test_v3_skip_is_preserved_but_never_added_as_passed_duration(v3_archive, duration_refresh):
+    _, results, package = v3_archive
+    node, phases = next(iter(results[0]["reports"].items()))
+    phases[1].update(outcome="skipped", reason="Explicit synthetic platform skip")
+    history = duration_refresh.refresh_v3(package())
+    assert node not in history["duration_ms"] and node not in history["source"]["node_observations"]
+    assert history["source"]["execution_audit"] == {
+        "passed": 19, "skipped": [{"node": node, "reason": "Explicit synthetic platform skip"}],
+        "allowed_skips": None, "collection_skips": [],
+    }
+
+
+def test_v3_current_8934_nodes_partition_exactly_once_with_skips_and_whole_files(frozen_v3_history):
+    history = gate.load_duration_history()
+    source = history["source"]
+    nodes = sorted(list(source["node_observations"]) +
+                   [s["node"] for s in source["execution_audit"]["skipped"]])
+    assert len(nodes) == len(set(nodes)) == 8934
+    assert gate.digest(nodes) == source["runs"][0]["nodes_sha256"]
+    shards = gate.partition(nodes, 20)
+    assert shards == gate.partition(nodes[::-1], 20)
+    assert sorted(sum(shards, [])) == nodes
+    assert gate.NODE_SPLIT_FILES == frozenset({"tests/test_chat_api.py"})
+    for filename in {n.split("::", 1)[0] for n in nodes} - gate.NODE_SPLIT_FILES:
+        assert sum(any(n.split("::", 1)[0] == filename for n in shard) for shard in shards) == 1
+    manifest = {"version": 4, "partition": gate.partition_policy(), "nodes": nodes,
+                "shards": shards, "allowed_skips": None}
+    gate.validate_manifest(manifest)
+    assert manifest["allowed_skips"] is None
+    assert gate.estimated_costs(["tests/test_never_measured.py::test_new"], history) == {
+        "tests/test_never_measured.py::test_new": max(history["duration_ms"].values())}
+
+
+def test_v3_refresh_rejects_changed_manifest_and_baseline(v3_archive, duration_refresh, monkeypatch):
+    _, _, package = v3_archive
+    path = package()
+    source = dict(duration_refresh.V3_SOURCE)
+    source["manifest_sha256"] = "0" * 64
+    monkeypatch.setattr(duration_refresh, "V3_SOURCE", source)
+    with pytest.raises(ValueError, match="manifest identity"):
+        duration_refresh.refresh_v3(path)
+    monkeypatch.setattr(duration_refresh, "V3_BASELINE_SHA256", "0" * 64)
+    with pytest.raises(ValueError, match="Frozen v2"):
+        duration_refresh.refresh_v3(path)
+
+
+def test_v3_fixed_gzip_preserves_reviewed_raw_bytes_and_loads_without_encoder_version(frozen_v3_history, duration_refresh):
+    packed = gate.DURATION_HISTORY_PATH.read_bytes()
+    raw = gate._duration_history_bytes()
+    assert len(packed) == 395886 and len(raw) == 4332137
+    assert hashlib.sha256(raw).hexdigest() == "15e1b18ae12b3bf219f727666979f994ea47c685618c25d0cea4686131ebff1d"
+    assert hashlib.sha256(packed).hexdigest() == "0f27cf1cb6b314864144eae39568ad3a148d637c256de1162e14d4b80b1ee512"
+    assert packed[:10] == bytes.fromhex("1f8b08000000000002ff")
+    assert gate.load_duration_history() == json.loads(raw)
+    assert duration_refresh.canonical_history_gzip(raw) == duration_refresh.canonical_history_gzip(raw)
+    # Across zlib versions only decoding is promised. The generator is pinned.
+    if duration_refresh.zlib.ZLIB_RUNTIME_VERSION == duration_refresh.V3_ENCODER_ZLIB_VERSION:
+        assert duration_refresh.canonical_history_gzip(raw) == packed
+
+
+def test_v3_writer_pins_encoder_and_both_digests(frozen_v3_history, tmp_path, monkeypatch, duration_refresh):
+    history = gate.load_duration_history()
+    path = tmp_path / "new.json.gz"
+    runtime = duration_refresh.zlib.ZLIB_RUNTIME_VERSION
+    if runtime == duration_refresh.V3_ENCODER_ZLIB_VERSION:
+        duration_refresh.write_v3_compressed(path, history)
+        assert path.read_bytes() == gate.DURATION_HISTORY_PATH.read_bytes()
+        duration_refresh.write_v3_compressed(path, history)
+        assert path.read_bytes() == gate.DURATION_HISTORY_PATH.read_bytes()
+        history["fallback_ms"] += 1
+        with pytest.raises(ValueError, match="raw history size or digest"):
+            duration_refresh.write_v3_compressed(path, history)
+        history["fallback_ms"] -= 1
+        monkeypatch.setattr(duration_refresh, "V4_BASELINE_COMPRESSED_SHA256", "0" * 64)
+        with pytest.raises(ValueError, match="compressed history size or digest"):
+            duration_refresh.write_v3_compressed(path, history)
+    monkeypatch.setattr(duration_refresh.zlib, "ZLIB_RUNTIME_VERSION", "unreviewed")
+    with pytest.raises(ValueError, match="requires zlib"):
+        duration_refresh.write_v3_compressed(path, history)
+    # Decoding the immutable checked-in gzip does not require the encoder.
+    monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256",
+                        "0f27cf1cb6b314864144eae39568ad3a148d637c256de1162e14d4b80b1ee512")
+    assert gate.load_duration_history()["version"] == 3
+
+
+@pytest.mark.parametrize("mutation,message", [
+    ("changed_packed", "compressed history digest mismatch"),
+    ("changed_raw", "duration history digest mismatch"),
+    ("truncated", "Truncated"), ("crc", "Corrupt"),
+    ("trailing", "Trailing or concatenated"), ("concatenated", "Trailing or concatenated"),
+    ("oversize_packed", "Compressed.*exceeds limit"), ("oversize_raw", "Uncompressed.*exceeds limit"),
+    ("header", "Noncanonical"),
+])
+def test_v3_compressed_history_fails_closed(tmp_path, monkeypatch, duration_refresh, mutation, message):
+    packed = gate.DURATION_HISTORY_PATH.read_bytes()
+    raw = gate._duration_history_bytes()
+    if mutation == "changed_packed":
+        packed = packed[:-1] + bytes([packed[-1] ^ 1])
+    elif mutation == "changed_raw":
+        packed = duration_refresh.canonical_history_gzip(raw + b" ")
+    elif mutation == "truncated":
+        packed = packed[:-8]
+    elif mutation == "crc":
+        packed = packed[:-8] + bytes([packed[-8] ^ 1]) + packed[-7:]
+    elif mutation == "trailing":
+        packed += b"junk"
+    elif mutation == "concatenated":
+        packed += duration_refresh.canonical_history_gzip(b"second")
+    elif mutation == "oversize_packed":
+        packed = b"x" * (gate.DURATION_HISTORY_MAX_COMPRESSED_BYTES + 1)
+    elif mutation == "oversize_raw":
+        monkeypatch.setattr(gate, "DURATION_HISTORY_MAX_RAW_BYTES", 128)
+        packed = duration_refresh.canonical_history_gzip(b"x" * 129)
+    elif mutation == "header":
+        packed = packed[:9] + b"\x03" + packed[10:]
+    path = tmp_path / "history.json.gz"
+    path.write_bytes(packed)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", path)
+    if mutation != "changed_packed":
+        # Let malformed encodings reach validation behind the outer digest.
+        monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256", hashlib.sha256(packed).hexdigest())
+    with pytest.raises(ValueError, match=message):
+        gate.load_duration_history()
+
+
+def test_v3_raw_limit_exact_boundary_is_accepted(frozen_v3_history, tmp_path, monkeypatch, duration_refresh):
+    raw = gate._duration_history_bytes()
+    monkeypatch.setattr(gate, "DURATION_HISTORY_MAX_RAW_BYTES", len(raw))
+    assert gate.load_duration_history()["version"] == 3
+    monkeypatch.setattr(gate, "DURATION_HISTORY_MAX_RAW_BYTES", len(raw) - 1)
+    with pytest.raises(ValueError, match="Uncompressed.*exceeds limit"):
+        gate.load_duration_history()
+
+
+@pytest.fixture
+def frozen_v3_history(monkeypatch):
+    """Keep the earlier immutable history and its regeneration tests covered."""
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v3.json.gz"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 3)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256",
+                        "15e1b18ae12b3bf219f727666979f994ea47c685618c25d0cea4686131ebff1d")
+    monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256",
+                        "0f27cf1cb6b314864144eae39568ad3a148d637c256de1162e14d4b80b1ee512")
+
+
+@pytest.fixture
+def v4_archive(v3_archive, monkeypatch, duration_refresh):
+    # Synthetic file-level units partition identically under either history.
+    manifest, results, package = v3_archive
+    manifest["partition"]["history_sha256"] = duration_refresh.V4_BASELINE_SHA256
+    for result in results:
+        result["manifest"] = gate.digest(manifest)
+
+    def build(**kwargs):
+        path = package(**kwargs)
+        monkeypatch.setattr(duration_refresh, "V4_SOURCE", duration_refresh.V3_SOURCE.copy())
+        return path
+    return manifest, results, build
+
+
+def test_v4_archive_reproduction_and_pins(v4_archive, duration_refresh, monkeypatch):
+    _, _, package = v4_archive
+    path = package()
+    first = duration_refresh.refresh_v4(path)
+    assert first == duration_refresh.refresh_v4(path)
+    assert first["version"] == 4 and first["source"]["execution_audit"]["passed"] == 20
+    monkeypatch.setattr(duration_refresh, "V4_BASELINE_COMPRESSED_SHA256", "0" * 64)
+    with pytest.raises(ValueError, match="Frozen v3 compressed"):
+        duration_refresh.refresh_v4(path)
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "extra", "path_traversal"])
+def test_v4_archive_rejects_wrong_evidence_file_set(v4_archive, duration_refresh, mutation):
+    _, _, package = v4_archive
+    options = {"missing": {"omitted": "shard-0.json"},
+               "duplicate": {"duplicate": "shard-0.json"},
+               "extra": {"extra": "shard-20.json"},
+               "path_traversal": {"extra": "../../outside.json"}}[mutation]
+    with pytest.raises(ValueError, match="evidence files"):
+        duration_refresh.refresh_v4(package(**options))
+
+
+@pytest.mark.parametrize("mutation", ["exit", "identity", "missing_node", "selection",
+                                      "failed", "xfail", "negative", "skip_no_reason"])
+def test_v4_archive_requires_complete_successful_execution(v4_archive, duration_refresh, mutation):
+    _, results, package = v4_archive
+    result = results[0]
+    phases = next(iter(result["reports"].values()))
+    if mutation == "exit":
+        result["exit_code"] = 2
+    elif mutation == "identity":
+        result["identity"] = {"run": "other", "platform": "Windows"}
+    elif mutation == "missing_node":
+        result["reports"] = {}
+    elif mutation == "selection":
+        result["selected"] = []
+    elif mutation == "failed":
+        phases[1]["outcome"] = "failed"
+    elif mutation == "xfail":
+        phases[1]["xfail"] = True
+    elif mutation == "skip_no_reason":
+        phases[1]["outcome"] = "skipped"
+    else:
+        phases[1]["duration_seconds"] = -1
+    with pytest.raises(ValueError):
+        duration_refresh.refresh_v4(package())
+
+
+def test_windows_v4_preserves_v3_costs_skips_and_complete_audit(duration_refresh):
+    baseline = json.loads(duration_refresh.zlib.decompress(
+        SCRIPT.with_name("durations-v3.json.gz").read_bytes(), wbits=31))
+    history = gate.load_duration_history()
+    assert history["version"] == 4
+    source = history["source"]
+    assert source["previous_history_sha256"] == duration_refresh.V4_BASELINE_SHA256
+    assert source["scope"] == "scheduling-only; not completed execution evidence"
+    assert source["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    run, = source["runs"]
+    for key, value in duration_refresh.V4_SOURCE.items():
+        assert run[key] == value
+    assert run["identity"]["attempt"] == "2"
+    assert run["identity"]["commit"] == "8d2d6e5d969110c94ce585f870a839025b5ba796"
+    assert run["manifest_nodes"] == 10405
+    assert all(s["exit_code"] == 0 for s in run["shards"])
+    assert sum(s["complete_passed_nodes"] for s in run["shards"]) == 10381
+    assert source["execution_audit"]["passed"] == 10381
+    assert len(source["execution_audit"]["skipped"]) == 24
+    assert source["execution_audit"]["collection_skips"] == []
+    assert history["historical_skips"] == baseline["historical_skips"]
+    expected = dict(baseline["duration_ms"])
+    for node, audit in source["node_observations"].items():
+        assert audit["previous_ms"] == baseline["duration_ms"].get(node)
+        observation, = audit["observations"]
+        expected[node] = max(audit["previous_ms"] or 0, observation["observed_ms"])
+        assert audit["effective_ms"] == expected[node]
+    assert history["duration_ms"] == expected
+    assert source["added_nodes"] == 1474 and source["raised_nodes"] == 1134
+    assert history["fallback_ms"] == max(expected.values())
+    nodes = sorted(list(source["node_observations"]) +
+                   [s["node"] for s in source["execution_audit"]["skipped"]])
+    shards = gate.partition(nodes, 20)
+    assert sorted(sum(shards, [])) == nodes and len(set(nodes)) == 10405
+    assert shards == gate.partition(nodes[::-1], 20)
+
+
+def test_v4_writer_reproduces_checked_in_bytes(tmp_path, duration_refresh):
+    history = gate.load_duration_history()
+    path = tmp_path / "v4.json.gz"
+    if duration_refresh.zlib.ZLIB_RUNTIME_VERSION != duration_refresh.V4_ENCODER_ZLIB_VERSION:
+        with pytest.raises(ValueError, match="requires zlib"):
+            duration_refresh.write_v4_compressed(path, history)
+    else:
+        duration_refresh.write_v4_compressed(path, history)
+        assert path.read_bytes() == gate.DURATION_HISTORY_PATH.read_bytes()
+        history["fallback_ms"] += 1
+        with pytest.raises(ValueError, match="raw history size or digest"):
+            duration_refresh.write_v4_compressed(path, history)

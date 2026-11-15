@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { Application, ApplicationInput, ApplicationCreationInput, ApplicationCreationResult, ApplicationDuplicates, DashboardSummary } from '@/types/application';
 import { createApiClient } from './http';
 
@@ -39,7 +40,7 @@ export async function createApplicationWithJd(input: ApplicationCreationInput): 
   if (![200, 201].includes(status) || !data || !Number.isSafeInteger(data.id) || data.id <= 0
       || typeof data.company_name !== 'string' || typeof data.position_name !== 'string'
       || (data.jd_version_id !== null && (!Number.isSafeInteger(data.jd_version_id) || data.jd_version_id <= 0))) {
-    throw new Error('创建回执不完整，请使用原请求恢复结果');
+    throw new Error(t("创建回执不完整，请使用原请求恢复结果"));
   }
   return data;
 }

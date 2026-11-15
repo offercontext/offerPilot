@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type {
   ChatMessage,
   ChatResponse,
@@ -34,6 +35,7 @@ export async function interruptPilotExecution(target: PilotExecution, commandId:
 }
 
 export interface ChatContextInput {
+  image_attachment_ids?: string[];
   context_type?: 'workspace' | 'application' | 'global' | string;
   context_ref?: string | number;
   mode?: string;
@@ -111,6 +113,7 @@ export async function sendChat(
       ...(context?.mode ? { mode: context.mode } : {}),
       ...(context?.page_context !== undefined ? { page_context: context.page_context } : {}),
       ...(context?.attachments !== undefined ? { attachments: context.attachments } : {}),
+      ...(context?.image_attachment_ids?.length ? { image_attachment_ids: context.image_attachment_ids } : {}),
       ...(context?.pilot_action !== undefined ? { pilot_action: context.pilot_action } : {}),
     },
     { signal: options?.signal },
@@ -298,7 +301,7 @@ export async function streamConfirmAction(
   options?: ChatStreamRequestOptions,
 ): Promise<ChatExecutionResponse> {
   const execution = await getPilotExecution(conversationId);
-  if (!execution) throw new Error('当前操作的任务身份不可用，请刷新确认状态。');
+  if (!execution) throw new Error(t("当前操作的任务身份不可用，请刷新确认状态。"));
   const response = await confirmRuntimeTurn(execution.turn_id, {
     request_id: options?.requestId ?? crypto.randomUUID(), conversation_id: conversationId,
     ...confirmationPayload(input),
@@ -339,7 +342,7 @@ async function postChatStream(
     return data;
   }
   if (!response.body) {
-    throw new Error('对话连接中断，请稍后重试。');
+    throw new Error(t("对话连接中断，请稍后重试。"));
   }
 
   let completed: ChatResponse | undefined;
@@ -353,7 +356,7 @@ async function postChatStream(
     if (event.event === 'error') {
       const data = event.data as { code?: string; message?: string; retryable?: boolean };
       throw new ChatStreamError(
-        data.message || '对话失败，请稍后重试',
+        data.message || t("对话失败，请稍后重试"),
         data.code,
         data.retryable,
       );
@@ -368,7 +371,7 @@ async function postChatStream(
   parser.push(decoder.decode());
   parser.flush();
   if (!completed) {
-    throw new Error('对话没有返回完整结果，请重试。');
+    throw new Error(t("对话没有返回完整结果，请重试。"));
   }
   return { ...completed, ...(turnId ? { turn_id: turnId } : {}), ...(typeof body.request_id === 'string' ? { request_id: body.request_id } : {}) };
 }
@@ -426,6 +429,7 @@ export async function updateConversation(
 }
 
 export interface Settings {
+  image_capability?: import('./chatImages').ImageCapability;
   version: string;
   data_dir: string;
   chat_auto_approve_writes: boolean;
@@ -455,6 +459,7 @@ export interface LogsPage {
 }
 
 export interface AIProviderProfile {
+  supports_vision?: boolean;
   id: string;
   label: string;
   provider: string;

@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import {
   useEffect,
   useRef,
@@ -61,11 +62,12 @@ export function CoreTaskSurfaceHost({
   renderOwner,
   sourceElement,
   focusReturnRef,
-  heading = '当前任务',
+  heading = t("当前任务"),
   className,
   revealOnOpen = false,
   closeGuard,
 }: CoreTaskSurfaceHostProps) {
+  useLocale();
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const ownerRef = useRef<HTMLDivElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
@@ -192,9 +194,8 @@ export function CoreTaskSurfaceHost({
         onTransitionEnd={completeAnimation}
       >
         <h2 id={`core-task-heading-${active.generation}`} className={styles.heading}>{heading}</h2>
-        <button type="button" className={styles.close} aria-label="关闭任务" onClick={() => requestClose(active)}>
-          关闭
-        </button>
+        <button type="button" className={styles.close} aria-label={t("关闭任务")} onClick={() => requestClose(active)}>
+          {t("关闭")}</button>
         <div className={styles.content}>{content}</div>
       </div>
     </section>

@@ -1893,42 +1893,43 @@ def test_real_ai_interview_review_smoke_allows_verified_evidence_excerpt():
     assert [step.name for step in steps] == ["http_interview_review_proposal"]
 
 
-def test_real_ai_interview_knowledge_capture_smoke_requires_confirmed_history():
-    class Response:
-        status_code = 201
+@pytest.mark.parametrize("case", ["ai_ready", "safe_empty", "unrelated_history"])
+def test_real_ai_interview_knowledge_capture_smoke_requires_confirmed_history(
+    tmp_path, monkeypatch, case,
+):
+    class Model:
+        supports_json_schema = False
+        calls = 0
 
-        def __init__(self, payload: dict[str, object], status_code: int = 201) -> None:
-            self.status_code = status_code
-            self._payload = payload
+        def complete(self, messages, tools, response_format=None):
+            self.calls += 1
+            if case == "safe_empty":
+                return Assistant(content='{"title":"","blocks":[]}')
+            excerpt = "explained the rollback plan and the observable safety signal."
+            return Assistant(content=json.dumps({
+                "title": "Rollback",
+                "blocks": [{
+                    "block_id": "rollback",
+                    "text": excerpt,
+                    "evidence_refs": [{"fragment_id": "fragment_001", "excerpt": excerpt}],
+                }],
+            }))
 
-        def json(self) -> dict[str, object]:
-            return self._payload
-
-    class Client:
-        def post(self, path: str, json: dict[str, object]) -> Response:
-            if path == "/api/application-events":
-                return Response({"id": 31})
-            if path == "/api/applications/7/notes":
-                return Response({"id": 32})
-            if path == "/api/notes/32/knowledge-capture/preview":
-                assert json["mode"] == "ai"
-                return Response(
-                    {
-                        "attempt_key": "real-ai-interview-knowledge",
-                        "note_fingerprint": "fingerprint",
-                        "preview": {"title": "safe", "blocks": []},
-                    },
-                    status_code=200,
-                )
-            if path == "/api/notes/32/knowledge-capture/confirm":
-                return Response({"version_id": 12, "source_id": 13, "content": {}})
-            raise AssertionError(path)
-
-        def get(self, path: str) -> Response:
-            if path == "/api/knowledge/notes":
-                return Response({"items": [{"id": 12}]}, status_code=200)
-            raise AssertionError(path)
-
+    model = Model()
     steps: list[SmokeStep] = []
-    _run_real_ai_interview_knowledge_capture_smoke(Client(), steps, 7)
-    assert [step.name for step in steps] == ["http_interview_knowledge_capture"]
+    with TestClient(create_app(data_dir=tmp_path, chat_model=model)) as client:
+        application = client.post(
+            "/api/applications", json={"company_name": "Capture", "position_name": "Engineer"}
+        ).json()
+        if case == "unrelated_history":
+            monkeypatch.setattr(client, "get", lambda path: SimpleNamespace(
+                status_code=200, json=lambda: {"items": [{"version_id": 999, "source_id": 999}]}
+            ))
+            with pytest.raises(RuntimeError, match="did not return confirmed history"):
+                _run_real_ai_interview_knowledge_capture_smoke(client, steps, application["id"], tmp_path)
+            assert steps == []
+        else:
+            _run_real_ai_interview_knowledge_capture_smoke(client, steps, application["id"], tmp_path)
+            assert [step.name for step in steps] == ["http_interview_knowledge_capture"]
+            assert ("safe_empty" in steps[0].detail) == (case == "safe_empty")
+    assert model.calls == 1

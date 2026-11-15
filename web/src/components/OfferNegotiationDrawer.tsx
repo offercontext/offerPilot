@@ -1,3 +1,5 @@
+import { applicationUiMessage } from '@/components/applicationUiText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'antd';
 import { MessageOutlined } from '@ant-design/icons';
@@ -51,12 +53,7 @@ export interface OfferNegotiationDraft {
 type BlockField = 'communication_goals' | 'clarification_questions' | 'talking_points' | 'preparation_checks';
 type PendingOperation = 'generate' | 'confirm' | null;
 
-const SECTIONS: Array<[BlockField, string]> = [
-  ['talking_points', '可以这样说'],
-  ['clarification_questions', '需要问清楚'],
-  ['preparation_checks', '沟通前核对'],
-  ['communication_goals', '本次沟通目标'],
-];
+
 
 function newKey(prefix: string): string {
   return typeof crypto !== 'undefined' && 'randomUUID' in crypto
@@ -65,18 +62,18 @@ function newKey(prefix: string): string {
 }
 
 function safeError(error: unknown): string {
-  if (!(error instanceof OfferNegotiationError)) return '谈薪准备暂时不可用，请稍后重试。';
-  if (error.code === 'offer_negotiation_provider_error') return 'AI 服务暂不可用，请使用原尝试重试。';
-  if (error.code === 'offer_negotiation_unverifiable') return 'AI 建议未通过证据校验，请重新开始。';
-  if (error.code === 'offer_negotiation_source_changed') return 'Offer 来源已变化，请查看历史记录。';
-  if (error.status === 422) return '谈薪准备输入无法验证，请检查后重试。';
-  if (error.status === 409) return '本次谈薪准备已发生冲突，请重新开始。';
-  return '谈薪准备暂时不可用，请稍后重试。';
+  if (!(error instanceof OfferNegotiationError)) return t("谈薪准备暂时不可用，请稍后重试。");
+  if (error.code === 'offer_negotiation_provider_error') return t("AI 服务暂不可用，请使用原尝试重试。");
+  if (error.code === 'offer_negotiation_unverifiable') return t("AI 建议未通过证据校验，请重新开始。");
+  if (error.code === 'offer_negotiation_source_changed') return t("Offer 来源已变化，请查看历史记录。");
+  if (error.status === 422) return t("谈薪准备输入无法验证，请检查后重试。");
+  if (error.status === 409) return t("本次谈薪准备已发生冲突，请重新开始。");
+  return t("谈薪准备暂时不可用，请稍后重试。");
 }
 
 function safeMutationError(error: unknown): string {
   if (error instanceof OfferNegotiationError && error.status === 0) {
-    return '请求可能仍在后台处理，请使用原尝试重试；输入已冻结。';
+    return t("请求可能仍在后台处理，请使用原尝试重试；输入已冻结。");
   }
   return safeError(error);
 }
@@ -86,16 +83,17 @@ function isPending(value: OfferNegotiationProposal | OfferNegotiationPending): v
 }
 
 export default function OfferNegotiationDrawer(props: Props) {
+  useLocale();
   if (!props.open) return null;
   if (listOfferBindingState(props.offer) === 'unbound') {
     return (
-      <section className={styles.workspace} aria-label="谈薪准备不可用">
+      <section className={styles.workspace} aria-label={t("谈薪准备不可用")}>
         <header className={styles.header}>
           <div>
-            <h2>无法为该 Offer 准备谈薪</h2>
-            <p role="alert">历史未绑定 Offer 仅支持只读查看，不能进入谈薪准备。</p>
+            <h2>{t("无法为该 Offer 准备谈薪")}</h2>
+            <p role="alert">{t("历史未绑定 Offer 仅支持只读查看，不能进入谈薪准备。")}</p>
           </div>
-          <Button onClick={props.onClose}>关闭</Button>
+          <Button onClick={props.onClose}>{t("关闭")}</Button>
         </header>
       </section>
     );
@@ -113,6 +111,14 @@ function BoundOfferNegotiationDrawer({
   entrypoint = 'ui',
   onOpenPilotChat,
 }: Props) {
+const SECTIONS: Array<[BlockField, string]> = [
+  ['talking_points', t("可以这样说")],
+  ['clarification_questions', t("需要问清楚")],
+  ['preparation_checks', t("沟通前核对")],
+  ['communication_goals', t("本次沟通目标")],
+];
+
+  useLocale();
   const [goal, setGoal] = useState(draft?.goal ?? '');
   const [concerns, setConcerns] = useState(draft?.concerns ?? '');
   const [scenario, setScenario] = useState(draft?.scenario ?? '');
@@ -235,7 +241,7 @@ function BoundOfferNegotiationDrawer({
       const dimension = dimensionFacts.find((item) => item.id === id);
       return {
         path_id: `dimension_${id}`,
-        label: dimension?.label ?? `维度 ${id}`,
+        label: dimension?.label ?? t("维度 {id}", { id: id }),
         value_text: dimension?.value_text ?? null,
       };
     });
@@ -265,22 +271,22 @@ function BoundOfferNegotiationDrawer({
   const workflowStep = displayedProposal ? 3 : (activePreview ? 2 : 1);
   const workflowMessage = workflowStep === 1
     ? {
-        title: '先填写这次谈薪的目标',
-        detail: '补充你想争取的结果、当前顾虑和沟通场景，填完后再核对发送给 AI 的内容。',
+        title: t("先填写这次谈薪的目标"),
+        detail: t("补充你想争取的结果、当前顾虑和沟通场景，填完后再核对发送给 AI 的内容。"),
       }
     : workflowStep === 2
       ? {
-          title: '核对这次准备内容',
-          detail: '确认 Offer 事实和你的输入无误后，再生成谈薪准备草稿。',
+          title: t("核对这次准备内容"),
+          detail: t("确认 Offer 事实和你的输入无误后，再生成谈薪准备草稿。"),
         }
       : hasBrief
         ? {
-            title: '谈薪准备已保存',
-            detail: '下方是本次实际保存的内容，你可以随时回来查看。',
+            title: t("谈薪准备已保存"),
+            detail: t("下方是本次实际保存的内容，你可以随时回来查看。"),
           }
         : {
-            title: '选择你要带走的建议',
-            detail: '勾选需要的内容并按需编辑，保存前还会再次确认。',
+            title: t("选择你要带走的建议"),
+            detail: t("勾选需要的内容并按需编辑，保存前还会再次确认。"),
           };
 
   const previewGeneration = async () => {
@@ -333,7 +339,7 @@ function BoundOfferNegotiationDrawer({
       if (isPending(result)) {
         setResultUnknown(true);
         setPendingOperation('generate');
-        setError('上次请求结果待确认，请使用原尝试重试；输入已冻结。');
+        setError(t("上次请求结果待确认，请使用原尝试重试；输入已冻结。"));
       } else {
         setProposal(result);
         setSelectedBlocks([]);
@@ -425,27 +431,27 @@ function BoundOfferNegotiationDrawer({
   };
 
   return (
-    <section aria-label="谈薪准备" data-testid="offer-negotiation-drawer" className={styles.workspace}>
+    <section aria-label={t("谈薪准备")} data-testid="offer-negotiation-drawer" className={styles.workspace}>
       <header className={styles.header}>
-        <h2>为 {displayedOffer.company_name} 准备谈薪</h2>
-        <p className={styles.boundary}>只整理事实、问题和表达草稿，不替你决定接受或拒绝 Offer。</p>
-        <Button type="text" onClick={onClose}>关闭</Button>
+        <h2>{t("为 {company} 准备谈薪", { company: displayedOffer.company_name })}</h2>
+        <p className={styles.boundary}>{t("只整理事实、问题和表达草稿，不替你决定接受或拒绝 Offer。")}</p>
+        <Button type="text" onClick={onClose}>{t("关闭")}</Button>
       </header>
       {displayedProposal && (
-        <p role="status">{displayedProposal.source_changed ? '来源已变化，以下仅供历史查看。' : '已冻结 Offer 来源，可审阅引用。'}</p>
+        <p role="status">{displayedProposal.source_changed ? t("来源已变化，以下仅供历史查看。") : t("已冻结 Offer 来源，可审阅引用。")}</p>
       )}
-      {isHistoryView && <Button type="link" onClick={() => setHistoryProposal(null)}>返回当前谈薪准备</Button>}
-      {error && <p role="alert">{error}</p>}
+      {isHistoryView && <Button type="link" onClick={() => setHistoryProposal(null)}>{t("返回当前谈薪准备")}</Button>}
+      {error && <p role="alert">{applicationUiMessage(error)}</p>}
       {resultUnknown && !isHistoryView && (
-        <button type="button" onClick={retry} disabled={busy}>使用原尝试重试</button>
+        <button type="button" onClick={retry} disabled={busy}>{t("使用原尝试重试")}</button>
       )}
       {!isHistoryView && (
-        <section className={styles.workflowGuide} data-testid="offer-negotiation-next-step" aria-label="谈薪准备进度">
-          <div className={styles.workflowEyebrow}>第 {workflowStep} 步，共 3 步</div>
-          <ol className={styles.workflowSteps} aria-label="谈薪准备步骤">
-            <li data-active={workflowStep === 1}>定目标</li>
-            <li data-active={workflowStep === 2}>核对并生成</li>
-            <li data-active={workflowStep === 3}>选择并保存</li>
+        <section className={styles.workflowGuide} data-testid="offer-negotiation-next-step" aria-label={t("谈薪准备进度")}>
+          <div className={styles.workflowEyebrow}>{t("第 {step} 步，共 3 步", { step: workflowStep })}</div>
+          <ol className={styles.workflowSteps} aria-label={t("谈薪准备步骤")}>
+            <li data-active={workflowStep === 1}>{t("定目标")}</li>
+            <li data-active={workflowStep === 2}>{t("核对并生成")}</li>
+            <li data-active={workflowStep === 3}>{t("选择并保存")}</li>
           </ol>
           <h3>{workflowMessage.title}</h3>
           <p>{workflowMessage.detail}</p>
@@ -455,12 +461,10 @@ function BoundOfferNegotiationDrawer({
                 icon={<MessageOutlined />}
                 disabled={busy}
                 data-testid="offer-negotiation-open-pilot"
-                aria-label="和 Pilot 深聊这份 Offer"
+                aria-label={t("和 Pilot 深聊这份 Offer")}
                 onClick={() => onOpenPilotChat(offer, briefValue)}
-              >
-                和 Pilot 深聊这份 Offer
-              </Button>
-              <span>会带入当前 Offer 和已填写内容，消息由你决定是否发送。</span>
+              >{t("和 Pilot 深聊这份 Offer")}</Button>
+              <span>{t("会带入当前 Offer 和已填写内容，消息由你决定是否发送。")}</span>
             </div>
           ) : null}
         </section>
@@ -471,9 +475,9 @@ function BoundOfferNegotiationDrawer({
             value={briefValue}
             disabled={frozen || Boolean(showGenerateConfirmation)}
             errors={{
-              goal: goal.trim() ? undefined : '请填写本次沟通目标。',
-              concerns: concerns.trim() ? undefined : '请填写本次顾虑。',
-              scenario: scenario.trim() ? undefined : '请填写沟通场景。',
+              goal: goal.trim() ? undefined : t("请填写本次沟通目标。"),
+              concerns: concerns.trim() ? undefined : t("请填写本次顾虑。"),
+              scenario: scenario.trim() ? undefined : t("请填写沟通场景。"),
             }}
             onChange={(next) => {
               setGoal(next.goal);
@@ -487,48 +491,44 @@ function BoundOfferNegotiationDrawer({
               data-testid="offer-negotiation-generate"
               onClick={() => void previewGeneration()}
               disabled={frozen || !dimensionFactsReady || !briefValid}
-            >
-              下一步：检查输入
-            </Button>
+            >{t("下一步：检查输入")}</Button>
           )}
           {dimensionFactsState === 'loading' && frozenDimensionIds.length > 0 && (
-            <p className={styles.fieldHint} role="status">正在读取比较维度，读取完成后才能继续。</p>
+            <p className={styles.fieldHint} role="status">{t("正在读取比较维度，读取完成后才能继续。")}</p>
           )}
         </fieldset>
       )}
       <section aria-label="AI input facts" data-testid="offer-negotiation-input-facts" className={styles.factsSection}>
-        <h3>本次将使用的 Offer 事实</h3>
-        <p>{displayedProposal?.input_snapshot || activePreview ? '以下为本次冻结输入' : '当前 Offer 事实，尚未冻结'}</p>
+        <h3>{t("本次将使用的 Offer 事实")}</h3>
+        <p>{displayedProposal?.input_snapshot || activePreview ? t("以下为本次冻结输入") : t("当前 Offer 事实，尚未冻结")}</p>
         <OfferSnapshotSummary offer={snapshotOffer} brief={visibleBrief} sourceState={sourceState} />
       </section>
       {!displayedProposal && activePreview && showGenerateConfirmation && (
         <ConfirmationPanel
-          title="确认本次 AI 输入"
-          description="核对冻结的 Offer 事实与本次填写内容后，才会发送给 AI。"
-          sources={[{ state: 'frozen', detail: '本次 Offer 与用户输入快照' }]}
+          title={t("确认本次 AI 输入")}
+          description={t("核对冻结的 Offer 事实与本次填写内容后，才会发送给 AI。")}
+          sources={[{ state: 'frozen', detail: t("本次 Offer 与用户输入快照") }]}
         >
-          <Button onClick={clearPreview} disabled={busy}>返回修改</Button>
+          <Button onClick={clearPreview} disabled={busy}>{t("返回修改")}</Button>
           <Button
             type="primary"
             data-testid="offer-negotiation-generate"
             data-action="confirm-generate"
             onClick={() => void submitGeneration()}
             disabled={busy}
-          >
-            确认生成谈薪准备草稿
-          </Button>
+          >{t("确认生成谈薪准备草稿")}</Button>
         </ConfirmationPanel>
       )}
-      {dimensionFactsState === 'loading' && <p role="status">正在读取本次谈薪准备所需的 Offer 事实……</p>}
-      {dimensionFactsState === 'error' && <p role="alert">Offer 自定义维度暂时无法读取，请稍后重试。</p>}
+      {dimensionFactsState === 'loading' && <p role="status">{t("正在读取本次谈薪准备所需的 Offer 事实……")}</p>}
+      {dimensionFactsState === 'error' && <p role="alert">{t("Offer 自定义维度暂时无法读取，请稍后重试。")}</p>}
       {displayedProposal && (
-        <div aria-label="谈薪准备草稿">
+        <div aria-label={t("谈薪准备草稿")}>
           {displayedProposal.proposal_status === 'safe_empty' ? (
-            <p>目前没有可验证、可给出的谈薪准备建议。</p>
+            <p>{t("目前没有可验证、可给出的谈薪准备建议。")}</p>
           ) : (
             <>
               {suggestedStartLabel && (
-                <p className={styles.proposalIntro}>先从“{suggestedStartLabel}”开始，勾选想带走的内容；你可以直接编辑后保存。</p>
+                <p className={styles.proposalIntro}>{t("先从“")}{suggestedStartLabel}{t("”开始，勾选想带走的内容；你可以直接编辑后保存。")}</p>
               )}
               {SECTIONS.map(([field, label]) => (
                 <section key={field} className={styles.proposalSection}>
@@ -554,23 +554,23 @@ function BoundOfferNegotiationDrawer({
           )}
           {displayedProposal.proposal_status !== 'safe_empty' && !isHistoryView && !hasBrief && !displayedProposal.source_changed && (
             <>
-              {selectedBlocks.length === 0 && <p className={styles.selectionHint} role="status">请选择至少一项建议后才能保存。</p>}
-              <Button type="primary" data-testid="offer-negotiation-confirm" onClick={() => setShowSaveConfirmation(true)} disabled={frozen || selectedBlocks.length === 0}>确认保存谈薪准备（已选 {selectedBlocks.length} 项）</Button>
+              {selectedBlocks.length === 0 && <p className={styles.selectionHint} role="status">{t("请选择至少一项建议后才能保存。")}</p>}
+              <Button type="primary" data-testid="offer-negotiation-confirm" onClick={() => setShowSaveConfirmation(true)} disabled={frozen || selectedBlocks.length === 0}>{t("确认保存谈薪准备（已选 {count} 项）", { count: selectedBlocks.length })}</Button>
               {showSaveConfirmation && (
                 <ConfirmationPanel
-                  title="确认保存谈薪准备"
-                  description="仅保存你选中并编辑后的内容；不会修改 Offer 或自动执行其他操作。"
-                  sources={[{ state: 'frozen', detail: '本次谈薪准备 Proposal' }]}
+                  title={t("确认保存谈薪准备")}
+                  description={t("仅保存你选中并编辑后的内容；不会修改 Offer 或自动执行其他操作。")}
+                  sources={[{ state: 'frozen', detail: t("本次谈薪准备 Proposal") }]}
                 >
-                  <Button onClick={() => setShowSaveConfirmation(false)} disabled={busy}>返回修改</Button>
-                  <Button type="primary" data-action="confirm-save" onClick={() => void confirm(true)} disabled={busy}>确认保存</Button>
+                  <Button onClick={() => setShowSaveConfirmation(false)} disabled={busy}>{t("返回修改")}</Button>
+                  <Button type="primary" data-action="confirm-save" onClick={() => void confirm(true)} disabled={busy}>{t("确认保存")}</Button>
                 </ConfirmationPanel>
               )}
             </>
           )}
           {hasBrief && (
             <section aria-label="saved negotiation brief">
-              <p>已确认保存，以下是本次实际保存的内容：</p>
+              <p>{t("已确认保存，以下是本次实际保存的内容：")}</p>
               {(displayedProposal.brief?.edited_content.blocks ?? [])
                 .filter((block) => displayedProposal.brief?.selected_blocks.includes(block.id))
                 .map((block) => (
@@ -581,12 +581,12 @@ function BoundOfferNegotiationDrawer({
         </div>
       )}
       {history.length > 0 && (
-        <section aria-label="历史谈薪准备">
-          <h3>历史记录</h3>
+        <section aria-label={t("历史谈薪准备")}>
+          <h3>{t("历史记录")}</h3>
           <NegotiationHistoryList items={history} selectedId={historyProposal?.id ?? proposal?.id ?? null} onSelect={selectHistory} />
         </section>
       )}
-      {blocks.length === 0 && displayedProposal?.proposal_status === 'safe_empty' && <p>未生成可验证内容，未保存任何谈薪准备记录。</p>}
+      {blocks.length === 0 && displayedProposal?.proposal_status === 'safe_empty' && <p>{t("未生成可验证内容，未保存任何谈薪准备记录。")}</p>}
     </section>
   );
 }

@@ -152,6 +152,9 @@ def _open_existing_db(data_dir: Path) -> sqlite3.Connection:
     - 不是有效 SQLite
     - 缺少 schema_migrations
     """
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     db_path = data_dir / "data.db"
     if not db_path.exists() or not db_path.is_file():
         raise KnowledgeResetError(

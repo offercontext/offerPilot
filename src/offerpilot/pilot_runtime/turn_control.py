@@ -105,7 +105,8 @@ class DurableRuntimeInvocationControl:
             # Only Runtime's fixed timeout/delivery convergence uses this entry.
             # A fresh scope prevents a late worker from inheriting this grant.
             recovery = ExecutionScope(self.repository, self.lease, terminal_states=("interrupted", "result_unknown"),
-                                      locally_active=lambda: self._inner.state is InvocationState.TIMED_OUT)
+                                      locally_active=lambda: self._inner.state is InvocationState.TIMED_OUT,
+                                      recover_timed_out_execution=True)
             if recovery.lease is None:
                 return False, None
             with bind_execution_scope(recovery):
@@ -145,14 +146,18 @@ class DurableRuntimeInvocationControl:
             if not self._renew_once():
                 return
 
-    def _finish_safely(self, state: str, *, best_effort: bool = False) -> None:
+    def _finish_safely(self, state: str, *, best_effort: bool = False,
+                       resolve_state: Callable[[], str] | None = None) -> None:
         lease = self.lease
         if lease is not None:
             try:
                 finish = getattr(self.repository, "try_finish", None) if best_effort else None
                 if not callable(finish):
                     finish = self.repository.finish
-                finish(lease, state)
+                if resolve_state is None:
+                    finish(lease, state)
+                else:
+                    finish(lease, state, resolve_state=resolve_state)
             except Exception:
                 # The lease expires and all local protected commits remain
                 # fenced. Never turn a cleanup failure into an execution retry.
@@ -162,12 +167,25 @@ class DurableRuntimeInvocationControl:
         self._heartbeat_stop.set()
         if self._heartbeat is not None:
             self._heartbeat.join(timeout=0.1)
-        terminal_state = "result_unknown" if self._clock() >= self._valid_until else state
+        def resolve_state() -> str:
+            if self._clock() >= self._valid_until:
+                return "result_unknown"
+            # This short CAS runs after BEGIN IMMEDIATE, never while waiting
+            # for another writer. A timeout that won first stays unknown; a
+            # terminal owner that won first cannot subsequently be timed out.
+            prior = self._inner.claim_finish_state()
+            return "result_unknown" if prior is InvocationState.TIMED_OUT else state
+
+        terminal_state = (
+            "result_unknown"
+            if self._clock() >= self._valid_until or self._inner.state is InvocationState.TIMED_OUT
+            else state
+        )
         best_effort = self._inner.state in {
             InvocationState.TIMED_OUT,
             InvocationState.CANCELLED,
         }
-        self._finish_safely(terminal_state, best_effort=best_effort)
+        self._finish_safely(terminal_state, best_effort=best_effort, resolve_state=resolve_state)
         if self._on_finished is not None:
             self._on_finished(self)
 

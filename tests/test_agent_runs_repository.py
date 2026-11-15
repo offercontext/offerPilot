@@ -5,11 +5,13 @@ import inspect
 import sqlite3
 import threading
 import time
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import event as sqlalchemy_event
 from sqlalchemy import select
 from sqlalchemy.engine import Connection
 from sqlalchemy.exc import OperationalError, TimeoutError
@@ -29,7 +31,7 @@ from offerpilot.agent_runtime.budget import (
     SafeClockAdapter,
 )
 from offerpilot.db import init_database, journal_session_factory_for_data_dir
-from offerpilot.models import AgentContextSnapshot, AgentEvent, ChatMessage, Conversation
+from offerpilot.models import AgentContextSnapshot, AgentEvent, AgentRun, ChatMessage, Conversation
 from offerpilot.repositories.agent_runs import (
     AgentRunRepository,
     CaptureContextCommand,
@@ -669,76 +671,221 @@ def test_converge_disposition_bound_rolls_back_run_event_and_domain_write(
         ) is None
 
 
-def test_concurrent_identical_event_append_returns_one_persisted_event(tmp_path: Path) -> None:
-    _create_run(tmp_path)
-    draft = _assistant_event(92)
+def _append_in_read_write_race(
+    tmp_path: Path,
+    batches: list[list[EventDraft]],
+    *,
+    supports_returning: bool,
+) -> tuple[list[AgentRunRepository], list[list[AgentEvent]]]:
+    """Race pre-write reads without requiring a writer to be scheduled in 50 ms.
+
+    Both Sessions reach their first real UPDATE before either may execute it.
+    Alternate which writer commits first. The second retains its earlier reads
+    (including the stale expected seq in the CAS path), so this still tests the
+    database allocator, rather than serializing whole repository operations.
+    Actual lock exhaustion is tested separately with the unchanged busy budget.
+    """
     barrier = threading.Barrier(2)
+    first_committed = [threading.Event() for _ in batches[0]]
+    pre_write_sequences: list[list[int]] = [[], []]
+    cas_outcomes: list[list[list[int]]] = [[[] for _ in batch] for batch in batches]
 
-    class RacingRepository(AgentRunRepository):
-        def __init__(self) -> None:
-            super().__init__(journal_session_factory_for_data_dir(tmp_path))
-            self._waited = False
+    class ObservedRepository(AgentRunRepository):
+        def __init__(self, index: int) -> None:
+            super().__init__(
+                journal_session_factory_for_data_dir(tmp_path),
+                supports_returning=lambda _session: supports_returning,
+            )
+            self.index = index
 
-        def _existing_event(
-            self,
-            session: Session,
-            run_id: str,
-            candidate: EventDraft,
-        ) -> AgentEvent | None:
-            existing = super()._existing_event(session, run_id, candidate)
-            if existing is None and candidate.dedupe_key == draft.dedupe_key and not self._waited:
-                self._waited = True
-                barrier.wait(timeout=2)
-            return existing
+        def _required_run(self, session: Session, run_id: str) -> AgentRun:
+            run = super()._required_run(session, run_id)
+            pre_write_sequences[self.index].append(run.last_seq)
+            return run
 
-    repositories = [RacingRepository(), RacingRepository()]
-    results: list[AgentEvent] = []
-    errors: list[BaseException] = []
-
-    def append(repository: AgentRunRepository) -> None:
-        try:
-            results.append(repository.append_event(RUN_ID, draft))
-        except BaseException as exc:  # test thread must report every failure
-            errors.append(exc)
-
-    threads = [threading.Thread(target=append, args=(repository,)) for repository in repositories]
-    for thread in threads:
-        thread.start()
-    for thread in threads:
-        thread.join(timeout=3)
-
-    assert all(not thread.is_alive() for thread in threads)
-    assert errors == []
-    assert len(results) == 2
-    assert results[0].id == results[1].id
-    assert repositories[0].count_events(RUN_ID, draft.dedupe_key) == 1
-
-
-def test_concurrent_seq_allocation_has_no_gaps_or_duplicates(tmp_path: Path) -> None:
-    _create_run(tmp_path)
-    repositories = [_repository(tmp_path), _repository(tmp_path)]
-    barrier = threading.Barrier(3)
-    errors: list[BaseException] = []
+    repositories = [ObservedRepository(index) for index in range(2)]
+    results: list[list[AgentEvent]] = [[], []]
+    errors: list[str] = []
 
     def append_batch(index: int) -> None:
+        offset = 0
+        waiting = True
+
+        def before_update(_connection, _cursor, statement, *_args):
+            nonlocal waiting
+            if not waiting or not statement.startswith("UPDATE agent_runs "):
+                return
+            waiting = False
+            barrier.wait(timeout=10)
+            if index != offset % 2:
+                assert first_committed[offset].wait(timeout=10)
+
+        def after_update(_connection, cursor, statement, *_args):
+            if not supports_returning and statement.startswith("UPDATE agent_runs "):
+                cas_outcomes[index][offset].append(cursor.rowcount)
+
+        engine = repositories[index].session_factory.kw["bind"]
+        sqlalchemy_event.listen(engine, "before_cursor_execute", before_update)
+        sqlalchemy_event.listen(engine, "after_cursor_execute", after_update)
         try:
-            barrier.wait()
-            for offset in range(5):
-                repositories[index].append_event(
-                    RUN_ID, _assistant_event(100 + index * 10 + offset)
-                )
-        except BaseException as exc:  # test thread must report every failure
-            errors.append(exc)
+            for offset, draft in enumerate(batches[index]):
+                waiting = True
+                results[index].append(repositories[index].append_event(RUN_ID, draft))
+                if index == offset % 2:
+                    first_committed[offset].set()
+                # Begin the next pair only after both preceding writes committed.
+                barrier.wait(timeout=10)
+        except BaseException:  # Preserve SQLite SQL and the worker stack on failure.
+            errors.append(traceback.format_exc())
+            barrier.abort()
+            for committed in first_committed:
+                committed.set()
+        finally:
+            sqlalchemy_event.remove(engine, "before_cursor_execute", before_update)
+            sqlalchemy_event.remove(engine, "after_cursor_execute", after_update)
 
     threads = [threading.Thread(target=append_batch, args=(index,)) for index in range(2)]
     for thread in threads:
         thread.start()
-    barrier.wait()
     for thread in threads:
-        thread.join()
+        thread.join(timeout=10)
+    assert all(not thread.is_alive() for thread in threads)
+    assert errors == [], "\n".join(errors)
+    assert pre_write_sequences[0] == pre_write_sequences[1]
+    assert len(pre_write_sequences[0]) == len(batches[0])
+    if not supports_returning:
+        for offset in range(len(batches[0])):
+            first = offset % 2
+            assert cas_outcomes[first][offset] == [1]
+            assert cas_outcomes[1 - first][offset] == [0, 1]
+    return repositories, results
 
-    assert errors == []
-    assert [event.seq for event in repositories[0].list_events(RUN_ID)] == list(range(1, 13))
+
+def test_concurrent_identical_event_append_returns_one_persisted_event(tmp_path: Path) -> None:
+    _assert_concurrent_identical_event_append(tmp_path, supports_returning=True)
+
+
+def test_concurrent_identical_event_append_with_cas_returns_one_persisted_event(
+    tmp_path: Path,
+) -> None:
+    _assert_concurrent_identical_event_append(tmp_path, supports_returning=False)
+
+
+def _assert_concurrent_identical_event_append(
+    tmp_path: Path, *, supports_returning: bool,
+) -> None:
+    _create_run(tmp_path)
+    draft = _assistant_event(92)
+    repositories, results = _append_in_read_write_race(
+        tmp_path, [[draft], [draft]], supports_returning=supports_returning,
+    )
+
+    assert results[0][0].id == results[1][0].id
+    assert results[0][0].payload_json == results[1][0].payload_json == draft.payload_json
+    assert repositories[0].count_events(RUN_ID, draft.dedupe_key) == 1
+    assert [event.seq for event in repositories[0].list_events(RUN_ID)] == [1, 2, 3]
+    assert repositories[0].get_run(RUN_ID).last_seq == 3  # type: ignore[union-attr]
+
+
+def test_concurrent_seq_allocation_has_no_gaps_or_duplicates(tmp_path: Path) -> None:
+    _assert_concurrent_seq_allocation(tmp_path, supports_returning=True)
+
+
+def test_concurrent_seq_allocation_with_cas_has_no_gaps_or_duplicates(tmp_path: Path) -> None:
+    _assert_concurrent_seq_allocation(tmp_path, supports_returning=False)
+
+
+def _assert_concurrent_seq_allocation(tmp_path: Path, *, supports_returning: bool) -> None:
+    _create_run(tmp_path)
+    batches = [
+        [_assistant_event(100 + index * 10 + offset) for offset in range(5)]
+        for index in range(2)
+    ]
+    repositories, results = _append_in_read_write_race(
+        tmp_path, batches, supports_returning=supports_returning,
+    )
+
+    events = repositories[0].list_events(RUN_ID)
+    assert [event.seq for event in events] == list(range(1, 13))
+    assert repositories[0].get_run(RUN_ID).last_seq == 12  # type: ignore[union-attr]
+    expected = {draft.dedupe_key: draft for batch in batches for draft in batch}
+    assert {event.dedupe_key for event in events[2:]} == expected.keys()
+    assert {event.id for batch in results for event in batch} == {event.id for event in events[2:]}
+    for event in events[2:]:
+        draft = expected[event.dedupe_key]
+        assert (event.payload_json, event.payload_digest, event.fact_digest) == (
+            draft.payload_json, draft.payload_digest, draft.fact_digest,
+        )
+
+
+@pytest.mark.parametrize("supports_returning", [True, False], ids=["returning", "cas"])
+def test_descheduled_writer_preserves_busy_budget_and_contiguous_sequence(
+    tmp_path: Path, supports_returning: bool,
+) -> None:
+    repository, _, _ = _create_run(tmp_path)
+    allocated = threading.Event()
+    release = threading.Event()
+    errors: list[str] = []
+    first = _assistant_event(801)
+    second = _assistant_event(802)
+
+    def hold_after_allocation(_event: AgentEvent) -> None:
+        allocated.set()
+        assert release.wait(timeout=10)
+
+    writer = _repository(tmp_path, before_event_insert=hold_after_allocation)
+    contender = _repository(tmp_path, supports_returning=lambda _session: supports_returning)
+    busy_timeouts: list[int] = []
+
+    def observe_update(connection, _cursor, statement, *_args):
+        if statement.startswith("UPDATE agent_runs "):
+            timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar_one()
+            busy_timeouts.append(timeout)
+            assert timeout == JOURNAL_DEFAULT_BUSY_TIMEOUT_MS == 50
+
+    sqlalchemy_event.listen(
+        contender.session_factory.kw["bind"], "before_cursor_execute", observe_update,
+    )
+
+    def append_first() -> None:
+        try:
+            writer.append_event(RUN_ID, first)
+        except BaseException:
+            errors.append(traceback.format_exc())
+
+    thread = threading.Thread(target=append_first)
+    thread.start()
+    try:
+        assert allocated.wait(timeout=10)
+        # Readers see the committed state while the other Session owns the write lock.
+        assert repository.get_run(RUN_ID).last_seq == 2  # type: ignore[union-attr]
+        assert [event.seq for event in repository.list_events(RUN_ID)] == [1, 2]
+        with pytest.raises(OperationalError) as raised:
+            contender.append_event(RUN_ID, second)
+        assert isinstance(raised.value.orig, sqlite3.OperationalError)
+        assert str(raised.value.orig) == "database is locked"
+        if hasattr(sqlite3, "SQLITE_BUSY"):  # sqlite_errorcode was added in Python 3.11.
+            assert getattr(raised.value.orig, "sqlite_errorcode", None) == sqlite3.SQLITE_BUSY
+        assert raised.value.statement.startswith("UPDATE agent_runs ")
+        assert busy_timeouts == [50]
+        assert repository.count_events(RUN_ID, second.dedupe_key) == 0
+    finally:
+        release.set()
+        thread.join(timeout=10)
+    assert not thread.is_alive()
+    assert errors == [], "\n".join(errors)
+    assert repository.get_run(RUN_ID).last_seq == 3  # type: ignore[union-attr]
+    with contender.session_factory() as session:
+        assert session.connection().exec_driver_sql("PRAGMA busy_timeout").scalar_one() == 50
+        assert not session.connection().connection.driver_connection.in_transaction
+    # This is a new explicit call after contention ends, not a hidden repository retry.
+    saved = contender.append_event(RUN_ID, second)
+    replayed = contender.append_event(RUN_ID, second)
+    assert saved.id == replayed.id
+    assert saved.seq == 4
+    assert saved.payload_json == second.payload_json
+    assert [event.seq for event in repository.list_events(RUN_ID)] == [1, 2, 3, 4]
+    assert repository.get_run(RUN_ID).last_seq == 4  # type: ignore[union-attr]
 
 
 def test_cas_fallback_stops_after_two_failed_attempts(
@@ -1370,6 +1517,20 @@ def test_public_write_commit_keeps_deadline_guard_under_shared_lock(
         assert str(raised.value) == "deadline"
     else:
         assert "locked" in str(raised.value).lower()
+        assert raised.value.statement is None  # The driver failed at COMMIT, after both writes.
+
+    draft = _assistant_event(604)
+    assert repository.get_run(RUN_ID).last_seq == 2  # type: ignore[union-attr]
+    assert repository.count_events(RUN_ID, draft.dedupe_key) == 0
+    assert [event.seq for event in repository.list_events(RUN_ID)] == [1, 2]
+    # Drop the observation hooks before testing a fresh call on the restored pool.
+    monkeypatch.undo()
+    saved = repository.append_event(RUN_ID, draft)
+    assert saved.seq == 3
+    assert saved.payload_json == draft.payload_json
+    assert repository.append_event(RUN_ID, draft).id == saved.id
+    assert [event.seq for event in repository.list_events(RUN_ID)] == [1, 2, 3]
+    assert repository.get_run(RUN_ID).last_seq == 3  # type: ignore[union-attr]
 
 
 def test_progress_handler_is_total_for_invalid_clock() -> None:

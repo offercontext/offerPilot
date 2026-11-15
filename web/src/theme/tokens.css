@@ -522,6 +522,25 @@ body {
 .knowledge-toolbar-spacer {
   flex: 1;
 }
+.knowledge-sources-search {
+  display: contents;
+}
+@media (min-width: 1000px) {
+  .knowledge-sources-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    --knowledge-search-width: 320px;
+  }
+  .knowledge-sources-search-input {
+    width: var(--knowledge-search-width) !important;
+    flex: 0 0 var(--knowledge-search-width);
+  }
+  html[lang='en-US'] .knowledge-sources-search {
+    --knowledge-search-width: 420px;
+  }
+}
 .knowledge-sources-search-input.ant-affix-wrapper,
 .knowledge-sources-search-input.ant-input {
   transition: border-color 0.18s var(--op-ease), box-shadow 0.18s var(--op-ease);

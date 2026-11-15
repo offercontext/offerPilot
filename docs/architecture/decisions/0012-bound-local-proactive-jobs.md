@@ -40,6 +40,30 @@ result_unknown。原子认领记录 owner、lease、attempt、turn_id 和 execut
 通过时区转换处理；设置变更在下一次检查及发布时生效。Inbox 显示来源、原因、时间、状态与失败，
 自动内容清楚标记为提醒或草稿，不显示为用户发起的消息。
 
+### 共享提醒事实（2026-10-21 收敛）
+
+今日待办和队列共用 `proactive/candidates.py` 的资格、主体和来源版本；
+只读 `GET /api/reminders/candidates` 不依赖主动功能开关，不创建任务或授权发送。
+前端只将候选映射为展示卡，不再另算面试、截止或 stale 资格。候选包含稳定主体
+`application` / `application_event` / `offer`、原因、来源 revision、事项到期时间和
+各自展示／投递窗口。Offer 答复截止与 ApplicationEvent 截止是不同主体，不互相去重；
+Offer 候选仅供展示，不借此新增后台发送能力。笔试、Offer 进展和自定义日程的
+todo 事项保留提前 72 小时的只读 `event_upcoming` 候选；done、cancelled 或失效来源
+不展示。其投递窗口始终为空，显式 remind_at 也不扩展队列类型或发送权限。
+
+stale 统一限定 pending、applied、written_test，满七个 24 小时即成立；
+interview、offer、closed 或已删除投递不产生 stale。展示在来源不变时持续保留；
+后台仍只检查第七天起的每周桶及其 24 小时有效期，不补发积压。
+面试和事件截止提前 72 小时展示，默认提前 24 小时投递，显式 remind_at 仍有效。
+todo 面试已有 ready/normal 准备成果时不再提醒准备；done 面试仅在一天复盘窗口内
+且尚无正式复盘笔记时产生 review；cancelled 不产生候选。关联投递不存在或已关闭时
+不产生待办。所有队列认领、执行和发布仍重新核验同一来源围栏。
+
+时间窗口按 UTC 秒计算，因此跨 DST 的七个日历日不一定是七个完整 24 小时。
+Offer 的纯日期按读取方明确提供的 IANA 展示时区的当天结束解释，不改变主动投递时区。
+加载中或读取失败不能当作“没有提醒”，来源更新后的旧结果不可继续作为当前内容展示。
+共享固定时钟验收样例见 `contracts/reminder-candidates.v1.json`。
+
 ## Consequences
 
 本地提醒可核验去重，模型费用有明确上限。暂停服务不会漏掉业务事实，也不会在重启时重做未知

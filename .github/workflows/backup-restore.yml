@@ -1,0 +1,52 @@
+name: Backup restore synthetic native and browser acceptance
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: backup-restore-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  restore:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/20261112-backup-complete-restore'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+      - run: uv sync --frozen --group dev
+      - run: npm ci --prefix web --ignore-scripts
+      - name: Native restore, shared locks, actual Knowledge API and historical ZIP
+        run: uv run pytest -q tests/test_backup_paths.py tests/test_backup_archive.py tests/test_backup_export.py tests/test_backup_restore_control.py tests/test_backup_install.py tests/test_backup_config_concurrency.py tests/test_backup_restore_api.py tests/test_backup_legacy.py tests/test_backup_image_roundtrip.py tests/test_workspace_lock.py
+      - run: npm run build --prefix web
+      - name: Install Chromium
+        working-directory: web
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Real UI and HTTP restore with process exit and restart
+        run: node web/tests/backup-restore/run.mjs artifacts/backup-restore-browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backup-restore-${{ matrix.os }}-${{ github.sha }}
+          path: artifacts/backup-restore-browser
+          if-no-files-found: warn
+          retention-days: 14

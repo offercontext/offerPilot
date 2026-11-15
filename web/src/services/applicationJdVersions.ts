@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type {
   ApplicationJdVersion,
   ApplicationJdVersionSaveInput,
@@ -13,7 +14,7 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
   });
   const payload = await response.json();
   if (!response.ok) {
-    const error = new Error(payload?.error ?? '岗位资料请求失败') as Error & {
+    const error = new Error(payload?.error ?? t("岗位资料请求失败")) as Error & {
       status?: number;
       code?: string;
     };

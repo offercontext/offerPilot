@@ -8,11 +8,26 @@ import {
   usePilotConversationController,
 } from './AssistantSurfaceProvider';
 import HaruChatWindow from './HaruChatWindow';
+import { getPilotExecution } from '@/services/chat';
+import { setLocale } from '@/i18n';
+import { publishPersona } from '@/features/companionPersona/useCompanionName';
+import type { PersonaView } from '@/services/persona';
 import { getPilotPresentation } from '@/features/actionPresentation/service';
+vi.mock('@/services/companion', async () => {
+  const { enabledCompanionSnapshot: snapshot } = await import('@/features/companionLife/testFixtures');
+  return { getCompanion: async () => snapshot, reportCompanionPresence: async () => snapshot.presence,
+    sendCompanionCommand: async () => snapshot, claimCompanionBid: async () => null };
+});
+vi.mock('@/services/persona', () => ({ getPersona: async () => ({ spec: { display_name: 'Haru' } }) }));
+import { readChatImage } from '@/services/chatImages';
+vi.mock('@/services/chatImages', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/services/chatImages')>(),
+  readChatImage: vi.fn().mockResolvedValue(new Blob(['image'], { type: 'image/png' })),
+}));
 vi.mock('@/features/actionPresentation/service', () => ({ getPilotPresentation: vi.fn().mockRejectedValue(new Error('legacy server')) }));
 vi.mock('@/services/chat', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/chat')>(),
-  getPilotExecution: vi.fn().mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' }),
+  getPilotExecution: vi.fn().mockResolvedValue(null),
   interruptPilotExecution: vi.fn().mockImplementation(async (target, commandId) => ({
     command_id: commandId, turn_id: target.turn_id, execution_generation: target.execution_generation, status: 'stopped',
   })),
@@ -109,16 +124,82 @@ function SharedDraftHarness() {
   return <HaruChatWindow returnFocusRef={{ current: null }} />;
 }
 
+function ImageHistoryHarness() {
+  const controller = usePilotConversationController();
+  const surface = useAssistantSurface();
+  useEffect(() => {
+    controller.setTurns([{ role: 'user', content: '', image_attachments: [{ id: 'img_history', sha256: 'hash',
+      mime_type: 'image/png', width: 2, height: 2, size_bytes: 5, normalization_version: 'image-normalize-v1' }] }]);
+    surface.openHaru();
+  }, []);
+  return <HaruChatWindow returnFocusRef={{ current: null }} />;
+}
+
+function LoadingHarness() {
+  const controller = usePilotConversationController();
+  const surface = useAssistantSurface();
+  useEffect(() => {
+    controller.setLoading(true);
+    controller.setLoadingLabel('正在处理：用户原始任务名');
+    surface.openHaru();
+  }, []);
+  return <HaruChatWindow returnFocusRef={{ current: null }} />;
+}
+
 describe('HaruChatWindow', () => {
+  it('keeps the custom companion name in the image composer and its accessible label across languages', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:custom-persona-image');
+      static revokeObjectURL = vi.fn();
+    });
+    await act(async () => root?.render(<AssistantSurfaceProvider><ImageHistoryHarness /></AssistantSurfaceProvider>));
+    const view: PersonaView = { profile_id: 'test-persona', revision: 1, content_hash: 'test', policy_version: 'test', presets: [],
+      spec: { display_name: '小晴', traits: [], speaking_style: '', verbosity: 'balanced', interests_text: '',
+        fictional_background: '', additional_style_notes: '', enabled_activity_templates: [] } };
+    try {
+      act(() => publishPersona(view));
+      const composer = host!.querySelector<HTMLTextAreaElement>('#haru-composer')!;
+      expect(host!.querySelector('label[for="haru-composer"]')!.textContent).toBe('给 小晴 发消息');
+      expect(composer.placeholder).toBe('问 小晴…');
+      expect(host!.querySelector('[aria-label="添加图片"]')).not.toBeNull();
+      expect(host!.querySelector('img[alt="图片 1，点击放大"]')).not.toBeNull();
+      act(() => setLocale('en-US'));
+      expect(host!.querySelector('label[for="haru-composer"]')!.textContent).toBe('Message 小晴');
+      expect(composer.placeholder).toBe('Ask 小晴…');
+      expect(host!.querySelector('[aria-label="Add images"]')).not.toBeNull();
+    } finally {
+      act(() => publishPersona({ ...view, spec: { ...view.spec, display_name: 'Haru' } }));
+    }
+  });
+
+  it('closes the image preview before closing Haru when Escape is pressed', async () => {
+    vi.stubGlobal('URL', class extends URL {
+      static createObjectURL = vi.fn(() => 'blob:history');
+      static revokeObjectURL = vi.fn();
+    });
+    await act(async () => root?.render(<AssistantSurfaceProvider><ImageHistoryHarness /></AssistantSurfaceProvider>));
+    expect(readChatImage).toHaveBeenCalledWith('img_history');
+    act(() => host!.querySelector<HTMLImageElement>('img[alt="图片 1，点击放大"]')!.click());
+    const dialog = host!.querySelector<HTMLElement>('#haru-chat-window')!;
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host!.querySelector('#haru-chat-window')).not.toBeNull();
+    act(() => dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host!.querySelector('#haru-chat-window')).toBeNull();
+  });
+
   it('blocks keyboard submission when only a remote execution is running', async () => {
+    vi.mocked(getPilotExecution).mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' });
     await act(async () => root?.render(
       <AssistantSurfaceProvider><ContextHarness /></AssistantSurfaceProvider>,
     ));
     expect(host!.querySelector('textarea')!.disabled).toBe(true);
+    expect(host!.querySelector('[data-task-state="running"]')).not.toBeNull();
     expect(host!.querySelector('[aria-label="停止生成"]')).not.toBeNull();
   });
 
   beforeEach(() => {
+    vi.mocked(getPilotExecution).mockReset().mockResolvedValue(null);
+    vi.mocked(getPilotPresentation).mockReset().mockRejectedValue(new Error('legacy server'));
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -127,6 +208,8 @@ describe('HaruChatWindow', () => {
   afterEach(() => {
     act(() => root?.unmount());
     host?.remove();
+    vi.unstubAllGlobals();
+    setLocale('zh-CN');
   });
 
   it('keeps a visible read-only recovery entry without Pending or Undo and recovers the display', async () => {
@@ -182,6 +265,8 @@ describe('HaruChatWindow', () => {
     ));
     expect(host!.querySelector('[role="dialog"]')?.textContent).toContain('先准备项目案例。');
     expect(host!.textContent).toContain('星河科技 · 前端工程师 · 1 个附件');
+    expect(host!.querySelector('[aria-label="当前上下文"] b')?.getAttribute('title'))
+      .toBe('星河科技 · 前端工程师 · 1 个附件');
     expect(host!.textContent).toContain('这一步会修改「星河科技 · 前端工程师」的内容');
     expect(host!.textContent).toContain('查看修改内容');
 
@@ -191,6 +276,7 @@ describe('HaruChatWindow', () => {
   });
 
   it('stops the single active request only when explicitly requested', async () => {
+    vi.mocked(getPilotExecution).mockResolvedValue({ turn_id: 'haru-stop', conversation_id: 7, execution_generation: 1, state: 'running' });
     const stop = vi.fn();
     await act(async () => root?.render(
       <AssistantSurfaceProvider><Harness stop={stop} /></AssistantSurfaceProvider>,
@@ -295,4 +381,45 @@ describe('HaruChatWindow', () => {
     expect(host!.querySelector<HTMLTextAreaElement>('#haru-composer')?.value).toBe('先讨论目标，再演练开场');
     expect(host!.querySelector('[role="dialog"]')).not.toBeNull();
   });
+
+  it('switches the open window language without remounting or losing the composer draft', async () => {
+    await act(async () => root?.render(
+      <AssistantSurfaceProvider><SharedDraftHarness /></AssistantSurfaceProvider>,
+    ));
+    const composer = host!.querySelector<HTMLTextAreaElement>('#haru-composer');
+    expect(composer?.value).toBe('先讨论目标，再演练开场');
+    act(() => setLocale('en-US'));
+    expect(host!.querySelector('[aria-label="Haru compact chat"]')).not.toBeNull();
+    expect(host!.querySelector('#haru-composer')).toBe(composer);
+    expect(composer?.value).toBe('先讨论目标，再演练开场');
+    expect(composer?.placeholder).toBe('Ask Haru…');
+    act(() => setLocale('zh-CN'));
+    expect(composer?.placeholder).toBe('问 Haru…');
+    expect(composer?.value).toBe('先讨论目标，再演练开场');
+  });
+
+  it('keeps existing conversation and entity content unchanged while translating its controls', async () => {
+    await act(async () => root?.render(
+      <AssistantSurfaceProvider><ContextHarness /></AssistantSurfaceProvider>,
+    ));
+    act(() => setLocale('en-US'));
+    expect(host!.textContent).toContain('保留这条消息');
+    expect(host!.textContent).toContain('腾讯 · 后端开发工程师');
+    expect(host!.textContent).toContain('美团 · 后端开发工程师');
+    expect(host!.textContent).toContain('Switch to current page');
+    expect(host!.textContent).toContain('Keep original context');
+  });
+
+
+  it('translates an active loading prefix while preserving the original task summary', async () => {
+    await act(async () => root?.render(
+      <AssistantSurfaceProvider><LoadingHarness /></AssistantSurfaceProvider>,
+    ));
+    expect(host!.textContent).toContain('正在处理：用户原始任务名');
+    act(() => setLocale('en-US'));
+    expect(host!.textContent).toContain('Working on: 用户原始任务名');
+    act(() => setLocale('zh-CN'));
+    expect(host!.textContent).toContain('正在处理：用户原始任务名');
+  });
+
 });

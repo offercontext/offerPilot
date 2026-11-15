@@ -1,0 +1,15 @@
+{
+  "id": 101,
+  "application_id": 1,
+  "resume_id": 1,
+  "idempotency_key": "historical-fit-v1-fixture",
+  "proposal_schema_version": 1,
+  "source_snapshot_json": "{\"application\":{\"company_name\":\"Acme\",\"id\":1,\"position_name\":\"Backend\"},\"candidate_assertions\":[{\"index\":0,\"text\":\"I can work in Shanghai.\"}],\"jd\":{\"sha256\":\"f9a86ee0f27ee387fd0ac8293b5a209ea606414b21ecf77a237bf0d1c46281c3\",\"source_label\":\"Recruiter copy\",\"text\":\"Kubernetes preferred\"},\"resume\":{\"content_json\":{\"raw_text\":\"Built APIs\",\"skills\":[\"Python\"]},\"id\":1,\"sha256\":\"44863d4fc9a6eacfd1791102e0ec4e77a6e9d099d0ef85b202c05131a326ce7e\",\"title\":\"Backend Resume\"},\"schema_version\":1}",
+  "triage_json": "{\"deadline\":{\"evidence_refs\":[],\"status\":\"not_stated\",\"text\":\"\"},\"fit_signals\":[{\"evidence_refs\":[{\"excerpt\":\"Built APIs\",\"path\":\"/raw_text\",\"source\":\"resume\"}],\"id\":\"api\",\"statement\":\"Existing API work is relevant.\"}],\"gaps\":[{\"candidate_status\":\"unknown\",\"evidence_refs\":[{\"excerpt\":\"Kubernetes preferred\",\"path\":\"/text\",\"source\":\"jd\"},{\"excerpt\":\"Built APIs\",\"path\":\"/raw_text\",\"source\":\"resume\"}],\"id\":\"kubernetes\",\"kind\":\"preferred\",\"requirement\":\"Kubernetes production experience\"}],\"hard_constraints\":[{\"evidence_refs\":[{\"excerpt\":\"Kubernetes preferred\",\"path\":\"/text\",\"source\":\"jd\"}],\"explanation\":\"Availability is not in the resume.\",\"id\":\"location\",\"requirement\":\"Shanghai office\",\"status\":\"unknown\"}],\"next_questions\":[\"Can you work in Shanghai?\"],\"recommendation\":\"hold\",\"summary\":\"Legacy unstructured summary. Must be rederived from evidence.\"}",
+  "deep_review_json": "{\"gaps_to_address\":[{\"evidence_refs\":[{\"excerpt\":\"Built APIs\",\"path\":\"/raw_text\",\"source\":\"resume\"}],\"id\":\"kubernetes\",\"statement\":\"Kubernetes experience needs confirmation.\"}],\"next_actions\":[{\"id\":\"assertion\",\"kind\":\"add_assertion\",\"label\":\"补充事实\"}],\"questions_to_clarify\":[{\"evidence_refs\":[],\"id\":\"location\",\"statement\":\"Confirm Shanghai availability.\"}],\"recommended_path\":\"clarify_first\",\"strengths\":[{\"evidence_refs\":[{\"excerpt\":\"Built APIs\",\"path\":\"/raw_text\",\"source\":\"resume\"}],\"id\":\"api\",\"statement\":\"API implementation is a strength.\"}]}",
+  "created_at": "2026-07-21T09:00:00+00:00",
+  "deep_reviewed_at": "2026-07-21T09:05:00+00:00",
+  "source_fingerprint_sha256": "ee268cf31cd004b3c711da60d80ee8724c48e90fdcf707781719f2b75c0e7834",
+  "triage_sha256": "204b19bf27de33873fee877ab5bf08c65fad08dbb4f95d3e7037a7287122cf75",
+  "deep_review_sha256": "4108aca7d2a966145a56bc97f0936275e34bdee44c06ad25a0d2d11a88ed3c8c"
+}

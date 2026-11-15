@@ -2288,3 +2288,25 @@
     transform: none;
   }
 }
+.imageRail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+}
+.imageDraft {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 112px;
+  padding: 8px;
+  border: 1px solid var(--op-border, #d9d9d9);
+  border-radius: 10px;
+  font-size: 12px;
+}
+.imagePreview { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.imagePreviewCompact { max-width: 100%; min-width: 0; }
+.imagePreviewCompact :global(.ant-image) { overflow: hidden; border-radius: 8px; box-shadow: 0 0 0 1px var(--op-border); }
+.imagePreviewCompact > button { max-width: 100%; white-space: normal; height: auto; min-height: 24px; font-size: 12px; }
+.imageName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.imageError { color: var(--op-danger, #b42318); overflow-wrap: anywhere; }

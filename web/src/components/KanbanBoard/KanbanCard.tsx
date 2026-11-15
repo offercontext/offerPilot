@@ -1,3 +1,5 @@
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
 import { useState } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { Select, message, Popconfirm, Button } from 'antd';
@@ -9,9 +11,7 @@ import { STATUS_LABELS } from '@/types/application';
 import type { Application, ApplicationStatus } from '@/types/application';
 import styles from './KanbanBoard.module.css';
 
-const STATUS_OPTIONS = (Object.entries(STATUS_LABELS) as [ApplicationStatus, string][]).map(
-  ([value, label]) => ({ value, label })
-);
+
 
 interface KanbanCardProps {
   record: Application;
@@ -28,6 +28,11 @@ export default function KanbanCard({
   onOpenDetail,
   onRequestStatusChange,
 }: KanbanCardProps) {
+const STATUS_OPTIONS = (Object.entries(STATUS_LABELS) as [ApplicationStatus, string][]).map(
+  ([value, label]) => ({ value, label })
+);
+
+  useLocale();
   const queryClient = useQueryClient();
   const [selectOpen, setSelectOpen] = useState(false);
 
@@ -46,9 +51,9 @@ export default function KanbanCard({
       await deleteApplication(record.id);
       queryClient.invalidateQueries({ queryKey: ['applications'] });
       queryClient.invalidateQueries({ queryKey: ['events'] });
-      message.success('已删除');
+      message.success(liveText(() => t("已删除")));
     } catch {
-      message.error('删除失败');
+      message.error(liveText(() => t("删除失败")));
     }
   };
 
@@ -69,13 +74,14 @@ export default function KanbanCard({
   return (
     <div
       ref={setNodeRef}
+      data-kanban-card
       className={`${styles.card} ${isDragging ? styles.cardPlaceholder : ''}`}
       {...listeners}
       {...attributes}
     >
       {cardContent}
       <div className={styles.cardFooter}>
-        <span onPointerDown={(e) => e.stopPropagation()}>
+        <span className={styles.cardStatus} onPointerDown={(e) => e.stopPropagation()}>
           <Select
             value={record.status}
             options={STATUS_OPTIONS}
@@ -84,11 +90,11 @@ export default function KanbanCard({
             onDropdownVisibleChange={setSelectOpen}
             size="small"
             popupMatchSelectWidth={false}
-            style={{ minWidth: 90 }}
+            style={{ width: '100%' }}
             onClick={(e) => e.stopPropagation()}
           />
         </span>
-        <span style={{ display: 'flex', alignItems: 'center' }}>
+        <span className={styles.cardActions}>
           {onOpenDetail && (
             <Button
               type="text"
@@ -98,20 +104,20 @@ export default function KanbanCard({
                 onOpenDetail(record);
               }}
               onPointerDown={(e) => e.stopPropagation()}
-              style={{ color: '#0284c7', marginLeft: 4, padding: '0 4px' }}
-              title="查看详情"
+              style={{ color: '#0284c7', padding: '0 4px' }}
+              title={t("查看详情")}
             >
               <RightOutlined />
             </Button>
           )}
           <Popconfirm
-            title="确定删除这条投递？"
+            title={t("确定删除这条投递？")}
             onConfirm={handleDelete}
-            okText="删除"
-            cancelText="取消"
+            okText={t("删除")}
+            cancelText={t("取消")}
           >
             <DeleteOutlined
-              style={{ color: '#94a3b8', marginLeft: 8, cursor: 'pointer' }}
+              style={{ color: '#94a3b8', cursor: 'pointer' }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
             />

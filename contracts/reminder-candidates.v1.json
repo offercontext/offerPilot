@@ -1,0 +1,1225 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "stale_before_7_days",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-02T04:00:00.864000+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "stale_7_days",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-02T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 1,
+      "expected": [
+        {
+          "id": "application:1:stale_application",
+          "subject_type": "application",
+          "subject_id": 1,
+          "reason_code": "stale_application",
+          "source_revision": "a5dfcf224167ebd7408d994f629a44895d8a7748d2d8d02663bae5f8a7acba42",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1788926400.0,
+          "display_from": 1788926400.0,
+          "display_until": null,
+          "delivery_due_at": 1788926400.0,
+          "delivery_expires_at": 1789012800.0,
+          "updated_at": 1788321600.0,
+          "deadline_label": null,
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "stale_8_days",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-01T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": [
+        {
+          "id": "application:1:stale_application",
+          "subject_type": "application",
+          "subject_id": 1,
+          "reason_code": "stale_application",
+          "source_revision": "657b9ce8b387061576081a7ddf9cd05d94fc60c205fbd8d33e2a0d65ba05aa52",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1788840000.0,
+          "display_from": 1788840000.0,
+          "display_until": null,
+          "delivery_due_at": 1788840000.0,
+          "delivery_expires_at": 1788926400.0,
+          "updated_at": 1788235200.0,
+          "deadline_label": null,
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "stale_14_days",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-08-26T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 1,
+      "expected": [
+        {
+          "id": "application:1:stale_application",
+          "subject_type": "application",
+          "subject_id": 1,
+          "reason_code": "stale_application",
+          "source_revision": "15ac2c8c1a34ad05ac9d116013f9d035252cd6ae3c0d2f3f96761f1e6663df4a",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1788321600.0,
+          "display_from": 1788321600.0,
+          "display_until": null,
+          "delivery_due_at": 1788926400.0,
+          "delivery_expires_at": 1789012800.0,
+          "updated_at": 1787716800.0,
+          "deadline_label": null,
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "stale_pending",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "pending",
+          "updated_at": "2026-09-02T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 1,
+      "expected": [
+        {
+          "id": "application:1:stale_application",
+          "subject_type": "application",
+          "subject_id": 1,
+          "reason_code": "stale_application",
+          "source_revision": "95a2cc220e24185fd77fd653d7fa653598146411082fe8ddb1bf686817e3daf8",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1788926400.0,
+          "display_from": 1788926400.0,
+          "display_until": null,
+          "delivery_due_at": 1788926400.0,
+          "delivery_expires_at": 1789012800.0,
+          "updated_at": 1788321600.0,
+          "deadline_label": null,
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "stale_written_test",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "written_test",
+          "updated_at": "2026-09-02T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 1,
+      "expected": [
+        {
+          "id": "application:1:stale_application",
+          "subject_type": "application",
+          "subject_id": 1,
+          "reason_code": "stale_application",
+          "source_revision": "a5f8609d5ff1b4c91afb6b4aad870ec0bddee545ef331f7701d5cfa0cd2868e4",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1788926400.0,
+          "display_from": 1788926400.0,
+          "display_until": null,
+          "delivery_due_at": 1788926400.0,
+          "delivery_expires_at": 1789012800.0,
+          "updated_at": 1788321600.0,
+          "deadline_label": null,
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "stale_interview",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "interview",
+          "updated_at": "2026-09-02T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "stale_offer",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "offer",
+          "updated_at": "2026-09-02T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "stale_closed",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "closed",
+          "updated_at": "2026-09-02T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "interview_72.0001h",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:00.360000+00:00"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "interview_72h",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "id": "application_event:1:interview_preparation",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "interview_preparation",
+          "source_revision": "acbe58d420864b607f3d01335cc50b0489b2c2dfb0428cdca7c4f0455753fff3",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789185600.0,
+          "display_from": 1788926400.0,
+          "display_until": 1789185600.0,
+          "delivery_due_at": 1789099200.0,
+          "delivery_expires_at": 1789185600.0,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "interview"
+        }
+      ]
+    },
+    {
+      "name": "interview_48h",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "todo",
+          "scheduled_at": "2026-09-11T04:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "id": "application_event:1:interview_preparation",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "interview_preparation",
+          "source_revision": "29f26344479372717726d3a1b6181b1b352962493c345906345581567046ad39",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789099200.0,
+          "display_from": 1788840000.0,
+          "display_until": 1789099200.0,
+          "delivery_due_at": 1789012800.0,
+          "delivery_expires_at": 1789099200.0,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "interview"
+        }
+      ]
+    },
+    {
+      "name": "interview_24h",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 1,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "expected": [
+        {
+          "id": "application_event:1:interview_preparation",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "interview_preparation",
+          "source_revision": "0848e987bb120d5757eb003eaff3e5b28eab210f21b864cf18909c3fa865e944",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789012800.0,
+          "display_from": 1788753600.0,
+          "display_until": 1789012800.0,
+          "delivery_due_at": 1788926400.0,
+          "delivery_expires_at": 1789012800.0,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "interview"
+        }
+      ]
+    },
+    {
+      "name": "interview_0h",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "todo",
+          "scheduled_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "interview_cancelled",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "cancelled",
+          "scheduled_at": "2026-09-10T04:00:00Z"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "interview_done",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "done",
+          "scheduled_at": "2026-09-10T04:00:00Z"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "interview_ready",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "ready": true,
+      "expected": []
+    },
+    {
+      "name": "review_done",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 1,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "done",
+          "scheduled_at": "2026-09-09T03:00:00Z"
+        }
+      ],
+      "expected": [
+        {
+          "id": "application_event:1:review",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "review",
+          "source_revision": "750043186a8491346845d70472396ac0eb38befe31428e3d362ea8b9333cf65f",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1788922800.0,
+          "display_from": 1788922800.0,
+          "display_until": 1789009200.0,
+          "delivery_due_at": 1788922800.0,
+          "delivery_expires_at": 1789009200.0,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "interview"
+        }
+      ]
+    },
+    {
+      "name": "review_with_note",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "interview",
+          "status": "done",
+          "scheduled_at": "2026-09-09T03:00:00Z"
+        }
+      ],
+      "note": true,
+      "expected": []
+    },
+    {
+      "name": "both_deadline_subjects",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 1,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "deadline",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00Z"
+        }
+      ],
+      "offers": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "deadline": "2026-09-10",
+          "status": "pending"
+        }
+      ],
+      "expected": [
+        {
+          "id": "application_event:1:deadline",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "deadline",
+          "source_revision": "e0cb1ed47961e6f146388490a8ccfbd28a0aaa97e31c98aaf753657b4d576ccf",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789012800.0,
+          "display_from": 1788753600.0,
+          "display_until": 1789012800.0,
+          "delivery_due_at": 1788926400.0,
+          "delivery_expires_at": 1789012800.0,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "deadline"
+        },
+        {
+          "id": "offer:1:offer_response_deadline",
+          "subject_type": "offer",
+          "subject_id": 1,
+          "reason_code": "offer_response_deadline",
+          "source_revision": "8e47e723e7f9eb6b418c76a50655ba7a2f9d47ea8e3de119e5f917a20a2d5ac0",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": 1,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789084799.999999,
+          "display_from": 1788479999.999999,
+          "display_until": 1789084799.999999,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": null,
+          "deadline_label": "2026-09-10",
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "unavailable_closed_at",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z",
+          "closed_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "deadline",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00Z"
+        }
+      ],
+      "offers": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "deadline": "2026-09-10",
+          "status": "pending"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "unavailable_deleted_at",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z",
+          "closed_at": "2026-09-09T04:00:00Z",
+          "deleted_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "deadline",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00Z"
+        }
+      ],
+      "offers": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "deadline": "2026-09-10",
+          "status": "pending"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "missing_application",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [],
+      "delivery_count": 0,
+      "offers": [
+        {
+          "id": 1,
+          "deadline": "2026-09-10",
+          "status": "pending"
+        }
+      ],
+      "expected": [
+        {
+          "id": "offer:1:offer_response_deadline",
+          "subject_type": "offer",
+          "subject_id": 1,
+          "reason_code": "offer_response_deadline",
+          "source_revision": "2094e271c06e45cd79603f4cf96a1e339129d4fa952afa14d77151295d553da8",
+          "application_id": null,
+          "event_id": null,
+          "offer_id": 1,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789084799.999999,
+          "display_from": 1788479999.999999,
+          "display_until": 1789084799.999999,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": null,
+          "deadline_label": "2026-09-10",
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "dst_seven_elapsed_days",
+      "now": "2026-03-15T12:00:00-04:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-03-08T12:00:00-04:00"
+        }
+      ],
+      "delivery_count": 1,
+      "timezone": "America/New_York",
+      "expected": [
+        {
+          "id": "application:1:stale_application",
+          "subject_type": "application",
+          "subject_id": 1,
+          "reason_code": "stale_application",
+          "source_revision": "7a01d68c45496d3a320c2c6913be60858bb1c1abc3dca11cfb2d4bd1e8a8e43c",
+          "application_id": 1,
+          "event_id": null,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1773590400.0,
+          "display_from": 1773590400.0,
+          "display_until": null,
+          "delivery_due_at": 1773590400.0,
+          "delivery_expires_at": 1773676800.0,
+          "updated_at": 1772985600.0,
+          "deadline_label": null,
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "dst_calendar_seven_but_167_hours",
+      "now": "2026-03-14T12:00:00-04:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-03-07T12:00:00-05:00"
+        }
+      ],
+      "delivery_count": 0,
+      "timezone": "America/New_York",
+      "expected": []
+    },
+    {
+      "name": "date_only_offer_in_display_timezone",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "timezone": "America/New_York",
+      "offers": [
+        {
+          "id": 1,
+          "deadline": "2026-09-10",
+          "status": "pending"
+        }
+      ],
+      "expected": [
+        {
+          "id": "offer:1:offer_response_deadline",
+          "subject_type": "offer",
+          "subject_id": 1,
+          "reason_code": "offer_response_deadline",
+          "source_revision": "57a63cf7e46a8ca91faf5a83e39fa360cf796e1820b50b6a422024bf962da597",
+          "application_id": null,
+          "event_id": null,
+          "offer_id": 1,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789099199.999999,
+          "display_from": 1788494399.999999,
+          "display_until": 1789099199.999999,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": null,
+          "deadline_label": "2026-09-10",
+          "event_type": null
+        }
+      ]
+    },
+    {
+      "name": "invalid_offer_deadline",
+      "now": "2026-09-09T04:00:00Z",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00Z"
+        }
+      ],
+      "delivery_count": 0,
+      "offers": [
+        {
+          "id": 1,
+          "deadline": "2026-02-30",
+          "status": "pending"
+        }
+      ],
+      "expected": []
+    },
+    {
+      "name": "display_events_24h",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": [
+        {
+          "id": "application_event:1:event_upcoming",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "event_upcoming",
+          "source_revision": "c8924af2df3289fa74e06a0939430c0155b66744274076449fbb5b10c8acfa62",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789012800.0,
+          "display_from": 1788753600.0,
+          "display_until": 1789012800.0,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "written_test"
+        },
+        {
+          "id": "application_event:2:event_upcoming",
+          "subject_type": "application_event",
+          "subject_id": 2,
+          "reason_code": "event_upcoming",
+          "source_revision": "ab3e48b472f4cbd60016285efb3c2cce7e4d8213f4f9c205c9b2953f89951653",
+          "application_id": 1,
+          "event_id": 2,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789012800.0,
+          "display_from": 1788753600.0,
+          "display_until": 1789012800.0,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "offer_step"
+        },
+        {
+          "id": "application_event:3:event_upcoming",
+          "subject_type": "application_event",
+          "subject_id": 3,
+          "reason_code": "event_upcoming",
+          "source_revision": "3374c4e0ec90dd9f7010737880441d96ffd7937e3cb6f13c7ed6fde2e9598dbb",
+          "application_id": 1,
+          "event_id": 3,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789012800.0,
+          "display_from": 1788753600.0,
+          "display_until": 1789012800.0,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "custom"
+        }
+      ]
+    },
+    {
+      "name": "display_events_72h",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": [
+        {
+          "id": "application_event:1:event_upcoming",
+          "subject_type": "application_event",
+          "subject_id": 1,
+          "reason_code": "event_upcoming",
+          "source_revision": "1484f7e66e75da43c6e624eef49974a5119a6d20a7ad9bbe317923e9be606b2b",
+          "application_id": 1,
+          "event_id": 1,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789185600.0,
+          "display_from": 1788926400.0,
+          "display_until": 1789185600.0,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "written_test"
+        },
+        {
+          "id": "application_event:2:event_upcoming",
+          "subject_type": "application_event",
+          "subject_id": 2,
+          "reason_code": "event_upcoming",
+          "source_revision": "a67bb3061635b8651d7e7ee851300442e92c1b2bd1e12a2a490c428030f0747f",
+          "application_id": 1,
+          "event_id": 2,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789185600.0,
+          "display_from": 1788926400.0,
+          "display_until": 1789185600.0,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "offer_step"
+        },
+        {
+          "id": "application_event:3:event_upcoming",
+          "subject_type": "application_event",
+          "subject_id": 3,
+          "reason_code": "event_upcoming",
+          "source_revision": "ac6cb8098e38f8af9edbd837d9b6888f12a980a7f9f9670f1aafc97399cc1373",
+          "application_id": 1,
+          "event_id": 3,
+          "offer_id": null,
+          "company": "Acme",
+          "position": "Engineer",
+          "due_at": 1789185600.0,
+          "display_from": 1788926400.0,
+          "display_until": 1789185600.0,
+          "delivery_due_at": null,
+          "delivery_expires_at": null,
+          "updated_at": 1788926400.0,
+          "deadline_label": null,
+          "event_type": "custom"
+        }
+      ]
+    },
+    {
+      "name": "display_events_beyond_72h",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:03.600000+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:03.600000+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "todo",
+          "scheduled_at": "2026-09-12T04:00:03.600000+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "display_events_at_due",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "todo",
+          "scheduled_at": "2026-09-09T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "todo",
+          "scheduled_at": "2026-09-09T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "todo",
+          "scheduled_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "display_events_done",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "done",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "done",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "done",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "display_events_cancelled",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "cancelled",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "cancelled",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "cancelled",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "display_events_closed_application",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00",
+          "closed_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    },
+    {
+      "name": "display_events_deleted_application",
+      "now": "2026-09-09T04:00:00+00:00",
+      "apps": [
+        {
+          "id": 1,
+          "status": "applied",
+          "updated_at": "2026-09-09T04:00:00+00:00",
+          "deleted_at": "2026-09-09T04:00:00+00:00"
+        }
+      ],
+      "events": [
+        {
+          "id": 1,
+          "application_id": 1,
+          "event_type": "written_test",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 2,
+          "application_id": 1,
+          "event_type": "offer_step",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        },
+        {
+          "id": 3,
+          "application_id": 1,
+          "event_type": "custom",
+          "status": "todo",
+          "scheduled_at": "2026-09-10T04:00:00+00:00"
+        }
+      ],
+      "delivery_count": 0,
+      "expected": []
+    }
+  ]
+}

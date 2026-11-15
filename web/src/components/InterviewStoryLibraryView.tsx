@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Alert, Button, Empty, Input, List, Space, Spin, Tag, Typography } from 'antd';
 import {
@@ -21,18 +22,18 @@ import styles from './InterviewStoryLibraryView.module.css';
 const { Paragraph, Title, Text } = Typography;
 
 const BLOCK_LABELS = {
-  situation: '情境',
-  task: '任务',
-  action: '行动',
-  result: '结果',
-  reflection: '复盘',
+  get situation() { return t("情境"); },
+  get task() { return t("任务"); },
+  get action() { return t("行动"); },
+  get result() { return t("结果"); },
+  get reflection() { return t("复盘"); },
 } as const;
 
 const SOURCE_LABELS = {
-  resume_version: '简历版本',
-  interview_note: '面试复盘',
-  mock_turn: '模拟面试回答',
-  user_assertion: '已冻结的用户确认陈述',
+  get resume_version() { return t("简历版本"); },
+  get interview_note() { return t("面试复盘"); },
+  get mock_turn() { return t("模拟面试回答"); },
+  get user_assertion() { return t("已冻结的用户确认陈述"); },
 } as const;
 
 const STORY_SOURCE_KINDS = new Set(['resume_version', 'interview_note', 'mock_turn', 'user_assertion']);
@@ -601,10 +602,11 @@ function EvidenceDisclosure({
   links: InterviewStoryEvidenceLink[];
   target: string;
 }) {
+  useLocale();
   if (links.length === 0) return null;
   return (
     <details className={styles.evidenceDisclosure} data-evidence-target={target}>
-      <summary>{links.length} 条冻结证据</summary>
+      <summary>{links.length} {t("条冻结证据")}</summary>
       <div className={styles.evidenceList}>
         {links.map((link, index) => (
           <div
@@ -627,6 +629,7 @@ function VersionSection({ title, children, links, target }: {
   links?: InterviewStoryEvidenceLink[];
   target?: string;
 }) {
+  useLocale();
   return (
     <section className={styles.versionSection}>
       <div className={styles.versionSectionHeader}>
@@ -639,6 +642,7 @@ function VersionSection({ title, children, links, target }: {
 }
 
 export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props) {
+  useLocale();
   const [stories, setStories] = useState<InterviewStory[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -812,45 +816,44 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
     : 0;
 
   return (
-    <section className={styles.library} aria-label="面试故事库">
+    <section className={styles.library} aria-label={t("面试故事库")}>
       <header className={styles.pageHeader}>
         <div className={styles.pageHeading}>
-          <Title level={3} className={styles.pageTitle}>面试故事库</Title>
+          <Title level={3} className={styles.pageTitle}>{t("面试故事库")}</Title>
           <Paragraph type="secondary" className={styles.pageDescription}>
-            只在你选择原始证据并确认后保存；故事版本会保留当时的来源，不会写入知识库或自动用于面试。
-          </Paragraph>
+            {t("只在你选择原始证据并确认后保存；故事版本会保留当时的来源，不会写入知识库或自动用于面试。")}</Paragraph>
         </div>
         <Space wrap className={styles.headerActions}>
-          {onBack ? <Button onClick={onBack}>返回面试</Button> : null}
-          <Button onClick={() => onOpenDraft({ entrypoint: 'ui', reviewNoteId: undefined })}>新建故事</Button>
+          {onBack ? <Button onClick={onBack}>{t("返回面试")}</Button> : null}
+          <Button onClick={() => onOpenDraft({ entrypoint: 'ui', reviewNoteId: undefined })}>{t("新建故事")}</Button>
         </Space>
       </header>
 
       <div className={styles.toolbar}>
-        <div className={styles.statusSwitch} role="group" aria-label="故事状态">
-          <button type="button" aria-pressed={status === 'active'} onClick={() => setStatus('active')}>使用中</button>
-          <button type="button" aria-pressed={status === 'archived'} onClick={() => setStatus('archived')}>已归档</button>
+        <div className={styles.statusSwitch} role="group" aria-label={t("故事状态")}>
+          <button type="button" aria-pressed={status === 'active'} onClick={() => setStatus('active')}>{t("使用中")}</button>
+          <button type="button" aria-pressed={status === 'archived'} onClick={() => setStatus('archived')}>{t("已归档")}</button>
         </div>
         <Input.Search
-          aria-label="搜索面试故事"
+          aria-label={t("搜索面试故事")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           onSearch={(value) => setQuery(value)}
-          placeholder="搜索故事标题"
+          placeholder={t("搜索故事标题")}
           className={styles.search}
         />
       </div>
 
-      {loading ? <Spin aria-label="正在加载面试故事" /> : null}
-      {error ? <Alert type="error" showIcon message="故事库暂时无法加载，请稍后重试。" action={<Button size="small" onClick={() => load()}>重试</Button>} /> : null}
+      {loading ? <Spin aria-label={t("正在加载面试故事")} /> : null}
+      {error ? <Alert type="error" showIcon message={t("故事库暂时无法加载，请稍后重试。")} action={<Button size="small" onClick={() => load()}>{t("重试")}</Button>} /> : null}
       {!loading && !error && effectiveStoryListState === 'unavailable' ? (
-        <Alert type="warning" showIcon message="故事来源暂时不可用，请稍后重试。" />
+        <Alert type="warning" showIcon message={t("故事来源暂时不可用，请稍后重试。")} />
       ) : null}
       {!loading && !error && effectiveStoryListState === 'partial' ? (
-        <Alert type="warning" showIcon message="部分故事暂时不可用，已展示可用故事。" />
+        <Alert type="warning" showIcon message={t("部分故事暂时不可用，已展示可用故事。")} />
       ) : null}
       {!loading && !error && effectiveStoryListState !== 'unavailable' && visibleStories.length === 0 ? (
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有已确认的面试故事" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("还没有已确认的面试故事")} />
       ) : null}
       {!loading && !error && visibleStories.length > 0 ? (
         <List
@@ -864,18 +867,18 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
                 <div className={styles.storySummary}>
                   <div className={styles.storyTitleRow}>
                     <Text strong className={styles.storyTitle}>{story.title}</Text>
-                    <Tag color={story.status === 'active' ? 'purple' : 'default'}>{story.status === 'active' ? '使用中' : '已归档'}</Tag>
+                    <Tag color={story.status === 'active' ? 'purple' : 'default'}>{story.status === 'active' ? t("使用中") : t("已归档")}</Tag>
                   </div>
                   <div className={styles.storyMeta}>
-                    <span>版本 {story.version_number ?? 0}</span>
-                    {state ? <Tag color={state === '来源已变化' || state === '部分来源暂时不可用' ? 'warning' : 'default'}>{state}</Tag> : null}
-                    {assertion ? <span>包含用户确认陈述</span> : null}
+                    <span>{t("版本 {version}", { version: story.version_number ?? 0 })}</span>
+                    {state ? <Tag color={state === '来源已变化' || state === '部分来源暂时不可用' ? 'warning' : 'default'}>{t(state)}</Tag> : null}
+                    {assertion ? <span>{t("包含用户确认陈述")}</span> : null}
                   </div>
                 </div>
                 <div className={styles.storyActions}>
-                  <Button onClick={() => void openStory(story.id)}>查看版本</Button>
+                  <Button onClick={() => void openStory(story.id)}>{t("查看版本")}</Button>
                   <Button type="text" onClick={() => void toggleArchive(story)}>
-                    {story.status === 'active' ? '归档' : '恢复'}
+                    {story.status === 'active' ? t("归档") : t("恢复")}
                   </Button>
                 </div>
               </List.Item>
@@ -888,21 +891,21 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
         <Alert
           type={historyState === 'error' || historyState === 'unavailable' ? 'warning' : 'info'}
           showIcon
-          message={historyState === 'loading' ? '正在加载故事版本…' : historyMessage ?? '故事历史暂时不可用，请稍后重试。'}
+          message={historyState === 'loading' ? t("正在加载故事版本…") : (historyMessage ? t(historyMessage) : null) ?? t("故事历史暂时不可用，请稍后重试。")}
         />
       ) : null}
 
       {selectedStory && historyState !== 'idle' ? (
-        <section className={styles.history} aria-label="故事版本历史">
+        <section className={styles.history} aria-label={t("故事版本历史")}>
           <div className={styles.historyHeader}>
             <div>
               <Title level={4} className={styles.historyTitle}>
-                {selectedVersion && historyState === 'ready' ? `版本 ${selectedVersion.version_number} · 已确认历史` : '故事版本历史'}
+                {selectedVersion && historyState === 'ready' ? t("版本 {version} · 已确认历史", { version: selectedVersion.version_number }) : t("故事版本历史")}
               </Title>
               {selectedVersion && historyState === 'ready' ? (
                 <div className={styles.historyMeta}>
-                  <Tag>{selectedVersion.origin_kind === 'manual' ? '手动保存' : 'AI 建议后确认'}</Tag>
-                  <span>{uniqueSourceCount} 个冻结来源 · {selectedVersion.evidence_links.length} 条证据引用</span>
+                  <Tag>{selectedVersion.origin_kind === 'manual' ? t("手动保存") : t("AI 建议后确认")}</Tag>
+                  <span>{uniqueSourceCount} {t("个冻结来源 ·")}{" "}{selectedVersion.evidence_links.length} {t("条证据引用")}</span>
                 </div>
               ) : null}
             </div>
@@ -913,13 +916,13 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
                   targetStoryId: selectedStory.id,
                   expectedCurrentVersionId: selectedStory.current_version_id ?? undefined,
                   expectedStoryRevision: selectedStory.story_revision,
-                })}>基于此故事新建版本</Button>
+                })}>{t("基于此故事新建版本")}</Button>
               ) : null}
-              <Button onClick={closeHistory}>关闭历史</Button>
+              <Button onClick={closeHistory}>{t("关闭历史")}</Button>
             </Space>
           </div>
 
-          <div className={styles.versionRail} aria-label="故事版本选择">
+          <div className={styles.versionRail} aria-label={t("故事版本选择")}>
             {versions.map((version) => (
               <button
                 key={version.id}
@@ -927,37 +930,37 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
                 aria-pressed={selectedVersion?.id === version.id}
                 onClick={() => void openVersion(selectedStory.id, version.id)}
               >
-                查看版本 {version.version_number}
+                {t("查看版本")}{" "}{version.version_number}
               </button>
             ))}
           </div>
 
-          {historyState === 'loading' ? <Alert type="info" showIcon message="正在加载故事版本…" /> : null}
+          {historyState === 'loading' ? <Alert type="info" showIcon message={t("正在加载故事版本…")} /> : null}
           {historyState === 'error' ? (
             <Alert
               type="error"
               showIcon
-              message={historyMessage ?? '故事历史暂时无法加载，请稍后重试。'}
-              action={<Button size="small" onClick={() => void openStory(selectedStory.id)}>重试</Button>}
+              message={(historyMessage ? t(historyMessage) : null) ?? t("故事历史暂时无法加载，请稍后重试。")}
+              action={<Button size="small" onClick={() => void openStory(selectedStory.id)}>{t("重试")}</Button>}
             />
           ) : null}
           {(historyState === 'partial' || historyState === 'unavailable') ? (
             <Alert
               type="warning"
               showIcon
-              message={historyMessage ?? (historyState === 'partial' ? '部分版本暂时不可用，已隐藏不完整内容。' : '当前版本暂时不可用，无法安全展示。')}
+              message={(historyMessage ? t(historyMessage) : null) ?? (historyState === 'partial' ? t("部分版本暂时不可用，已隐藏不完整内容。") : t("当前版本暂时不可用，无法安全展示。"))}
             />
           ) : null}
           {selectedVersion && historyState === 'ready' ? (
             <>
-              <Alert type="info" showIcon message="以下内容来自已确认的冻结版本。" />
+              <Alert type="info" showIcon message={t("以下内容来自已确认的冻结版本。")} />
               <div className={styles.versionContent} data-testid="story-version-content">
                 <div className={styles.evidenceSummary}>
-                  <span>{uniqueSourceCount} 个冻结来源</span>
-                  <strong>{selectedVersion.evidence_links.length} 条证据引用</strong>
+                  <span>{uniqueSourceCount} {t("个冻结来源")}</span>
+                  <strong>{selectedVersion.evidence_links.length} {t("条证据引用")}</strong>
                 </div>
                 <VersionSection
-                  title="故事标题"
+                  title={t("故事标题")}
                   links={linksForTarget(selectedVersion, 'title', selectedVersion.content.title.id)}
                   target="title:title"
                 >
@@ -965,7 +968,7 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
                 </VersionSection>
 
                 {selectedVersion.content.applicable_questions.length > 0 ? (
-                  <VersionSection title="适用问题">
+                  <VersionSection title={t("适用问题")}>
                     <div className={styles.compactList}>
                       {selectedVersion.content.applicable_questions.map((question) => (
                         <div key={question.id}>
@@ -989,7 +992,7 @@ export default function InterviewStoryLibraryView({ onOpenDraft, onBack }: Props
                 ))}
 
                 {selectedVersion.content.capability_labels.length > 0 ? (
-                  <VersionSection title="能力标签">
+                  <VersionSection title={t("能力标签")}>
                     <div className={styles.capabilityList}>
                       {selectedVersion.content.capability_labels.map((label) => (
                         <div key={label.id} className={styles.capabilityItem}>

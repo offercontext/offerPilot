@@ -1,10 +1,11 @@
+import { t } from '@/i18n';
 import type { ResumeImportField } from '@/types/resume';
 
-const LABELS: Record<string, string> = { contact: '基本信息', name: '姓名/名称', email: '邮箱', phone: '电话', location: '所在地', career_intent: '求职意向', target_roles: '目标岗位', target_locations: '目标城市', education: '教育经历', school: '学校', degree: '学历', major: '专业', start_date: '开始时间', end_date: '结束时间', experience: '工作经历', company: '公司', title: '职位', highlights: '工作亮点', projects: '项目经历', role: '职责', skills: '技能' };
+const LABELS: Record<string, string> = { get contact() { return t("基本信息"); }, get name() { return t("姓名/名称"); }, get email() { return t("邮箱"); }, get phone() { return t("电话"); }, get location() { return t("所在地"); }, get career_intent() { return t("求职意向"); }, get target_roles() { return t("目标岗位"); }, get target_locations() { return t("目标城市"); }, get education() { return t("教育经历"); }, get school() { return t("学校"); }, get degree() { return t("学历"); }, get major() { return t("专业"); }, get start_date() { return t("开始时间", undefined, "resume.startDate"); }, get end_date() { return t("结束时间"); }, get experience() { return t("工作经历"); }, get company() { return t("公司"); }, get title() { return t("职位"); }, get highlights() { return t("工作亮点"); }, get projects() { return t("项目经历"); }, get role() { return t("职责"); }, get skills() { return t("技能"); } };
 export function importFieldLabel(path: string): string {
   return path.split('.').reduce<string[]>((parts, part) => {
     if (/^\d+$/.test(part)) parts[parts.length - 1] += ` ${Number(part) + 1}`;
-    else parts.push(LABELS[part] ?? '字段');
+    else parts.push(LABELS[part] ?? t("字段"));
     return parts;
   }, []).join(' · ');
 }

@@ -4,13 +4,15 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
-from typing import Optional
+from typing import NoReturn, Optional
 
 import typer
 import uvicorn
 
 from offerpilot.ai.client import ConfiguredAIClient
-from offerpilot.ai.workflows import analyze_jd, generate_questions, match_resume
+from offerpilot.ai.workflows import (
+    JDInput, WorkflowError, analyze_jd, generate_questions, match_resume, resolve_jd_input,
+)
 from offerpilot.application_status import APPLICATION_STATUS_IDS, normalize_application_status
 from offerpilot.api import create_app
 from offerpilot.config import (
@@ -23,6 +25,9 @@ from offerpilot.config import (
 )
 from offerpilot.db import session_factory_for_data_dir
 from offerpilot.diagnostics import append_log_entry
+from offerpilot.external_agents.cli import app as mcp_app
+from offerpilot.repositories.application_jd_versions import ApplicationJDService
+from offerpilot.evaluation.cli import app as eval_app
 from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
 from offerpilot.repositories.jd import JDAnalysesRepository
 from offerpilot.repositories.notes import NoteCreate, NotesRepository
@@ -56,6 +61,10 @@ app.add_typer(question_app, name="question")
 app.add_typer(skill_app, name="skill")
 app.add_typer(wakeup_app, name="wakeup")
 app.add_typer(knowledge_app, name="knowledge")
+app.add_typer(mcp_app, name="mcp")
+
+# Loading the command group does not initialize an observer, database or subject.
+app.add_typer(eval_app, name="eval")
 
 
 @app.command()
@@ -180,20 +189,22 @@ def config(
 
 @app.command("analyze")
 def analyze_command(
-    jd: str = typer.Option("", "--jd", "-j", help="JD text to analyze (use '-' to read stdin)"),
-    jd_url: str = typer.Option("", "--jd-url", "-u", help="JD page URL to fetch then analyze"),
-    app_id: int = typer.Option(0, "--app", "-a", help="linked application ID"),
+    jd: Optional[str] = typer.Option(None, "--jd", "-j", help="Independent JD text ('-' for stdin)"),
+    jd_url: str = typer.Option("", "--jd-url", "-u", help="Record-only URL; not supported as input"),
+    app_id: Optional[int] = typer.Option(None, "--app", "-a", help="Linked application ID"),
+    jd_version: Optional[int] = typer.Option(
+        None, "--jd-version", help="Current saved JD version ID; requires --app and no --jd",
+    ),
 ) -> None:
-    jd_text = _read_dash_stdin(jd)
-    _validate_cli_jd_input(jd_text, jd_url)
+    request = _cli_jd_input(jd, jd_url, app_id, jd_version)
+    session_factory = session_factory_for_data_dir(resolve_data_dir())
     try:
         result = analyze_jd(
-            _build_ai_model(),
-            _jd_repo(),
-            jd_text=jd_text,
-            jd_url=jd_url,
-            application_id=app_id if app_id > 0 else None,
+            _build_ai_model, JDAnalysesRepository(session_factory),
+            ApplicationJDService(session_factory), request,
         )
+    except WorkflowError as exc:
+        _exit_workflow_error(exc)
     except (RuntimeError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     summary = str(result.result.get("summary") or "")
@@ -206,14 +217,22 @@ def analyze_command(
 def start(
     port: Optional[int] = typer.Option(None, "--port", "-p", help="local server port"),
     host: str = typer.Option("127.0.0.1", "--host", help="server bind host"),
+    enable_local_mail_setup: bool = typer.Option(False, "--enable-local-mail-setup",
+        help="Enable user-only mail credential setup on literal loopback; no reverse proxy"),
 ) -> None:
+    if enable_local_mail_setup and host not in {"127.0.0.1", "::1"}:
+        raise typer.BadParameter("--enable-local-mail-setup requires --host 127.0.0.1 or ::1; reverse proxies are unsupported")
     data_dir = resolve_data_dir()
+    server_app = create_app(data_dir=data_dir, job_mail_local_setup_enabled=enable_local_mail_setup)
     cfg = load_config(data_dir)
     resolved_port = port if port is not None else cfg.local_port
-    session_factory_for_data_dir(data_dir)
     append_log_entry(data_dir, "INFO", f"server starting on port {resolved_port}")
     typer.echo(f"OfferPilot running at http://localhost:{resolved_port}")
-    uvicorn.run(create_app(data_dir=data_dir), host=host, port=resolved_port)
+    if enable_local_mail_setup:
+        uvicorn.run(server_app,
+                    host=host, port=resolved_port, proxy_headers=False)
+    else:
+        uvicorn.run(server_app, host=host, port=resolved_port)
 
 
 @app.command()
@@ -602,21 +621,22 @@ def resume_list() -> None:
 @resume_app.command("match")
 def resume_match(
     resume_id: int = typer.Option(..., "--resume", "-r", help="resume ID"),
-    jd: str = typer.Option("", "--jd", "-j", help="JD text to match (use '-' to read stdin)"),
-    jd_url: str = typer.Option("", "--jd-url", "-u", help="JD page URL to fetch then match"),
-    app_id: int = typer.Option(0, "--app", "-a", help="linked application ID"),
+    jd: Optional[str] = typer.Option(None, "--jd", "-j", help="Independent JD text ('-' for stdin)"),
+    jd_url: str = typer.Option("", "--jd-url", "-u", help="Record-only URL; not supported as input"),
+    app_id: Optional[int] = typer.Option(None, "--app", "-a", help="Linked application ID"),
+    jd_version: Optional[int] = typer.Option(
+        None, "--jd-version", help="Current saved JD version ID; requires --app and no --jd",
+    ),
 ) -> None:
-    jd_text = _read_dash_stdin(jd)
-    _validate_cli_jd_input(jd_text, jd_url)
+    request = _cli_jd_input(jd, jd_url, app_id, jd_version)
+    session_factory = session_factory_for_data_dir(resolve_data_dir())
     try:
         result = match_resume(
-            _build_ai_model(),
-            _resumes_repo(),
-            resume_id=resume_id,
-            jd_text=jd_text,
-            jd_url=jd_url,
-            application_id=app_id if app_id > 0 else None,
+            _build_ai_model, ResumesRepository(session_factory),
+            ApplicationJDService(session_factory), resume_id, request,
         )
+    except WorkflowError as exc:
+        _exit_workflow_error(exc)
     except (RuntimeError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     score = result.result.get("match_score")
@@ -831,16 +851,19 @@ def question_generate(
     app_id: int = typer.Option(0, "--app", "-a", help="application ID for notes source"),
     count: int = typer.Option(8, "--count", "-n", help="number of questions to generate"),
 ) -> None:
+    session_factory = session_factory_for_data_dir(resolve_data_dir())
     try:
         result = generate_questions(
-            _build_ai_model(),
-            _questions_repo(),
-            _notes_repo(),
+            _build_ai_model,
+            QuestionsRepository(session_factory),
+            NotesRepository(session_factory),
             source=source,
             topic=topic,
             application_id=app_id,
             count=count,
         )
+    except WorkflowError as exc:
+        _exit_workflow_error(exc)
     except (RuntimeError, ValueError) as exc:
         raise typer.BadParameter(str(exc)) from exc
     typer.echo(f"\nGenerated {result.count} questions  (skipped duplicates: {result.skipped})")
@@ -856,8 +879,8 @@ def _applications_repo() -> ApplicationsRepository:
     return ApplicationsRepository(session_factory_for_data_dir(resolve_data_dir()))
 
 
-def _jd_repo() -> JDAnalysesRepository:
-    return JDAnalysesRepository(session_factory_for_data_dir(resolve_data_dir()))
+def _jd_versions() -> ApplicationJDService:
+    return ApplicationJDService(session_factory_for_data_dir(resolve_data_dir()))
 
 
 def _resumes_repo() -> ResumesRepository:
@@ -890,28 +913,34 @@ def _read_dash_stdin(value: str) -> str:
     return value
 
 
-def _validate_cli_jd_input(jd_text: str, jd_url: str) -> None:
-    if jd_url:
-        if not jd_text.strip():
-            typer.echo(
-                json.dumps(
-                    {
-                        "code": "jd_text_required",
-                        "error": "jd_text is required; jd_url is record-only",
-                    },
-                    ensure_ascii=False,
-                )
-            )
-            raise typer.Exit(code=2)
-        typer.echo(
-            json.dumps(
-                {"code": "jd_url_not_supported", "error": "jd_url is record-only"},
-                ensure_ascii=False,
-            )
+def _cli_jd_input(
+    jd: str | None, jd_url: str, app_id: int | None, jd_version: int | None,
+) -> JDInput:
+    request = JDInput(
+        jd_text=_read_dash_stdin(jd) if jd is not None else None,
+        jd_url=jd_url, application_id=app_id, jd_version_id=jd_version,
+    )
+    # Preserve the CLI's early, machine-readable URL migration error, using
+    # the same business validator rather than a second source contract.
+    if jd_url and app_id is None and jd_version is None:
+        try:
+            resolve_jd_input(_jd_versions(), request)
+        except WorkflowError as exc:
+            suffix = "; jd_url is record-only" if exc.code == "jd_text_required" else ""
+            _exit_workflow_error(exc, suffix=suffix)
+    return request
+
+
+def _exit_workflow_error(exc: WorkflowError, *, suffix: str = "") -> NoReturn:
+    message = str(exc) + suffix
+    if exc.code == "application_jd_version_required":
+        message += (
+            "; use --app <id> --jd-version <current-version-id> without --jd. "
+            "Save the JD in the application first, or omit --app for independent text."
         )
-        raise typer.Exit(code=2)
-    if not jd_text.strip():
-        raise typer.BadParameter("jd_text_required")
+    typer.echo(json.dumps({"code": exc.code or "invalid_request", "error": message},
+                          ensure_ascii=False))
+    raise typer.Exit(code=2)
 
 
 def _print_config(data_dir: Path, cfg: Config) -> None:

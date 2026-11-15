@@ -637,6 +637,42 @@
   text-align: center;
 }
 
+/* Keep desktop explanations readable at the narrower supported width. */
+@media (min-width: 1000px) {
+  .metricReason {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* English labels and explanations need more room than the compact Chinese rows. */
+:global(html[lang='en-US']) .missionMetric {
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: start;
+}
+
+:global(html[lang='en-US']) .metricReason {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:global(html[lang='en-US']) .metricSummary {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+}
+
+:global(html[lang='en-US']) .metricValue {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .metric-blocked .metricState {
   background: rgba(239, 68, 68, 0.14);
   color: var(--op-error);

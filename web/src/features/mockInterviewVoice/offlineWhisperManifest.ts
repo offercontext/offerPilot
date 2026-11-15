@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 export type OfflineWhisperManifest = {
   readonly schemaVersion: 1;
   readonly modelId: 'onnx-community/whisper-small';
@@ -41,5 +42,5 @@ export function validateOfflineWhisperManifest(value: OfflineWhisperManifest): b
 }
 
 export function formatModelSize(bytes = OFFLINE_WHISPER_MANIFEST.approximateBytes): string {
-  return `约 ${Math.round(bytes / 1024 / 1024)} MB`;
+  return t("约 {size} MB", { size: Math.round(bytes / 1024 / 1024) });
 }

@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Button } from 'antd';
 import type { PipelineInsight } from '@/lib/pipelineInsights';
 import styles from '../dashboard.module.css';
@@ -23,18 +24,19 @@ export default function ActionQueue({
   onOpenQuestions,
   onSeeAll,
 }: Props) {
+  useLocale();
   const topItems = items.slice(0, 5);
 
   if (topItems.length === 0) {
     return (
       <div className={styles.actionEmpty}>
         <div>
-          <div className={styles.actionEmptyTitle}>今天没有紧急事项</div>
-          <div className={styles.actionEmptyText}>当前节奏稳定，可以继续补充投递、刷题或整理复盘。</div>
+          <div className={styles.actionEmptyTitle}>{t("今天没有紧急事项")}</div>
+          <div className={styles.actionEmptyText}>{t("当前节奏稳定，可以继续补充投递、刷题或整理复盘。")}</div>
         </div>
         <div className={styles.actionEmptyButtons}>
-          <Button type="primary" onClick={onAddApplication}>添加投递</Button>
-          <Button onClick={onOpenQuestions}>打开题库</Button>
+          <Button type="primary" onClick={onAddApplication}>{t("添加投递")}</Button>
+          <Button onClick={onOpenQuestions}>{t("打开题库")}</Button>
         </div>
       </div>
     );
@@ -60,8 +62,7 @@ export default function ActionQueue({
       ))}
       {items.length > topItems.length && (
         <Button className={styles.seeAllActions} onClick={onSeeAll}>
-          查看全部 {items.length} 个行动
-        </Button>
+          {t("查看全部 {count} 个行动", { count: items.length })}</Button>
       )}
     </div>
   );

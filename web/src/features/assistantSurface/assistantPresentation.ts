@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { UITurn } from '@/components/ChatPanel/model';
 
 const HARU_MESSAGE_LIMIT = 8;
@@ -18,7 +19,7 @@ export function compactMessageText(turn: UITurn): string {
     return [
       turn.presentation.conclusion,
       turn.content.trim() || turn.presentation.detailMarkdown.trim(),
-      actions ? `下一步\n${actions}` : '',
+      actions ? `${t('下一步')}\n${actions}` : '',
     ].filter(Boolean).join('\n\n');
   }
   const text = turn.content.trim();

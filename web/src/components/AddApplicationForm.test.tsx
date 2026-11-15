@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
+import { createRequire } from 'node:module';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { message } from 'antd';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AddApplicationForm from './AddApplicationForm';
 import { checkApplicationDuplicates, createApplicationWithJd, getApplicationCreationScope } from '@/services/applications';
@@ -18,6 +20,7 @@ const request: ApplicationCreationInput = {
 };
 const result = { ...request, id: 7, jd_version_id: null } as unknown as ApplicationCreationResult;
 let root: Root;
+let host: HTMLDivElement;
 let client: QueryClient;
 const created = vi.fn();
 const closed = vi.fn();
@@ -49,17 +52,84 @@ async function select(id: string, label: string) {
   await act(async () => option.click()); await flush();
 }
 beforeEach(() => {
-  vi.resetAllMocks(); localStorage.clear(); document.body.replaceChildren();
+  vi.resetAllMocks(); localStorage.clear();
   vi.spyOn(window, 'getComputedStyle').mockImplementation((element) => nativeComputedStyle(element));
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: false, addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn() }) });
   vi.mocked(getApplicationCreationScope).mockResolvedValue('workspace-a');
   vi.mocked(checkApplicationDuplicates).mockResolvedValue({ items: [], has_more: false });
   vi.mocked(createApplicationWithJd).mockResolvedValue(result);
-  root = createRoot(document.body.appendChild(document.createElement('div')));
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
-afterEach(() => { act(() => root.unmount()); client.clear(); vi.restoreAllMocks(); });
+afterEach(async () => {
+  // Static messages own a separate React root and portal into document.body.
+  // Let that owner remove its notices before removing only this test's host.
+  // Clearing body directly leaves its delayed expiry holding detached nodes.
+  try {
+    await act(async () => { message.destroy(); root.unmount(); });
+    expect(document.querySelector('.ant-message')).toBeNull();
+  } finally {
+    host.remove(); client.clear(); vi.restoreAllMocks();
+  }
+});
+
+// jsdom is already the test environment dependency; keep its tiny fixture API
+// typed here without adding an otherwise unused @types/jsdom dependency.
+const { JSDOM } = createRequire(import.meta.url)('jsdom') as {
+  JSDOM: new (html: string, options: { pretendToBeVisual: boolean }) => { window: Window };
+};
+
+// Hold a real polyfill refresh across a clock switch, as a prior UI owner can.
+// Its separate ESM controller keeps this fixture independent of AntD's CJS singleton.
+async function pendingDisconnectedResizeFrame() {
+  const requestFrame = globalThis.requestAnimationFrame;
+  // jsdom shares one interval across all RAF callbacks in a window. A prior
+  // owner's real-clock RAF must not make this fixture borrow that interval.
+  const frameWindow = new JSDOM('', { pretendToBeVisual: true }).window;
+  const frames: number[] = [];
+  globalThis.requestAnimationFrame = (callback) => {
+    const handle = frameWindow.requestAnimationFrame(callback);
+    frames.push(handle);
+    return handle;
+  };
+  let module: typeof import('resize-observer-polyfill');
+  try {
+    module = await vi.importActual<typeof import('resize-observer-polyfill')>(
+      'resize-observer-polyfill/dist/ResizeObserver.es.js',
+    );
+  } catch (error) {
+    frameWindow.close();
+    throw error;
+  } finally {
+    globalThis.requestAnimationFrame = requestFrame;
+  }
+  const onResize = vi.fn();
+  const observer = new module.default(onResize);
+  const schedule = vi.spyOn(globalThis, 'setTimeout')
+    .mockImplementation(() => 0 as unknown as ReturnType<typeof setTimeout>);
+  let registrations: typeof schedule.mock.calls;
+  try {
+    observer.observe(document.createElement('div'));
+    registrations = schedule.mock.calls.slice();
+  } finally {
+    observer.disconnect();
+    schedule.mockRestore();
+  }
+  expect(registrations).toHaveLength(1);
+  expect(registrations[0][0]).toBeTypeOf('function');
+  expect(registrations[0][1]).toBe(20);
+  return {
+    release: registrations[0][0] as () => void,
+    frames,
+    onResize,
+    dispose: () => {
+      frames.forEach((handle) => frameWindow.cancelAnimationFrame(handle));
+      frameWindow.close();
+    },
+  };
+}
 
 describe('single Application intake', () => {
   it.each(['cancel', 'external'])('reoffers a bypassed unknown submission after %s close and reopen', async (method) => {
@@ -125,7 +195,7 @@ describe('single Application intake', () => {
     await render(); input('company_name', '公司 A'); input('position_name', '工程师'); await click('核对并检查重复'); await click('确认保存');
     const original = vi.mocked(createApplicationWithJd).mock.calls[0][0];
     expect(document.body.textContent).toContain('创建结果未知');
-    act(() => root.unmount()); root = createRoot(document.body.appendChild(document.createElement('div')));
+    act(() => root.unmount()); root = createRoot(host);
     await render(); expect(document.body.textContent).toContain('有一条待恢复提交');
     expect(document.getElementById('company_name')).toBeNull();
     await click('查询／恢复结果');
@@ -177,5 +247,69 @@ describe('single Application intake', () => {
     await render(); await click('查询／恢复结果');
     expect(createApplicationWithJd).toHaveBeenCalledWith(request);
     expect(loadPendingCreations('workspace-a')).toHaveLength(1);
+  });
+  it.each([false, true])('destroys real static message portals and their expiry timers (pending resize frame: %s)', async (withResizeFrame) => {
+    const resizeFrame = withResizeFrame ? await pendingDisconnectedResizeFrame() : null;
+    // Reproduce the competing owner that made same-window fixtures flaky.
+    // Register synchronously before switching clocks so its RAF is still pending.
+    const cancelPriorFrame = globalThis.cancelAnimationFrame;
+    const priorFrame = withResizeFrame ? requestAnimationFrame(() => {}) : null;
+    vi.useFakeTimers();
+    const scheduleTimeout = vi.spyOn(globalThis, 'setTimeout');
+    const cancelTimeout = vi.spyOn(globalThis, 'clearTimeout');
+    const scheduleInterval = vi.spyOn(globalThis, 'setInterval');
+    const cancelInterval = vi.spyOn(globalThis, 'clearInterval');
+    const onClose = vi.fn();
+    try {
+      resizeFrame?.release();
+      if (resizeFrame) {
+        expect(resizeFrame.frames).toHaveLength(1);
+        expect(scheduleInterval).toHaveBeenCalledTimes(1);
+        expect(scheduleInterval.mock.results[0].type).toBe('return');
+      }
+      const frameInterval = scheduleInterval.mock.results[0]?.value;
+      const firstRegistration = scheduleTimeout.mock.calls.length;
+      await act(async () => {
+        void message.success({
+          key: 'owned-intake-cleanup-notice',
+          content: 'Owned intake cleanup notice',
+          duration: 60,
+          onClose,
+        });
+      });
+      expect(document.querySelector('.ant-message')?.textContent).toContain('Owned intake cleanup notice');
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+      // This open's exact expiry handle, not every prior owner's timer.
+      const expiryRegistrations = scheduleTimeout.mock.calls.flatMap((args, index) =>
+        index >= firstRegistration && args[1] === 60_000
+          ? [scheduleTimeout.mock.results[index]]
+          : [],
+      );
+      expect(expiryRegistrations).toHaveLength(1);
+      expect(expiryRegistrations[0].type).toBe('return');
+      const expiryHandle = expiryRegistrations[0].value;
+      expect(cancelTimeout).not.toHaveBeenCalledWith(expiryHandle);
+      expect(onClose).not.toHaveBeenCalled();
+      await act(async () => { message.destroy(); });
+      expect(document.querySelector('.ant-message')).toBeNull();
+      expect(cancelTimeout).toHaveBeenCalledWith(expiryHandle);
+      if (resizeFrame) expect(cancelInterval).not.toHaveBeenCalledWith(frameInterval);
+      await act(async () => { await vi.runAllTimersAsync(); });
+      expect(onClose).not.toHaveBeenCalled();
+      expect(document.querySelector('.ant-message')).toBeNull();
+      if (resizeFrame) {
+        expect(cancelInterval).toHaveBeenCalledWith(frameInterval);
+        expect(resizeFrame.onResize).not.toHaveBeenCalled();
+      }
+    } finally {
+      // Cancel only this fixture's RAF on failure; normally it retires itself above.
+      resizeFrame?.dispose();
+      scheduleTimeout.mockRestore();
+      cancelTimeout.mockRestore();
+      scheduleInterval.mockRestore();
+      cancelInterval.mockRestore();
+      vi.useRealTimers();
+      if (priorFrame !== null) cancelPriorFrame(priorFrame);
+    }
   });
 });

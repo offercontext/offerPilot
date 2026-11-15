@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import type { ChatResponse, ChatStreamEvent, PilotExecution } from '@/types/chat';
 import { authHeaders } from './authToken';
 import type { PilotTimelinePage } from '@/features/actionPresentation/contracts';
@@ -9,11 +10,17 @@ export interface RuntimeIdentity {
   conversation_id: number;
   execution_generation: number;
 }
+/** Ephemeral text only; canonical messages and action authority stay in P2. */
+export interface RuntimeAssistantProgress extends RuntimeIdentity {
+  sequence: number;
+  content: string;
+}
 export interface RuntimeObserveOptions {
   signal?: AbortSignal;
   onAccepted?: (identity: { conversationId: number; turnId: string; executionGeneration: number; protocol: typeof protocol }) => void;
   onEvent?: (event: ChatStreamEvent) => void;
   onSnapshot?: (page: PilotTimelinePage) => void | Promise<void>;
+  onAssistantProgress?: (progress: RuntimeAssistantProgress) => void;
 }
 type RuntimeState = Partial<RuntimeIdentity> & {
   protocol_version?: string;
@@ -34,7 +41,7 @@ export class RuntimeSubscriptionError extends Error {
   readonly acceptedTurn = true;
   readonly code = 'runtime_subscription_detached';
   constructor(readonly target: RuntimeIdentity) {
-    super('连接已断开，任务仍可能在运行。重新打开对话可查看已保存的结果。');
+    super(t("连接已断开，任务仍可能在运行。重新打开对话可查看已保存的结果。"));
     this.name = 'RuntimeSubscriptionError';
   }
 }
@@ -43,10 +50,10 @@ export class RuntimeEndedError extends Error {
   readonly acceptedTurn = true;
   readonly code: string;
   constructor(readonly target: RuntimeIdentity, readonly state: string) {
-    super(({ failed: '任务执行失败，请查看已保存的记录。', stopped: '任务已停止，已提交的更改仍保留。',
-      interrupted: '执行已中断，请查看已保存的记录。', result_unknown: '执行结果待核对，请查看已保存的记录。',
-      completed: '任务已完成，请查看已保存的结果。', waiting_confirmation: '任务正在等待确认，请刷新确认状态。',
-    } as Record<string, string>)[state] ?? '任务状态已变化，请重新读取已保存的记录。');
+    super(({ failed: t("任务执行失败，请查看已保存的记录。"), stopped: t("任务已停止，已提交的更改仍保留。"),
+      interrupted: t("执行已中断，请查看已保存的记录。"), result_unknown: t("执行结果待核对，请查看已保存的记录。"),
+      completed: t("任务已完成，请查看已保存的结果。"), waiting_confirmation: t("任务正在等待确认，请刷新确认状态。"),
+    } as Record<string, string>)[state] ?? t("任务状态已变化，请重新读取已保存的记录。"));
     this.name = 'RuntimeEndedError'; this.code = `runtime_${state}`;
   }
 }
@@ -156,26 +163,55 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
   const url = `${base}/turns/${encodeURIComponent(target.turn_id)}`;
   let high = 0;
   let completed: ChatResponse | undefined;
+  let progressText = '';
+  let progressUnavailable = false;
+  const publishProgress = () => {
+    // A presentation callback must not create transport retries or commands.
+    try { options?.onAssistantProgress?.({ ...target, sequence: high, content: progressText }); }
+    catch { /* Optional, read-only UI projection. */ }
+  };
+  const clearProgress = () => { progressText = ''; publishProgress(); };
   const consume = (raw: ChatStreamEvent & { event_seq?: number; kind?: string }, snapshotEvent = false) => {
     if (completed) return;
     if (raw.turn_id !== target.turn_id || raw.conversation_id !== target.conversation_id
       || raw.execution_generation !== target.execution_generation) return;
     const kind = raw.event ?? raw.kind;
     if (kind === 'resync_required') {
+      progressUnavailable = true;
+      clearProgress();
       options?.onEvent?.({ ...raw, event: 'status', seq: raw.event_seq ?? raw.seq ?? high,
-        data: { phase: 'resync', label: '部分实时进度已省略，正在恢复已保存记录。' } });
+        data: { phase: 'resync', label: t("部分实时进度已省略，正在恢复已保存记录。") } });
       throw new Error('runtime_resync_required');
     }
     if (kind === 'subscribed' || kind === 'heartbeat') return;
     const seq = raw.event_seq ?? raw.seq;
     if (!Number.isSafeInteger(seq) || seq <= high) return;
-    if (seq > high + 1 && !snapshotEvent) throw new Error('runtime_event_gap');
+    if (seq > high + 1) {
+      progressText = ''; progressUnavailable = true;
+      if (!snapshotEvent) { publishProgress(); throw new Error('runtime_event_gap'); }
+    }
     high = seq;
     if (!kind) throw new Error('runtime_event_kind_missing');
     const event = { ...raw, event: kind, seq };
+    if (options?.onAssistantProgress && !snapshotEvent) {
+      if (kind === 'assistant_delta' && !progressUnavailable) {
+        const delta = (event.data as { delta?: unknown })?.delta;
+        if (typeof delta === 'string') {
+          if (progressText.length + delta.length <= 1_048_576) progressText += delta;
+          else { progressText = ''; progressUnavailable = true; }
+        }
+      } else if (['assistant_message', 'confirmation_required', 'completed', 'error'].includes(kind)) {
+        // A committed message/pending/terminal event replaces the segment,
+        // never appends canonical text to its replayed delta prefix.
+        progressText = '';
+        progressUnavailable = false;
+      }
+      publishProgress();
+    }
     if (event.event === 'completed') completed = result({ terminal: event.data as { response?: ChatResponse } }, target);
     options?.onEvent?.(event);
   };
+  try {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     options?.signal?.throwIfAborted();
     try {
@@ -185,6 +221,12 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
         const response = result(saved, target);
         if (response) return response;
       }
+      // Recovery progress is deliberately a live, partial segment. Snapshot
+      // replay belongs to canonical history, never to a second text bubble.
+      // On a real reconnect discard the old segment instead of concatenating
+      // across an unavailable/replayed event interval. The final P2 message
+      // still supplies the complete reply.
+      clearProgress();
       let snapshot = await readJson(`${url}/snapshot`, options);
       requireTarget(snapshot, target);
       if (snapshot.terminal?.response) {
@@ -211,6 +253,9 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
         if (response) return response;
         throw new RuntimeEndedError(target, snapshot.state);
       }
+      // Only contiguous new SSE frames after the complete snapshot watermark
+      // may populate this new segment, even when the retained history had gaps.
+      progressText = ''; progressUnavailable = false;
       const cursor = snapshot.event_cursor ?? snapshot.snapshot_cursor;
       if (!cursor) throw new Error('runtime_snapshot_cursor_missing');
       const responseStream = await fetch(`${url}/events?after=${encodeURIComponent(cursor)}`, {
@@ -247,4 +292,5 @@ export async function observeRuntimeTurn(target: RuntimeIdentity, options?: Runt
     }
   }
   throw new RuntimeSubscriptionError(target);
+  } finally { clearProgress(); }
 }

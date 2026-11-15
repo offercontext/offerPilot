@@ -88,6 +88,23 @@ beforeEach(() => {
 });
 
 describe('InterviewReadinessCenter', () => {
+  it('keeps JD confirmation in a single native label and toggles without nested label activation', () => {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    renderQuickDraft(root, [quickResume]);
+    const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    const label = checkbox.closest('label')!;
+    expect(label.textContent).toContain('已核对，本次按此岗位资料练习');
+    expect(label.parentElement?.closest('label')).toBeNull();
+    act(() => label.click());
+    expect(checkbox.checked).toBe(true);
+    act(() => label.click());
+    expect(checkbox.checked).toBe(false);
+    expect(createPracticeCaseMock).not.toHaveBeenCalled();
+    act(() => root.unmount());
+  });
+
   it('does not expose an application or event picker for real preparation', () => {
     const markup = renderToStaticMarkup(
       <InterviewReadinessCenter initialMode="real" fixedMode="real" />,

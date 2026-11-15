@@ -7,7 +7,7 @@ import AppShell from './AppShell';
 vi.mock('@tanstack/react-query', () => ({
   useMutation: () => ({ isPending: false, mutate: vi.fn() }),
   useQuery: () => ({ data: [], isError: false, isLoading: false, isFetching: false, error: null }),
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryCache: () => ({ subscribe: () => () => undefined }) }),
 }));
 vi.mock('@dnd-kit/core', () => ({
   DndContext: (props: { children: React.ReactNode }) => <div>{props.children}</div>,
@@ -144,7 +144,11 @@ describe('AppShell Interview Story draft isolation', () => {
 
     act(() => host?.querySelector<HTMLButtonElement>('[data-testid="nav-interview"]')?.click());
     await flush();
-    act(() => host?.querySelector<HTMLButtonElement>('[data-testid="library-open-ui-story"]')?.click());
+    // The interview index now links to the single Experience owner, rather than
+    // retaining a second Story library under an interview tab. Re-enter through
+    // the same source Note to prove the retained UI scope is restored.
+    expect(host?.querySelector('[data-testid="open-ui-story"]')).not.toBeNull();
+    act(() => host?.querySelector<HTMLButtonElement>('[data-testid="open-ui-story"]')?.click());
     await flush();
     expect(host?.querySelector('[data-testid="story-entrypoint"]')?.textContent).toBe('ui');
     expect(host?.querySelector('[data-testid="story-key"]')?.textContent).toBe(uiKey);

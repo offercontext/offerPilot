@@ -4,6 +4,7 @@ import sqlite3
 import pytest
 
 from offerpilot.db import init_database
+from offerpilot.models import ChatMessage
 
 
 def test_chat_messages_have_conversation_foreign_key(tmp_path):
@@ -340,7 +341,10 @@ def test_write_operation_chat_rebuild_is_atomic_on_orphan_rows(tmp_path):
         assert "0026_write_operation_ledger" not in versions
 
 
-def test_write_operation_chat_rebuild_drops_stale_cross_table_trigger(tmp_path):
+@pytest.mark.parametrize("existing_images", [False, True])
+def test_write_operation_chat_rebuild_drops_stale_cross_table_trigger(
+    tmp_path, existing_images
+):
     db_path = tmp_path / "stale-trigger.db"
     init_database(db_path)
     with sqlite3.connect(db_path) as conn:
@@ -357,10 +361,34 @@ def test_write_operation_chat_rebuild_drops_stale_cross_table_trigger(tmp_path):
             "operation_id TEXT, delivery_kind TEXT, delivery_ordinal INTEGER,"
             "created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         )
+        # Recreate the historical schema without copying newer image columns.
+        legacy_columns = (
+            "id, conversation_id, role, content, tool_calls, tool_call_id, "
+            "provider_blocks, operation_id, delivery_kind, delivery_ordinal, created_at"
+        )
         conn.execute(
-            "INSERT INTO chat_messages SELECT * FROM chat_messages_current"
+            f"INSERT INTO chat_messages ({legacy_columns}) "
+            f"SELECT {legacy_columns} FROM chat_messages_current"
         )
         conn.execute("DROP TABLE chat_messages_current")
+        conn.execute("INSERT INTO conversations (id, title) VALUES (1, 'legacy')")
+        conn.execute(
+            "INSERT INTO chat_messages (id, conversation_id, role, content) "
+            "VALUES (1, 1, 'user', 'preserved')"
+        )
+        expected_images = (
+            '[{"id":"historical-image","sha256":"original-hash"}]'
+            if existing_images else "[]"
+        )
+        if existing_images:
+            conn.execute(
+                "ALTER TABLE chat_messages ADD COLUMN "
+                "image_refs_json TEXT NOT NULL DEFAULT '[]'"
+            )
+            conn.execute(
+                "UPDATE chat_messages SET image_refs_json = ? WHERE id = 1",
+                (expected_images,),
+            )
         conn.execute(
             "CREATE TRIGGER trg_write_operation_chat_restrict "
             "BEFORE DELETE ON write_operations "
@@ -368,7 +396,22 @@ def test_write_operation_chat_rebuild_drops_stale_cross_table_trigger(tmp_path):
             "BEGIN SELECT RAISE(ABORT, 'operation delivery messages exist'); END"
         )
 
-    init_database(db_path)
+    # Check the first upgrade as well as idempotence: a second init must not
+    # conceal a dropped column by silently recreating it with empty references.
+    for _attempt in range(2):
+        factory = init_database(db_path)
+        with sqlite3.connect(db_path) as conn:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(chat_messages)")}
+            assert "image_refs_json" in columns
+            stored_images = conn.execute(
+                "SELECT image_refs_json FROM chat_messages WHERE id = 1"
+            ).fetchone()
+            assert stored_images == (expected_images,)
+        with factory() as session:
+            message = session.get(ChatMessage, 1)
+            assert message is not None
+            assert message.content == "preserved"
+            assert message.image_refs_json == expected_images
 
     with sqlite3.connect(db_path) as conn:
         table_sql = conn.execute(

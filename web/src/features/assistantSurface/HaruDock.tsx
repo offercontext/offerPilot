@@ -1,3 +1,4 @@
+import CompanionLifeStatus from '@/features/companionLife/CompanionLifeStatus';
 import { useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import CalendarHaruPresentation from './CalendarHaruPresentation';
@@ -7,6 +8,7 @@ import PilotMascot, {
 } from '@/features/pilotMascot/PilotMascot';
 import type { PilotMascotRect } from '@/features/pilotMascot/pilotMascotPreference';
 import { useAssistantSurface } from './AssistantSurfaceProvider';
+import { isDesktopOwner } from './desktopHaru';
 import HaruChatWindow from './HaruChatWindow';
 
 interface Props {
@@ -42,7 +44,7 @@ export default function HaruDock({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [anchorRect, setAnchorRect] = useState<PilotMascotRect>();
 
-  if (!visible) return null;
+  if (!visible || isDesktopOwner()) return null;
 
   const notification = surface.completionNotice
     ? {
@@ -53,7 +55,7 @@ export default function HaruDock({
 
   return (
     <>
-      {calendarActive ? (calendarHost ? createPortal(<CalendarHaruPresentation
+      {calendarActive ? (calendarHost ? createPortal(<div><CalendarHaruPresentation
         activity={notification?.status ?? activity}
         panelOpen={surface.surface === 'haru_chat'}
         onToggle={() => {
@@ -65,7 +67,7 @@ export default function HaruDock({
         triggerRef={triggerRef}
         onAnchorRectChange={setAnchorRect}
         animationLevel={animationLevel}
-      />, calendarHost) : null) : <PilotMascot
+      /><CompanionLifeStatus inline suppressed={Boolean(notification) || activity !== 'idle'} /></div>, calendarHost) : null) : <PilotMascot
         compact={compact}
         activity={notification?.status ?? activity}
         panelOpen={surface.surface === 'haru_chat'}
@@ -88,6 +90,7 @@ export default function HaruDock({
         placement="contextual"
         triggerRef={triggerRef}
       />}
+      {!calendarActive && <CompanionLifeStatus anchorRect={anchorRect} suppressed={Boolean(notification) || activity !== 'idle'} />}
       <HaruChatWindow returnFocusRef={triggerRef} onExpand={onExpand} anchorRect={anchorRect} />
     </>
   );

@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useMemo, useState } from 'react';
 import { Button, Input, Popconfirm } from 'antd';
 import {
@@ -35,10 +36,10 @@ interface Props {
 }
 
 export const GROUP_LABELS: Record<ConversationGroupKey, string> = {
-  pinned: '置顶',
-  today: '今天',
-  'previous-seven-days': '近 7 天',
-  earlier: '更早',
+  get pinned() { return t("置顶"); },
+  get today() { return t("今天"); },
+  get 'previous-seven-days'() { return t("近 7 天"); },
+  get earlier() { return t("更早"); },
 };
 
 export default function ThreadRail({
@@ -51,6 +52,7 @@ export default function ThreadRail({
   onDelete,
   onUpdate,
 }: Props) {
+  const locale = useLocale();
   const [query, setQuery] = useState('');
   const view: ConversationView = showArchived ? 'archived' : 'active';
   const conversationsInView = useMemo(
@@ -59,7 +61,7 @@ export default function ThreadRail({
   );
   const visibleConversations = useMemo(
     () => searchConversations(conversationsInView, query),
-    [conversationsInView, query],
+    [conversationsInView, query, locale],
   );
   const groups = useMemo(
     () => groupConversations(visibleConversations, new Date()),
@@ -67,7 +69,7 @@ export default function ThreadRail({
   );
 
   function renameConversation(conversation: Conversation) {
-    const title = window.prompt('重命名对话', conversation.title)?.trim();
+    const title = window.prompt(t("重命名对话"), conversation.title)?.trim();
     if (!title || title === conversation.title) return;
     onUpdate(conversation.id, { title });
   }
@@ -80,8 +82,8 @@ export default function ThreadRail({
     const isArchived = view === 'archived';
     const hasPendingAction = Boolean(conversation.pending_action);
     const archiveTitle = hasPendingAction
-      ? '该对话有待确认操作，完成或取消后才能归档'
-      : '归档对话';
+      ? t("该对话有待确认操作，完成或取消后才能归档")
+      : t("归档对话");
 
     return (
       <div
@@ -91,7 +93,7 @@ export default function ThreadRail({
         <button
           type="button"
           className={styles.threadSelect}
-          aria-label={`打开对话：${conversation.title}`}
+          aria-label={t("打开对话：{title}", { title: conversation.title })}
           onClick={() => onSelect(conversation.id)}
         >
           <span className={styles.threadMain}>
@@ -99,8 +101,8 @@ export default function ThreadRail({
             <span className={styles.threadMeta}>
               <span>{conversationModeLabel(conversation.mode)}</span>
               <span aria-hidden="true">·</span>
-              <span>{dayjs(conversation.updated_at).format('M月D日')}</span>
-              {hasPendingAction ? <span className={styles.pendingBadge}>待确认</span> : null}
+              <span>{dayjs(conversation.updated_at).format(locale === 'zh-CN' ? 'M月D日' : 'MMM D')}</span>
+              {hasPendingAction ? <span className={styles.pendingBadge}>{t("待确认")}</span> : null}
             </span>
             {conversation.context_label ? (
               <span className={styles.threadContext} title={conversation.context_label}>
@@ -113,8 +115,8 @@ export default function ThreadRail({
           <Button
             type="text"
             className={styles.threadAction}
-            aria-label={conversation.pinned_at ? '取消置顶对话' : '置顶对话'}
-            title={conversation.pinned_at ? '取消置顶' : '置顶'}
+            aria-label={conversation.pinned_at ? t("取消置顶对话") : t("置顶对话")}
+            title={conversation.pinned_at ? t("取消置顶") : t("置顶")}
             icon={<PushpinOutlined />}
             onKeyDown={stopActionPropagation}
             onClick={(event) => {
@@ -125,8 +127,8 @@ export default function ThreadRail({
           <Button
             type="text"
             className={styles.threadAction}
-            aria-label="重命名对话"
-            title="重命名"
+            aria-label={t("重命名对话")}
+            title={t("重命名")}
             icon={<EditOutlined />}
             onKeyDown={stopActionPropagation}
             onClick={(event) => {
@@ -138,8 +140,8 @@ export default function ThreadRail({
             <Button
               type="text"
               className={styles.threadAction}
-              aria-label="恢复对话"
-              title="恢复对话"
+              aria-label={t("恢复对话")}
+              title={t("恢复对话")}
               icon={<UndoOutlined />}
               onKeyDown={stopActionPropagation}
               onClick={(event) => {
@@ -163,9 +165,9 @@ export default function ThreadRail({
             />
           )}
           <Popconfirm
-            title="删除该对话？"
-            okText="删除"
-            cancelText="取消"
+            title={t("删除该对话？")}
+            okText={t("删除")}
+            cancelText={t("取消")}
             onConfirm={(event) => {
               event?.stopPropagation();
               onDelete(conversation.id);
@@ -176,8 +178,8 @@ export default function ThreadRail({
               type="text"
               danger
               className={styles.threadAction}
-              aria-label="删除对话"
-              title="删除对话"
+              aria-label={t("删除对话")}
+              title={t("删除对话")}
               icon={<DeleteOutlined />}
               onKeyDown={stopActionPropagation}
               onClick={stopActionPropagation}
@@ -189,41 +191,35 @@ export default function ThreadRail({
   }
 
   const emptyLabel = query.trim()
-    ? '没有匹配的对话'
+    ? t("没有匹配的对话")
     : view === 'archived'
-      ? '暂无已归档对话'
-      : '暂无对话';
+      ? t("暂无已归档对话")
+      : t("暂无对话");
 
   return (
     <aside className={styles.rail}>
-      <Button className={styles.railNew} block size="large" icon={<PlusOutlined />} onClick={onNew}>
-        新建对话
-      </Button>
+      <Button className={styles.railNew} block size="large" icon={<PlusOutlined />} onClick={onNew}>{t("新建对话")}</Button>
       <Input
         className={styles.railSearch}
         size="large"
         allowClear
         prefix={<SearchOutlined aria-hidden="true" />}
-        aria-label="搜索对话"
-        placeholder="搜索对话"
+        aria-label={t("搜索对话")}
+        placeholder={t("搜索对话", undefined, "pilot.search.placeholder")}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
       />
-      <div className={styles.railViewToggle} role="group" aria-label="对话视图">
+      <div className={styles.railViewToggle} role="group" aria-label={t("对话视图")}>
         <Button
           type={view === 'active' ? 'primary' : 'text'}
           aria-pressed={view === 'active'}
           onClick={() => onViewChange(false)}
-        >
-          进行中
-        </Button>
+        >{t("进行中")}</Button>
         <Button
           type={view === 'archived' ? 'primary' : 'text'}
           aria-pressed={view === 'archived'}
           onClick={() => onViewChange(true)}
-        >
-          已归档
-        </Button>
+        >{t("已归档")}</Button>
       </div>
       <div className={styles.railThreads}>
         {visibleConversations.length === 0 ? (

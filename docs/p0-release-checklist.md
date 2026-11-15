@@ -25,6 +25,7 @@ The scope/status, browser walkthrough, and deferred sections below are the histo
 Run one of these before treating the branch as locally releasable:
 
 ```powershell
+$env:PYTHONUTF8 = "1"
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
 ```
 
@@ -34,11 +35,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1
 
 The scripts wrap the checks below. This is an explanation of the full gate, not a second checklist to run before or after it. A release builds the frontend once, then calls local smoke with `--skip-build` / `-SkipBuild`; standalone local smoke still builds by default. Skipping requires `web/dist/index.html`, and the caller must establish that the build matches the current code and dependencies.
 
+Windows uses `PYTHONUTF8=1`, matching `.github/workflows/desktop-windows.yml`. Set it before pytest collection, shard execution and the release entrypoint; `PYTHONIOENCODING` alone changes streams, not default file decoding. Keep one source/dependency/configuration/environment snapshot for all evidence. Preserve unsuccessful attempts separately and do not relabel evidence from an older SHA as a complete gate for a new SHA.
+
 Both runtime layers remain: local smoke launches the actual `oc start` CLI process and checks health/SPA fallback before `oc smoke`; `oc verify --profile local` runs broader business scenarios over an isolated HTTP app. The business checks overlap (and share the chat-card helper), but local verify does not replace the independent CLI startup check. This change does not merge or remove either layer. PowerShell gates explicitly stop on nonzero native-command and child-gate exit codes.
 
 The general pytest gate tests the historical Application JD implementation-scope guard with isolated Git fixtures (committed, staged, unstaged, and untracked changes). To audit an actual JD release scope, supply both `OFFERPILOT_APPLICATION_JD_BASELINE_FILE` and `OFFERPILOT_APPLICATION_JD_ALLOWLIST_FILE` and run `uv run pytest -q tests/test_application_jd_browser_harness.py -k implementation_scope_is_machine_checked`. The files must contain the previously approved baseline SHA and ASCII path allowlist, not values generated from the current diff. Setting either variable activates the real-worktree audit; a missing counterpart, invalid file, or out-of-scope change fails closed. General regression success is not evidence that a particular release's file scope was approved.
 
 Frontend tests use `web/vitest.config.ts` to cap worker concurrency at four while retaining every test and the production source audit's thirty-second budget. This avoids CPU/IO contention from host-dependent default worker counts; `npm test` remains the full frontend gate.
+
+For a host under memory pressure, the full entry also supports `-IsolateBackendTests -BackendOutput <new-directory>` (PowerShell), or `--isolate-backend-tests --backend-output <new-directory>` (Bash). Use a new ignored directory such as `artifacts/backend-full-<run-id>`, or a location outside the checkout, so evidence files do not change the source snapshot. This optional mode freezes the complete pytest catalog and runs serial processes with a target of 400 nodes each, keeping each file together; an oversized file remains one group. Session fixtures are recreated per process. It verifies every collected node's execution identity, native exits, source/index, recorded Python/platform/dependency/tool versions, and persisted log/report hashes before accepting a full backend receipt; the environment fingerprint does not cover every process variable. Skips remain separately reported. Missing/duplicate results, failure, changed recorded inputs or an existing output directory block completion. `PYTEST_ADDOPTS` must be empty. Interrupted runs retain partial evidence and require a new directory; there is no automatic resume or cleanup. Standalone `--verify` may revalidate a matching old receipt, while the complete gate always executes into a new directory first. The default remains one `pytest -q` process; all other release checks still run in either mode.
 
 ```powershell
 uv run pytest -q
@@ -82,7 +87,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\release-gate.ps1 -
 ./scripts/release-gate.sh --install
 ```
 
-This calls `scripts/install-gate.ps1` or `scripts/install-gate.sh` to verify the source checkout CLI and isolated `uv tool install` path. The shell gate also verifies `scripts/install.sh --source` against the local checkout.
+This calls `scripts/install-gate.ps1` or `scripts/install-gate.sh` to verify the source checkout CLI and isolated `uv tool install` path. It checks that the base install does not require MCP, installs the `mcp` extra, and uses that installed environment for real stdio preparation and pending readback with fictitious data. It never approves the request. Release-gate runs retain installation artifacts and print their location; failures always retain them. The shell gate also verifies `scripts/install.sh --source` against the local checkout. Windows and POSIX installation execution are separate evidence.
 
 ## Browser Product Walkthrough
 

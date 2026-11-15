@@ -75,6 +75,58 @@ def test_manager_can_close_before_start(monkeypatch) -> None:
         )
 
 
+def test_watchdog_does_not_publish_unknown_after_terminal_control_won(monkeypatch) -> None:
+    clock = [0.0]
+    claimed, release, checked = threading.Event(), threading.Event(), threading.Event()
+    original = managed_execution.InMemoryRuntimeInvocationControl.request_timeout
+
+    def observe_timeout(control):
+        changed = original(control)
+        checked.set()
+        return changed
+
+    monkeypatch.setattr(managed_execution.InMemoryRuntimeInvocationControl, 'request_timeout', observe_timeout)
+    manager = RuntimeExecutionManager(run_workers=1, clock=lambda: clock[0])
+
+    def operation(_sink, control, _budget):
+        assert control.mark_completed()
+        claimed.set()
+        assert release.wait(5)
+        return MessageOutcome("committed result", conversation_id=1)
+
+    try:
+        manager.submit(turn_id="terminal-winner", conversation_id=1,
+                       operation=operation, timeout_seconds=1)
+        assert claimed.wait(5)
+        clock[0] = 2.0
+        assert checked.wait(5)
+        assert manager.status("terminal-winner")["state"] == "running"
+        release.set()
+        assert manager.wait("terminal-winner", timeout=5)
+        assert manager.status("terminal-winner")["state"] == "completed"
+    finally:
+        release.set()
+        manager.close(wait=True)
+
+
+def test_worker_timeout_exception_after_control_completion_still_converges() -> None:
+    from offerpilot.pilot_runtime.errors import RuntimeAgentTimedOut
+
+    manager = RuntimeExecutionManager(run_workers=1)
+
+    def operation(_sink, control, _budget):
+        assert control.mark_completed()
+        raise RuntimeAgentTimedOut()
+
+    try:
+        manager.submit(turn_id='post-finish-error', conversation_id=1, operation=operation)
+        assert manager.wait('post-finish-error', timeout=5)
+        status = manager.status('post-finish-error')
+        assert status['state'] == 'result_unknown' and status['worker_done']
+    finally:
+        manager.close(wait=True)
+
+
 def test_partial_worker_start_failure_closes_without_stranded_run(monkeypatch) -> None:
     created: list[threading.Thread] = []
 

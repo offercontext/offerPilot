@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import dayjs, { type ConfigType } from 'dayjs';
 import type { Application, ApplicationStatus } from '@/types/application';
 import { EVENT_TYPE_LABELS, type ScheduleEvent } from '@/types/event';
@@ -121,11 +122,11 @@ function getOfferDeadlineDays(deadlineValue: string, current: dayjs.Dayjs): numb
 
 function formatOfferDeadlineLabel(deadlineValue: string, current: dayjs.Dayjs, days: number): string {
   const deadline = parseOfferDeadline(deadlineValue);
-  if (deadline?.isSame(current, 'day')) return '答复期今天到期';
+  if (deadline?.isSame(current, 'day')) return t("答复期今天到期");
 
   const rounded = Math.max(0, Math.ceil(days));
-  if (rounded === 0) return '答复期今天到期';
-  return `答复期还剩 ${rounded} 天`;
+  if (rounded === 0) return t("答复期今天到期");
+  return t("答复期还剩 {rounded} 天", { rounded: rounded });
 }
 
 function companyPosition(company?: string, position?: string): string {
@@ -157,8 +158,8 @@ export function deriveActionItems({
       kind: 'offer_deadline',
       priority,
       title: `${offer.company_name} Offer ${label}`,
-      detail: '建议确认接受、谈判或拒绝策略，必要时打开谈薪教练。',
-      primaryActionLabel: '处理 Offer',
+      detail: t("建议确认接受、谈判或拒绝策略，必要时打开谈薪教练。"),
+      primaryActionLabel: t("处理 Offer"),
       target: 'offers',
       offerId: offer.id,
       appId: offer.application_id,
@@ -177,14 +178,14 @@ export function deriveActionItems({
     if (hours < 0 || hours > 72) continue;
 
     const priority: ActionItemPriority = hours <= 24 ? 'p0' : 'p1';
-    const titleBase = companyPosition(event.company_name, event.position_name) || '面试安排';
+    const titleBase = companyPosition(event.company_name, event.position_name) || t("面试安排");
     items.push({
       id: `interview-${event.id}`,
       kind: 'interview_soon',
       priority,
-      title: `${titleBase} ${EVENT_TYPE_LABELS[event.event_type]}：${when.format('M月D日 HH:mm')}`,
-      detail: '建议复习到期题目，查看岗位 JD 分析和历史薄弱点。',
-      primaryActionLabel: '准备面试',
+      title: t("{titleBase} {value}：{value3}", { titleBase: titleBase, value: EVENT_TYPE_LABELS[event.event_type], value3: when.format(t("M月D日 HH:mm")) }),
+      detail: t("建议复习到期题目，查看岗位 JD 分析和历史薄弱点。"),
+      primaryActionLabel: t("准备面试"),
       target: 'calendar',
       eventId: event.id,
       appId: event.application_id,
@@ -209,9 +210,9 @@ export function deriveActionItems({
       id: `stale-${application.id}`,
       kind: 'stale_application',
       priority: days >= 14 ? 'p1' : 'p2',
-      title: `${application.company_name} · ${application.position_name} 已 ${days} 天无更新`,
-      detail: '建议跟进、补充备注或更新投递状态，避免看板长期停滞。',
-      primaryActionLabel: '打开投递',
+      title: t("{company_name} · {position_name} 已 {days} 天无更新", { company_name: application.company_name, position_name: application.position_name, days: days }),
+      detail: t("建议跟进、补充备注或更新投递状态，避免看板长期停滞。"),
+      primaryActionLabel: t("打开投递"),
       target: 'board',
       appId: application.id,
       sortKey: 1000 - days,
@@ -236,9 +237,9 @@ export function deriveActionItems({
       id: `no-next-${application.id}`,
       kind: 'no_next_event',
       priority: 'p2',
-      title: `${application.company_name} · ${application.position_name} 未安排下一场`,
-      detail: '当前处于面试阶段，建议补充下一场安排或更新投递状态。',
-      primaryActionLabel: '安排下一步',
+      title: t("{company_name} · {position_name} 未安排下一场", { company_name: application.company_name, position_name: application.position_name }),
+      detail: t("当前处于面试阶段，建议补充下一场安排或更新投递状态。"),
+      primaryActionLabel: t("安排下一步"),
       target: 'calendar',
       appId: application.id,
       sortKey: 2500,
@@ -256,9 +257,9 @@ export function deriveActionItems({
         id: `material-kit-${application.id}`,
         kind: 'material_kit_incomplete',
         priority: 'p2',
-        title: `${application.company_name} · ${application.position_name} 投递准备待完善`,
-        detail: '简历建议、沟通话术或投递清单尚未完成。',
-        primaryActionLabel: '打开材料包',
+        title: t("{company_name} · {position_name} 投递准备待完善", { company_name: application.company_name, position_name: application.position_name }),
+        detail: t("简历建议、沟通话术或投递清单尚未完成。"),
+        primaryActionLabel: t("打开材料包"),
         target: 'board',
         appId: application.id,
         sortKey: 2200,
@@ -272,9 +273,9 @@ export function deriveActionItems({
       id: 'questions-due',
       kind: 'question_due',
       priority: due >= 10 ? 'p1' : 'p2',
-      title: `${due} 道题目到期复习`,
-      detail: '建议安排一次 20 分钟练习，保持面试手感。',
-      primaryActionLabel: '开始刷题',
+      title: t("{due} 道题目到期复习", { due: due }),
+      detail: t("建议安排一次 20 分钟练习，保持面试手感。"),
+      primaryActionLabel: t("开始刷题"),
       target: 'questions',
       questionCount: due,
       sortKey: 3000 - Math.min(due, 50),

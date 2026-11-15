@@ -80,7 +80,7 @@ vi.mock('@tanstack/react-query', () => ({
     };
     return { data: data[key], isError: false, isLoading: false, isFetching: false, error: null };
   },
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
+  useQueryClient: () => ({ invalidateQueries: vi.fn(), getQueryCache: () => ({ subscribe: () => () => undefined }) }),
 }));
 
 vi.mock('@/services/opportunityFitReviews', () => ({
@@ -274,7 +274,6 @@ vi.mock('@/components/InterviewV01View', () => ({ default: () => <div /> }));
 vi.mock('@/components/ResumeLibraryView', () => ({ default: () => <div /> }));
 vi.mock('@/features/reminders/RemindersView', () => ({ default: () => <div /> }));
 vi.mock('@/components/SettingsView', () => ({ default: () => <div /> }));
-vi.mock('@/components/MockInterviewDrawer', () => ({ default: () => <div /> }));
 vi.mock('@/components/InterviewStoryLibraryView', () => ({ default: () => <div /> }));
 vi.mock('@/components/InterviewStoryDrawer', () => ({ default: () => <div /> }));
 vi.mock('@/features/pilotMascot/PilotMascot', () => ({ default: () => <div /> }));

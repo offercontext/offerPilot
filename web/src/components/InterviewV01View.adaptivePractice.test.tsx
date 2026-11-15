@@ -12,7 +12,9 @@ const services = vi.hoisted(() => ({ interviews: vi.fn(), recommendations: vi.fn
 vi.mock('@/services/interviews', () => ({ listInterviews: services.interviews }));
 vi.mock('@/services/adaptiveInterviewPractice', () => ({
   listAdaptivePracticeRecommendations: services.recommendations,
+  listAdaptivePracticePlans: services.recommendations,
 }));
+vi.mock('@/features/reviewReadiness/service', () => ({ getEventReadinessFeedback: vi.fn().mockResolvedValue({ application_id: 7, event_id: 9, items: [] }) }));
 vi.mock('@/services/interviewPracticeCases', () => ({
   createInterviewPracticeCase: services.createPracticeCase,
 }));
@@ -120,8 +122,7 @@ describe('InterviewV01View event and free-practice surface', () => {
     act(() => root?.render(<InterviewV01View onOpenFreePractice={openFreePractice} />));
     await flush();
     expect(services.createPracticeCase).not.toHaveBeenCalled();
-    act(() => [...(container?.querySelectorAll('[role="tab"]') ?? [])].find((tab) => tab.textContent?.includes('面试练习'))?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
-    const entry = [...(container?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('开始面试练习'));
+    const entry = [...(container?.querySelectorAll('button') ?? [])].find((button) => button.textContent === '快速模拟');
     expect(entry).toBeTruthy();
     expect(openFreePractice).not.toHaveBeenCalled();
     act(() => entry?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
@@ -129,12 +130,12 @@ describe('InterviewV01View event and free-practice surface', () => {
     expect(services.createPracticeCase).not.toHaveBeenCalled();
   });
 
-  it('switches to practice only for a newly incremented external request token', async () => {
+  it('focuses the visible practice home only for a newly incremented external request token', async () => {
     act(() => root?.render(<InterviewV01View practiceRequestToken={1} />));
     await flush();
-    expect(container?.querySelector('[data-testid="free-practice-workspace"]')).toBeNull();
+    expect(document.activeElement).not.toBe(container?.querySelector('[data-testid="free-practice-workspace"]')?.parentElement);
     act(() => root?.render(<InterviewV01View practiceRequestToken={2} />));
-    expect(container?.querySelector('[data-testid="free-practice-workspace"]')).not.toBeNull();
+    expect(document.activeElement).toBe(container?.querySelector('[data-testid="free-practice-workspace"]')?.parentElement);
   });
 
   it('loads every cursor page before projecting cards', async () => {

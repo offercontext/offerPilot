@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { LockOutlined } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Input, Skeleton, Space, Typography } from 'antd';
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function AuthGate({ children }: Props) {
+  useLocale();
   const [token, setToken] = useState('');
   const [invalid, setInvalid] = useState(false);
   const statusQuery = useQuery({
@@ -51,20 +53,20 @@ export default function AuthGate({ children }: Props) {
               OfferPilot
             </Typography.Title>
             <Typography.Text style={{ color: 'var(--op-muted)' }}>
-              Enter the local access token for this workspace.
+              {t('请输入此工作区的本地访问令牌。')}
             </Typography.Text>
           </div>
         </Space>
-        {invalid ? <Alert type="error" showIcon message="Invalid token" /> : null}
+        {invalid ? <Alert type="error" showIcon message={t('访问令牌无效')} /> : null}
         <Input.Password
           value={token}
           onChange={(event) => setToken(event.target.value)}
           onPressEnter={submitToken}
-          placeholder="Access token"
+          placeholder={t('访问令牌')}
           autoFocus
         />
         <Button type="primary" onClick={submitToken} loading={statusQuery.isFetching} block>
-          Continue
+          {t('继续')}
         </Button>
       </section>
     </main>

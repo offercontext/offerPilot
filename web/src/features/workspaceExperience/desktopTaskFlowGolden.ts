@@ -1,11 +1,12 @@
 export const DESKTOP_TASK_FLOW_GOLDEN = {
   baseline: '0c10e05e256eb757d5f89a8b009dcea193f2fc78',
+  // Current task surfaces; the historical baseline identity above is not rewritten.
   navigationGroups: ['主要任务', '常用资料', '辅助'],
   primaryNavigation: ['今日', '投递', '面试', 'Offer'],
   resourceNavigation: ['素材库'],
   applicationTabs: ['概览', '准备', '进展'],
-  interviewTabs: ['即将进行', '已完成', '面试练习'],
-  resourceTabs: ['简历', '经历素材', '参考资料'],
+  interviewTabs: ['即将进行', '已完成'],
+  resourceTabs: ['简历', '我的经历', '参考知识'],
   topBarActions: ['添加投递', '开始面试练习', '开始刷题', '录入 Offer', '上传简历', '添加经历'],
   assistantOwners: { providers: 1, controllers: 1 },
   surfaceSwitchRequestDelta: { chat: 0, sse: 0 },

@@ -11,6 +11,7 @@ export interface RealtimeState {
   transcript: string;
   supplemental: boolean;
   message: string;
+  revocationPending?: boolean;
 }
 export interface RealtimeAnswer {
   text: string; turnNo: number; turnKey: string; acceptance: AnswerAcceptance;
@@ -62,7 +63,7 @@ export class RealtimeVoiceController {
     this.turnNo = input.turnNo;
     this.sealedTurn = 0;
     this.lastRevision = -1;
-    this.patch({ status: 'connecting', locked: true, message: '', transcript: '', supplemental: false });
+    this.patch({ status: 'connecting', locked: true, message: '', transcript: '', supplemental: false, revocationPending: false });
     try {
       const grant = await this.deps.create({ ...input, requestKey: this.deps.key() });
       if (generation !== this.generation) {
@@ -154,12 +155,12 @@ export class RealtimeVoiceController {
     this.media = undefined;
     clearInterval(this.heartbeat);
     this.heartbeat = undefined;
-    this.patch({ status: manual ? 'manual' : 'paused', message });
+    this.patch({ status: manual ? 'manual' : 'paused', message, revocationPending: false });
     const grant = this.grant;
     if (grant) {
       try { await this.deps.action(grant, 'close'); }
       catch {
-        this.patch({ locked: true, message: `${message} 授权撤销尚未确认，请重试暂停。` });
+        this.patch({ locked: true, revocationPending: true });
         return;
       }
       if (this.grant === grant) this.grant = undefined;

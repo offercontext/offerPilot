@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import type { Reminder } from '@/lib/insights';
 import styles from '../dashboard.module.css';
 
@@ -13,19 +14,19 @@ interface Props {
 }
 
 export default function RemindersSummary({ reminders, onSeeAll }: Props) {
+  useLocale();
   const top = reminders.slice(0, 4);
   return (
     <div className={styles.card}>
       <div
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}
       >
-        <span className={styles.cardTitle} style={{ margin: 0 }}>待跟进</span>
+        <span className={styles.cardTitle} style={{ margin: 0 }}>{t("待跟进")}</span>
         <a onClick={onSeeAll} style={{ fontSize: 14, cursor: 'pointer', color: 'var(--op-primary)' }}>
-          全部 →
-        </a>
+          {t("全部 →")}</a>
       </div>
       {top.length === 0 ? (
-        <div className={styles.empty}>暂无待办 ✦</div>
+        <div className={styles.empty}>{t("暂无待办 ✦")}</div>
       ) : (
         top.map((r) => (
           <div key={r.id} style={{ display: 'flex', gap: 9, alignItems: 'center', marginBottom: 9 }}>

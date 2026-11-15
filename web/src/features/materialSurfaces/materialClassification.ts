@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import { mapMaterialLabel, type MaterialLabelKey } from './materialLabels';
 
 /**
@@ -789,7 +790,7 @@ function project(input: MaterialProjectionInput, wanted: 'experience' | 'externa
       : classification.kind === 'external_reference';
     if (!matches) continue;
     const labelKey: MaterialLabelKey = classification.kind;
-    const title = safeTitle(record, classification.kind === 'experience_story' ? '经历故事' : classification.kind === 'confirmed_capture' ? '已确认面试片段' : '参考资料');
+    const title = safeTitle(record, classification.kind === 'experience_story' ? t("经历故事") : classification.kind === 'confirmed_capture' ? t("已确认面试片段") : t("参考资料"));
     const summary = safeSummary(record, title);
     const itemSourceState = sourceStateFor(record, classification);
     if (itemSourceState === 'unavailable') {

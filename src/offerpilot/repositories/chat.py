@@ -1488,7 +1488,11 @@ class ChatRepository:
         )
 
     def delete_conversation(self, conversation_id: int) -> None:
+        from offerpilot.companion.chat import erase_chat_evidence
+
         with self._session_factory() as session:
+            session.execute(text("BEGIN IMMEDIATE"))
+            erase_chat_evidence(session, conversation_id)
             session.execute(
                 delete(ChatMessage).where(ChatMessage.conversation_id == conversation_id)
             )

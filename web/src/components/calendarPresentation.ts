@@ -1,8 +1,9 @@
+import { t } from '@/i18n';
 import dayjs from 'dayjs';
 import type { CalendarEntry } from '@/types/calendar';
 import { eventFocusDate } from '@/lib/pilotEvidenceFocus';
 
-export const CALENDAR_KINDS = { application: '投递', interview: '面试', written_test: '笔试', deadline: '截止', offer: 'Offer', other: '其他' } as const;
+export const CALENDAR_KINDS = { get application() { return t("投递"); }, get interview() { return t("面试"); }, get written_test() { return t("笔试"); }, get deadline() { return t("截止"); }, offer: 'Offer', get other() { return t("其他"); } } as const;
 export type CalendarKind = keyof typeof CALENDAR_KINDS;
 // Keep the existing strict timestamp validation, but the calendar's date
 // identity is local throughout: chip, detail, and incoming evidence focus.
@@ -42,7 +43,7 @@ export function presentCalendar(entries: CalendarEntry[]): PresentedCalendarEntr
     const timestamp = localDate ? dayjs(source.scheduled_at) : null;
     const timed = timestamp?.isValid() ? timestamp : null;
     const kind = calendarKind(source);
-    const label = source.note_id && !source.event_id ? '复盘' : CALENDAR_KINDS[kind];
+    const label = source.note_id && !source.event_id ? t("复盘") : CALENDAR_KINDS[kind];
     const title = source.event_type ? source.title.replace(/ · (面试|笔试|Offer(?: 进展)?|截止|自定义)$/, '') : source.title;
     return {
       key: calendarEntryKey(source),

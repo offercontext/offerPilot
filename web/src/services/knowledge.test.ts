@@ -16,7 +16,7 @@ describe('confirmed interview knowledge source envelope', () => {
     { items: null },
     { items: undefined },
     { items: 'not-a-list' },
-  ])('rejects malformed successful responses instead of presenting them as empty', (input) => {
+  ])('rejects malformed successful responses instead of presenting them as empty (case %#)', (input) => {
     expect(() => parseConfirmedInterviewKnowledgeNotesResponse(input)).toThrow(
       '经历素材来源暂时不可用',
     );

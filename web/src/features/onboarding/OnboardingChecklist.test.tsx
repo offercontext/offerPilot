@@ -8,7 +8,7 @@ import OnboardingChecklist from './OnboardingChecklist';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe('OnboardingChecklist', () => {
-  it('shows all four milestones and progress', () => {
+  it('prioritizes the first application and offers optional enhancements without a required counter', () => {
     const html = renderToStaticMarkup(
       <OnboardingChecklist
         status={{
@@ -26,7 +26,10 @@ describe('OnboardingChecklist', () => {
         onAction={vi.fn()}
       />,
     );
-    expect(html).toContain('1 / 4');
+    expect(html).not.toContain('1 / 4');
+    expect(html).toContain('稍后再说');
+    expect(html).toContain('无需配置 AI');
+    expect(html.indexOf('data-onboarding-action="create_first_application"')).toBeLessThan(html.indexOf('data-onboarding-action="configure_ai"'));
     expect(html).toContain('<button');
     expect(html).toContain('data-onboarding-action="configure_ai"');
     expect(html).toContain('data-onboarding-action="create_primary_resume"');
@@ -71,9 +74,9 @@ describe('OnboardingChecklist', () => {
     });
 
     expect(actions).toEqual([
-      'configure_ai',
-      'create_primary_resume',
       'create_first_application',
+      'create_primary_resume',
+      'configure_ai',
       'send_first_pilot_message',
     ]);
 

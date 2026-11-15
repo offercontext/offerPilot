@@ -15,82 +15,13 @@ from offerpilot.api import create_app
 from offerpilot.db import session_factory_for_data_dir
 from offerpilot.diagnostics import read_recent_log_entries
 from offerpilot.models import OpportunityFitReview
+from tests.fixtures.opportunity_fit_v1_history import seed_v1_history
 from offerpilot.models import OpportunityFitReviewStage
 from offerpilot.repositories.applications import ApplicationCreate, ApplicationsRepository
 from offerpilot.repositories.opportunity_fit_reviews import (
     OpportunityFitReviewConfirmationExpired,
     OpportunityFitReviewsRepository,
 )
-
-
-def _triage() -> dict[str, object]:
-    return {
-        "recommendation": "hold",
-        "hard_constraints": [
-            {
-                "id": "location",
-                "requirement": "Shanghai office",
-                "status": "unknown",
-                "explanation": "Availability is not in the resume.",
-                "evidence_refs": [
-                    {"source": "jd", "path": "/text", "excerpt": "Kubernetes preferred"}
-                ],
-            }
-        ],
-        "fit_signals": [
-            {
-                "id": "api",
-                "statement": "Existing API work is relevant.",
-                "evidence_refs": [
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "gaps": [
-            {
-                "id": "kubernetes",
-                "requirement": "Kubernetes preferred",
-                "kind": "preferred",
-                "candidate_status": "unknown",
-                "evidence_refs": [
-                    {"source": "jd", "path": "/text", "excerpt": "Kubernetes preferred"},
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "deadline": {"status": "not_stated", "text": "", "evidence_refs": []},
-        "next_questions": ["Can you work in Shanghai?"],
-    }
-
-
-def _deep() -> dict[str, object]:
-    return {
-        "strengths": [
-            {
-                "id": "api",
-                "statement": "API implementation is a strength.",
-                "evidence_refs": [
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "gaps_to_address": [
-            {
-                "id": "kubernetes",
-                "statement": "Kubernetes experience needs confirmation.",
-                "evidence_refs": [
-                    {"source": "resume", "path": "/raw_text", "excerpt": "Built APIs"}
-                ],
-            }
-        ],
-        "questions_to_clarify": [
-            {"id": "location", "statement": "Confirm Shanghai availability.", "evidence_refs": []}
-        ],
-        "recommended_path": "clarify_first",
-        "next_actions": [
-            {"id": "assertion", "label": "补充事实", "kind": "add_assertion"}
-        ],
-    }
 
 
 def _v2_payload(stage: str) -> dict[str, object]:
@@ -140,17 +71,6 @@ def _v2_payload(stage: str) -> dict[str, object]:
     }
 
 
-class ReviewModel:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def complete(self, messages, tools):  # type: ignore[no-untyped-def]
-        self.calls += 1
-        return Assistant(
-            content=json.dumps(_triage() if self.calls == 1 else _deep(), ensure_ascii=False)
-        )
-
-
 class V2ReviewModel:
     def __init__(self) -> None:
         self.calls = 0
@@ -161,7 +81,7 @@ class V2ReviewModel:
 
 
 def _ready(tmp_path, model=None):
-    client = TestClient(create_app(data_dir=tmp_path, chat_model=model or ReviewModel()))
+    client = TestClient(create_app(data_dir=tmp_path, chat_model=model or V2ReviewModel()))
     application = client.post(
         "/api/applications",
         json={"company_name": "Acme", "position_name": "Backend", "notes": "private note"},
@@ -242,20 +162,32 @@ def test_api_returns_stable_502_without_record_for_unverifiable_model(tmp_path) 
 
 
 def test_api_rederives_legacy_summary_without_frontend_crash(tmp_path) -> None:
-    client, application, resume = _ready(tmp_path)
+    model = V2ReviewModel()
+    client, application, resume = _ready(tmp_path, model)
+    factory = session_factory_for_data_dir(tmp_path)
+    historical = seed_v1_history(factory, application["id"], resume["id"])
     path = f"/api/applications/{application['id']}/opportunity-fit-reviews"
-    created = client.post(
-        path,
-        json={
-            "resume_id": resume["id"],
-            "jd_text": "Kubernetes preferred",
-            "jd_source_label": "copy",
-            "candidate_assertions": [],
-            "idempotency_key": "26b4dd35-75e6-4d3f-8806-3cb7bc9f3e2e",
-        },
-    )
-    assert created.status_code == 410
-    assert created.json()["error_code"] == "opportunity_fit_v1_write_disabled"
+    listed = client.get(path)
+    assert listed.status_code == 200
+    summary = next(item for item in listed.json() if item["id"] == historical.id and item["schema_version"] == 1)
+    assert isinstance(summary["summary"], dict)
+    assert summary["summary"]["evidence_refs"]
+    assert "Legacy unstructured" not in summary["summary"]["text"]
+    detail = client.get(f"{path}/{historical.id}")
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["schema_version"] == 1
+    assert body["source"]["jd"]["text"] == "Kubernetes preferred"
+    assert body["triage"]["recommendation"] == "hold"
+    assert body["deep_review"]["recommended_path"] == "clarify_first"
+    assert "source_snapshot_json" not in body
+    assert body["source_fingerprint_sha256"] == historical.source_fingerprint_sha256
+    assert client.post(f"{path}/{historical.id}/deep-review").status_code == 410
+    assert model.calls == 0
+    with factory() as session:
+        saved = session.get(OpportunityFitReview, historical.id)
+        assert saved.triage_json == historical.triage_json
+        assert saved.deep_review_json == historical.deep_review_json
 
 
 def test_api_does_not_retry_provider_failure(tmp_path) -> None:
@@ -325,6 +257,16 @@ def test_api_v2_requires_confirmation_before_deep_and_preserves_v1_contract(tmp_
     deep = client.post(f"{path}/{body['review_id']}/deep-review", json=deep_payload)
     assert deep.status_code == 201
     assert deep.json()["stage"] == "deep_review"
+    assert model.calls == 2
+
+    historical = seed_v1_history(session_factory_for_data_dir(tmp_path), application["id"], resume["id"])
+    mixed = client.get(path)
+    assert mixed.status_code == 200
+    assert {item["schema_version"] for item in mixed.json()} == {1, 2}
+    legacy_detail = client.get(f"{path}/{historical.id}")
+    assert legacy_detail.status_code == 200
+    assert legacy_detail.json()["schema_version"] == 1
+    assert legacy_detail.json()["deep_review"]["recommended_path"] == "clarify_first"
     assert model.calls == 2
 
 

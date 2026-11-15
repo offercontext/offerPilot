@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { setLocale } from '@/i18n';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
@@ -93,6 +94,7 @@ it('ignores late snapshots after an Offer edit and does not refetch on equivalen
 });
 
 afterEach(() => {
+  act(() => setLocale('zh-CN'));
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -224,4 +226,23 @@ it('keeps custom dimension rows out of the fixed salary facts table', async () =
   expect(host.querySelector('[data-section="fixed-facts"]')?.textContent).not.toContain('通勤');
   expect(host.querySelector('[data-section="custom-dimensions"]')?.textContent).toContain('通勤');
   expect(host.querySelector('[data-section="custom-dimensions"] table')).not.toBeNull();
+});
+
+
+it('switches comparison copy without resetting filters, refetching, or translating offer facts', async () => {
+  const offers = [offer(1), offer(2)].map((item) => ({ ...item, company_name: `用户公司 ${item.id}`, perks: '用户提供的福利原文' }));
+  readComparison.mockResolvedValue({ offers, dimensions: [], missing: [] });
+  await mountComparison(offers);
+  await act(async () => host?.querySelector<HTMLButtonElement>('[role="switch"]')?.click());
+  const calls = readComparison.mock.calls.length;
+  await act(async () => setLocale('en-US'));
+  expect(host?.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(host?.querySelector('[data-field="annual"]')).toBeNull();
+  expect(host?.textContent).toContain('Offer comparison');
+  expect(host?.textContent).toContain('用户公司 1');
+  expect(readComparison).toHaveBeenCalledTimes(calls);
+  await act(async () => setLocale('zh-CN'));
+  expect(host?.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+  expect(host?.textContent).toContain('Offer 横向对比');
+  expect(readComparison).toHaveBeenCalledTimes(calls);
 });

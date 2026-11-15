@@ -111,7 +111,7 @@ describe('KnowledgeSourcesView', () => {
   it('renders Source library surface with upload, bundle, paste entries and search box', () => {
     const markup = renderWithProviders();
 
-    expect(markup).toContain('素材库');
+    expect(markup).toContain('参考知识');
     expect(markup).toContain('上传 Markdown / Text');
     expect(markup).toContain('上传图文资料');
     expect(markup).toContain('粘贴正文');

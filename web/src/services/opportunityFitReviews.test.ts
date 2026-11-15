@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as fitService from './opportunityFitReviews';
 import {
   findOpportunityFitV2SourceConflictStage,
   listOpportunityFitReviews,
@@ -135,5 +136,17 @@ describe('opportunity fit source-conflict recovery', () => {
     await expect(
       findOpportunityFitV2SourceConflictStage(9, 'deep_review', 'deep-key-00000001', 42),
     ).resolves.toEqual({ status: 'unknown' });
+  });
+});
+
+
+describe('retired v1 writers', () => {
+  it('keeps history reads without exporting obsolete write requests', async () => {
+    expect(fitService).not.toHaveProperty('createOpportunityFitReview');
+    expect(fitService).not.toHaveProperty('createOpportunityFitDeepReview');
+    const history = { id: 101, application_id: 1, schema_version: 1, status: 'deep_reviewed' };
+    getMock.mockResolvedValue({ data: history });
+    await expect(fitService.getOpportunityFitReview(1, 101)).resolves.toEqual(history);
+    expect(getMock).toHaveBeenCalledWith('/applications/1/opportunity-fit-reviews/101');
   });
 });

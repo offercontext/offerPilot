@@ -26,7 +26,7 @@ class AIProviderProfile(BaseModel):
     supports_vision: bool = False
     supports_json_schema: bool = False
 
-    @field_validator("supports_json_schema", mode="before")
+    @field_validator("supports_json_schema", "supports_vision", mode="before")
     @classmethod
     def normalize_json_schema_capability(cls, value: Any) -> bool:
         return value if type(value) is bool else False
@@ -52,6 +52,7 @@ class Config(BaseModel):
     local_port: int = DEFAULT_PORT
     chat_auto_approve_writes: bool = False
     onboarding_force_open: bool = False
+    onboarding_dismissed: bool = False
     active_provider_id: str = DEFAULT_PROVIDER_ID
     fallback_provider_id: str = ""
     multimodal_provider_id: str = ""
@@ -135,6 +136,9 @@ def resolve_data_dir() -> Path:
 
 
 def load_config(data_dir: Path) -> Config:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     path = data_dir / "config.json"
     if not path.exists():
         cfg = Config(confirmation_secret=secrets.token_urlsafe(32))
@@ -161,6 +165,9 @@ def load_config(data_dir: Path) -> Config:
 
 
 def save_config(data_dir: Path, config: Config) -> None:
+    from offerpilot.backup_install import ensure_workspace_lease
+
+    ensure_workspace_lease(data_dir)
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / "config.json"
     path.write_text(config.model_dump_json(indent=2) + "\n", encoding="utf-8")

@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useDroppable } from '@dnd-kit/core';
 import type { ReactNode } from 'react';
 import type { PilotContextAttachment } from '@/types/chat';
@@ -16,6 +17,7 @@ export default function PilotContextDropTarget({
   disabled,
   onNativeDrop,
 }: PilotContextDropTargetProps) {
+  useLocale();
   const { isOver, setNodeRef } = useDroppable({ id: PILOT_CONTEXT_DROP_ID });
 
   return (
@@ -29,7 +31,7 @@ export default function PilotContextDropTarget({
           {children}
         </NativePilotAttachmentDropSurface>
       ) : children}
-      {isOver ? <div className={styles.dropHint}>松开以加入 Pilot 上下文</div> : null}
+      {isOver ? <div className={styles.dropHint}>{t("松开以加入 Pilot 上下文")}</div> : null}
     </div>
   );
 }

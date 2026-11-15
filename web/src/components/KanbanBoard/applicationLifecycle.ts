@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import dayjs from 'dayjs';
 import type { Application, ApplicationInput, ApplicationStatus } from '@/types/application';
 import { KANBAN_COLUMNS, STATUS_LABELS } from '@/types/application';
@@ -107,7 +108,7 @@ export function formatNextApplicationEvent(
     .filter((event) => dayjs(event.scheduled_at).isSame(cursor) || dayjs(event.scheduled_at).isAfter(cursor))
     .sort((a, b) => dayjs(a.scheduled_at).valueOf() - dayjs(b.scheduled_at).valueOf())[0];
 
-  if (!next) return '暂无下一事件';
+  if (!next) return t("暂无下一事件");
   return `${EVENT_TYPE_LABELS[next.event_type]} · ${dayjs(next.scheduled_at).format('YYYY-MM-DD HH:mm')}`;
 }
 

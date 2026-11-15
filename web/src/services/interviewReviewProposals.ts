@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 import axios from 'axios';
 import type { InterviewReviewProposal } from '@/types/interviewReviewProposal';
 import { createApiClient } from './http';
@@ -5,11 +6,11 @@ import { createApiClient } from './http';
 const http = createApiClient({ baseURL: '/api', timeout: 10000 });
 
 const SAFE_ERRORS: Record<string, string> = {
-  interview_review_event_required: '请先绑定有效的面试事件。',
-  interview_review_not_found: '面试复盘已不可见，请重新打开投递。',
-  interview_review_source_conflict: '复盘来源已变化，请重新核对后再生成。',
-  interview_review_provider_error: 'AI 服务暂不可用，请稍后重试。',
-  interview_review_unverifiable: 'AI 建议未通过证据校验，原复盘未受影响，请重试。',
+  get interview_review_event_required() { return t("请先绑定有效的面试事件。"); },
+  get interview_review_not_found() { return t("面试复盘已不可见，请重新打开投递。"); },
+  get interview_review_source_conflict() { return t("复盘来源已变化，请重新核对后再生成。"); },
+  get interview_review_provider_error() { return t("AI 服务暂不可用，请稍后重试。"); },
+  get interview_review_unverifiable() { return t("AI 建议未通过证据校验，原复盘未受影响，请重试。"); },
 };
 
 export class InterviewReviewProposalError extends Error {
@@ -42,7 +43,7 @@ function safeError(error: unknown): InterviewReviewProposalError {
   if (response?.status === 502) {
     return new InterviewReviewProposalError(SAFE_ERRORS.interview_review_provider_error);
   }
-  return new InterviewReviewProposalError('复盘建议暂时不可用，请稍后重试。');
+  return new InterviewReviewProposalError(t("复盘建议暂时不可用，请稍后重试。"));
 }
 
 export async function listInterviewReviewProposals(noteID: number): Promise<InterviewReviewProposal[]> {

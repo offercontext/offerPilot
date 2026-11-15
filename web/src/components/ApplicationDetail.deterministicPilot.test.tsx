@@ -626,7 +626,7 @@ describe('ApplicationDetail deterministic Pilot JD entry', () => {
     act(() => root?.render(<ApplicationDetail application={application} open onClose={vi.fn()} onAskPilot={onAskPilot} />));
 
     const shortcut = [...(container?.querySelectorAll('button') ?? [])]
-      .find((button) => button.textContent?.includes('让 Haru 帮我'));
+      .find((button) => button.textContent?.includes('让 Pilot 帮我'));
     expect(shortcut).not.toBeUndefined();
     act(() => (shortcut as HTMLButtonElement).click());
 
@@ -641,7 +641,7 @@ describe('ApplicationDetail deterministic Pilot JD entry', () => {
     act(() => root?.render(<ApplicationDetail application={application} open onClose={vi.fn()} onAskPilot={onAskPilot} />));
 
     const shortcut = [...(container?.querySelectorAll('button') ?? [])]
-      .find((button) => button.textContent?.includes('让 Haru 帮我'));
+      .find((button) => button.textContent?.includes('让 Pilot 帮我'));
     expect(shortcut).not.toBeUndefined();
     act(() => (shortcut as HTMLButtonElement).click());
 

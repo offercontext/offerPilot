@@ -1,3 +1,5 @@
+import { useLocalizedValidation } from './applicationUiText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, type Ref } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeftOutlined } from '@ant-design/icons';
@@ -35,9 +37,7 @@ interface ScheduleEventFormValues {
   status?: string;
 }
 
-const EVENT_TYPE_OPTIONS = (Object.entries(EVENT_TYPE_LABELS) as [ScheduleEventType, string][]).map(
-  ([value, label]) => ({ value, label })
-);
+
 
 function getDefaultScheduledAt() {
   return dayjs().add(1, 'day').startOf('hour');
@@ -53,7 +53,13 @@ export default function ScheduleEventForm({
   headingRef,
   onSuccess,
 }: ScheduleEventFormProps) {
+const EVENT_TYPE_OPTIONS = (Object.entries(EVENT_TYPE_LABELS) as [ScheduleEventType, string][]).map(
+  ([value, label]) => ({ value, label })
+);
+
+  useLocale();
   const [form] = Form.useForm<ScheduleEventFormValues>();
+  useLocalizedValidation(form);
   const queryClient = useQueryClient();
   const isEdit = !!event;
 
@@ -61,7 +67,7 @@ export default function ScheduleEventForm({
     mutationFn: (input: ScheduleEventInput) =>
       isEdit ? updateEvent(event.id, input) : createEvent(input),
     onSuccess: (savedEvent) => {
-      message.success(isEdit ? '日程已更新' : '日程已创建');
+      message.success(isEdit ? t("日程已更新") : t("日程已创建"));
       onSuccess?.(savedEvent);
       queryClient.invalidateQueries({ queryKey: ['calendar'] });
       queryClient.invalidateQueries({ queryKey: ['events'] });
@@ -69,7 +75,7 @@ export default function ScheduleEventForm({
       onClose();
     },
     onError: () => {
-      message.error(isEdit ? '更新日程失败' : '创建日程失败');
+      message.error(isEdit ? t("更新日程失败") : t("创建日程失败"));
     },
   });
 
@@ -132,7 +138,7 @@ export default function ScheduleEventForm({
   if (!open) return null;
 
   return (
-    <section data-testid="schedule-event-form" aria-label={isEdit ? '编辑日程' : '新建日程'} className={`${workflowStyles.surface} ${workflowStyles.stack}`}>
+    <section data-testid="schedule-event-form" aria-label={isEdit ? t("编辑日程") : t("新建日程")} className={`${workflowStyles.surface} ${workflowStyles.stack}`}>
       <div className={workflowStyles.sectionHeader}>
         <div>
           <Button
@@ -140,30 +146,28 @@ export default function ScheduleEventForm({
             icon={<ArrowLeftOutlined />}
             onClick={handleClose}
             style={{ width: 'fit-content', height: 'auto', padding: 0 }}
-          >
-            返回上一层
-          </Button>
+          >{t("返回上一层")}</Button>
           <h2 ref={headingRef} tabIndex={-1} style={{ margin: '8px 0 0' }}>
-            {isEdit ? '编辑日程' : '新建日程'}
+            {isEdit ? t("编辑日程") : t("新建日程")}
           </h2>
         </div>
         <Space className={workflowStyles.actionGroup}>
-          <Button onClick={handleClose}>取消</Button>
+          <Button onClick={handleClose}>{t("取消")}</Button>
           <Button type="primary" loading={mutation.isPending} onClick={() => form.submit()}>
-            {isEdit ? '保存' : '创建'}
+            {isEdit ? t("保存") : t("创建")}
           </Button>
         </Space>
       </div>
       <Form form={form} layout="vertical" onFinish={handleFinish} requiredMark={false} className={workflowStyles.section}>
         <Form.Item
           name="application_id"
-          label="投递"
-          rules={[{ required: true, message: '请选择投递' }]}
+          label={t("投递")}
+          rules={[{ required: true, message: t("请选择投递") }]}
         >
           <Select
             showSearch
             disabled={!!initialApplication || isEdit}
-            placeholder="选择投递"
+            placeholder={t("选择投递")}
             optionFilterProp="label"
             options={applications.map((application) => ({
               value: application.id,
@@ -175,62 +179,62 @@ export default function ScheduleEventForm({
         <div className={workflowStyles.formGridCompact}>
           <Form.Item
             name="event_type"
-            label="类型"
-            rules={[{ required: true, message: '请选择类型' }]}
+            label={t("类型")}
+            rules={[{ required: true, message: t("请选择类型") }]}
           >
             <Select options={EVENT_TYPE_OPTIONS} />
           </Form.Item>
-          <Form.Item name="round" label="轮次">
+          <Form.Item name="round" label={t("轮次")}>
             <InputNumber min={0} precision={0} style={{ width: '100%' }} />
           </Form.Item>
         </div>
 
-        <Form.Item name="subtype" label="子类型">
-          <Input placeholder="例如 assessment / technical / negotiation" />
+        <Form.Item name="subtype" label={t("子类型")}>
+          <Input placeholder={t("例如 assessment / technical / negotiation")} />
         </Form.Item>
 
-        <Form.Item name="tags" label="标签">
-          <Select mode="tags" placeholder="输入后回车添加标签" tokenSeparators={[',', '，']} />
+        <Form.Item name="tags" label={t("标签")}>
+          <Select mode="tags" placeholder={t("输入后回车添加标签")} tokenSeparators={[',', '，']} />
         </Form.Item>
 
         <div className={workflowStyles.formGridCompact}>
           <Form.Item
             name="scheduled_at"
-            label="时间"
-            rules={[{ required: true, message: '请选择时间' }]}
+            label={t("时间")}
+            rules={[{ required: true, message: t("请选择时间") }]}
           >
             <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm" />
           </Form.Item>
           <Form.Item
             name="duration_minutes"
-            label="时长"
-            rules={[{ required: true, message: '请输入时长' }]}
+            label={t("时长")}
+            rules={[{ required: true, message: t("请输入时长") }]}
           >
-            <InputNumber min={1} precision={0} addonAfter="分钟" style={{ width: '100%' }} />
+            <InputNumber min={1} precision={0} addonAfter={t("分钟")} style={{ width: '100%' }} />
           </Form.Item>
         </div>
 
         <div className={workflowStyles.formGridStatus}>
-          <Form.Item name="remind_at" label="提醒时间">
+          <Form.Item name="remind_at" label={t("提醒时间")}>
             <DatePicker showTime style={{ width: '100%' }} format="YYYY-MM-DD HH:mm" />
           </Form.Item>
-          <Form.Item name="status" label="状态">
+          <Form.Item name="status" label={t("状态")}>
             <Select
               options={[
-                { value: 'todo', label: '待处理' },
-                { value: 'done', label: '已完成' },
-                { value: 'cancelled', label: '已取消' },
+                { value: 'todo', label: t("待处理") },
+                { value: 'done', label: t("已完成") },
+                { value: 'cancelled', label: t("已取消") },
               ]}
             />
           </Form.Item>
         </div>
 
-        <Form.Item name="location" label="地点">
-          <Input placeholder="线上链接或线下地址" />
+        <Form.Item name="location" label={t("地点")}>
+          <Input placeholder={t("线上链接或线下地址")} />
         </Form.Item>
 
-        <Form.Item name="notes" label="备注">
-          <Input.TextArea rows={3} placeholder="准备事项、联系人等" />
+        <Form.Item name="notes" label={t("备注")}>
+          <Input.TextArea rows={3} placeholder={t("准备事项、联系人等")} />
         </Form.Item>
       </Form>
     </section>

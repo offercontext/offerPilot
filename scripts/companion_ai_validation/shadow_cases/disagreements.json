@@ -1,0 +1,15 @@
+{
+  "unreconciled": [
+    {
+      "id": "s04",
+      "author_hypotheses": [
+        "unknown"
+      ],
+      "blind_primary": "contradicted",
+      "reason": "同一当前活动在三步中的第1步，target却断言已经一起折完整条船；完成状态与当前阶段冲突，同时共同制作超出仅有选色参与的证据。并非仅因“不证明共同制作”就认定其明确不存在。",
+      "alternative": "unknown：若单独抽取“曾共同制作”且不绑定当前同一活动，材料只能说未获支持；但这里“整条小船”在上下文中自然指当前活动，不能靠改换事件消除冲突。"
+    }
+  ],
+  "forced_consensus": false,
+  "all_ambiguities_retained_in_blind_labels": true
+}

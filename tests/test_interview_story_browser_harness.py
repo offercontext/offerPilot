@@ -1094,6 +1094,45 @@ def test_isolated_python_keeps_json_stdout_separate_from_diagnostics(
     assert not list(tmp_path.glob("json-probe-*"))
 
 
+@pytest.mark.parametrize("port_sequence", ("then_distinct", "always_same"))
+def test_story_browser_harness_service_proxy_ports_handle_ephemeral_reuse(
+    tmp_path: Path, port_sequence: str,
+) -> None:
+    source = _HARNESS_PATH.read_text(encoding="utf-8")
+    allocator = source[
+        source.index("function Get-DistinctFreePort("):
+        source.index("function Assert-ExitCode(")
+    ]
+    anchor = "  $providers | ConvertTo-Json -Compress | Set-Content -LiteralPath $providerAllowlist -Encoding utf8\n"
+    start = source.index(anchor) + len(anchor)
+    allocation = source[start:source.index("  $env:OFFERPILOT_DATA = $tempData", start)]
+    wrapper = tmp_path / "service-ports.ps1"
+    wrapper.write_text(
+        "$ErrorActionPreference = 'Stop'\n"
+        "$script:cursor = 0\n"
+        + f"$script:sequence = '{port_sequence}'\n"
+        + "function Get-FreePort {\n"
+        + "  $script:cursor++\n"
+        + "  if ($script:sequence -eq 'always_same' -or $script:cursor -le 2) { return 19100 }\n"
+        + "  return 19101\n"
+        + "}\n"
+        + allocator
+        + allocation
+        + "@{service=$port; proxy=$proxyPort; allocations=$script:cursor} | ConvertTo-Json -Compress\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(wrapper)],
+        capture_output=True, text=True, timeout=30,
+    )
+    if port_sequence == "then_distinct":
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout) == {"service": 19100, "proxy": 19101, "allocations": 3}
+    else:
+        assert result.returncode != 0
+        assert "Could not allocate a distinct local port" in result.stderr
+
+
 def test_story_browser_harness_starts_audited_chromium_before_honoring_completion_signal(tmp_path: Path) -> None:
     source_data = tmp_path / "configured-data"
     source_data.mkdir()
@@ -1185,6 +1224,39 @@ def _chromium_attempt_records(output: str) -> list[tuple[int, str, int, str]]:
             output,
         )
     ]
+
+
+def _chromium_cleanup_diagnostic_lines(output: str) -> list[str]:
+    match = re.search(
+        r"^Dedicated Chromium startup cleanup diagnostic: [^\r\n]*?; diagnostic=(.*?); cleanup_error=",
+        output,
+        re.MULTILINE | re.DOTALL,
+    )
+    assert match is not None, "Chromium cleanup diagnostic field is missing"
+    return match.group(1).splitlines()
+
+
+@pytest.mark.parametrize("newline", ("\n", "\r\n"))
+@pytest.mark.parametrize("warning", ("", "StarletteDeprecationWarning: startup dependency warning"))
+def test_chromium_cleanup_diagnostic_preserves_exit_marker_after_startup_warnings(
+    newline: str, warning: str,
+) -> None:
+    diagnostic = f"{warning}{newline}forced Chromium startup exit" if warning else "forced Chromium startup exit"
+    output = (
+        "Dedicated Chromium startup cleanup diagnostic: attempt=1; outcome=exited; "
+        f"cleanup=failed; diagnostic={diagnostic}; cleanup_error=Forced cleanup failure{newline}"
+    )
+    assert "forced Chromium startup exit" in _chromium_cleanup_diagnostic_lines(output)
+
+
+@pytest.mark.parametrize("diagnostic", ("unrelated child stderr", "prefix forced Chromium startup exit suffix"))
+def test_chromium_cleanup_diagnostic_rejects_a_marker_outside_its_field(diagnostic: str) -> None:
+    output = (
+        "forced Chromium startup exit\n"
+        "Dedicated Chromium startup cleanup diagnostic: attempt=1; outcome=exited; "
+        f"cleanup=failed; diagnostic={diagnostic}; cleanup_error=forced Chromium startup exit\n"
+    )
+    assert "forced Chromium startup exit" not in _chromium_cleanup_diagnostic_lines(output)
 
 
 def test_story_browser_harness_retries_an_exited_chromium_with_a_new_port_and_profile(tmp_path: Path) -> None:
@@ -1313,7 +1385,7 @@ def test_story_browser_harness_fails_closed_when_failed_chromium_cleanup_is_unce
     assert len(attempts) == 1
     assert attempts[0][0:2] == (1, "exited")
     assert "exit_code=73" in output
-    assert "diagnostic=forced Chromium startup exit" in output
+    assert "forced Chromium startup exit" in _chromium_cleanup_diagnostic_lines(output)
     assert "cleanup=failed" in output
     assert "attempt=2" not in output
     assert "Dedicated browser target is ready" not in output

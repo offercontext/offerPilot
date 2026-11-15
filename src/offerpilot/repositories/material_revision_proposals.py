@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/materials.md（改写生成、选中修改的接受与拒绝）。
+
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, List
@@ -233,6 +235,7 @@ class MaterialRevisionProposalsRepository:
             return _normalize_proposal_timestamps(proposal), child, True
 
     def reject(self, application_id: int, proposal_id: int) -> MaterialRevisionProposal:
+        # 拒绝只改变建议状态，不删除原简历或回滚已接受的改写；已接受提案不能再拒绝。
         with self._session_factory() as session:
             proposal = _visible_proposal(session, application_id, proposal_id)
             if proposal is None:
@@ -265,6 +268,8 @@ class MaterialRevisionProposalsRepository:
 def build_source_snapshot(
     session: Session, application_id: int, user_assertions: list[str]
 ) -> tuple[dict[str, Any], str]:
+    # 只消费唯一材料包、其关联的活跃简历、当前 JD 及最新确认的证据包。
+    # 冻结整组来源并计算指纹；生成、接受时使用同一构造器识别来源漂移。
     assertions = _normalize_assertions(user_assertions)
     application = _visible_application(session, application_id)
     if application is None:

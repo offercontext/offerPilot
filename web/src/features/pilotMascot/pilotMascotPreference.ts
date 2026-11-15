@@ -4,6 +4,7 @@ export const PILOT_MASCOT_MIN_ZOOM = 0.8;
 export const PILOT_MASCOT_MAX_ZOOM = 1.3;
 export const PILOT_MASCOT_POSITION_KEY = 'offerpilot:pilot-mascot-position';
 export const PILOT_MASCOT_ANIMATION_KEY = 'offerpilot:pilot-mascot-animation';
+export const PILOT_MASCOT_ANIMATION_CHANGED = 'offerpilot:pilot-mascot-animation-changed';
 
 export type PilotMascotAnimationLevel = 'full' | 'minimal' | 'off';
 
@@ -197,4 +198,5 @@ export function writePilotMascotAnimationLevel(
   } catch {
     // A blocked storage backend must not affect Haru availability.
   }
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(PILOT_MASCOT_ANIMATION_CHANGED, { detail: level }));
 }

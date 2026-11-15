@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Fragment, createElement } from 'react';
 import type { Capability } from './capabilities';
 import styles from './ChatPanel.module.css';
@@ -10,10 +11,11 @@ interface Props {
 }
 
 export default function SlashMenu({ items, selected, onSelect, onHover }: Props) {
+  useLocale();
   if (!items.length) return null;
   let lastGroup = '';
   return (
-    <div className={styles.slash} role="listbox" aria-label="能力命令">
+    <div className={styles.slash} role="listbox" aria-label={t("能力命令")}>
       {items.map((cap, i) => {
         const showGroup = cap.group !== lastGroup;
         lastGroup = cap.group;

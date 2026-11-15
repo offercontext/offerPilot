@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# 业务地图：docs/architecture/code-map/opportunity-offers.md（初筛确认与深入分析）。
+
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
@@ -15,9 +17,7 @@ from offerpilot.ai.agent_contracts import ChatModel
 from offerpilot.ai.opportunity_fit_reviews import (
     OpportunityFitModelError,
     build_source_snapshot,
-    generate_deep_review,
     generate_deep_review_v2,
-    generate_triage,
     generate_triage_v2,
 )
 from offerpilot.models import (
@@ -143,6 +143,8 @@ class OpportunityFitReviewsRepository:
         model: ChatModel,
         jd_version_id: int | None = None,
     ) -> tuple[OpportunityFitReviewSession, OpportunityFitReviewStage, bool, str]:
+        # 先持久化 stage 的生成所有权，再调用模型；同 key/快照重放，租约过期才接管。
+        # 确认凭据绑定本代结果，生成成功还须通过最终来源和所有权检查。
         confirmation_secret = self._require_confirmation_secret()
         provider_token = ""
         should_call_provider = False
@@ -365,6 +367,8 @@ class OpportunityFitReviewsRepository:
     def confirm_triage_v2(
         self, application_id: int, review_id: int, stage_id: int, confirmation_token: str
     ) -> OpportunityFitReviewStage:
+        # 初筛确认是一次性消费：先核对当前 JD、有效期和签名，再以代次/哈希条件更新。
+        # confirmed 的重复确认返回已消费错误，不能当作普通幂等写直接复用。
         confirmation_secret = self._require_confirmation_secret()
         with self._session_factory() as session:
             session.execute(text("BEGIN IMMEDIATE"))
@@ -471,6 +475,8 @@ class OpportunityFitReviewsRepository:
         idempotency_key: str,
         model: ChatModel,
     ) -> tuple[OpportunityFitReviewStage, bool]:
+        # 深入分析只继承已确认初筛的冻结快照和来源指纹，不用这次请求重建候选人事实。
+        # 父初筛归属、当前 JD 与快照完整性在 claim 前检查，落库前仍检查所有权和来源。
         with self._session_factory() as session:
             # Serialize the parent/source decision with the deep-review claim.
             session.execute(text("BEGIN IMMEDIATE"))
@@ -637,65 +643,6 @@ class OpportunityFitReviewsRepository:
             session.refresh(current_stage)
             return current_stage, True
 
-    def create_triage(
-        self,
-        application_id: int,
-        resume_id: int,
-        jd_text: str,
-        jd_source_label: str,
-        candidate_assertions: list[str],
-        idempotency_key: str,
-        model: ChatModel,
-    ) -> tuple[OpportunityFitReview, bool]:
-        with self._session_factory() as session:
-            application = _visible_application(session, application_id)
-            if application is None:
-                raise OpportunityFitReviewNotFound()
-            existing = _find_by_idempotency(session, application_id, idempotency_key)
-            if existing is not None:
-                return _normalize_review_timestamps(existing), False
-            snapshot = _build_snapshot(
-                session,
-                application,
-                resume_id,
-                jd_text,
-                jd_source_label,
-                candidate_assertions,
-            )
-
-        triage = generate_triage(model, snapshot)
-        snapshot_json = canonical_json(snapshot)
-        triage_json = canonical_json(triage.payload)
-        fingerprint = sha256_text(snapshot_json)
-
-        with self._session_factory() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
-            if _visible_application(session, application_id) is None:
-                raise OpportunityFitReviewNotFound()
-            existing = _find_by_idempotency(session, application_id, idempotency_key)
-            if existing is not None:
-                return _normalize_review_timestamps(existing), False
-            review = OpportunityFitReview(
-                application_id=application_id,
-                resume_id=resume_id,
-                idempotency_key=idempotency_key,
-                source_fingerprint_sha256=fingerprint,
-                source_snapshot_json=snapshot_json,
-                triage_json=triage_json,
-                triage_sha256=sha256_text(triage_json),
-            )
-            session.add(review)
-            try:
-                session.commit()
-            except IntegrityError:
-                session.rollback()
-                existing = _find_by_idempotency(session, application_id, idempotency_key)
-                if existing is None:
-                    raise
-                return _normalize_review_timestamps(existing), False
-            session.refresh(review)
-            return _normalize_review_timestamps(review), True
-
     def list(self, application_id: int) -> list[OpportunityFitReview]:
         statement = (
             select(OpportunityFitReview)
@@ -712,38 +659,6 @@ class OpportunityFitReviewsRepository:
         with self._session_factory() as session:
             review = _visible_review(session, application_id, review_id)
             return _normalize_review_timestamps(review) if review is not None else None
-
-    def create_deep_review(
-        self,
-        application_id: int,
-        review_id: int,
-        model: ChatModel,
-    ) -> tuple[OpportunityFitReview, bool]:
-        with self._session_factory() as session:
-            review = _visible_review(session, application_id, review_id)
-            if review is None:
-                raise OpportunityFitReviewNotFound()
-            if review.deep_review_json is not None:
-                return _normalize_review_timestamps(review), False
-            snapshot = _parse_stored_object(review.source_snapshot_json, "source snapshot")
-            triage = _parse_stored_object(review.triage_json, "triage")
-
-        deep_review = generate_deep_review(model, snapshot, triage)
-        deep_review_json = canonical_json(deep_review.payload)
-
-        with self._session_factory() as session:
-            session.execute(text("BEGIN IMMEDIATE"))
-            review = _visible_review(session, application_id, review_id)
-            if review is None:
-                raise OpportunityFitReviewNotFound()
-            if review.deep_review_json is not None:
-                return _normalize_review_timestamps(review), False
-            review.deep_review_json = deep_review_json
-            review.deep_review_sha256 = sha256_text(deep_review_json)
-            review.deep_reviewed_at = datetime.now(timezone.utc)
-            session.commit()
-            session.refresh(review)
-            return _normalize_review_timestamps(review), True
 
 
 def _build_snapshot(
@@ -804,18 +719,6 @@ def _visible_review(
     )
 
 
-def _find_by_idempotency(
-    session: Session,
-    application_id: int,
-    idempotency_key: str,
-) -> OpportunityFitReview | None:
-    return session.scalar(
-        select(OpportunityFitReview)
-        .where(OpportunityFitReview.application_id == application_id)
-        .where(OpportunityFitReview.idempotency_key == idempotency_key)
-    )
-
-
 def _find_v2_session(
     session: Session, application_id: int, idempotency_key: str
 ) -> OpportunityFitReviewSession | None:
@@ -851,7 +754,11 @@ def _find_v2_stage_by_application_key(
 def _v2_live_owner_conditions(
     stage: OpportunityFitReviewStage, provider_token: str, now: datetime
 ) -> tuple[Any, ...]:
+    # Callers load this stage after BEGIN IMMEDIATE. Compare parsed instants as
+    # well as the CAS so legacy offset-bearing expiry text cannot pass equality.
+    expires_at = _as_utc(stage.lease_expires_at)
     return (
+        expires_at is not None and expires_at > now,
         OpportunityFitReviewStage.id == stage.id,
         OpportunityFitReviewStage.stage_generation == stage.stage_generation,
         OpportunityFitReviewStage.provider_call_token == provider_token,
@@ -995,13 +902,6 @@ def _verify_confirmation_token(
     return hmac.compare_digest(signature, expected) and hmac.compare_digest(
         _hash_token(token), stage.confirmation_token_hash
     )
-
-
-def _parse_stored_object(value: str, name: str) -> dict[str, Any]:
-    try:
-        return parse_json_object(name, value)
-    except JsonContractError as exc:
-        raise OpportunityFitReviewConflictError(str(exc)) from exc
 
 
 def _normalize_review_timestamps(review: OpportunityFitReview) -> OpportunityFitReview:

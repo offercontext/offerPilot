@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -18,20 +19,20 @@ function render(state: 'current' | 'frozen' | 'changed' | 'unknown' | 'pending')
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
-  act(() => root?.render(<SourceStateTag state={state} detail="简历版本已变化" />));
+  act(() => root?.render(<SourceStateTag state={state} detail={t("简历版本已变化")} />));
   return container;
 }
 
 describe('SourceStateTag', () => {
   it.each([
-    ['current', '当前使用来源'],
-    ['frozen', '已保留当时版本'],
-    ['changed', '来源已更新，已有结果仍保留'],
-    ['unknown', '来源暂不可确认'],
-    ['pending', '待确认的证据预览'],
+    ['current', t("当前使用来源")],
+    ['frozen', t("已保留当时版本")],
+    ['changed', t("来源已更新，已有结果仍保留")],
+    ['unknown', t("来源暂不可确认")],
+    ['pending', t("待确认的证据预览")],
   ] as const)('renders the fixed Chinese label for %s', (state, label) => {
     const view = render(state);
     expect(view.textContent).toContain(label);
-    expect(view.textContent).toContain('简历版本已变化');
+    expect(view.textContent).toContain(t("简历版本已变化"));
   });
 });

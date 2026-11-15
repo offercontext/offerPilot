@@ -1,0 +1,1360 @@
+{
+  "schema_version": 1,
+  "baseline_id": "selection-safety-integrated-v1",
+  "source_commit": "34e45b13697799c2dc9cd6a3ef359478df828b70",
+  "upstream_commit": "62abd7a26d4a43d9c5fd55dbc58d4991ee97b687",
+  "source_baseline_hash": "56f49d9e0ef11d8abb5c00041761fa57f5b3452e35ae2cd838a81e133a956e06",
+  "master_baseline_hash": "f46d029ddc3bd7fdc44568de6715cdb9d6c3e5ab6eb092f02f48e117a0c1a6dc",
+  "integrated_baseline_hash": "ef8e6f96fd18430396a462b20131467cee31a41fe3a86443080ad1ad8d07aa77",
+  "rows": [
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[application_events]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[application_events]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[applications]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[applications]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memories]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memories]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memory_mutations]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memory_mutations]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memory_versions]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[confirmed_memory_versions]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[context_contributor_settings]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[context_contributor_settings]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_captured_source_metadata]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_captured_source_metadata]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_evidence]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_evidence]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_extraction_snapshots]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_extraction_snapshots]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_note_evidence]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_note_evidence]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_note_versions]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_note_versions]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_notes]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_notes]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_sources]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_each_registered_table_commit_rollback_compensate[knowledge_sources]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[application_events]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[application_events]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[applications]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[applications]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memories]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memories]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memory_mutations]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memory_mutations]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memory_versions]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[confirmed_memory_versions]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[context_contributor_settings]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[context_contributor_settings]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_captured_source_metadata]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_captured_source_metadata]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_evidence]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_evidence]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_extraction_snapshots]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_extraction_snapshots]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_note_evidence]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_note_evidence]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_note_versions]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_note_versions]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_notes]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_notes]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_sources]",
+      "new_id": "tests/evaluation/test_context_observer.py::test_every_table_commit_survives_process_crash_and_uncommitted_write_does_not[knowledge_sources]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_context_observer.py::test_profile_is_closed_and_tampering_is_gap",
+      "new_id": "tests/evaluation/test_context_observer.py::test_profile_is_closed_and_tampering_is_gap",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[bad_receipt]",
+      "new_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[bad_receipt]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[extra_delta]",
+      "new_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[extra_delta]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[other_memory]",
+      "new_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[other_memory]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[wrong_version]",
+      "new_id": "tests/evaluation/test_core_integrity.py::test_fixture_control_rejects_concurrent_or_wrong_objects[wrong_version]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_integrity.py::test_missing_is_unknown_keeps_full_denominator",
+      "new_id": "tests/evaluation/test_core_integrity.py::test_missing_is_unknown_keeps_full_denominator",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_integrity.py::test_raw_socket_to_approved_provider_requires_validated_send_permission",
+      "new_id": "tests/evaluation/test_core_integrity.py::test_raw_socket_to_approved_provider_requires_validated_send_permission",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[extra_field]",
+      "new_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[extra_field]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[gate_release]",
+      "new_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[gate_release]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[outer_release]",
+      "new_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[outer_release]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[statistics]",
+      "new_id": "tests/evaluation/test_core_release.py::test_receipt_binds_complete_report_and_cannot_grant_release[statistics]",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_final_input.py::test_final_wire_body_links_unicode_memory_units_without_opaque_copy",
+      "new_id": "tests/evaluation/test_final_input.py::test_final_wire_body_links_unicode_memory_units_without_opaque_copy",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_run_budget.py::test_fee_reservation_blocks_before_ack_and_unknown_usage_is_not_refunded",
+      "new_id": "tests/evaluation/test_run_budget.py::test_fee_reservation_blocks_before_ack_and_unknown_usage_is_not_refunded",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_verdicts.py::test_failure_survives_independent_grader_exception",
+      "new_id": "tests/evaluation/test_verdicts.py::test_failure_survives_independent_grader_exception",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_verdicts.py::test_frozen_denominator_and_required_rule",
+      "new_id": "tests/evaluation/test_verdicts.py::test_frozen_denominator_and_required_rule",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/evaluation/test_verdicts.py::test_required_rule_cannot_be_downgraded",
+      "new_id": "tests/evaluation/test_verdicts.py::test_required_rule_cannot_be_downgraded",
+      "origins": [
+        "source"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/pilot_runtime/test_confirmation.py::test_approve_claims_executes_once_and_delivers_once",
+      "new_id": "tests/pilot_runtime/test_confirmation.py::test_approve_claims_executes_once_and_delivers_once",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/pilot_runtime/test_confirmation.py::test_real_sqlite_two_connections_have_one_claim_and_one_executor",
+      "new_id": "tests/pilot_runtime/test_confirmation.py::test_real_sqlite_two_connections_have_one_claim_and_one_executor",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[after_persist]",
+      "new_id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[after_persist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[before_persist]",
+      "new_id": "tests/pilot_runtime/test_receipt_delivery_recovery.py::test_restart_recovers_receipt_at_delivery_boundaries[before_persist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_auth_api.py::test_auth_enabled_requires_bearer_token_for_api_routes",
+      "new_id": "tests/test_auth_api.py::test_auth_enabled_requires_bearer_token_for_api_routes",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvent]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvent]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvidenceBundle]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationEvidenceBundle]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationJDVersion]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationJDVersion]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationMaterialKit]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationMaterialKit]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationOutcome]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationOutcome]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationSubmissionSnapshot]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ApplicationSubmissionSnapshot]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewNote]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewNote]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewReadinessSignal]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[InterviewReadinessSignal]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[JDAnalysis]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[JDAnalysis]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[MaterialRevisionProposal]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[MaterialRevisionProposal]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Offer]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Offer]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewSession]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewSession]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewStage]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReviewStage]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReview]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[OpportunityFitReview]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Question]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[Question]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ResumeMatch]",
+      "new_id": "tests/test_conditional_delete_repositories.py::test_application_delete_if_matches_rejects_every_fk_dependency[ResumeMatch]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker build -t offerpilot:smoke .]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker build -t offerpilot:smoke .]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-oc --help]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-oc --help]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv run oc --help]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv run oc --help]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv tool install --force .]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-Install-uv tool install --force .]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[bash-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker build -t offerpilot:smoke .]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker build -t offerpilot:smoke .]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Docker-docker run --rm -e OFFERPILOT_DATA=/tmp/offerpilot-smoke offerpilot:smoke smoke --static-dir /app/web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-oc --help]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-oc --help]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv run oc --help]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv run oc --help]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv tool install --force .]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-Install-uv tool install --force .]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_powershell_optional_gate_failures_reach_parent[powershell-RealAi-uv run oc verify --profile real-ai --static-dir web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm run build]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm run build]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm test]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-npm test]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run mypy src]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run mypy src]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc smoke --static-dir web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc smoke --static-dir web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc verify --profile local --static-dir web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run oc verify --profile local --static-dir web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run pytest -q]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run pytest -q]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run ruff check .]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[bash-uv run ruff check .]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm run build]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm run build]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm test]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-npm test]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run mypy src]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run mypy src]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc smoke --static-dir web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc smoke --static-dir web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc verify --profile local --static-dir web/dist]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run oc verify --profile local --static-dir web/dist]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run pytest -q]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run pytest -q]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run ruff check .]",
+      "new_id": "tests/test_gate_scripts.py::test_release_stops_on_each_native_failure[powershell-uv run ruff check .]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_knowledge_delete_persistence.py::test_purge_does_not_delete_db_when_quarantine_move_fails",
+      "new_id": "tests/test_knowledge_delete_persistence.py::test_purge_does_not_delete_db_when_quarantine_move_fails",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
+      "new_id": "tests/test_managed_runtime_api.py::test_runtime_status_rechecks_source_visibility_after_manager_read",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_managed_runtime_api.py::test_runtime_status_rereads_durable_terminal_after_manager_transition",
+      "new_id": "tests/test_managed_runtime_api.py::test_runtime_status_rereads_durable_terminal_after_manager_transition",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_partition_preserves_every_node_and_keeps_files_together",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_partition_preserves_every_node_and_keeps_files_together",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_setup_skip_is_explicitly_counted_without_becoming_a_pass",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_setup_skip_is_explicitly_counted_without_becoming_a_pass",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[boolean_exit]",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[boolean_exit]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[duplicate]",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[duplicate]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[extra]",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[extra]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[failed]",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[failed]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[missing]",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[missing]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[teardown]",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_backend_zero_exit_cannot_hide_missing_or_failed_execution[teardown]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_full_backend_refuses_inherited_pytest_filters_before_any_execution",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_full_backend_refuses_inherited_pytest_filters_before_any_execution",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_native_zero_without_backend_execution_report_is_incomplete",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_native_zero_without_backend_execution_report_is_incomplete",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_real_backend_failure_stops_remaining_groups_and_never_verifies",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_real_backend_failure_stops_remaining_groups_and_never_verifies",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_backend_gate.py::test_real_isolated_backend_run_verifies_full_coverage_and_refuses_tampered_report",
+      "new_id": "tests/test_selection/test_backend_gate.py::test_real_isolated_backend_run_verifies_full_coverage_and_refuses_tampered_report",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_backend_reconciliation_failure_dominates_skip_and_missing",
+      "new_id": "tests/test_selection/test_selection.py::test_backend_reconciliation_failure_dominates_skip_and_missing",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_deleted_test_blocks_merge_and_stale_mapping",
+      "new_id": "tests/test_selection/test_selection.py::test_deleted_test_blocks_merge_and_stale_mapping",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_dependency_closure_cycles_and_p2_direct",
+      "new_id": "tests/test_selection/test_selection.py::test_dependency_closure_cycles_and_p2_direct",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_document_no_changes_and_snapshot_invalidation",
+      "new_id": "tests/test_selection/test_selection.py::test_document_no_changes_and_snapshot_invalidation",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[cleanup-1]",
+      "new_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[cleanup-1]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[corrupt-1]",
+      "new_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[corrupt-1]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[missing-1]",
+      "new_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[missing-1]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[mutate-2]",
+      "new_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[mutate-2]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[timeout-3]",
+      "new_id": "tests/test_selection/test_selection.py::test_execute_preserves_failures_and_rejects_incomplete_or_changed_runs[timeout-3]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[downgraded]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[downgraded]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[duplicate]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[duplicate]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[missing]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[missing]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[none]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[none]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[unclassified]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_baseline_rejects_missing_or_downgraded_identity[unclassified]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v1]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v1]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v2]",
+      "new_id": "tests/test_selection/test_selection.py::test_fixed_safety_identity_cannot_be_removed_from_same_baseline_version[v2]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_frontend_reconciliation_missing_duplicate_and_skip",
+      "new_id": "tests/test_selection/test_selection.py::test_frontend_reconciliation_missing_duplicate_and_skip",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_git_paths_staged_unstaged_untracked_rename_and_unknown_base",
+      "new_id": "tests/test_selection/test_selection.py::test_git_paths_staged_unstaged_untracked_rename_and_unknown_base",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_harness_candidate_cannot_point_away_from_selected_root",
+      "new_id": "tests/test_selection/test_selection.py::test_harness_candidate_cannot_point_away_from_selected_root",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[backend-none]",
+      "new_id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[backend-none]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[unknown-full]",
+      "new_id": "tests/test_selection/test_selection.py::test_invalid_mapping_cannot_remove_required_execution[unknown-full]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths0]",
+      "new_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths0]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths1]",
+      "new_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths1]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths2]",
+      "new_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths2]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths3]",
+      "new_id": "tests/test_selection/test_selection.py::test_invalid_risk_paths_are_configuration_errors[paths3]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_latest_public_safety_baseline_preserves_v1_and_adds_status_races",
+      "new_id": "tests/test_selection/test_selection.py::test_latest_public_safety_baseline_preserves_v1_and_adds_status_races",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_master_safety_registration_preserves_existing_source_identities",
+      "new_id": "tests/test_selection/test_selection.py::test_master_safety_registration_preserves_existing_source_identities",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[dev]",
+      "new_id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[dev]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Missing-stack fixtures remain fail-closed; real integrated stack still requires exact six-trial receipts"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[full]",
+      "new_id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[full]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Missing-stack fixtures remain fail-closed; real integrated stack still requires exact six-trial receipts"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[merge]",
+      "new_id": "tests/test_selection/test_selection.py::test_master_unsupported_harness_remains_required_and_blocks_whole_plan[merge]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Missing-stack fixtures remain fail-closed; real integrated stack still requires exact six-trial receipts"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_new_test_without_metadata_is_not_silently_skipped",
+      "new_id": "tests/test_selection/test_selection.py::test_new_test_without_metadata_is_not_silently_skipped",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_offerpilot_mapping_cannot_downgrade_latest_safety_baseline",
+      "new_id": "tests/test_selection/test_selection.py::test_offerpilot_mapping_cannot_downgrade_latest_safety_baseline",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_owned_process_exits_when_controller_crashes",
+      "new_id": "tests/test_selection/test_selection.py::test_owned_process_exits_when_controller_crashes",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[p0]",
+      "new_id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[p0]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[unknown_priority]",
+      "new_id": "tests/test_selection/test_selection.py::test_real_collection_rejects_conflicting_or_unknown_markers[unknown_priority]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_real_plan_execute_catches_regression",
+      "new_id": "tests/test_selection/test_selection.py::test_real_plan_execute_catches_regression",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_real_skip_is_not_success",
+      "new_id": "tests/test_selection/test_selection.py::test_real_skip_is_not_success",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_registered_selector_cli_really_invokes_help",
+      "new_id": "tests/test_selection/test_selection.py::test_registered_selector_cli_really_invokes_help",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_runtime_markdown_and_broken_document_links_do_not_pass",
+      "new_id": "tests/test_selection/test_selection.py::test_runtime_markdown_and_broken_document_links_do_not_pass",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[False]",
+      "new_id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[False]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[True]",
+      "new_id": "tests/test_selection/test_selection.py::test_test_rename_out_of_catalog_blocks_merge[True]",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_unknown_surface_and_priority_are_conservative",
+      "new_id": "tests/test_selection/test_selection.py::test_unknown_surface_and_priority_are_conservative",
+      "origins": [
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[0]",
+      "new_id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[0]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[3]",
+      "new_id": "tests/test_selection/test_selection.py::test_zero_exit_without_smoke_or_harness_evidence_cannot_pass[3]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/test_write_operations.py::test_locked_modify_executes_effective_args_against_original_proposal",
+      "new_id": "tests/test_write_operations.py::test_locked_modify_executes_effective_args_against_original_proposal",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_approval_transaction.py::test_approve_reject_race_has_one_terminal_winner_and_one_executor",
+      "new_id": "tests/tool_authority/test_approval_transaction.py::test_approve_reject_race_has_one_terminal_winner_and_one_executor",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_replay_topology.py::test_final_terminal_replay_has_no_pending_projection",
+      "new_id": "tests/tool_authority/test_replay_topology.py::test_final_terminal_replay_has_no_pending_projection",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[applications-update_application_status_scoped-second_id-None-None]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[applications-update_application_status_scoped-second_id-None-None]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-delete_application_event_scoped-second_event_id-ApplicationEvent-None]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-delete_application_event_scoped-second_event_id-ApplicationEvent-None]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-update_application_event_scoped-second_event_id-ApplicationEvent-notes]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[events-update_application_event_scoped-second_event_id-ApplicationEvent-notes]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-delete_note_scoped-second_note_id-InterviewNote-None]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-delete_note_scoped-second_note_id-InterviewNote-None]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-update_note_scoped-second_note_id-InterviewNote-company]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[notes-update_note_scoped-second_note_id-InterviewNote-company]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-save_offer_assessment_scoped-second_offer_id-Offer-assessment]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-save_offer_assessment_scoped-second_offer_id-Offer-assessment]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-update_offer_scoped-second_offer_id-Offer-notes]",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_restricted_update_and_delete_fail_closed_for_cross_application_targets[offers-update_offer_scoped-second_offer_id-Offer-notes]",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    },
+    {
+      "old_id": "tests/tool_authority/test_scoped_writes.py::test_soft_deleted_current_parent_denies_every_scoped_write_without_side_effect",
+      "new_id": "tests/tool_authority/test_scoped_writes.py::test_soft_deleted_current_parent_denies_every_scoped_write_without_side_effect",
+      "origins": [
+        "source",
+        "master"
+      ],
+      "semantic_scope": "Original coverage retained"
+    }
+  ],
+  "counts": {
+    "source": 111,
+    "master": 117,
+    "union": 159,
+    "source_only": 42,
+    "master_only": 48
+  },
+  "historical_baseline_files_modified": false
+}

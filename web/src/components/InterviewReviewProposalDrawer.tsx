@@ -1,3 +1,4 @@
+import { t, useLocale, getLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Card, Empty, List, Space, Spin, Tag, Typography } from 'antd';
 import type { InterviewNote } from '@/types/note';
@@ -18,10 +19,10 @@ import styles from './InterviewReviewProposalDrawer.module.css';
 const { Paragraph, Text, Title } = Typography;
 
 const EVIDENCE_LABELS: Record<InterviewReviewEvidenceRef['path'], string> = {
-  '/questions': '复盘问题',
-  '/self_reflection': '自我反思',
-  '/difficulty_points': '困难点',
-  '/mood': '情绪记录',
+  get '/questions'() { return t("复盘问题"); },
+  get '/self_reflection'() { return t("自我反思"); },
+  get '/difficulty_points'() { return t("困难点"); },
+  get '/mood'() { return t("情绪记录"); },
 };
 
 interface Props {
@@ -73,6 +74,7 @@ function safeErrorMessage(error: unknown): string {
 }
 
 function EvidenceRefs({ refs }: { refs: InterviewReviewEvidenceRef[] }) {
+  useLocale();
   if (refs.length === 0) return null;
   return (
     <div className={styles.evidence}>
@@ -101,6 +103,7 @@ export default function InterviewReviewProposalDrawer({
   readinessDrafts,
   onReadinessDraftChange,
 }: Props) {
+  useLocale();
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const [history, setHistory] = useState<InterviewReviewProposal[]>([]);
@@ -131,7 +134,7 @@ export default function InterviewReviewProposalDrawer({
   currentEventIDRef.current = currentEventID;
   const resultUnknown = attemptState?.result_unknown ?? false;
   const hasChangedSource = selected?.source_status === 'source_changed';
-  const generationLabel = hasChangedSource ? '重新生成复盘建议' : '生成复盘建议';
+  const generationLabel = hasChangedSource ? t("重新生成复盘建议") : t("生成复盘建议");
 
   useEffect(() => {
     const eventIdAtScopeStart = currentEventID;
@@ -229,7 +232,7 @@ export default function InterviewReviewProposalDrawer({
       return;
     }
     const key = hasChangedSource ? newAttemptKey() : (attemptState?.key ?? newAttemptKey());
-    if (!window.confirm('本次复盘内容与面试事件信息将发送给当前配置的 AI 服务。是否继续？')) return;
+    if (!window.confirm(t("本次复盘内容与面试事件信息将发送给当前配置的 AI 服务。是否继续？"))) return;
     onAttemptStateChange?.({ key, result_unknown: false, event_id: currentEventID });
     activeAttemptKey.current = key;
     const requestScope = ownerScope;
@@ -267,35 +270,35 @@ export default function InterviewReviewProposalDrawer({
   if (!open) return null;
 
   return (
-    <section className={styles.drawer} aria-label="面试复盘建议" aria-busy={loading || generating}>
+    <section className={styles.drawer} aria-label={t("面试复盘建议")} aria-busy={loading || generating}>
       <div className={styles.header}>
         <div>
-          <Button type="link" onClick={handleClose}>返回复盘</Button>
-          <h2 ref={headingRef} tabIndex={-1} className={styles.title}>面试复盘建议</h2>
+          <Button type="link" onClick={handleClose}>{t("返回复盘")}</Button>
+          <h2 ref={headingRef} tabIndex={-1} className={styles.title}>{t("面试复盘建议")}</h2>
         </div>
-        <Button onClick={handleClose}>关闭</Button>
+        <Button onClick={handleClose}>{t("关闭")}</Button>
       </div>
 
-      <Card title="用户记录" size="small">
-        <Paragraph><Text strong>面试问题：</Text>{note.questions || '未记录'}</Paragraph>
-        <Paragraph><Text strong>自我反思：</Text>{note.self_reflection || '未记录'}</Paragraph>
-        <Paragraph><Text strong>困难点：</Text>{note.difficulty_points || '未记录'}</Paragraph>
-        <Paragraph><Text strong>情绪记录：</Text>{note.mood || '未记录'}</Paragraph>
+      <Card title={t("用户记录")} size="small">
+        <Paragraph><Text strong>{t("面试问题：")}</Text>{note.questions || t("未记录")}</Paragraph>
+        <Paragraph><Text strong>{t("自我反思：")}</Text>{note.self_reflection || t("未记录")}</Paragraph>
+        <Paragraph><Text strong>{t("困难点：")}</Text>{note.difficulty_points || t("未记录")}</Paragraph>
+        <Paragraph><Text strong>{t("情绪记录：")}</Text>{note.mood || t("未记录")}</Paragraph>
       </Card>
 
-      {error && <Paragraph type="danger" role="alert">{error}</Paragraph>}
-      {resultUnknown && <Tag color="orange">结果待确认，请使用原尝试重试</Tag>}
+      {error && <Paragraph type="danger" role="alert">{t(error)}</Paragraph>}
+      {resultUnknown && <Tag color="orange">{t("结果待确认，请使用原尝试重试")}</Tag>}
 
-      <Card title="历史建议" size="small" className={styles.history}>
+      <Card title={t("历史建议")} size="small" className={styles.history}>
         {loading ? <Spin /> : history.length === 0 ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有复盘建议" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("还没有复盘建议")} />
         ) : (
           <List
             dataSource={history}
             renderItem={(item) => (
               <List.Item>
                 <Button type="link" disabled={historyTargetBlocked(item.id)} onClick={() => void openHistory(item.id)}>
-                  {new Date(item.created_at).toLocaleString()} {item.source_status === 'source_changed' ? '（来源已变化）' : ''}
+                  {new Date(item.created_at).toLocaleString(getLocale())} {item.source_status === 'source_changed' ? t("（来源已变化）") : ''}
                 </Button>
               </List.Item>
             )}
@@ -304,25 +307,25 @@ export default function InterviewReviewProposalDrawer({
       </Card>
 
       {selectedProposal && (
-        <Card title="AI 建议" size="small">
-          {hasChangedSource && <Tag color="orange">来源已变化，请重新生成</Tag>}
+        <Card title={t("AI 建议")} size="small">
+          {hasChangedSource && <Tag color="orange">{t("来源已变化，请重新生成")}</Tag>}
           <Paragraph>{selectedProposal.proposal.summary.text}</Paragraph>
           <EvidenceRefs refs={selectedProposal.proposal.summary.evidence_refs} />
-          <Title level={5}>已观察到的表现</Title>
+          <Title level={5}>{t("已观察到的表现")}</Title>
           {selectedProposal.proposal.observations.map((item) => (
             <div key={item.id} className={styles.item}>
               <Paragraph>{item.text}</Paragraph>
               <EvidenceRefs refs={item.evidence_refs} />
             </div>
           ))}
-          <Title level={5}>练习重点</Title>
+          <Title level={5}>{t("练习重点")}</Title>
           {selectedProposal.proposal.practice_focuses.map((item) => (
             <div key={item.id} className={styles.item}>
               <Paragraph>{item.text}</Paragraph>
               <EvidenceRefs refs={item.evidence_refs} />
             </div>
           ))}
-          <Title level={5}>待澄清问题</Title>
+          <Title level={5}>{t("待澄清问题")}</Title>
           {[...selectedProposal.proposal.clarifications, ...selectedProposal.proposal.next_questions].map((item) => (
             <div key={item.id} className={styles.item}>
               <Paragraph>{item.question}</Paragraph>
@@ -330,7 +333,7 @@ export default function InterviewReviewProposalDrawer({
             </div>
           ))}
           {!selectedProposal.proposal.observations.length && !selectedProposal.proposal.practice_focuses.length && (
-            <Text type="secondary">当前没有可安全验证的表现或练习重点，请先补充待澄清问题。</Text>
+            <Text type="secondary">{t("当前没有可安全验证的表现或练习重点，请先补充待澄清问题。")}</Text>
           )}
         </Card>
       )}
@@ -378,7 +381,7 @@ export default function InterviewReviewProposalDrawer({
             {generationLabel}
           </Button>
         )}
-        {!currentEventID && <Text type="secondary">请先绑定有效的面试事件。</Text>}
+        {!currentEventID && <Text type="secondary">{t("请先绑定有效的面试事件。")}</Text>}
       </Space>
     </section>
   );

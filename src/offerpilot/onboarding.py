@@ -25,6 +25,9 @@ def onboarding_payload(
     return {
         "steps": steps,
         "completed_count": completed_count,
-        "is_complete": completed_count == len(steps),
+        # Recording an application is the first useful outcome. AI, a resume and
+        # a Pilot conversation are optional enhancements, not admission gates.
+        "is_complete": steps["create_first_application"],
         "force_open": config.onboarding_force_open,
+        "dismissed": config.onboarding_dismissed,
     }

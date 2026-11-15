@@ -1,3 +1,4 @@
+import { t } from '@/i18n';
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
@@ -22,17 +23,17 @@ describe('ConfirmationPanel', () => {
     root = createRoot(container);
     act(() => root?.render(
       <ConfirmationPanel
-        title="确认生成面试建议"
-        description="仅使用以下已选择内容。"
-        sources={[{ state: 'frozen', detail: '已确认岗位描述' }]}
+        title={t("确认生成面试建议")}
+        description={t("仅使用以下已选择内容。")}
+        sources={[{ state: 'frozen', detail: t("已确认岗位描述") }]}
       >
-        <button type="button" onClick={onConfirm}>确认并生成</button>
+        <button type="button" onClick={onConfirm}>{t("确认并生成")}</button>
       </ConfirmationPanel>,
     ));
 
-    expect(container.textContent).toContain('确认生成面试建议');
-    expect(container.textContent).toContain('已保留当时版本');
-    expect(container.textContent).toContain('已确认岗位描述');
+    expect(container.textContent).toContain(t("确认生成面试建议"));
+    expect(container.textContent).toContain(t("已保留当时版本"));
+    expect(container.textContent).toContain(t("已确认岗位描述"));
     const button = container.querySelector('button');
     expect(button).not.toBeNull();
     act(() => button?.click());

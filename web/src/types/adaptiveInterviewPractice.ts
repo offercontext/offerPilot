@@ -1,3 +1,4 @@
+import type { TrainingEvidenceDraft } from './trainingEvidence';
 export type AdaptivePracticeDrillKind =
   | 'difficulty_breakdown'
   | 'answer_reframe'
@@ -65,6 +66,8 @@ export interface AdaptivePracticeCompleteInput {
 }
 
 export interface AdaptivePracticeOwnerDraft {
+  trainingEvidenceDraft?: TrainingEvidenceDraft;
+  trainingEvidenceHost?: { signalVersionId: number | null; targetEventId: number | null };
   ownerKey: string;
   ownerGeneration: number;
   signalVersionId: number | null;

@@ -125,15 +125,15 @@ const SURFACE_STATES: ReadonlySet<MaterialKitSurfaceState> = new Set([
 ]);
 
 const LABELS: Record<MaterialKitSurfaceActionId, string> = {
-  none: MATERIAL_FLOW_COPY.surface.loading,
-  open_jd: MATERIAL_FLOW_COPY.surface.missingJd,
-  select_resume: MATERIAL_FLOW_COPY.surface.missingResume,
-  generate: MATERIAL_FLOW_COPY.surface.notGenerated,
-  save: MATERIAL_FLOW_COPY.surface.dirtyDraft,
-  confirm: MATERIAL_FLOW_COPY.surface.waitingConfirmation,
-  resolve: MATERIAL_FLOW_COPY.surface.resultUnknown,
-  record_submission: MATERIAL_FLOW_COPY.surface.readyUnsubmitted,
-  view_submission: MATERIAL_FLOW_COPY.surface.submitted,
+  get none() { return MATERIAL_FLOW_COPY.surface.loading; },
+  get open_jd() { return MATERIAL_FLOW_COPY.surface.missingJd; },
+  get select_resume() { return MATERIAL_FLOW_COPY.surface.missingResume; },
+  get generate() { return MATERIAL_FLOW_COPY.surface.notGenerated; },
+  get save() { return MATERIAL_FLOW_COPY.surface.dirtyDraft; },
+  get confirm() { return MATERIAL_FLOW_COPY.surface.waitingConfirmation; },
+  get resolve() { return MATERIAL_FLOW_COPY.surface.resultUnknown; },
+  get record_submission() { return MATERIAL_FLOW_COPY.surface.readyUnsubmitted; },
+  get view_submission() { return MATERIAL_FLOW_COPY.surface.submitted; },
 };
 
 const NAVIGATION_ONLY = new Set<MaterialKitSurfaceActionId>(['open_jd', 'select_resume', 'view_submission']);

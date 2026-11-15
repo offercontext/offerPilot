@@ -56,6 +56,7 @@ class PilotTurnItemV1(BaseModel):
     message_id: int | None = None
     operation_id: str | None = None
     content: str = ''
+    image_attachments: list[dict[str, object]] = Field(default_factory=list)
     action: ActionPresentationV1 | None = None
 
     @model_validator(mode='after')

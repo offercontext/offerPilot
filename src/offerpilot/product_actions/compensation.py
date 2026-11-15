@@ -15,6 +15,7 @@ from typing import (
     Any,
     Callable,
     Literal,
+    Mapping,
     NoReturn,
     Protocol,
     SupportsIndex,
@@ -2567,8 +2568,7 @@ def _validate_manual_history_attempt_sequence(
         if _story_datetime_utc(
             attempt.confirmed_at,
             "interview_story_undo_lifecycle_lineage",
-        )
-        <= target_time
+        ) <= target_time
     )
     proposal_parent_ids = {
         attempt.product_action_operation_id
@@ -2590,8 +2590,7 @@ def _validate_manual_history_attempt_sequence(
             if _story_datetime_utc(
                 operation.committed_at,
                 "interview_story_undo_later_compensation_lineage",
-            )
-            <= target_time
+            ) <= target_time
         )
     events: list[
         tuple[
@@ -2635,7 +2634,17 @@ def _validate_manual_history_attempt_sequence(
                 operation,
             )
         )
-    events.sort(key=lambda item: (item[0], item[1], str(item[2].id)))
+    revisions = _story_event_revision_hints(events, attempts, first_revision=1)
+    target_revision = revisions[id(previous)]
+    events = [
+        item for item in events
+        if isinstance(item[2], InterviewStoryVersion)
+        or item[0] < target_time
+        or revisions[id(item[2])] <= target_revision
+    ]
+    events.sort(key=lambda item: (
+        item[0], revisions[id(item[2])], item[1], str(item[2].id)
+    ))
     state: _StoryLineageState | None = None
     version_titles: dict[int, str] = {}
     expected_version_number = 1
@@ -2955,6 +2964,79 @@ def _story_lifecycle_attempts(
             )
         )
     )
+
+
+def _story_causal_revision(
+    event: InterviewStoryVersion | InterviewStoryProposalAttempt | WriteOperation,
+    attempts: Mapping[int, InterviewStoryProposalAttempt],
+) -> int | None:
+    """Read a sorting hint; legacy manual CAS must be reconstructed on replay."""
+    code = "interview_story_undo_later_event_order"
+    if isinstance(event, WriteOperation):
+        revision = _decode_json_object(event.result_json, code).get("story_revision")
+        if type(revision) is not int or revision < 2:
+            raise ProductActionIntegrityError(code)
+        return revision
+    if isinstance(event, InterviewStoryVersion):
+        attempt = attempts.get(event.id)
+        if attempt is None:
+            raise ProductActionIntegrityError(code)
+    else:
+        attempt = event
+    payload = _decode_json_object(attempt.input_snapshot_json, code)
+    revision = payload.get("expected_story_revision")
+    if isinstance(event, InterviewStoryVersion) and event.version_number == 1:
+        if revision is not None:
+            raise ProductActionIntegrityError(code)
+        return 1
+    if (
+        isinstance(event, InterviewStoryVersion)
+        and event.origin_kind == "manual"
+        and set(payload) == {"operation", "request_fingerprint"}
+    ):
+        return None
+    if type(revision) is not int or revision < 1:
+        raise ProductActionIntegrityError(code)
+    return revision + 1
+
+
+def _story_event_revision_hints(
+    events: list[
+        tuple[
+            datetime,
+            int,
+            InterviewStoryVersion | InterviewStoryProposalAttempt | WriteOperation,
+        ]
+    ],
+    attempts: Mapping[int, InterviewStoryProposalAttempt],
+    *,
+    first_revision: int,
+) -> dict[int, int]:
+    """Fill legacy sorting gaps; acceptance still requires exact CAS fingerprints.
+
+    Every event advances one revision. Lifecycle/new-format/compensation records
+    occupy their explicit positions; legacy manual versions occupy remaining
+    positions in immutable version order. These hints never replace replay.
+    """
+    revisions: dict[int, int] = {}
+    legacy_versions: list[InterviewStoryVersion] = []
+    for _time, _priority, event in events:
+        revision = _story_causal_revision(event, attempts)
+        if revision is None:
+            if not isinstance(event, InterviewStoryVersion):
+                raise ProductActionIntegrityError("interview_story_undo_later_event_order")
+            legacy_versions.append(event)
+        else:
+            revisions[id(event)] = revision
+    occupied = set(revisions.values())
+    next_revision = first_revision
+    for version in sorted(legacy_versions, key=lambda value: value.version_number):
+        while next_revision in occupied:
+            next_revision += 1
+        revisions[id(version)] = next_revision
+        occupied.add(next_revision)
+        next_revision += 1
+    return revisions
 
 
 def _story_canonical_iso_datetime(
@@ -3479,14 +3561,16 @@ def _validate_legitimate_story_drift(
         source_attempt.confirmed_at,
         "interview_story_undo_attempt_lineage",
     )
+    target_revision = cast(int, parent_result["story_revision"])
     later_lifecycle_attempts = tuple(
         attempt
         for attempt in _story_lifecycle_attempts(session, story.id)
-        if _story_datetime_utc(
+        if (event_time := _story_datetime_utc(
             attempt.confirmed_at,
             "interview_story_undo_lifecycle_lineage",
-        )
-        > target_time
+        )) > target_time
+        or (event_time == target_time
+            and cast(int, _story_causal_revision(attempt, {})) >= target_revision)
     )
     attempts = {
         version.id: _story_attempt_for_version(session, version)
@@ -3558,7 +3642,12 @@ def _validate_legitimate_story_drift(
                 attempt,
             )
         )
-    events.sort(key=lambda item: (item[0], item[1], str(item[2].id)))
+    revisions = _story_event_revision_hints(
+        events, attempts, first_revision=target_revision + 1
+    )
+    events.sort(key=lambda item: (
+        item[0], revisions[id(item[2])], item[1], str(item[2].id)
+    ))
     state = _StoryLineageState(
         current_version_id=created.id,
         story_revision=cast(int, parent_result["story_revision"]),

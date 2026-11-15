@@ -1,3 +1,5 @@
+import { t, useLocale } from '@/i18n';
+import { displayPilotUiMessage } from './model';
 import { useEffect, useState } from 'react';
 import styles from './ChatPanel.module.css';
 
@@ -13,6 +15,7 @@ interface Props {
 }
 
 export default function ThinkingIndicator({ label }: Props) {
+  useLocale();
   const [step, setStep] = useState(0);
 
   useEffect(() => {
@@ -27,7 +30,7 @@ export default function ThinkingIndicator({ label }: Props) {
         <i />
         <i />
       </span>
-      <span>{label ?? WAITING_STEPS[step]}...</span>
+      <span>{label ? displayPilotUiMessage(label) : t(WAITING_STEPS[step])}...</span>
     </div>
   );
 }

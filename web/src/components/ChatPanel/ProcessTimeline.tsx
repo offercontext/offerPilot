@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { useLayoutEffect, useState, createElement } from 'react';
 import { RightOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import {
@@ -19,6 +20,7 @@ interface Props {
 }
 
 export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedded = false }: Props) {
+  useLocale();
   const [open, setOpen] = useState(false);
   const [expandedSteps, setExpandedSteps] = useState(false);
   const stepSetIdentity = toolStepSetIdentity(steps);
@@ -35,7 +37,7 @@ export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedd
   return (
     <div
       className={`${styles.timeline} ${open ? styles.timelineOpen : ''} ${embedded ? styles.timelineEmbedded : ''}`}
-      aria-label="AI 操作摘要"
+      aria-label={t("AI 操作摘要")}
     >
       <button
         type="button"
@@ -44,7 +46,7 @@ export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedd
         onClick={() => setOpen((value) => !value)}
       >
         <ThunderboltOutlined aria-hidden="true" />
-        <span>{summary ?? `AI 做了什么 · 共 ${steps.length} 步`}</span>
+        <span>{summary ?? t("AI 做了什么 · 共 {count} 步", { count: steps.length })}</span>
         <RightOutlined className={styles.tlChev} aria-hidden="true" />
       </button>
       {open ? (
@@ -53,6 +55,8 @@ export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedd
             <ul className={styles.tlSteps}>
               {visibleSteps.map((step, index) => {
                 const meta = toolMeta(step.name);
+                const detail = step.localization?.detail?.() ?? step.detail;
+                const resultText = step.localization?.resultText?.() ?? step.resultText;
                 const evidenceSelection = selectEvidence(step.evidence ?? [], 8);
                 const evidenceCount = evidenceSelection.visible.length + evidenceSelection.remainingCount;
                 return (
@@ -66,9 +70,9 @@ export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedd
                       </span>
                       <span className={styles.stepText}>
                         <b>{meta.label}</b>
-                        {step.detail ? <span className={styles.stepDetail}> · {step.detail}</span> : null}
+                        {detail ? <span className={styles.stepDetail}> · {detail}</span> : null}
                       </span>
-                      {evidenceCount ? <span className={styles.stepCount}>{evidenceCount} 条来源</span> : null}
+                      {evidenceCount ? <span className={styles.stepCount}>{t("{evidenceCount} 条来源", { evidenceCount: evidenceCount })}</span> : null}
                     </div>
                     {evidenceSelection.visible.length ? (
                       <EvidenceList
@@ -81,8 +85,8 @@ export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedd
                         onOpenEvidence={onOpenEvidence}
                       />
                     ) : null}
-                    {step.resultText ? <div className={styles.stepFallback}>工具返回：{step.resultText}</div> : null}
-                    {step.evidenceUnavailable ? <div className={styles.stepFallback}>暂时无法展示这一步的明细。</div> : null}
+                    {resultText ? <div className={styles.stepFallback}>{t("工具返回：{resultText}", { resultText })}</div> : null}
+                    {step.evidenceUnavailable ? <div className={styles.stepFallback}>{t("暂时无法展示这一步的明细。")}</div> : null}
                   </li>
                 );
               })}
@@ -94,7 +98,7 @@ export default function ProcessTimeline({ steps, onOpenEvidence, summary, embedd
                 aria-expanded={expandedSteps}
                 onClick={() => setExpandedSteps((value) => !value)}
               >
-                {expandedSteps ? '收起后续步骤' : `还有 ${remainingSteps} 步`}
+                {expandedSteps ? t("收起后续步骤") : t("还有 {remainingSteps} 步", { remainingSteps: remainingSteps })}
               </button>
             ) : null}
           </div>

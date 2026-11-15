@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import { Alert, Switch, Typography } from 'antd';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -10,6 +11,7 @@ const sources: Array<[ContextSourceName, string, string]> = [
   ['older_conversation_summary', '较早对话的摘要', '使用你主动生成且来源仍有效的摘要。'],
 ];
 export default function ContextPolicySettings() {
+  useLocale();
   const query = useQuery({ queryKey: ['context-policies'], queryFn: getContextPolicies });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -17,14 +19,14 @@ export default function ContextPolicySettings() {
     if (!query.data) return;
     setBusy(true); setError('');
     try { await updateContextPolicies(query.data, name, enabled); await query.refetch(); }
-    catch { setError('设置未确认，请刷新后重试。'); await query.refetch(); }
+    catch { setError("设置未确认，请刷新后重试。"); await query.refetch(); }
     finally { setBusy(false); }
   }
   return <section aria-labelledby="context-policy-title" style={{ background: 'var(--op-surface)', border: '1px solid var(--op-border)', borderRadius: 16, padding: 24, display: 'grid', gap: 16 }}>
-    <Typography.Title id="context-policy-title" level={4} style={{ margin: 0 }}>回复使用的参考信息</Typography.Title>
-    {(error || query.isError) && <Alert type="error" message={error || '参考信息设置读取失败'} />}
+    <Typography.Title id="context-policy-title" level={4} style={{ margin: 0 }}>{t("回复使用的参考信息")}</Typography.Title>
+    {(error || query.isError) && <Alert type="error" message={t(error) || t("参考信息设置读取失败")} />}
     {sources.map(([name, title, help]) => <div key={name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'center' }}>
-      <div><div id={`${name}-label`}>{title}</div><Typography.Text type="secondary">{help}</Typography.Text></div>
+      <div><div id={`${name}-label`}>{t(title)}</div><Typography.Text type="secondary">{t(help)}</Typography.Text></div>
       <Switch aria-labelledby={`${name}-label`} checked={query.data?.policies[name].enabled ?? false} disabled={!query.data || busy} onChange={(enabled) => void change(name, enabled)} />
     </div>)}
   </section>;

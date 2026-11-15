@@ -4,8 +4,10 @@ from datetime import datetime, timedelta, timezone
 from threading import Event, Thread, current_thread
 from types import TracebackType
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.orm import Session, sessionmaker
+
+from offerpilot.models import OpportunityFitReviewStage
 
 
 DEFAULT_OPPORTUNITY_FIT_LEASE_SECONDS = 120.0
@@ -91,26 +93,33 @@ class LeaseHeartbeat:
                 if self._stop.is_set():
                     session.rollback()
                     return False
+                stage = session.get(OpportunityFitReviewStage, self._stage_id)
                 now = datetime.now(timezone.utc)
+                lease_expires_at = stage.lease_expires_at if stage is not None else None
+                if lease_expires_at is not None and lease_expires_at.utcoffset() is None:
+                    lease_expires_at = lease_expires_at.replace(tzinfo=timezone.utc)
+                if self._stop.is_set():
+                    session.rollback()
+                    return False
+                # Legacy raw SQL writes include a UTC offset; ORM writes do not.
+                # Compare parsed instants under the write lock, before the CAS.
+                if lease_expires_at is None or lease_expires_at <= now:
+                    session.rollback()
+                    self._lost.set()
+                    return False
                 expires_at = now + timedelta(seconds=self._lease_seconds)
                 result = session.execute(
-                    text(
-                        "UPDATE opportunity_fit_review_stages "
-                        "SET lease_expires_at=:lease_expires_at "
-                        "WHERE id=:stage_id "
-                        "AND stage_generation=:stage_generation "
-                        "AND provider_call_token=:provider_call_token "
-                        "AND status='generating' "
-                        "AND lease_expires_at IS NOT NULL "
-                        "AND lease_expires_at > :now"
-                    ),
-                    {
-                        "lease_expires_at": expires_at,
-                        "stage_id": self._stage_id,
-                        "stage_generation": self._stage_generation,
-                        "provider_call_token": self._provider_call_token,
-                        "now": now,
-                    },
+                    update(OpportunityFitReviewStage)
+                    .where(
+                        OpportunityFitReviewStage.id == self._stage_id,
+                        OpportunityFitReviewStage.stage_generation == self._stage_generation,
+                        OpportunityFitReviewStage.provider_call_token == self._provider_call_token,
+                        OpportunityFitReviewStage.status == "generating",
+                        OpportunityFitReviewStage.lease_expires_at.is_not(None),
+                        OpportunityFitReviewStage.lease_expires_at > now,
+                    )
+                    .values(lease_expires_at=expires_at)
+                    .execution_options(synchronize_session=False)
                 )
                 if self._stop.is_set():
                     session.rollback()

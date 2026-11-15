@@ -1,0 +1,11 @@
+{
+  "schema_version": 2,
+  "suite_id": "harness-e09-current-goal-preflight-v1",
+  "execution_items": [
+    {
+      "execution_item_id": "E09.memory_override",
+      "spec_path": "cases/E09.memory_override.v3.json",
+      "required": true
+    }
+  ]
+}

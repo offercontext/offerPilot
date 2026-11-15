@@ -1,3 +1,5 @@
+import { liveText } from '@/i18n/liveText';
+import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import dayjs from 'dayjs';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -68,7 +70,7 @@ import {
   MATERIAL_FLOW_COPY,
   materialConfirmationKindLabel,
   materialEvidencePreviewIssueLabels,
-  materialFlowErrorMessage,
+  materialFlowErrorKey,
   type MaterialFlowErrorContext,
 } from './materialFlowCopy';
 
@@ -126,14 +128,14 @@ interface ProposalVariables {
 }
 
 const STATUS_LABELS: Record<MaterialKitStatus, string> = {
-  draft: '草稿',
-  ready: '已准备',
-  submitted: '已投递',
+  get draft() { return t("草稿"); },
+  get ready() { return t("已准备"); },
+  get submitted() { return t("已投递"); },
 };
 
 const EDITABLE_STATUS_OPTIONS: Array<{ label: string; value: EditableMaterialKitStatus }> = [
-  { label: STATUS_LABELS.draft, value: 'draft' },
-  { label: STATUS_LABELS.ready, value: 'ready' },
+  { get label() { return STATUS_LABELS.draft; }, value: 'draft' },
+  { get label() { return STATUS_LABELS.ready; }, value: 'ready' },
 ];
 
 function createDefaultContent(): MaterialKitContent {
@@ -205,7 +207,7 @@ function formatConfirmationKind(value: string): string {
 }
 
 function getErrorMessage(error: unknown, context: MaterialFlowErrorContext = 'general'): string {
-  return materialFlowErrorMessage(error, context);
+  return materialFlowErrorKey(error, context);
 }
 
 interface ProposalAssertionsValidation {
@@ -438,6 +440,7 @@ export default function MaterialKitDrawer({
   sourceConflict: externalSourceConflict = false,
   onOwnerStateChange,
 }: Props) {
+  const locale = useLocale();
   const { message } = AntApp.useApp();
   const queryClient = useQueryClient();
   const applicationID = application?.id;
@@ -509,7 +512,7 @@ export default function MaterialKitDrawer({
   const [proposalAssertions, setProposalAssertions] = useState(() => initialOwnerDraft?.proposalAssertions ?? '');
   const proposalAssertionsValidation = useMemo(
     () => validateProposalAssertions(proposalAssertions),
-    [proposalAssertions],
+    [proposalAssertions, locale],
   );
   const markOwnerDraftDirty = () => {
     ownerDraftActiveRef.current = true;
@@ -682,7 +685,7 @@ export default function MaterialKitDrawer({
 
     if (!isValidMaterialKitForApplication(kit, application.id)) {
       setExistingKit(null);
-      setActionError('材料包来源无效，已停止写入');
+      setActionError("材料包来源无效，已停止写入");
       return;
     }
     applyKitToEditor(kit);
@@ -737,13 +740,13 @@ export default function MaterialKitDrawer({
     onSuccess: (kit, variables) => {
       if (!isCurrentOwnerRequest(variables.applicationID, variables.generation)) return;
       if (!isValidMaterialKitForApplication(kit, variables.applicationID)) {
-        setActionError('材料包响应无效，已停止写入');
+        setActionError("材料包响应无效，已停止写入");
         return;
       }
       queryClient.setQueryData(['application-material-kit', variables.applicationID], kit);
 
       applyKitToEditor(kit, false);
-      message.success('材料包已生成');
+      message.success(liveText(() => t("材料包已生成")));
     },
     onError: (error, variables) => {
       if (isCurrentOwnerRequest(variables.applicationID, variables.generation)) {
@@ -763,13 +766,13 @@ export default function MaterialKitDrawer({
     onSuccess: (kit, variables) => {
       if (!isCurrentOwnerRequest(variables.applicationID, variables.generation)) return;
       if (!isValidMaterialKitForApplication(kit, variables.applicationID)) {
-        setActionError('材料包响应无效，已停止写入');
+        setActionError("材料包响应无效，已停止写入");
         return;
       }
       queryClient.setQueryData(['application-material-kit', variables.applicationID], kit);
 
       applyKitToEditor(kit, false);
-      message.success('材料包已保存');
+      message.success(liveText(() => t("材料包已保存")));
     },
     onError: (error, variables) => {
       if (isCurrentOwnerRequest(variables.applicationID, variables.generation)) {
@@ -790,7 +793,7 @@ export default function MaterialKitDrawer({
         || !existingKit
         || nextProposal.material_kit_id !== existingKit.id
         || nextProposal.source.material_kit.id !== existingKit.id) {
-        setActionError('提案来源无效，已停止写入');
+        setActionError("提案来源无效，已停止写入");
         return;
       }
       setProposal(nextProposal);
@@ -827,10 +830,10 @@ export default function MaterialKitDrawer({
         return;
       }
 
-      setConfirmationError('材料证据刷新失败，请重试刷新后再确认');
+      setConfirmationError("材料证据刷新失败，请重试刷新后再确认");
     } catch {
       if (isCurrentConfirmationSession(requestedApplicationID, sessionID, generation)) {
-        setConfirmationError('材料证据刷新失败，请重试刷新后再确认');
+        setConfirmationError("材料证据刷新失败，请重试刷新后再确认");
       }
     } finally {
       if (isCurrentConfirmationSession(requestedApplicationID, sessionID, generation)) {
@@ -859,7 +862,7 @@ export default function MaterialKitDrawer({
       confirmationSessionRef.current = null;
       blockedPreviewUpdatedAtRef.current = null;
       ownerLeaseRef.current?.writeConfirmation(null);
-      message.success('本次投递记录已保存');
+      message.success(liveText(() => t("本次投递记录已保存")));
     },
     onError: (error: unknown, variables) => {
       if (!isCurrentConfirmationSession(variables.applicationID, variables.sessionID, variables.generation)) return;
@@ -1062,7 +1065,7 @@ export default function MaterialKitDrawer({
         document.getElementById('material-kit-resume-select')?.focus();
         break;
       case 'resolve':
-        setActionError('请根据当前提示确认材料状态后再继续');
+        setActionError("请根据当前提示确认材料状态后再继续");
         break;
       default:
         break;
@@ -1200,7 +1203,7 @@ export default function MaterialKitDrawer({
       if (isCurrentOwnerRequest(requestedApplicationID, requestedGeneration)) {
         setEvidenceDetail(isValidEvidenceDetailForApplication(detail, requestedApplicationID, bundleID) ? detail : null);
         if (!isValidEvidenceDetailForApplication(detail, requestedApplicationID, bundleID)) {
-          setEvidenceDetailError('本次投递记录来源无效');
+          setEvidenceDetailError("本次投递记录来源无效");
         }
       }
     } catch (error) {
@@ -1237,7 +1240,7 @@ export default function MaterialKitDrawer({
 
     const submittedDate = new Date(confirmationSubmittedAt);
     if (Number.isNaN(submittedDate.getTime())) {
-      setConfirmationError('请选择有效的投递时间');
+      setConfirmationError("请选择有效的投递时间");
       return;
     }
 
@@ -1286,15 +1289,15 @@ export default function MaterialKitDrawer({
 
   const copyMessageBody = async (body: string) => {
     if (!navigator.clipboard?.writeText) {
-      message.error('当前浏览器不支持复制');
+      message.error(liveText(() => t("当前浏览器不支持复制")));
       return;
     }
 
     try {
       await navigator.clipboard.writeText(body);
-      message.success('已复制到剪贴板');
+      message.success(liveText(() => t("已复制到剪贴板")));
     } catch {
-      message.error('复制失败，请手动复制');
+      message.error(liveText(() => t("复制失败，请手动复制")));
     }
   };
 
@@ -1319,8 +1322,7 @@ export default function MaterialKitDrawer({
       <div data-testid="material-kit-surface-state" data-state={materialSurface.state} hidden />
       <div className={styles.workspaceHeader}>
         <Button type="link" icon={<ArrowLeftOutlined />} className={styles.backButton} onClick={onClose}>
-          返回投递详情
-        </Button>
+          {t("返回投递详情")}</Button>
         <Typography.Title level={3} className={styles.workspaceTitle}>
           {MATERIAL_FLOW_COPY.drawer.materialKitTitle}
         </Typography.Title>
@@ -1329,21 +1331,21 @@ export default function MaterialKitDrawer({
         <div className={styles.layout}>
           <aside className={styles.contextPanel}>
             <div>
-              <Typography.Text className={styles.eyebrow}>当前岗位</Typography.Text>
+              <Typography.Text className={styles.eyebrow}>{t("当前岗位")}</Typography.Text>
               <Typography.Title level={4} className={styles.company}>
-                {application?.company_name || '未选择公司'}
+                {application?.company_name || t("未选择公司")}
               </Typography.Title>
               <Typography.Paragraph className={styles.position}>
-                {application?.position_name || '请选择一个投递记录'}
+                {application?.position_name || t("请选择一个投递记录")}
               </Typography.Paragraph>
-              <SourceStateTag state="current" detail="当前投递" />
+              <SourceStateTag state="current" detail={t("当前投递")} />
             </div>
 
             <Form layout="vertical" className={styles.contextForm}>
-              <Form.Item label="简历版本" required>
+              <Form.Item label={t("简历版本")} required>
                 <Select
                   id="material-kit-resume-select"
-                  placeholder="选择本次实际使用的简历版本"
+                  placeholder={t("选择本次实际使用的简历版本")}
                   value={resumeID}
                   onChange={(value: number | undefined) => {
                     setResumeID(value);
@@ -1357,13 +1359,13 @@ export default function MaterialKitDrawer({
                 />
               </Form.Item>
 
-              <Form.Item label="JD 摘要 / 岗位要求" required>
+              <Form.Item label={t("JD 摘要 / 岗位要求")} required>
                 <Input.TextArea
                   value={jdSnapshot}
                   readOnly
                   aria-readonly="true"
                   onChange={(event) => setJdSnapshot(event.target.value)}
-                  placeholder="粘贴岗位 JD，或使用投递备注作为默认内容"
+                  placeholder={t("粘贴岗位 JD，或使用投递备注作为默认内容")}
                   rows={8}
                   disabled={!application || legacySubmitted || editorWritesBlocked}
                 />
@@ -1385,14 +1387,14 @@ export default function MaterialKitDrawer({
                 ) : null}
               </Form.Item>
 
-              <Form.Item label="材料状态">
+              <Form.Item label={t("材料状态")}>
                 <Select
                   value={legacySubmitted ? undefined : status}
                   onChange={(nextStatus: EditableMaterialKitStatus) => {
                     setStatus(nextStatus);
                     markOwnerDraftDirty();
                   }}
-                  options={EDITABLE_STATUS_OPTIONS}
+                  options={EDITABLE_STATUS_OPTIONS.map((option) => ({ ...option }))}
                 disabled={!canSave || legacySubmitted || editorWritesBlocked}
                 />
               </Form.Item>
@@ -1400,21 +1402,21 @@ export default function MaterialKitDrawer({
 
             <div className={styles.progressBlock}>
               <div className={styles.progressHeader}>
-                <span>完成度</span>
+                <span>{t("完成度")}</span>
                 <span className="op-tnum">{completion}%</span>
               </div>
               <Progress percent={completion} showInfo={false} className="op-tnum" />
             </div>
 
             {actionError ? (
-              <Alert type="error" showIcon message={actionError} className={styles.alert} />
+              <Alert type="error" showIcon message={t(actionError)} className={styles.alert} />
             ) : null}
 
             {legacySubmitted ? (
               <Alert
                 type="warning"
                 showIcon
-                message="旧投递标记，缺少证据快照"
+                message={t("旧投递标记，缺少证据快照")}
                 className={styles.legacyWarning}
               />
             ) : null}
@@ -1429,7 +1431,7 @@ export default function MaterialKitDrawer({
                 disabled={materialSurface.primaryAction.id === 'none' || (!fallbackSurfaceAction && (generateDisabled || editorWritesBlocked))}
               >
                 {materialSurface.primaryAction.id === 'generate' || !fallbackSurfaceAction
-                  ? '生成材料包'
+                  ? t("生成材料包")
                   : materialSurface.primaryAction.label}
               </Button>
               <Button
@@ -1440,8 +1442,7 @@ export default function MaterialKitDrawer({
                 loading={saveMutation.isPending}
                 disabled={!canSave || legacySubmitted || editorWritesBlocked}
               >
-                保存
-              </Button>
+                {t("保存")}</Button>
               <Button
                 onClick={handleGenerateProposal}
                 loading={proposalMutation.isPending}
@@ -1456,8 +1457,7 @@ export default function MaterialKitDrawer({
                   onClick={openConfirmation}
                   disabled={confirmationWriteBlocked || confirmationOpen}
                 >
-                  确认已投递
-                </Button>
+                  {t("确认已投递")}</Button>
               ) : null}
               {materialSurface.primaryAction.id === 'view_submission' ? (
                 <Button
@@ -1465,8 +1465,7 @@ export default function MaterialKitDrawer({
                   data-material-primary="true"
                   onClick={() => document.querySelector('[data-testid="evidence-history"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
                 >
-                  查看本次投递记录
-                </Button>
+                  {t("查看本次投递记录")}</Button>
               ) : null}
             </Space>
 
@@ -1474,40 +1473,38 @@ export default function MaterialKitDrawer({
               <Typography.Text className={styles.evidenceHistoryTitle}>{MATERIAL_FLOW_COPY.drawer.evidenceHistoryTitle}</Typography.Text>
               {evidenceHistoryQuery.isError ? (
                 <div className={styles.historyError}>
-                  <Typography.Text>本次投递记录加载失败</Typography.Text>
+                  <Typography.Text>{t("本次投递记录加载失败")}</Typography.Text>
                   <Button size="small" onClick={() => void evidenceHistoryQuery.refetch()}>
-                    重新加载历史
-                  </Button>
+                    {t("重新加载历史")}</Button>
                 </div>
               ) : evidenceHistoryLoading ? (
-                <Typography.Text className={styles.evidenceEmpty}>正在加载本次投递记录，请稍候</Typography.Text>
+                <Typography.Text className={styles.evidenceEmpty}>{t("正在加载本次投递记录，请稍候")}</Typography.Text>
               ) : evidenceHistory.length === 0 ? (
-                <Typography.Text className={styles.evidenceEmpty}>尚无本次投递记录</Typography.Text>
+                <Typography.Text className={styles.evidenceEmpty}>{t("尚无本次投递记录")}</Typography.Text>
               ) : (
                 <>
                   <div className={styles.evidenceHistorySummary}>
-                    <Typography.Text>已确认投递 {evidenceHistory.length} 次</Typography.Text>
+                    <Typography.Text>{t("已确认投递 ")}{evidenceHistory.length}{t(" 次")}</Typography.Text>
                     {latestEvidenceConfirmation ? (
                       <Typography.Text className={styles.evidenceTime}>
-                        最近确认（本地）：{formatEvidenceTimestamp(latestEvidenceConfirmation.confirmed_at)}
+                        {t("最近确认（本地）：")}{formatEvidenceTimestamp(latestEvidenceConfirmation.confirmed_at)}
                       </Typography.Text>
                     ) : null}
                   </div>
                   <div className={styles.evidenceHistoryList}>
                     {evidenceHistory.map((entry) => (
                       <div className={styles.evidenceHistoryItem} key={entry.id}>
-                        <Typography.Text>第 {entry.sequence} 次</Typography.Text>
-                        <Typography.Text className={styles.evidenceTime}>投递（本地）：{formatEvidenceTimestamp(entry.submitted_at)}</Typography.Text>
-                        <Typography.Text className={styles.evidenceTime}>确认（本地）：{formatEvidenceTimestamp(entry.confirmed_at)}</Typography.Text>
-                        <Typography.Text className={styles.evidenceTime}>确认方式：{formatConfirmationKind(entry.confirmation_kind)}</Typography.Text>
+                        <Typography.Text>{t("第 {sequence} 次", { sequence: entry.sequence })}</Typography.Text>
+                        <Typography.Text className={styles.evidenceTime}>{t("投递（本地）：")}{formatEvidenceTimestamp(entry.submitted_at)}</Typography.Text>
+                        <Typography.Text className={styles.evidenceTime}>{t("确认（本地）：")}{formatEvidenceTimestamp(entry.confirmed_at)}</Typography.Text>
+                        <Typography.Text className={styles.evidenceTime}>{t("确认方式：")}{formatConfirmationKind(entry.confirmation_kind)}</Typography.Text>
                         <Button
                           className={styles.evidenceDetailButton}
                           size="small"
                           onClick={() => void openEvidenceDetail(entry.id)}
                           disabled={evidenceDetailLoading}
                         >
-                          查看详情
-                        </Button>
+                          {t("查看详情")}</Button>
                       </div>
                     ))}
                   </div>
@@ -1520,7 +1517,7 @@ export default function MaterialKitDrawer({
             {!canSave ? (
               <Empty
                 className={styles.empty}
-                description="选择简历并填写 JD 后，生成材料包即可编辑简历建议、沟通话术和检查清单"
+                description={t("选择简历并填写 JD 后，生成材料包即可编辑简历建议、沟通话术和检查清单")}
               />
             ) : (
               <div className={styles.sections}>
@@ -1528,9 +1525,8 @@ export default function MaterialKitDrawer({
                   <div className={styles.sectionHeader}>
                     <div>
                       <Typography.Title level={5} className={styles.sectionTitle}>
-                        简历优化建议
-                      </Typography.Title>
-                      <Typography.Text className={styles.sectionHint}>把 AI 建议整理成可执行的修改清单</Typography.Text>
+                        {t("简历优化建议")}</Typography.Title>
+                      <Typography.Text className={styles.sectionHint}>{t("把 AI 建议整理成可执行的修改清单")}</Typography.Text>
                     </div>
                     <Tag color={displayedStatus === 'submitted' ? 'green' : displayedStatus === 'ready' ? 'blue' : 'default'}>
                       {STATUS_LABELS[displayedStatus]}
@@ -1538,7 +1534,7 @@ export default function MaterialKitDrawer({
                   </div>
 
                   <Form layout="vertical">
-                    <Form.Item label="整体摘要">
+                    <Form.Item label={t("整体摘要")}>
                       <Input.TextArea
                         value={content.resume_advice.summary}
                         onChange={(event) => updateAdvice('summary', event.target.value)}
@@ -1546,34 +1542,34 @@ export default function MaterialKitDrawer({
                         disabled={legacySubmitted || editorWritesBlocked}
                       />
                     </Form.Item>
-                    <Form.Item label="匹配亮点">
+                    <Form.Item label={t("匹配亮点")}>
                       <Input.TextArea
                         value={linesToText(content.resume_advice.highlights)}
                         onChange={(event) => updateAdvice('highlights', textToLines(event.target.value))}
                         rows={4}
-                        placeholder="每行一条亮点"
+                        placeholder={t("每行一条亮点")}
                         disabled={legacySubmitted || editorWritesBlocked}
                       />
                     </Form.Item>
-                    <Form.Item label="建议改写的要点">
+                    <Form.Item label={t("建议改写的要点")}>
                       <Input.TextArea
                         value={linesToText(content.resume_advice.rewrite_bullets)}
                         onChange={(event) => updateAdvice('rewrite_bullets', textToLines(event.target.value))}
                         rows={4}
-                        placeholder="每行一条改写建议"
+                        placeholder={t("每行一条改写建议")}
                         disabled={legacySubmitted || editorWritesBlocked}
                       />
                     </Form.Item>
-                    <Form.Item label="风险缺口">
+                    <Form.Item label={t("风险缺口")}>
                       <Input.TextArea
                         value={linesToText(content.resume_advice.gaps)}
                         onChange={(event) => updateAdvice('gaps', textToLines(event.target.value))}
                         rows={3}
-                        placeholder="每行一个待补强点"
+                        placeholder={t("每行一个待补强点")}
                         disabled={legacySubmitted || editorWritesBlocked}
                       />
                     </Form.Item>
-                    <Form.Item label="备注">
+                    <Form.Item label={t("备注")}>
                       <Input.TextArea
                         value={content.resume_advice.notes}
                         onChange={(event) => updateAdvice('notes', event.target.value)}
@@ -1586,8 +1582,7 @@ export default function MaterialKitDrawer({
 
                 <section className={styles.section}>
                   <Typography.Title level={5} className={styles.sectionTitle}>
-                    沟通话术
-                  </Typography.Title>
+                    {t("沟通话术")}</Typography.Title>
                   <div className={styles.messageList}>
                     {content.messages.map((item, index) => (
                       <div className={styles.messageItem} key={`${item.type}-${index}`}>
@@ -1603,21 +1598,20 @@ export default function MaterialKitDrawer({
                           onClick={() => copyMessageBody(item.body)}
                             disabled={legacySubmitted || editorWritesBlocked || !item.body.trim()}
                           >
-                            复制
-                          </Button>
+                            {t("复制")}</Button>
                         </div>
                         <Input.TextArea
                           value={item.body}
                           onChange={(event) => updateMessage(index, { body: event.target.value })}
                           rows={5}
-                          placeholder="填写可直接发送的正文"
+                          placeholder={t("填写可直接发送的正文")}
                           disabled={legacySubmitted || editorWritesBlocked}
                         />
                         <Input.TextArea
                           value={item.notes}
                           onChange={(event) => updateMessage(index, { notes: event.target.value })}
                           rows={2}
-                          placeholder="内部备注"
+                          placeholder={t("内部备注")}
                           disabled={legacySubmitted || editorWritesBlocked}
                         />
                       </div>
@@ -1627,14 +1621,13 @@ export default function MaterialKitDrawer({
 
                 <section className={styles.section}>
                   <Typography.Title level={5} className={styles.sectionTitle}>
-                    投递检查清单
-                  </Typography.Title>
+                    {t("投递检查清单")}</Typography.Title>
                   <div className={styles.checklist}>
                     {content.checklist.map((item) => (
                       <div className={styles.checkRow} key={item.id}>
                         <Checkbox
                           checked={item.done}
-                          aria-label={`${item.done ? '取消完成' : '标记完成'}：${item.label}`}
+                          aria-label={t("{value}：{label}", { value: item.done ? t("取消完成") : t("标记完成"), label: item.label })}
                           onChange={(event) => updateChecklist(item.id, { done: event.target.checked })}
                           disabled={legacySubmitted || editorWritesBlocked}
                         />
@@ -1665,14 +1658,13 @@ export default function MaterialKitDrawer({
       />
       <Modal
         open={confirmationOpen}
-        title="确认本次投递记录"
+        title={t("确认本次投递记录")}
         onCancel={closeConfirmation}
         destroyOnClose
         footer={(
           <Space className={styles.confirmationActions}>
             <Button onClick={closeConfirmation} disabled={confirmMutation.isPending}>
-              取消
-            </Button>
+              {t("取消")}</Button>
             {!confirmationPreviewValid || evidencePreviewQuery.isError ? (
               <Button
                 onClick={() => {
@@ -1683,8 +1675,7 @@ export default function MaterialKitDrawer({
                 loading={confirmationRefreshing}
                 disabled={confirmationRefreshing || !applicationID || !confirmationKey}
               >
-                重新刷新证据
-              </Button>
+                {t("重新刷新证据")}</Button>
             ) : null}
             <Button
               type="primary"
@@ -1692,53 +1683,51 @@ export default function MaterialKitDrawer({
               loading={confirmMutation.isPending}
               disabled={confirmationWriteBlocked || confirmationRefreshing || evidencePreviewQuery.isError || !confirmationPreviewValid || !confirmationPreview?.ready || !confirmationKey || !confirmationSubmittedAt}
             >
-              确认投递
-            </Button>
+              {t("确认投递")}</Button>
           </Space>
         )}
       >
         <ConfirmationPanel
-          title="确认本次投递记录"
-          description="请核对当前展示的来源后再保存；保存不会替你执行平台操作。"
+          title={t("确认本次投递记录")}
+          description={t("请核对当前展示的来源后再保存；保存不会替你执行平台操作。")}
           sources={confirmationPreview?.ready
-            ? [{ state: 'pending', detail: '待确认的本次投递记录预览' }]
+            ? [{ state: 'pending', detail: t("待确认的本次投递记录预览") }]
             : []}
           className={styles.confirmationBody}
         >
-          <Typography.Text className={styles.confirmationKind}>用户确认，非平台回执</Typography.Text>
+          <Typography.Text className={styles.confirmationKind}>{t("用户确认，非平台回执")}</Typography.Text>
           <Typography.Paragraph className={styles.confirmationHint}>
-            请根据下方只读来源摘要核对本次投递；保存后会保留这份材料快照。
-          </Typography.Paragraph>
+            {t("请根据下方只读来源摘要核对本次投递；保存后会保留这份材料快照。")}</Typography.Paragraph>
 
           {confirmationPreview?.ready ? (
             <div className={styles.sourceSummary}>
               <div className={styles.sourceRow}>
-                <Typography.Text>岗位：{confirmationPreview.sources.application.company_name} · {confirmationPreview.sources.application.position_name}</Typography.Text>
+                <Typography.Text>{t("岗位：")}{confirmationPreview.sources.application.company_name} · {confirmationPreview.sources.application.position_name}</Typography.Text>
               </div>
-              <Typography.Text>简历：{confirmationPreview.sources.resume.title}</Typography.Text>
-              <Typography.Text>JD：{confirmationPreview.sources.jd.characters} 字符</Typography.Text>
-              <Typography.Text>来源已通过当前材料校验。</Typography.Text>
+              <Typography.Text>{t("简历：")}{confirmationPreview.sources.resume.title}</Typography.Text>
+              <Typography.Text>JD：{confirmationPreview.sources.jd.characters}{t(" 字符")}</Typography.Text>
+              <Typography.Text>{t("来源已通过当前材料校验。")}</Typography.Text>
             </div>
           ) : (
             <div className={styles.previewIssues}>
               {confirmationRefreshing ? (
-                <Typography.Text>正在刷新材料证据，请稍候</Typography.Text>
+                <Typography.Text>{t("正在刷新材料证据，请稍候")}</Typography.Text>
               ) : evidencePreviewLoading ? (
-                <Typography.Text>正在加载材料证据，请稍候</Typography.Text>
+                <Typography.Text>{t("正在加载材料证据，请稍候")}</Typography.Text>
               ) : evidencePreviewQuery.isError ? (
-                <Typography.Text>材料证据加载失败，请刷新后再确认</Typography.Text>
+                <Typography.Text>{t("材料证据加载失败，请刷新后再确认")}</Typography.Text>
               ) : (confirmationPreview?.issues || []).length > 0 ? (
                 <ul>
                   {materialEvidencePreviewIssueLabels(confirmationPreview?.issues || []).map((issue) => <li key={issue}>{issue}</li>)}
                 </ul>
               ) : (
-                <Typography.Text>材料证据尚未准备完成</Typography.Text>
+                <Typography.Text>{t("材料证据尚未准备完成")}</Typography.Text>
               )}
             </div>
           )}
 
           <Form layout="vertical">
-            <Form.Item label="投递时间">
+            <Form.Item label={t("投递时间")}>
               <Input
                 type="datetime-local"
                 value={confirmationSubmittedAt}
@@ -1748,33 +1737,32 @@ export default function MaterialKitDrawer({
             </Form.Item>
           </Form>
 
-          {confirmationError ? <Alert type="error" showIcon message={confirmationError} /> : null}
+          {confirmationError ? <Alert type="error" showIcon message={t(confirmationError)} /> : null}
         </ConfirmationPanel>
       </Modal>
       <Modal
         open={evidenceDetailOpen}
-        title="本次投递记录详情"
+        title={t("本次投递记录详情")}
         onCancel={closeEvidenceDetail}
         destroyOnClose
         footer={(
           <Button onClick={closeEvidenceDetail} disabled={evidenceDetailLoading}>
-            关闭
-          </Button>
+            {t("关闭")}</Button>
         )}
       >
         <div className={styles.evidenceDetailBody}>
-          <Typography.Text className={styles.confirmationKind}>只读证据快照</Typography.Text>
+          <Typography.Text className={styles.confirmationKind}>{t("只读证据快照")}</Typography.Text>
           {evidenceDetailLoading ? (
-            <Typography.Text className={styles.evidenceEmpty}>正在加载本次投递记录详情，请稍候</Typography.Text>
+            <Typography.Text className={styles.evidenceEmpty}>{t("正在加载本次投递记录详情，请稍候")}</Typography.Text>
           ) : evidenceDetailError ? (
-            <Alert type="error" showIcon message={evidenceDetailError} />
+            <Alert type="error" showIcon message={t(evidenceDetailError)} />
           ) : evidenceDetail ? (
             <>
               <div className={styles.evidenceDetailSummary}>
-                <Typography.Text>第 {evidenceDetail.sequence} 次</Typography.Text>
-                <Typography.Text className={styles.evidenceTime}>投递（本地）：{formatEvidenceTimestamp(evidenceDetail.submitted_at)}</Typography.Text>
-                <Typography.Text className={styles.evidenceTime}>确认（本地）：{formatEvidenceTimestamp(evidenceDetail.confirmed_at)}</Typography.Text>
-                <Typography.Text className={styles.evidenceTime}>确认方式：{formatConfirmationKind(evidenceDetail.confirmation_kind)}</Typography.Text>
+                <Typography.Text>{t("第 {sequence} 次", { sequence: evidenceDetail.sequence })}</Typography.Text>
+                <Typography.Text className={styles.evidenceTime}>{t("投递（本地）：")}{formatEvidenceTimestamp(evidenceDetail.submitted_at)}</Typography.Text>
+                <Typography.Text className={styles.evidenceTime}>{t("确认（本地）：")}{formatEvidenceTimestamp(evidenceDetail.confirmed_at)}</Typography.Text>
+                <Typography.Text className={styles.evidenceTime}>{t("确认方式：")}{formatConfirmationKind(evidenceDetail.confirmation_kind)}</Typography.Text>
               </div>
             </>
           ) : null}

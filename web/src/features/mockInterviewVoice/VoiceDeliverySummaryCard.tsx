@@ -1,3 +1,4 @@
+import { t, useLocale } from '@/i18n';
 import type { RefObject } from 'react';
 import { AudioOutlined, ClockCircleOutlined, PauseCircleOutlined, SoundOutlined } from '@ant-design/icons';
 import type { VoiceDeliverySummary } from './voiceDeliverySummary';
@@ -19,6 +20,7 @@ function codePointOffsetToCodeUnit(text: string, offset: number): number {
 }
 
 export default function VoiceDeliverySummaryCard({ summary, transcriptRef, audioRef }: Props) {
+  useLocale();
   const longestPause = summary.pauseRanges
     .slice()
     .sort((left, right) => (right[1] - right[0]) - (left[1] - left[0]))[0];
@@ -38,37 +40,36 @@ export default function VoiceDeliverySummaryCard({ summary, transcriptRef, audio
   };
 
   return (
-    <section className={styles.card} aria-label="表达节奏复盘">
+    <section className={styles.card} aria-label={t("表达节奏复盘")}>
       <header className={styles.header}>
         <div>
           <span className={styles.eyebrow}>DELIVERY REVIEW</span>
-          <h4>表达节奏复盘</h4>
-          <p>仅陈述本次录音的可测量事实，不评价表达能力或面试表现。</p>
+          <h4>{t("表达节奏复盘")}</h4>
+          <p>{t("仅陈述本次录音的可测量事实，不评价表达能力或面试表现。")}</p>
         </div>
-        <span className={styles.localBadge}><span aria-hidden>●</span> 本地分析</span>
+        <span className={styles.localBadge}><span aria-hidden>●</span> {t("本地分析")}</span>
       </header>
       <div className={styles.metrics}>
-        <div className={styles.metric}><ClockCircleOutlined /><span>回答时长</span><strong>{formatDuration(summary.totalDurationMs)}</strong></div>
-        <div className={styles.metric}><AudioOutlined /><span>有效发声</span><strong>{formatDuration(summary.voicedDurationMs)}</strong></div>
-        <div className={styles.metric}><PauseCircleOutlined /><span>停顿次数</span><strong>{summary.pauseCount} 次</strong></div>
+        <div className={styles.metric}><ClockCircleOutlined /><span>{t("回答时长")}</span><strong>{formatDuration(summary.totalDurationMs)}</strong></div>
+        <div className={styles.metric}><AudioOutlined /><span>{t("有效发声")}</span><strong>{formatDuration(summary.voicedDurationMs)}</strong></div>
+        <div className={styles.metric}><PauseCircleOutlined /><span>{t("停顿次数")}</span><strong>{t("{count} 次", { count: summary.pauseCount })}</strong></div>
         <button className={styles.metricButton} type="button" onClick={locatePause} disabled={!audioRef?.current || !longestPause}>
-          <PauseCircleOutlined /><span>最长停顿</span><strong>{(summary.longestPauseMs / 1_000).toFixed(1)} 秒</strong>
+          <PauseCircleOutlined /><span>{t("最长停顿")}</span><strong>{(summary.longestPauseMs / 1_000).toFixed(1)} {t("秒")}</strong>
         </button>
-        <div className={styles.metric}><SoundOutlined /><span>文字节奏</span><strong>{summary.speechRateCpm === undefined ? '样本不足' : `${summary.speechRateCpm} 字/分钟`}</strong></div>
+        <div className={styles.metric}><SoundOutlined /><span>{t("文字节奏")}</span><strong>{summary.speechRateCpm === undefined ? t("样本不足") : t("{rate} 字/分钟", { rate: summary.speechRateCpm })}</strong></div>
       </div>
       <div className={styles.fillers}>
-        <div><strong>口头语位置</strong><span>按确认后的文字统计，点击可定位。</span></div>
+        <div><strong>{t("口头语位置")}</strong><span>{t("按确认后的文字统计，点击可定位。")}</span></div>
         <div className={styles.fillerList}>
           {summary.fillerOccurrences.length ? summary.fillerOccurrences.flatMap((item) => item.transcriptOffsets.map((offset, index) => (
             <button key={`${item.text}-${offset}-${index}`} type="button" onClick={() => locateFiller(offset, item.text)} disabled={!transcriptRef?.current}>
-              {item.text} · 第 {offset + 1} 字
-            </button>
-          ))) : <span className={styles.empty}>本次未识别到默认口头语</span>}
+              {item.text} {t("· 第 {position} 字", { position: offset + 1 })}</button>
+          ))) : <span className={styles.empty}>{t("本次未识别到默认口头语")}</span>}
         </div>
       </div>
       <details className={styles.method}>
-        <summary>查看计算口径</summary>
-        <p>停顿只统计首次与末次发声之间不少于 0.8 秒的静音；文字节奏使用确认文字的有效 Unicode 字符数除以总回答分钟数。</p>
+        <summary>{t("查看计算口径")}</summary>
+        <p>{t("停顿只统计首次与末次发声之间不少于 0.8 秒的静音；文字节奏使用确认文字的有效 Unicode 字符数除以总回答分钟数。")}</p>
       </details>
     </section>
   );

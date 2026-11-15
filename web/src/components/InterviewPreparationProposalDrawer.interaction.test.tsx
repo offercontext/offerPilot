@@ -601,4 +601,99 @@ describe('InterviewPreparationProposalDrawer interaction', () => {
     expect(attemptChanges).toContain(null);
     expect(draftChanges).toContain(null);
   });
+
+  it('hydrates late JD text and version together without replacing user choices', async () => {
+    const onDraftChange = vi.fn();
+    const props = { open: true, onClose: vi.fn(), onDraftChange,
+      resumeOptions: [{ id: 13 }, { id: 14 }] };
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props}
+      context={{ ...context, jdText: '', jdVersionId: null }} />));
+    const select = container!.querySelector<HTMLSelectElement>('select')!;
+    const assertions = container!.querySelectorAll<HTMLTextAreaElement>('textarea')[1]!;
+    act(() => {
+      select.value = '14';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(assertions, 'User edited assertion');
+      assertions.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props} context={context} />));
+    expect(container!.querySelector('textarea')!.value).toBe(context.jdText);
+    expect(select.value).toBe('14');
+    expect(assertions.value).toBe('User edited assertion');
+    expect(onDraftChange.mock.lastCall?.[0]).toMatchObject({
+      jdText: context.jdText, jdVersionId: 1, resumeId: 14, assertionsText: 'User edited assertion',
+    });
+    expect(container!.querySelector<HTMLButtonElement>('[data-testid="interview-preparation-generate"]')!.disabled).toBe(false);
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['empty draft', '', null, false, context.jdText, 1],
+    ['versioned draft', 'Frozen JD', 99, false, 'Frozen JD', 99],
+    ['unversioned legacy text', 'Legacy JD', null, false, 'Legacy JD', null],
+    ['unknown empty draft', '', null, true, '', null],
+  ] as const)('restores %s without inventing a source version', async (_name, jdText, jdVersionId, unknown, expectedText, expectedVersion) => {
+    const onDraftChange = vi.fn();
+    const draft: InterviewPreparationDraft = {
+      attemptState: { key: 'restored-attempt', result_unknown: unknown },
+      resumeId: 13, jdText, jdVersionId, assertionsText: 'Saved assertion', knowledgeSelections: [],
+    };
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer open context={context}
+      onClose={vi.fn()} draft={draft} onDraftChange={onDraftChange} />));
+    expect(container!.querySelector('textarea')!.value).toBe(expectedText);
+    expect(onDraftChange.mock.lastCall?.[0]).toMatchObject({
+      jdText: expectedText, jdVersionId: expectedVersion, assertionsText: 'Saved assertion',
+    });
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+  it('does not replace a selected JD when current source changes or disappears', async () => {
+    const onDraftChange = vi.fn();
+    const props = { open: true, onClose: vi.fn(), onDraftChange };
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props} context={context} />));
+    const original = container!.querySelector('textarea');
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props}
+      context={{ ...context, jdText: 'Newer JD', jdVersionId: 2 }} />));
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props}
+      context={{ ...context, jdText: '', jdVersionId: null }} />));
+    expect(container!.querySelector('textarea')).toBe(original);
+    expect(original!.value).toBe(context.jdText);
+    expect(onDraftChange.mock.lastCall?.[0]).toMatchObject({ jdText: context.jdText, jdVersionId: 1 });
+  });
+
+
+  it('keeps an unknown draft frozen when the owner persists and returns draft updates', async () => {
+    let latest: InterviewPreparationDraft | null = null;
+    function RestoredOwner() {
+      const [draft, setDraft] = useState<InterviewPreparationDraft | null>({
+        attemptState: { key: 'unknown-attempt', result_unknown: true },
+        resumeId: 13, jdText: '', jdVersionId: null, assertionsText: 'Saved assertion', knowledgeSelections: [],
+      });
+      latest = draft;
+      return <InterviewPreparationProposalDrawer open context={context} onClose={vi.fn()}
+        draft={draft ?? undefined} onDraftChange={setDraft} />;
+    }
+    await act(async () => root?.render(<RestoredOwner />));
+    expect(container!.querySelector('textarea')!.value).toBe('');
+    expect(latest).toMatchObject({
+      jdText: '', jdVersionId: null, attemptState: { key: 'unknown-attempt', result_unknown: true },
+    });
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
+
+  it('does not hydrate an empty mounted unknown attempt when the current JD arrives', async () => {
+    const props = { open: true, onClose: vi.fn(),
+      attemptState: { key: 'unknown-without-draft', result_unknown: true }, onDraftChange: vi.fn() };
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props}
+      context={{ ...context, jdText: '', jdVersionId: null }} />));
+    await act(async () => root?.render(<InterviewPreparationProposalDrawer {...props} context={context} />));
+    expect(container!.querySelector('textarea')!.value).toBe('');
+    expect(props.onDraftChange.mock.lastCall?.[0]).toMatchObject({
+      jdText: '', jdVersionId: null, attemptState: props.attemptState,
+    });
+    expect(container!.querySelector<HTMLButtonElement>('[data-testid="interview-preparation-generate"]')!.disabled).toBe(true);
+    expect(service.create).not.toHaveBeenCalled();
+  });
+
 });

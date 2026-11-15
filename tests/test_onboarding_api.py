@@ -57,6 +57,7 @@ def test_onboarding_derives_real_workspace_steps(tmp_path):
         "completed_count": 4,
         "is_complete": True,
         "force_open": False,
+        "dismissed": False,
     }
 
 
@@ -79,3 +80,30 @@ def test_onboarding_rejects_non_boolean_force_open(tmp_path):
 
     assert response.status_code == 422
     assert response.json()["error"] == "force_open must be boolean"
+
+
+def test_onboarding_first_application_needs_neither_ai_nor_resume(tmp_path):
+    client = TestClient(create_app(data_dir=tmp_path))
+    assert client.get("/api/onboarding").json()["is_complete"] is False
+    assert client.post(
+        "/api/applications",
+        json={"company_name": "Local record", "position_name": "Engineer"},
+    ).status_code == 201
+    status = client.get("/api/onboarding").json()
+    assert status["is_complete"] is True
+    assert status["steps"]["configure_ai"] is False
+    assert status["steps"]["create_primary_resume"] is False
+    assert status["steps"]["send_first_pilot_message"] is False
+
+
+def test_incomplete_onboarding_dismissal_survives_restart_and_reopens(tmp_path):
+    client = TestClient(create_app(data_dir=tmp_path))
+    response = client.patch("/api/onboarding", json={"force_open": False})
+    assert response.status_code == 200
+    assert response.json()["dismissed"] is True
+    assert response.json()["is_complete"] is False
+    restarted = TestClient(create_app(data_dir=tmp_path))
+    assert restarted.get("/api/onboarding").json()["dismissed"] is True
+    reopened = restarted.patch("/api/onboarding", json={"force_open": True}).json()
+    assert reopened["force_open"] is True
+    assert reopened["dismissed"] is False

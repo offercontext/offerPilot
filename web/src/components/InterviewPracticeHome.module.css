@@ -1,0 +1,8 @@
+.home { margin-bottom: 28px; }
+.home > h3 { margin: 0 0 8px; font-size: 20px; }
+.home > p { margin: 0 0 16px; color: var(--op-muted, #64748b); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+.grid > article { padding: 18px; border: 1px solid var(--op-border, #e2e8f0); border-radius: 12px; background: var(--op-surface, #fff); min-width: 0; }
+.grid h4 { margin: 0 0 10px; font-size: 15px; }
+.grid p { overflow-wrap: anywhere; color: var(--op-muted, #64748b); line-height: 1.6; }
+.grid button { margin-top: 4px; }
