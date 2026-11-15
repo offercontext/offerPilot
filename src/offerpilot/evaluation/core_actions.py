@@ -403,7 +403,11 @@ class CoreHTTPDriver(HTTPDriver):
             self.script_replies = self.reply_counter[0]
             if self.reply_counter[0] > self.max_replies:
                 raise TimeoutError("script reply watchdog")
-        timeout = request_deadline - started
+        # Preserve the original relative fast-route cap: round-tripping through
+        # started + 30 can produce a value either above or below 30. The trial's
+        # remaining budget and the absolute late-response checks still apply.
+        timeout = (min(30, remaining) if observed_wait is None
+                   else request_deadline - started)
         started_at = datetime.now(timezone.utc).isoformat()
         with self._diagnostic_lock:
             self._request_index += 1

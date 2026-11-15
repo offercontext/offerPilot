@@ -2043,3 +2043,14 @@ MockTransport 和 owned loopback。实现见 [ADR-0014](architecture/decisions/0
 - 本地验证：独立恢复树修复前 21 passed / 1 failed（仅摘要）/ 118 deselected；修复后运行全部 14 个 supported-view 参数，加 node_split、reviewed_split、shared_fixture、split_fixture、shared_parameter、dynamic_or_cached、xunit_module、indirect_parametrization 相关 guards，25 passed / 115 deselected。包括真实两分片执行与共享 fixture 拒绝。目标 ruff 与 diff --check 通过；不计作完整 gate。
 - 旧 Windows 的具体替代覆盖：`tests/test_application_jd_browser_harness.py::test_application_jd_harness_parses_and_uses_explicit_stage_contract` 的 setup/call/teardown 全部 passed、xfail=false，call 3.8876 秒，shard exit_code=0。
 - 教训：改变可按 node 拆分的测试源时，先审查状态所有权和 fixture 生命周期，再同步审查说明与摘要；摘要更新本身不等于隔离审查。
+
+
+## 2026-11-15：快路由相对超时往返绝对时钟引入浮点误差
+
+- 现象：PR70 Windows run 43727842493 attempt 2 的 shard18（job132917290913）1177 passed / 1 failed，唯一失败是 `test_fast_routes_keep_original_thirty_second_cap[POST-/other]` 的 read timeout 为 29.99999999999997 而非 30。最终 gate 被依赖失败阻断，不能由旧轮通过抵消。
+- 根因：CoreHTTPDriver 将快路由 30 秒预算先加到 monotonic 起点，再减去起点交给 HTTPX；固定起点 255.9 可复现向下舍入，226.1 可复现超过 30。基础 HTTPDriver 原本直接使用 `min(30, remaining)`。
+- 修复：快路由恢复相对预算计算，严格保持 30 秒上限和剩余 trial 预算。绝对 deadline 对迟到响应的拒绝、脚本次数限制、blocking worker 的等待和 cleanup reserve 逻辑不变；不以近似断言掩盖问题。
+- 回归：固定模块局部时钟覆盖三类快路由、三个浮点起点及充足/不足预算，严格核对 HTTPX 四类 timeout；到期发送零请求，截止返回拒绝且不重发。真实 HTTP worker 的 deadline、cleanup、late-result 与取消相关专项另行运行。
+- 失败证据：[attempt 2](https://github.com/offercontext/offerPilot/actions/runs/43727842493/attempts/2)，artifact14182049486，ZIP SHA256 `3c1a57c78ded9053ea8fb8008a20b6682d225d79a65d914123db85260cbc6bce`。原失败不覆盖；attempt1 的 runner 失联是独立历史故障。
+- 验证：最终严格回归对旧实现在内存中运行，10 failed / 12 passed（浮点反例稳定失败）；修复后 deadline 整模块 32 passed，相关 integrity/failure attribution/cleanup/cancellation 专项 170 passed / 4 skipped；ruff、目标 mypy 与独立只读审查通过。完整新轮 CI 单独跟踪，局部成功不代替完整门禁。
+- 教训：相对传输预算直接从策略上限和剩余预算求最小值；绝对时钟用于截止判定，避免相对值往返绝对浮点时间带来不必要舍入。
