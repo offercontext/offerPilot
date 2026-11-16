@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   browser:
-    if: github.event.pull_request.number == 70 && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/20261115-editable-memory-profile'
+    if: github.event.pull_request.head.repo.full_name == github.repository && ((github.event.pull_request.number == 70 && github.event.pull_request.head.ref == 'feat/20261115-editable-memory-profile') || github.event.pull_request.head.ref == 'fix/20261116-memory-visual-polish')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
