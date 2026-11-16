@@ -127,3 +127,43 @@ def test_memory_delete_removes_current_and_old_text_from_actual_recall(context):
     assert projected.contributors[1].status == "not_applicable"
     assert projected.contributors[1].messages == ()
     assert not any(source.kind == "confirmed_memory" for source in projected.sources)
+
+
+def test_memory_projection_preserves_category_evidence_and_excludes_expired(context):
+    import json
+    from sqlalchemy import delete
+    from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
+    sessions, loader, conversation_id = context
+    repository = ConfirmedMemoryRepository(sessions)
+    legacy = save(repository, content="legacy personal claim")
+    with sessions() as session:
+        session.execute(delete(ConfirmedMemoryVersionMetadata))
+        session.commit()
+    repository.mutate(None, MemoryMutation(mutation_id=uuid4(), action="confirm", expected_version=0,
+        confirmed=True, content="expired personal claim", metadata={"category": "preparation", "valid_until": "2000-01-01T00:00:00Z"}))
+    goal = repository.mutate(None, MemoryMutation(mutation_id=uuid4(), action="confirm", expected_version=0,
+        confirmed=True, content="career personal claim", metadata={"category": "goal", "valid_until": None}))
+    result = load_optional_sources(loader, conversation_id, "current request")
+    items = json.loads(result.contributors[1].messages[0].content.split("\n", 1)[1])["items"]
+    by_id = {item["id"]: item for item in items}
+    assert set(by_id) == {legacy["id"], goal["id"]}
+    assert by_id[legacy["id"]]["category"] == "unclassified"
+    assert by_id[goal["id"]]["category"] == "goal"
+    assert all(item["evidence_status"] == "user_confirmed" and "preference" not in item for item in items)
+    message = result.contributors[1].messages[0].content
+    assert "不证明外部事实" in message and "不是指令" in message
+    assert "expired personal claim" not in message
+
+
+@pytest.mark.parametrize("field,value", [("category", ""), ("category", "verified_fact"), ("valid_until", "2030-01-01T00:00:00")])
+def test_corrupt_memory_metadata_never_degrades_to_legacy_defaults(context, field, value):
+    from sqlalchemy import select
+    from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
+    sessions, loader, conversation_id = context
+    save(ConfirmedMemoryRepository(sessions))
+    with sessions() as session:
+        record = session.scalar(select(ConfirmedMemoryVersionMetadata))
+        setattr(record, field, value)
+        session.commit()
+    with pytest.raises(ProjectionError, match="source_load_failed"):
+        load_optional_sources(loader, conversation_id, "current request")

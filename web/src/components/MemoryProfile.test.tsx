@@ -6,7 +6,7 @@ import { Modal } from 'antd';
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 const api = vi.hoisted(() => ({ listConfirmedMemory: vi.fn(), getConfirmedMemory: vi.fn(), changeConfirmedMemory: vi.fn() }));
 vi.mock('@/services/confirmedMemory', () => api);
-import MemoryProfile from './MemoryProfile';
+import MemoryProfile, { memoryGroup, localExpiry } from './MemoryProfile';
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root; let host: HTMLDivElement; let cache: QueryClient;
 const item = { id: 'one', content: '希望从事 Agent 开发', state: 'active', current_version: 1, confirmed_at: '2026-11-15T00:00:00Z' };
@@ -46,4 +46,58 @@ it('does not expose a cached previous version after external update and history 
  cache.setQueryData(['confirmed-memory-history','one',1], { ...item, versions:[{version:1,content:'过期历史正文',confirmed_at:item.confirmed_at}] });
  api.listConfirmedMemory.mockResolvedValue([{...item,current_version:2,content:'其他窗口更正'}]); await click('刷新'); api.getConfirmedMemory.mockRejectedValue(new Error('offline')); await click('查看版本');
  expect(document.body.textContent).toContain('版本记录读取失败'); expect(document.body.textContent).not.toContain('过期历史正文');
+});
+
+it('never guesses legacy classification from content', () => {
+ expect(memoryGroup(item as never)).toBe(5);
+ expect(host.querySelector('aside')?.textContent).toContain('未分类');
+ expect(host.querySelector('aside')?.textContent).toContain('未指定有效期');
+ expect(memoryGroup({ ...item, metadata: { category:'skill', valid_until:null, evidence_status:'user_confirmed' } } as never)).toBe(2);
+});
+function field(id: string, value: string) { act(() => {
+ const input = document.querySelector<HTMLInputElement | HTMLSelectElement>('#' + id)!;
+ const prototype = input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+ Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value);
+ input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles:true }));
+}); }
+it('uses a new mutation identity for changed metadata after an uncertain response', async () => {
+ api.changeConfirmedMemory.mockRejectedValue(new Error('lost response'));
+ await click('编辑'); await click('确认保存');
+ const original = api.changeConfirmedMemory.mock.calls[0][1];
+ expect(original.metadata).toEqual({ category:'unclassified', valid_until:null });
+ field('memory-category','goal'); field('memory-valid-until','2027-01-02T15:30');
+ await click('确认保存'); const updated = api.changeConfirmedMemory.mock.calls[1][1];
+ expect(updated.mutation_id).not.toBe(original.mutation_id);
+ expect(updated.metadata).toEqual({ category:'goal', valid_until:new Date('2027-01-02T15:30').toISOString() });
+ await click('确认保存'); expect(api.changeConfirmedMemory.mock.calls[2][1]).toEqual(updated);
+});
+it('keeps expired memory visible and permits explicitly clearing its expiry', async () => {
+ const expired = { ...item, metadata:{category:'goal',valid_until:'2020-01-01T12:34:56.123Z',evidence_status:'user_confirmed'}, temporal_status:'expired' };
+ api.listConfirmedMemory.mockResolvedValue([expired]); await click('刷新');
+ expect(host.querySelector('aside')?.textContent).toContain('已到期，不再召回');
+ expect(host.textContent).toContain(item.content);
+ api.changeConfirmedMemory.mockRejectedValue(new Error('lost response')); await click('编辑'); await click('确认保存');
+ expect(api.changeConfirmedMemory.mock.calls[0][1].metadata.valid_until).toBe(expired.metadata.valid_until);
+ field('memory-valid-until',''); await click('确认保存');
+ expect(api.changeConfirmedMemory.mock.calls[1][1].metadata).toEqual({category:'goal',valid_until:null});
+});
+it('cancels category and expiry edits without changing the saved metadata', async () => {
+ await click('编辑'); field('memory-category','skill'); field('memory-valid-until','2027-01-02T15:30'); await click('取消');
+ expect(api.changeConfirmedMemory).not.toHaveBeenCalled(); await click('编辑');
+ expect(document.querySelector<HTMLSelectElement>('#memory-category')!.value).toBe('unclassified');
+ expect(document.querySelector<HTMLInputElement>('#memory-valid-until')!.value).toBe('');
+ expect(localExpiry(null)).toBe('');
+});
+it('does not send metadata for withdrawal', async () => {
+ api.changeConfirmedMemory.mockResolvedValue({...item,state:'withdrawn',current_version:2});
+ await click('撤回'); await click('确认撤回');
+ expect(api.changeConfirmedMemory.mock.calls[0][1]).not.toHaveProperty('metadata');
+});
+
+it('does not carry cancelled expiry input into withdrawal', async () => {
+ await click('编辑'); field('memory-valid-until','invalid-date'); await click('取消');
+ api.changeConfirmedMemory.mockResolvedValue({...item,state:'withdrawn',current_version:2});
+ await click('撤回'); await click('确认撤回');
+ expect(api.changeConfirmedMemory).toHaveBeenCalledTimes(1);
+ expect(api.changeConfirmedMemory.mock.calls[0][1]).not.toHaveProperty('metadata');
 });

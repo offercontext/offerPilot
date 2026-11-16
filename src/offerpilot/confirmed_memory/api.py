@@ -17,15 +17,15 @@ def register_memory_routes(app: FastAPI, sessions: sessionmaker[Session]) -> Non
         try:
             return JSONResponse(repository.get(memory_id))
         except MemoryGone:
-            return JSONResponse({"error": "该偏好已删除或不存在"}, status_code=404)
+            return JSONResponse({"error": "该记忆已删除或不存在"}, status_code=404)
 
     def apply(memory_id: str | None, command: MemoryMutation) -> JSONResponse:
         try:
             return JSONResponse(repository.mutate(memory_id, command))
         except MemoryGone:
-            return JSONResponse({"error": "该偏好已删除", "error_code": "memory_gone"}, status_code=410)
+            return JSONResponse({"error": "该记忆已删除", "error_code": "memory_gone"}, status_code=410)
         except MemoryConflict as exc:
-            return JSONResponse({"error": "偏好已变化，请刷新后确认", "error_code": str(exc)}, status_code=409)
+            return JSONResponse({"error": "记忆已变化，请刷新后确认", "error_code": str(exc)}, status_code=409)
 
     @app.post("/api/confirmed-memory")
     def create_memory(command: MemoryMutation) -> JSONResponse:

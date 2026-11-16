@@ -55,6 +55,8 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 - [ADR-0012: 持久化有界的本地主动任务](./0012-bound-local-proactive-jobs.md) — Accepted
 - [ADR-0013: 持久化受当前模型能力约束的原生图片消息](./0013-persist-native-image-messages.md) — Accepted
 
+- [ADR-0019: 版本化个人记忆分类与显式有效期](./0019-version-memory-metadata.md) — Proposed（实现验证中）
+
 ### 决策链
 
 ```

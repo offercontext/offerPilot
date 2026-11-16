@@ -23,7 +23,8 @@ def input_provenance(
         return None, "expected_memory_identity_missing"
     expected = dict(
         id=str(aliases["memory_id"]), version=aliases["memory_version"],
-        preference=fixture["memory"],
+        content=fixture["memory"], category="unclassified", valid_until=None,
+        evidence_status="user_confirmed",
     )
     requests = [
         row for row in evidence.get("http", [])

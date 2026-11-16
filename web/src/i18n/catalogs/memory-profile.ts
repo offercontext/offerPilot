@@ -1,4 +1,16 @@
 export default {
+  '未分类': 'Unclassified',
+  '未指定有效期': 'Validity not specified',
+  '请输入有效的截止时间': 'Enter a valid expiry time',
+  '已到期，不再召回': 'Expired, no longer recalled',
+  '仅展示用户明确确认的记忆，不自动导入 AI 推断。分组由你确认，旧记录保持未分类。': 'Only explicitly confirmed memories are shown, with no automatic AI inferences. You confirm categories; legacy records stay unclassified.',
+  '旧记录不会自动推断分类，可编辑后明确选择。': 'Legacy categories are not inferred. Edit a record to choose one explicitly.',
+  '有效期': 'Validity',
+  '记录和历史仍保留。编辑有效期并确认后可重新使用。': 'The record and history remain. Edit and confirm its validity to use it again.',
+  '记忆分类': 'Memory category',
+  '有效期截止（本地时间，可选）': 'Valid until (local time, optional)',
+  '留空表示未指定有效期，不代表永久有效；到期只停止召回，不删除历史。': 'Leave blank for unspecified validity, not permanent validity. Expiry stops recall without deleting history.',
+
   "记忆画像": "Memory profile",
   "我的记忆画像": "My memory profile",
   "让 Pilot 更了解你，每一条记忆都由你掌控": "Help Pilot understand you. Every memory is yours to control.",
