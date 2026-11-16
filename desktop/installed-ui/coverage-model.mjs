@@ -8,7 +8,7 @@ export const ROOTS = Object.freeze([
   ['R07', 'questions', '面试', '刷题'], ['R08', 'offers', 'Offer', null],
   ['R09', 'resumes', '素材库', '简历'], ['R10', 'reviews', '素材库', '我的经历'],
   ['R11', 'knowledge', '素材库', '参考知识'], ['R12', 'pilot', null, null],
-  ['R13', 'settings', '设置', null],
+  ['R13', 'settings', '设置', null], ['R14', 'memory', '记忆画像', null],
 ].map(([id, view, module, tab]) => Object.freeze({ id, view, module, tab })));
 export const ROOT_STATES = Object.freeze(['empty-before-fixtures', 'populated-to-supported-extent']);
 export const ROOT_CASES = Object.freeze(ROOT_STATES.flatMap((state) => ['dark', 'light'].flatMap((theme) =>

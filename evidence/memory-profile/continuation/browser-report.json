@@ -1,0 +1,251 @@
+{
+  "kind": "real production UI / real HTTP and SQLite / synthetic test content / no provider",
+  "sha": "59c79a50ab78226aca991e3cc37dbe8a6184b87a",
+  "run": "43679506195",
+  "attempt": "1",
+  "assertions": [
+    "real empty state",
+    "UI add persisted exactly once",
+    "five graph categories rendered",
+    "desktop category is inside viewport",
+    "desktop category is inside viewport",
+    "desktop category is inside viewport",
+    "desktop category is inside viewport",
+    "desktop category is inside viewport",
+    "graph detail and source",
+    "list radio selected",
+    "list exposes every record",
+    "search narrows list",
+    "group filter",
+    "cancel leaves stored text intact",
+    "double click sends one real mutation",
+    "edit increments exactly one version",
+    "actual recall replaces old text",
+    "withdraw removes actual recall",
+    "withdrawn filter shows one",
+    "reconfirm restores recall",
+    "delete cancel preserves record",
+    "deleted text absent from refreshed UI",
+    "delete survives refresh",
+    "delete removes actual recall",
+    "zh-CN-light-1672 has no document horizontal overflow",
+    "en-US-dark-1672 has no document horizontal overflow",
+    "en-US-light-1672 has no document horizontal overflow",
+    "zh-CN-dark-390 has no document horizontal overflow",
+    "en-US-light-390 has no document horizontal overflow",
+    "no page errors",
+    "no console errors",
+    "no external requests"
+  ],
+  "screenshots": [
+    {
+      "name": "desktop-zh-dark-graph",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/desktop-zh-dark-graph.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "desktop-zh-dark-list",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/desktop-zh-dark-list.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "edit-dialog",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/edit-dialog.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "history",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/history.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "deleted-after-refresh",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/deleted-after-refresh.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "zh-CN-light-1672",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/zh-CN-light-1672.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "en-US-dark-1672",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/en-US-dark-1672.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "en-US-light-1672",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/en-US-light-1672.png",
+      "viewport": {
+        "width": 1672,
+        "height": 941
+      }
+    },
+    {
+      "name": "zh-CN-dark-390-overview",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/zh-CN-dark-390-overview.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "name": "zh-CN-dark-390",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/zh-CN-dark-390.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "name": "zh-CN-dark-390-detail",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/zh-CN-dark-390-detail.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "name": "en-US-light-390-overview",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/en-US-light-390-overview.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "name": "en-US-light-390",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/en-US-light-390.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "name": "en-US-light-390-detail",
+      "file": "/home/runner/work/offerPilot/offerPilot/artifacts/memory-profile-browser/en-US-light-390-detail.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    }
+  ],
+  "pageErrors": [],
+  "consoleErrors": [],
+  "unexpectedNetwork": [],
+  "requests": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory/b14a7375-3b77-4a5a-86b0-cc39ce5f1449"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory/b14a7375-3b77-4a5a-86b0-cc39ce5f1449"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory/b14a7375-3b77-4a5a-86b0-cc39ce5f1449"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory/b14a7375-3b77-4a5a-86b0-cc39ce5f1449"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory/b14a7375-3b77-4a5a-86b0-cc39ce5f1449"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:19080/api/confirmed-memory"
+    }
+  ],
+  "status": "passed",
+  "checkout": {
+    "head": "59c79a50ab78226aca991e3cc37dbe8a6184b87a",
+    "tree": "7fb8547d5e1fb742b8e779fedeffe2210fe31670",
+    "dirty": "",
+    "prHead": "6ae2e596c97d513a516fc6f1f371ec75f83e55a8"
+  },
+  "beforeRefresh": "- region \"记忆画像\":\n  - heading \"我的记忆画像\" [level=1]\n  - paragraph: 让 Pilot 更了解你，每一条记忆都由你掌控\n  - button \"添加记忆\"\n  - paragraph: 仅展示用户明确确认的记忆，不自动导入 AI 推断或备考计划。分组按正文自动整理，仅用于浏览。\n  - radiogroup \"记忆视图\":\n    - radio \"图谱\" [checked]\n    - text: 图谱\n    - radio \"列表\"\n    - text: 列表\n  - button \"loading 刷 新\":\n    - img \"loading\"\n    - text: 刷 新\n  - status: 记忆已确认保存\n  - textbox \"搜索记忆\"\n  - combobox \"记忆状态\"\n  - text: 全部状态\n  - combobox \"记忆分组\"\n  - text: 全部分组\n  - img \"user\"\n  - strong: 我\n  - heading \"aim 目标 1\" [level=2]:\n    - img \"aim\"\n    - text: 目标 1\n  - button \"希望从事 Agent 开发 已确认\" [pressed]\n  - heading \"book 经历 0\" [level=2]:\n    - img \"book\"\n    - text: 经历 0\n  - text: 暂无记忆\n  - heading \"code 技能 0\" [level=2]:\n    - img \"code\"\n    - text: 技能 0\n  - text: 暂无记忆\n  - heading \"heart 偏好 0\" [level=2]:\n    - img \"heart\"\n    - text: 偏好 0\n  - text: 暂无记忆\n  - heading \"calendar 近期准备 0\" [level=2]:\n    - img \"calendar\"\n    - text: 近期准备 0\n  - text: 暂无记忆\n  - complementary \"记忆详情\":\n    - heading \"记忆详情\" [level=2]\n    - text: 目标 用户已确认\n    - heading \"记忆内容\" [level=3]\n    - paragraph: 希望从事 Agent 开发\n    - heading \"来源\" [level=3]\n    - paragraph: 用户明确确认\n    - paragraph: 未记录原始对话链接；确认不代表外部事实已核验。\n    - heading \"最近确认\" [level=3]\n    - paragraph: 2026/11/15 05:06:40\n    - paragraph: 版本 1\n    - button \"编 辑\"\n    - button \"撤 回\"\n    - button \"删 除\"\n    - button \"查看版本\""
+}

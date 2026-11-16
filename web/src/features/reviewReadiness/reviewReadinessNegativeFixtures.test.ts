@@ -20,7 +20,8 @@ const CORE_TASK_IDS = new Set([
   'materials.story',
   'materials.reference',
 ]);
-const TOP_LEVEL_NAV = new Set(['today', 'applications', 'interview', 'offers', 'resources', 'settings']);
+// Approved memory-profile entry; the navigation contract remains exact and ordered.
+const TOP_LEVEL_NAV = new Set(['today', 'applications', 'interview', 'offers', 'resources', 'memory', 'settings']);
 const CORE_TASK_IDENTITY = new Map<string, readonly string[]>([
   ['application.opportunity_fit', ['applicationId']],
   ['application.material_kit', ['applicationId']],
@@ -6842,10 +6843,10 @@ describe('review readiness negative fixture gate', () => {
 
   it('rejects top-level navigation expansion through post-initialization mutations', () => {
     const mutations = [
-      `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; MODULE_NAV.push({ key: 'readiness' });`,
-      `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; MODULE_NAV.splice(1, 0, { key: 'readiness' });`,
-      `let MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; MODULE_NAV[0] = { key: 'readiness' };`,
-      `let MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; MODULE_NAV = [...MODULE_NAV, { key: 'readiness' }];`,
+      `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; MODULE_NAV.push({ key: 'readiness' });`,
+      `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; MODULE_NAV.splice(1, 0, { key: 'readiness' });`,
+      `let MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; MODULE_NAV[0] = { key: 'readiness' };`,
+      `let MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; MODULE_NAV = [...MODULE_NAV, { key: 'readiness' }];`,
     ];
     for (const source of mutations) {
       expect(auditFrontendSources(new Map([
@@ -6943,7 +6944,7 @@ describe('review readiness negative fixture gate', () => {
   it('tracks top-level navigation mutations through aliases', () => {
     expect(auditFrontendSources(new Map([
       ['web/src/layout/navigation.ts', `
-        const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }];
+        const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }];
         const nav = MODULE_NAV; nav.push({ key: 'readiness' });
       `],
     ]))).toContain('navigation:top-level-expanded');
@@ -7043,7 +7044,7 @@ describe('review readiness negative fixture gate', () => {
   });
 
   it('tracks navigation mutations through factories, object properties, and destructured receivers', () => {
-    const prefix = `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }];`;
+    const prefix = `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }];`;
     const probes = [
       `${prefix} function getNav() { return MODULE_NAV; } getNav().push({ key: 'readiness' });`,
       `${prefix} const holder = { nav: MODULE_NAV }; holder.nav.push({ key: 'readiness' });`,
@@ -7107,7 +7108,7 @@ describe('review readiness negative fixture gate', () => {
       ])), source).toContain('ui:generic-operation-undo');
     }
 
-    const navPrefix = `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }];`;
+    const navPrefix = `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }];`;
     const navProbes = [
       `${navPrefix} const box = { nav: MODULE_NAV }; const copy = box; copy.nav.push({ key: 'readiness' });`,
       `${navPrefix} const box = { nav: MODULE_NAV }; const spread = { ...box }; const { nav } = spread; nav.push({ key: 'readiness' });`,
@@ -7220,7 +7221,7 @@ describe('review readiness negative fixture gate', () => {
       ['web/src/features/reviewReadiness/Owner.tsx', `import { undoWriteOperation } from '@/services/writeOperations'; const api = { undo: undoWriteOperation }; api.undo = () => undefined; api.undo(id);`],
     ]))).not.toContain('ui:generic-operation-undo');
 
-    const navPrefix = `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; const safe = [];`;
+    const navPrefix = `const MODULE_NAV = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; const safe = [];`;
     expect(auditFrontendSources(new Map([
       ['web/src/layout/navigation.ts', `${navPrefix} let nav = MODULE_NAV; nav = safe; nav.push({ key: 'readiness' });`],
     ]))).not.toContain('navigation:top-level-expanded');
@@ -7978,10 +7979,10 @@ describe('review readiness negative fixture gate', () => {
       ['web/src/features/coreTaskSurface/contracts.ts', `const BASE = ['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']; export const CORE_TASK_IDS = [...BASE];`],
     ]))).not.toContain('core-task:id-union-expanded');
     expect(auditFrontendSources(new Map([
-      ['web/src/layout/navigation.ts', `const BASE = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; const EXTRA = [{ key: 'readiness' }]; export const MODULE_NAV = [...BASE, ...EXTRA];`],
+      ['web/src/layout/navigation.ts', `const BASE = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; const EXTRA = [{ key: 'readiness' }]; export const MODULE_NAV = [...BASE, ...EXTRA];`],
     ]))).toContain('navigation:top-level-expanded');
     expect(auditFrontendSources(new Map([
-      ['web/src/layout/navigation.ts', `const BASE = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]; export const MODULE_NAV = [...BASE];`],
+      ['web/src/layout/navigation.ts', `const BASE = [{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]; export const MODULE_NAV = [...BASE];`],
     ]))).not.toContain('navigation:top-level-expanded');
   });
 
@@ -8148,7 +8149,7 @@ describe('review readiness negative fixture gate', () => {
     for (const expression of [`[${ids}].filter((id) => id !== 'materials.story')`, `[${ids}, 'materials.reference']`, `['materials.reference', ${ids}]`]) {
       expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `export const CORE_TASK_IDS = ${expression};`]])), expression).toContain('core-task:id-union-expanded');
     }
-    const nav = `{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }`;
+    const nav = `{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }`;
     for (const expression of [`[${nav}].filter((item) => item.key !== 'settings')`, `[${nav}, { key: 'settings' }]`, `[{ key: 'settings' }, ${nav}]`]) {
       expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `export const MODULE_NAV = ${expression};`]])), expression).toContain('navigation:top-level-expanded');
     }
@@ -8194,7 +8195,7 @@ describe('review readiness negative fixture gate', () => {
     const ids = `['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']`;
     expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS };`]]))).not.toContain('core-task:id-union-expanded');
     for (const mutation of [`IDS.push('materials.reference')`, `IDS.reverse()`]) expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; ${mutation};`]])), mutation).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV };`]]))).not.toContain('navigation:top-level-expanded');
     for (const mutation of [`NAV.push({ key: 'settings' })`, `NAV.reverse()`]) expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; ${mutation};`]])), mutation).toContain('navigation:top-level-expanded');
   });
@@ -8836,14 +8837,14 @@ describe('review readiness negative fixture gate', () => {
   it('rejects indexed and property assignment mutations of closed sets', () => {
     const ids = `['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']`;
     for (const mutation of [`IDS[0] = 'review.readiness'`, `IDS.extra = 'review.readiness'`]) expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; ${mutation};`]])), mutation).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     for (const mutation of [`NAV[0] = { key: 'readiness' }`, `NAV.extra = { key: 'readiness' }`]) expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; ${mutation};`]])), mutation).toContain('navigation:top-level-expanded');
   });
 
   it('rejects closed-set alias mutations and nested navigation writes', () => {
     const ids = `['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']`;
     expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; const alias = IDS; alias.push('review.readiness');`]]))).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     for (const mutation of [`const alias = NAV; alias.reverse()`, `NAV[0].key = 'readiness'`]) expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; ${mutation};`]])), mutation).toContain('navigation:top-level-expanded');
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; const other = [{ key: 'today' }]; other[0].key = 'readiness';`]]))).not.toContain('navigation:top-level-expanded');
   });
@@ -8851,7 +8852,7 @@ describe('review readiness negative fixture gate', () => {
   it('rejects Reflect.set and Object.assign closed-set mutations', () => {
     const ids = `['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']`;
     for (const mutation of [`Reflect.set(IDS, 0, 'review.readiness')`, `Object.assign(IDS, { 0: 'review.readiness' })`]) expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; ${mutation};`]])), mutation).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     for (const mutation of [`Reflect.set(NAV, 0, { key: 'readiness' })`, `Object.assign(NAV, { 0: { key: 'readiness' } })`]) expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; ${mutation};`]])), mutation).toContain('navigation:top-level-expanded');
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; const other = []; Reflect.set(other, 0, { key: 'readiness' });`]]))).not.toContain('navigation:top-level-expanded');
   });
@@ -8859,7 +8860,7 @@ describe('review readiness negative fixture gate', () => {
   it('rejects defineProperty closed-set mutations only on the exported value', () => {
     const ids = `['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']`;
     expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; Object.defineProperty(IDS, 0, { value: 'review.readiness' });`]]))).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; Object.defineProperty(NAV, 0, { value: { key: 'readiness' } });`]]))).toContain('navigation:top-level-expanded');
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; const local = []; Object.defineProperty(local, 0, { value: { key: 'readiness' } });`]]))).not.toContain('navigation:top-level-expanded');
   });
@@ -8867,7 +8868,7 @@ describe('review readiness negative fixture gate', () => {
   it('shares computed and aliased mutation builtin provenance for closed sets', () => {
     const ids = `['application.opportunity_fit', 'application.material_kit', 'application.interview_prepare', 'application.interview_review', 'application.general_review', 'application.offer_review', 'application.record_outcome', 'interview.free_practice', 'materials.resume', 'materials.story', 'materials.reference']`;
     for (const mutation of [`const assign = Object['assign']; assign(IDS, { 0: 'review.readiness' })`, `const METHOD = 'defineProperty'; Object[METHOD](IDS, 0, { value: 'review.readiness' })`]) expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; ${mutation};`]])), mutation).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; const local = []; const assign = Object.assign; assign(local, { 0: { key: 'readiness' } });`]]))).not.toContain('navigation:top-level-expanded');
   });
 
@@ -8878,7 +8879,7 @@ describe('review readiness negative fixture gate', () => {
       `const R = Reflect; const set = R['set']; set(IDS, 0, 'review.readiness')`,
       `const R = Reflect; const { defineProperty } = R; defineProperty(IDS, 0, { value: 'review.readiness' })`,
     ]) expect(auditFrontendSources(new Map([['web/src/features/coreTaskSurface/contracts.ts', `const IDS = ${ids}; export { IDS as CORE_TASK_IDS }; ${mutation};`]])), mutation).toContain('core-task:id-union-expanded');
-    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'settings' }]`;
+    const nav = `[{ key: 'today' }, { key: 'applications' }, { key: 'interview' }, { key: 'offers' }, { key: 'resources' }, { key: 'memory' }, { key: 'settings' }]`;
     expect(auditFrontendSources(new Map([['web/src/layout/navigation.ts', `const NAV = ${nav}; export { NAV as MODULE_NAV }; const local = []; const R = Reflect; const set = R.set; set(local, 0, { key: 'readiness' });`]]))).not.toContain('navigation:top-level-expanded');
   });
 
@@ -8930,6 +8931,21 @@ describe('review readiness negative fixture gate', () => {
 
   it('keeps the production audit within its bounded performance baseline', () => {
     expect(auditProductionOnce().durationMs).toBeLessThan(30_000);
+  });
+
+  it('requires the approved memory entry without admitting unknown, duplicate or reordered navigation', () => {
+    const approved = ['today', 'applications', 'interview', 'offers', 'resources', 'memory', 'settings'];
+    const audit = (keys: string[]) => auditFrontendSources(new Map([
+      ['web/src/layout/navigation.ts', `export const MODULE_NAV = [${keys.map(key => `{ key: '${key}' }`).join(',')}];`],
+    ]));
+    expect(audit(approved)).not.toContain('navigation:top-level-expanded');
+    for (const keys of [
+      approved.filter(key => key !== 'memory'),
+      [...approved, 'readiness'],
+      [...approved, 'memory'],
+      approved.map(key => key === 'memory' ? 'readiness' : key),
+      ['memory', ...approved.filter(key => key !== 'memory')],
+    ]) expect(audit(keys)).toContain('navigation:top-level-expanded');
   });
 
   it('keeps the production frontend inside the closed ownership and privacy boundary', () => {

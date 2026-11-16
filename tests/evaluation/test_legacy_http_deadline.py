@@ -195,8 +195,16 @@ def test_watcher_close_failure_stays_unverified_and_preserves_request_error(tmp_
 
 @pytest.mark.parametrize("method,path", [("GET", "/api/chat"),
     ("POST", "/api/pilot/runtime/v1/turns"), ("POST", "/other")])
-def test_fast_routes_keep_original_thirty_second_cap(tmp_path, method, path):
+@pytest.mark.parametrize("started", [255.9, 226.1, 1000.1])
+@pytest.mark.parametrize("remaining", [600, 8])
+def test_fast_routes_keep_original_thirty_second_cap(tmp_path, monkeypatch, method, path,
+                                                    started, remaining):
+    from offerpilot.evaluation import core_actions
+    # These clock origins deterministically round (started + 30) - started
+    # both below and above 30. Patch only this module, not process-wide time.
+    monkeypatch.setattr(core_actions, "time", SimpleNamespace(monotonic=lambda: started))
     driver = driver_for("http://127.0.0.1:1", tmp_path, remaining=600)
+    driver.deadline = started + remaining
     driver.client.close()
     observed = []
 
@@ -208,6 +216,51 @@ def test_fast_routes_keep_original_thirty_second_cap(tmp_path, method, path):
     try:
         assert driver.request(method, path) == {"ok": True}
         assert len(observed) == 1 and not driver.local_http_observations
-        assert observed[0].extensions["timeout"]["read"] == 30
+        assert observed[0].extensions["timeout"] == dict.fromkeys(
+            ("connect", "read", "write", "pool"), min(30, driver.deadline - started))
+    finally:
+        driver.close()
+
+
+@pytest.mark.parametrize("remaining", [0, -1])
+def test_expired_fast_route_sends_nothing(tmp_path, monkeypatch, remaining):
+    from offerpilot.evaluation import core_actions
+    started = 255.9
+    monkeypatch.setattr(core_actions, "time", SimpleNamespace(monotonic=lambda: started))
+    driver = driver_for("http://127.0.0.1:1", tmp_path)
+    driver.deadline = started + remaining
+    calls = []
+    monkeypatch.setattr(driver.client, "request", lambda *a, **kw: calls.append(kw))
+    try:
+        with pytest.raises(TimeoutError, match="trial deadline"):
+            driver.request("POST", "/other")
+        assert calls == [] and driver.reply_counter[0] == 0
+    finally:
+        driver.close()
+
+
+@pytest.mark.parametrize("remaining", [600, 8])
+def test_fast_route_rejects_response_at_absolute_deadline(tmp_path, monkeypatch, remaining):
+    from offerpilot.evaluation import core_actions
+    clock = [255.9]
+    started = clock[0]
+    monkeypatch.setattr(core_actions, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    driver = driver_for("http://127.0.0.1:1", tmp_path)
+    driver.deadline = started + remaining
+    calls = []
+    response = httpx.Response(200, json={"ok": True})
+
+    def late(*args, **kwargs):
+        calls.append(kwargs)
+        clock[0] = min(started + 30, driver.deadline)
+        return response
+
+    monkeypatch.setattr(driver.client, "request", late)
+    try:
+        with pytest.raises(TimeoutError, match="local HTTP response deadline"):
+            driver.request("POST", "/other")
+        assert len(calls) == driver.reply_counter[0] == 1
+        assert calls[0]["timeout"] == min(30, driver.deadline - started)
+        assert response.is_closed and not driver.observations
     finally:
         driver.close()

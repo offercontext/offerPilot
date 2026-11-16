@@ -65,7 +65,7 @@ test('coverage inventory exactly matches production navigation routes, module la
     const production = { nav: MODULE_NAV, tabs: MODULE_TABS, routes: views.map(view => ({
       view, module: resolveModuleForView(view), defaultView: defaultViewForModule(resolveModuleForView(view)), tabs: moduleTabsForView(view),
     })) };
-    assert.equal(ROOTS.length, 13);
+    assert.equal(ROOTS.length, 14);
     assert.equal(new Set(ROOTS.map(({ view }) => view)).size, ROOTS.length);
     assert.deepEqual(ROOTS.map(({ view }) => view).sort(), [...views].sort());
     assert.deepEqual(Object.values(production.tabs).flat().map(({ view }) => view).sort(), [...views].sort());
@@ -119,9 +119,9 @@ test('coverage cleanup-only failures cannot turn into successful tests', async (
   }
 });
 
-test('the complete 130-target root matrix covers both populations, dark widths and light 1280 exactly once', () => {
-  assert.equal(ROOT_CASES.length, 130);
-  assert.equal(new Set(ROOT_CASES.map(({ caseId }) => caseId)).size, 130);
+test('the complete 140-target root matrix covers both populations, dark widths and light 1280 exactly once', () => {
+  assert.equal(ROOT_CASES.length, 140);
+  assert.equal(new Set(ROOT_CASES.map(({ caseId }) => caseId)).size, 140);
   for (const root of ROOTS) for (const state of ROOT_STATES) {
     const targets = ROOT_CASES.filter(item => item.surfaceId === root.id && item.state === state);
     assert.deepEqual(targets.map(({ theme, width }) => [theme, width]),

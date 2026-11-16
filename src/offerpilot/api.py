@@ -487,6 +487,7 @@ CHAT_PAGE_CONTEXT_VIEWS = {
     "reviews",
     "offers",
     "knowledge",
+    "memory",
     "questions",
     "resumes",
     "pilot",
@@ -1426,6 +1427,9 @@ def create_app(
         if request.url.path.startswith("/api/job-mail/"):
             # Mail and credentials must not be echoed in validation diagnostics.
             return error_response(422, "邮件请求字段无效，请检查必填字段、时间与确认内容", code="job_mail_invalid_payload")
+        if request.url.path == "/api/confirmed-memory" or request.url.path.startswith("/api/confirmed-memory/"):
+            # Memory validators carry ValueError in ctx; never serialize it or echo private text.
+            return error_response(422, "记忆请求无效，请明确确认内容与操作", code="memory_invalid_payload")
         errors = exc.errors()
         if errors and all(
             err.get("type") == "int_parsing"
@@ -9292,6 +9296,7 @@ def _chat_page_context_messages(page_context: dict[str, Any] | None) -> list[Mes
         "reviews": "notes",
         "offers": "offers",
         "knowledge": "workspace",
+        "memory": "workspace",
         "questions": "workspace",
         "resumes": "resumes",
         "pilot": "workspace",

@@ -1,0 +1,36 @@
+/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/tests/_offline_network_guard.py:126: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import _TestClientTransport  # noqa: E402
+.......................................                                  [100%]
+=============================== warnings summary ===============================
+tests/test_confirmed_memory.py: 1 warning
+tests/test_chat_api.py: 27 warnings
+  /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/src/offerpilot/api.py:1610: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("startup")
+
+tests/test_confirmed_memory.py: 2 warnings
+tests/test_chat_api.py: 54 warnings
+  /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/applications.py:4675: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+tests/test_confirmed_memory.py: 1 warning
+tests/test_chat_api.py: 27 warnings
+  /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/src/offerpilot/api.py:1618: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("shutdown")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+39 passed, 376 deselected, 112 warnings in 65.36s (0:01:05)

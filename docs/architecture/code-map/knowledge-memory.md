@@ -11,7 +11,7 @@
 | 上传资料、原文、抽取失败 | Imported Source → Extraction Snapshot → Evidence | [KnowledgeSourcesView](../../../web/src/components/KnowledgeSourcesView.tsx)、[knowledge service](../../../web/src/services/knowledge.ts) → [KnowledgeIngestService](../../../src/offerpilot/knowledge/service.py) |
 | 面试复盘沉淀知识 | Captured Source、Evidence、Knowledge Note Version | [面试捕获链](interview.md#6-相邻功能) → [interview_knowledge_capture Repository](../../../src/offerpilot/repositories/interview_knowledge_capture.py) |
 | 修改/归档知识笔记 | Note 的版本与生命周期 | [KnowledgeNoteManager](../../../web/src/components/KnowledgeNoteManager.tsx)、[knowledgeNoteLifecycle](../../../web/src/services/knowledgeNoteLifecycle.ts) → [note_api](../../../src/offerpilot/knowledge/note_api.py) → [KnowledgeNoteLifecycle](../../../src/offerpilot/knowledge/note_lifecycle.py) |
-| 记住我的偏好、撤回记忆 | ConfirmedMemory / Version；用户持续认知，不证明外部事实 | [ConfirmedMemorySettings](../../../web/src/components/ConfirmedMemorySettings.tsx)、[confirmedMemory](../../../web/src/services/confirmedMemory.ts) → [memory API](../../../src/offerpilot/confirmed_memory/api.py) → [ConfirmedMemoryRepository](../../../src/offerpilot/confirmed_memory/repository.py) |
+| 记住我的偏好、撤回记忆 | ConfirmedMemory / Version；用户持续认知，不证明外部事实 | [MemoryProfile](../../../web/src/components/MemoryProfile.tsx)（独立记忆画像及设置内共用）、[confirmedMemory](../../../web/src/services/confirmedMemory.ts) → [memory API](../../../src/offerpilot/confirmed_memory/api.py) → [ConfirmedMemoryRepository](../../../src/offerpilot/confirmed_memory/repository.py) |
 | Pilot 没带入知识/重点/历史 | 有开关、范围、版本、预算的可选来源 | [ContextPolicySettings](../../../web/src/components/ContextPolicySettings.tsx)、[contextPolicies](../../../web/src/services/contextPolicies.ts) → [context_sources](../../../src/offerpilot/context_sources/) |
 
 完整面试记录、投递、JD 和普通对话不因存在就自动成为 Source；捕获需经过对应确认链。Source Brief 有独立实现及状态，但不得把旧 Brief/Wiki 管线当成当前统一知识消费路径。
@@ -35,6 +35,8 @@
 | Note 归档 / 恢复 | 检查当前版本；恢复还检查 Source 可用性 | Source 失效不能靠恢复 Note 绕过 |
 | Note 删除 | 清空历史正文与捕获预览，移除 Evidence 关联并置空当前指针 | 与归档不同；保留删除回执语义，不能宣称可恢复正文 |
 | Memory 确认 / 撤回 / 删除 | `ConfirmedMemoryRepository.mutate`；mutation_id + expected_version | 撤回保留内容，删除清空全部版本正文；重放返回当前可见状态，不复活被删内容 |
+
+记忆画像的图谱/列表仅投影当前确认记录；正文关键词分组不持久化、不送入召回。来源仅显示已记录的用户确认与确认时间，不伪造对话链接或 AI 推断。写入继续使用原 mutation_id / expected_version，删除同时清理页面历史缓存。页面上下文 memory 按 workspace 处理。
 
 ## 4. Pilot 消费链
 

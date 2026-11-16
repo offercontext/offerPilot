@@ -111,3 +111,19 @@ def test_sqlite_busy_is_temporary_but_missing_table_is_not(context):
     with pytest.raises(ProjectionError) as caught:
         loader.load(lambda connection: connection.execute("SELECT * FROM nonexistent_optional_source"), lambda value: value)
     assert not isinstance(caught.value, SourceTemporarilyUnavailable)
+
+
+def test_memory_delete_removes_current_and_old_text_from_actual_recall(context):
+    sessions, loader, conversation_id = context
+    repository = ConfirmedMemoryRepository(sessions)
+    item = save(repository, content="旧记忆正文")
+    save(repository, 1, memory_id=item["id"], content="更正后的记忆")
+    projected = load_optional_sources(loader, conversation_id, "问题")
+    messages = str(projected.contributors[1].messages)
+    assert "更正后的记忆" in messages
+    assert "旧记忆正文" not in messages
+    save(repository, 2, memory_id=item["id"], action="delete", content="")
+    projected = load_optional_sources(loader, conversation_id, "问题")
+    assert projected.contributors[1].status == "not_applicable"
+    assert projected.contributors[1].messages == ()
+    assert not any(source.kind == "confirmed_memory" for source in projected.sources)

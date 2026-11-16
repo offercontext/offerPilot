@@ -1,0 +1,12 @@
+✔ segmented helper clicks its real label and verifies the checked radio without force (0.70305ms)
+✔ segmented ambiguity or unchanged selection cannot become pass (1.795752ms)
+✔ evidence-backed story role, final history identity and desktop Haru handoff remain explicit (0.925753ms)
+✔ question editor category readback waits for the same open-form effect without replacing the value (3.332277ms)
+ℹ tests 742
+ℹ suites 0
+ℹ pass 741
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 1
+ℹ todo 0
+ℹ duration_ms 6428.012086

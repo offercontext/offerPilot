@@ -1,0 +1,265 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> offerpilot-web@0.1.0 test
+> vitest run src/layout/Sidebar.workspace.test.ts src/layout/CommandPalette.test.ts src/layout/CommandPalette.accessibility.test.tsx src/components/SettingsView.test.ts src/components/SettingsView.mascot.test.tsx src/components/SettingsView.pagination.test.tsx
+
+
+ RUN  v2.1.9 /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web
+
+ ✓ src/layout/CommandPalette.test.ts (7 tests) 4ms
+ ✓ src/layout/CommandPalette.accessibility.test.tsx (1 test) 173ms
+ ✓ src/components/SettingsView.mascot.test.tsx (1 test) 274ms
+ ✓ src/components/SettingsView.test.ts (5 tests) 3ms
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > queries page two at offset 20 without polling
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > uses a 360px accessible diagnostics viewport on the first page
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > shows a retryable failure instead of the empty state before any page loads
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > resets to page one and invalidates only the newest page when refreshed from page two
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > only polls while diagnostics are visible and stops after closing
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > keeps a previous page visible with a retryable refresh warning
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+stderr | src/components/SettingsView.pagination.test.tsx > SettingsView runtime diagnostics pagination > keeps the last successful page visible when a newly selected page fails
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+Error: AggregateError
+    at Object.dispatchError (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/xhr-utils.js:62:19)
+    at Request.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/xhr/XMLHttpRequest-impl.js:655:18)
+    at Request.emit (node:events:526:24)
+    at ClientRequest.<anonymous> (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/jsdom/lib/jsdom/living/helpers/http-request.js:127:14)
+    at ClientRequest.emit (node:events:514:28)
+    at emitErrorEvent (node:_http_client:114:11)
+    at Socket.socketErrorListener (node:_http_client:774:5)
+    at Socket.emit (node:events:514:28)
+    at emitErrorNT (node:internal/streams/destroy:170:8)
+    at emitErrorCloseNT (node:internal/streams/destroy:129:3) undefined
+
+ ✓ src/components/SettingsView.pagination.test.tsx (7 tests) 1243ms
+   ✓ SettingsView runtime diagnostics pagination > queries page two at offset 20 without polling 362ms
+ ✓ src/layout/Sidebar.workspace.test.ts (2 tests) 2ms
+
+ Test Files  6 passed (6)
+      Tests  23 passed (23)
+   Start at  12:21:02
+   Duration  3.86s (transform 977ms, setup 0ms, collect 7.06s, tests 1.70s, environment 858ms, prepare 253ms)

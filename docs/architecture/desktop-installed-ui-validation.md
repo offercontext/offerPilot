@@ -50,7 +50,7 @@ schema 2 区分产品源码 `commit`、安装包构建的 `buildCommit` / `build
 5. 只读检查现有 `nodeCliInspect` fuse 已开启；若关闭则失败，不翻转 fuse。启动前后 exe 摘要必须一致。
 6. 通过 Playwright `_electron.launch({ executablePath })` 启动真实安装 exe，临时使用 Node inspect/CDP。明确 `chromiumSandbox: true`、`bypassCSP: false`，不加入 `--no-sandbox`，不改变 app 的 devTools、webSecurity、Node integration、context isolation、sandbox、CSP 或权限处理。检查运行时保护值及 debug/backend 监听仅为 loopback。DevTools 禁用按下述严格行为探针验证。
 7. 通过主进程 `process.pid` 取得实际 Electron PID，再用 Windows CIM 的 exe 路径、父 PID 和创建时间独立识别后端。Playwright `process()` 在 Windows 可能是 shell，不把它当 Electron PID，不信任后端自报 PID。
-8. 先在空白 profile 扫描全部 13 个根页面，再从“添加第一个投递”进入表单，输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”；不使用“仍然创建”兜底。之后通过公开 UI 创建额外合成记录，流程和边界见下节。不会配置 provider 或真实凭据。
+8. 先在空白 profile 按当前 ROOTS 扫描全部根页面，再从“添加第一个投递”进入表单，输入固定中文合成公司、岗位与备注，保留“准备投递”和“稍后补充 JD”。执行“核对并检查重复”，必须看到“未发现符合规则的重复记录”，再点击“确认保存”；不使用“仍然创建”兜底。之后通过公开 UI 创建额外合成记录，流程和边界见下节。不会配置 provider 或真实凭据。
 9. 初始投递只保留这次 UI 发起 POST 回执的 ID、公司、岗位、备注、状态五个字段。核对详情标题和备注，返回上一层，经主导航“投递”进入“列表”，搜索并核对恰好一条、相同 ID 的记录。执行新增逐屏检查后，通过 UI 切换明暗模式，继续原来的关闭重启验收。
 10. 分别关闭主窗与 Haru，验证窗口隐藏且仍由同一主进程/后端持有；执行观察到的真实托盘显示/隐藏/打开回调，再执行实际退出回调。要求主进程、冻结后端及渲染进程全部退出，后台与临时调试端口关闭后才重新启动。重新打开同一安装 exe、真实 profile、相同保存端口；要求新主/后端 PID、创建时间以及相同记录 ID、中文详情与主题。
 11. 再次正常退出并核对进程/端口清理与 exe 完整性。任何启动、保护、持久化、正常关闭或清理问题均为失败；失败后的清理不能改成成功。
@@ -61,9 +61,9 @@ schema 2 区分产品源码 `commit`、安装包构建的 `buildCommit` / `build
 
 无 provider 的非 AI 流程不伪造历史正文或草稿。正文和双窗口草稿在主题、折叠与窗口切换中的保留，以及退出重启后的已发送历史读回，交由同安装器的免费 MOCK 流程验证。未发送草稿仅为进程内状态，不承诺跨进程保存；这些新增流程须以实际 Windows 结果为准。
 
-`coverage-model.mjs` 列出 R01–R13 根页面、S01–S32 主要子界面及结果枚举；`screen-coverage.mjs` 驱动真实安装窗口中的控件。`coverage-recorder.mjs` 使用 `BrowserWindow.setContentSize` 设置 900、1008、1280、1440 内容宽度，并读取 `innerWidth/innerHeight` 核对；不使用浏览器 viewport 模拟、Vite fixture、React 状态注入、API 造数或数据库写入。
+`coverage-model.mjs` 列出 R01–R14 根页面（含记忆画像）、S01–S32 主要子界面及结果枚举；`screen-coverage.mjs` 驱动真实安装窗口中的控件。`coverage-recorder.mjs` 使用 `BrowserWindow.setContentSize` 设置 900、1008、1280、1440 内容宽度，并读取 `innerWidth/innerHeight` 核对；不使用浏览器 viewport 模拟、Vite fixture、React 状态注入、API 造数或数据库写入。
 
-- 13 个根页面分别保留空白基线和已通过本地 UI 建立数据后的暗色四宽度截图；亮色根页面为 1280。大页面另滚动到下部截图。根页面的 PASS 是 `kind=visual`，只表示导航标记/可见内容/几何断言通过，不能计入功能通过数。
+- 14 个根页面分别保留空白基线和已通过本地 UI 建立数据后的暗色四宽度截图；亮色根页面为 1280。大页面另滚动到下部截图。根页面的 PASS 是 `kind=visual`，只表示导航标记/可见内容/几何断言通过，不能计入功能通过数。
 - 通过 UI 建立 11 条额外投递，加初始记录共 12 条。包括超长中文和不间断英文名称，验证搜索、分页、详情分段、Back 与实际 `popstate` 前进/后退。按真实 POST ID 定位，不假设 ID=1 或记录在第一页。
 - 主要流程包括：添加校验/取消重开、JD 两版保存/历史、日程创建/编辑取消/保存、已完成合成面试与手动复盘、题目手动保存、简历分章/JSON 校验/保存重开/复制对比、知识粘贴导入/四个详情页、手动故事证据绑定/版本历史、两份 Offer 与薪酬算术/比较选项、Pilot 未发送草稿，以及设置中的安全只读/外观路径。
 - 知识 V1 的 `api.py` 不注册 `on_extraction_succeeded` Brief 回调；正文导入是本地处理，仍核对入库响应 `brief_status=not_started`，不调用生成或 rebuild。简历“和 Haru 创建初稿”只建立空结构。所有数据使用 `QA-20261007-<run>` 标识；不访问 example.invalid 来源网址。

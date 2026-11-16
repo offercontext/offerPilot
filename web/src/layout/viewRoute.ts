@@ -13,6 +13,7 @@ const VIEW_IDS = new Set<ViewMode>([
   'questions',
   'resumes',
   'pilot',
+  'memory',
   'settings',
 ]);
 

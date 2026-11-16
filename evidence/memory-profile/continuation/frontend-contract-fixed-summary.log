@@ -1,0 +1,11 @@
+Warning: The current testing environment is not configured to support act(...)
+
+ ✓ src/i18n/modal.test.ts (1 test) 3ms
+ ✓ src/features/jobMail/jobMailWarningLocalization.test.ts (1 test) 3ms
+ ✓ src/components/ChatPanel/VoiceCoachingPilotEntry.test.tsx (2 tests) 71ms
+ ✓ src/i18n/liveText.test.tsx (1 test) 12ms
+
+ Test Files  313 passed (313)
+      Tests  3177 passed (3177)
+   Start at  13:35:07
+   Duration  75.63s (transform 11.97s, setup 0ms, collect 131.64s, tests 89.31s, environment 29.20s, prepare 11.86s)

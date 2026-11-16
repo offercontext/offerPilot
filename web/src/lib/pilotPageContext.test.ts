@@ -91,6 +91,7 @@ describe('pilot page context', () => {
       reviews: '经历素材',
       offers: 'Offer',
       knowledge: '参考资料',
+      memory: '记忆画像',
       questions: '题库',
       resumes: '简历',
       pilot: 'Pilot',
