@@ -135,3 +135,28 @@ def test_out_of_range_utc_deadlines_http_rejected_without_private_echo(tmp_path)
         assert response.status_code == 422
         assert "metadata-private-sentinel" not in response.text
         assert client.get("/api/confirmed-memory").json() == []
+
+
+@pytest.mark.parametrize("content", ["周三下午方便联系", "目标是求职，项目经历包含技能练习，近期准备复习"])
+def test_legacy_reads_never_backfill_categories_and_user_correction_versions(repository, content):
+    original = repository.mutate(None, command(content=content))
+    # Reproduce an actual pre-metadata confirmed version, not a default metadata row.
+    with repository.sessions() as session:
+        session.execute(delete(ConfirmedMemoryVersionMetadata))
+        session.commit()
+    for _ in range(2):
+        assert repository.list()[0]["metadata"]["category"] == "unclassified"
+        view = repository.get(original["id"])
+        assert view["metadata"]["category"] == "unclassified"
+        assert view["versions"][0]["metadata"]["category"] == "unclassified"
+    with repository.sessions() as session:
+        assert not session.scalars(select(ConfirmedMemoryVersionMetadata)).all()
+    correction = command(1, content=content, metadata={"category": "experience", "valid_until": None})
+    corrected = repository.mutate(original["id"], correction)
+    assert corrected["metadata"]["category"] == "experience"
+    assert repository.mutate(original["id"], correction) == corrected
+    history = repository.get(original["id"])["versions"]
+    assert [v["metadata"]["category"] for v in history] == ["unclassified", "experience"]
+    assert [v["content"] for v in history] == [content, content]
+    with repository.sessions() as session:
+        assert len(session.scalars(select(ConfirmedMemoryVersionMetadata)).all()) == 1

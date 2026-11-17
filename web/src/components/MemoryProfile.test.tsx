@@ -101,3 +101,32 @@ it('does not carry cancelled expiry input into withdrawal', async () => {
  expect(api.changeConfirmedMemory).toHaveBeenCalledTimes(1);
  expect(api.changeConfirmedMemory.mock.calls[0][1]).not.toHaveProperty('metadata');
 });
+
+it.each(['周三下午方便联系', '目标是求职，项目经历包含技能练习，近期准备复习'])('shows legacy content as unclassified without any write: %s', async content => {
+ const legacy = { ...item, content };
+ api.listConfirmedMemory.mockResolvedValue([legacy]); await click('刷新');
+ expect(memoryGroup(legacy as never)).toBe(5);
+ const detail = host.querySelector('aside')!;
+ expect(detail.querySelector('.ant-tag')?.textContent).toBe('未分类');
+ const node = [...host.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find(el => el.textContent?.includes(content))!;
+ expect(node.closest('section')?.querySelector('h2')?.textContent).toContain('未分类');
+ await click('编辑');
+ expect(document.querySelector<HTMLSelectElement>('#memory-category')!.value).toBe('unclassified');
+ await click('取消');
+ expect(api.changeConfirmedMemory).not.toHaveBeenCalled();
+});
+
+it('uses the user correction rather than competing keywords after save and refresh', async () => {
+ const content = '目标是求职，项目经历包含技能练习，近期准备复习';
+ const legacy = { ...item, content };
+ api.listConfirmedMemory.mockResolvedValue([legacy]); await click('刷新'); await click('编辑');
+ field('memory-category', 'experience');
+ const corrected = { ...legacy, current_version:2, metadata:{category:'experience',valid_until:null,evidence_status:'user_confirmed'}, temporal_status:'unknown' };
+ api.changeConfirmedMemory.mockResolvedValue(corrected); api.listConfirmedMemory.mockResolvedValue([corrected]);
+ await click('确认保存'); await click('刷新');
+ expect(api.changeConfirmedMemory.mock.calls[0][1]).toMatchObject({content, expected_version:1, metadata:{category:'experience',valid_until:null}});
+ expect(host.querySelector('aside .ant-tag')?.textContent).toBe('经历');
+ const node = [...host.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find(el => el.textContent?.includes(content))!;
+ expect(node.closest('section')?.querySelector('h2')?.textContent).toContain('经历');
+ await click('编辑'); expect(document.querySelector<HTMLSelectElement>('#memory-category')!.value).toBe('experience');
+});
