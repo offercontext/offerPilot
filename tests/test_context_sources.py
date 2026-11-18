@@ -327,3 +327,43 @@ def test_exploratory_memory_comparison_is_repeatable_and_budget_bounded():
     assert len(results) == len(fixture["queries"]) * len(fixture["budgets"]) * len(fixture["id_order_seeds"]) * 2
     assert all(row["bytes"] <= row["budget"] for row in results)
     assert all("long" in row["oversize_relevant"] for row in results if row["case"] == "long_budget")
+
+
+def test_candidate_experiment_admission_and_topic_switch_are_bounded():
+    from scripts.memory_experiments.candidate_v2 import select_memory
+    pool = [_memory("legacy", "过去参与过检索服务建设"),
+            _memory("food", "喜欢甜食", "preference"),
+            _memory("job", "希望进入金融行业", "goal"),
+            _memory("art", "业余爱好陶艺")]
+    assert "legacy" in {item["id"] for item in select_memory(pool, "准备面试").items}
+    assert "food" not in {item["id"] for item in select_memory(pool, "推荐岗位").items}
+    assert [item["id"] for item in select_memory(pool, "不要聊工作，改聊陶艺").items] == ["art"]
+    assert select_memory(pool, "推荐一道甜点", confirmed_interview_context=True).items == []
+    assert select_memory(pool, "", confirmed_interview_context=True).items == []
+
+
+def test_candidate_experiment_backfill_cap_does_not_restore_all_unknowns():
+    from scripts.memory_experiments.candidate_v2 import BACKFILL_LIMIT, select_memory
+    pool = [_memory(str(i), "过去参与过服务建设") for i in range(20)]
+    # Distinct contents prevent deduplication from masking admission limits.
+    for i, item in enumerate(pool):
+        item["content"] += str(i)
+    result = select_memory(pool, "优化简历")
+    assert len(result.items) == BACKFILL_LIMIT
+    assert select_memory([_memory("u", "一条无法判断用途的记录")], "优化简历").items == []
+
+
+def test_memory_evaluation_separates_required_helpful_and_prebudget():
+    from scripts.evaluate_memory_retrieval import evaluate, summarize
+    fixture = {"id_order_seeds": [0], "budgets": [4096], "memories": [
+        {"key": "required", "content": "Zeta", "category": "unclassified"},
+        {"key": "helpful", "content": "中文短句", "category": "preference"},
+    ], "queries": [{"id": "q", "family": "metric", "query": "Zeta",
+                    "required": ["required"], "helpful": ["helpful"],
+                    "relevant": ["required", "helpful"]}]}
+    rows = [r for r in evaluate(fixture) if r["strategy"] == "task_lexical"]
+    summary = summarize(rows)
+    assert summary["required_recall"] == summary["pre_required_recall"] == 1
+    assert summary["helpful_recall"] == summary["pre_helpful_recall"] == 0
+    assert summary["macro_recall"] == summary["pre_recall"] == 0.5
+    assert summary["irrelevant_fraction"] == summary["pre_irrelevant_fraction"] == 0
