@@ -57,6 +57,8 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 
 - [ADR-0019: 版本化个人记忆分类与显式有效期](./0019-version-memory-metadata.md) — Proposed（实现验证中）
 
+- [ADR-0020：按当前任务检索个人记忆的词法基线](0020-retrieve-memory-by-current-task.md)（Proposed）
+
 ### 决策链
 
 ```

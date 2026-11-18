@@ -1,0 +1,362 @@
+{
+  "description": "Authored exploratory labels after implementation; no human independent ground truth. Eligible current records only. Same shared pool, three ID permutations, real contributor byte limits. No universal language preference so no-hit is measurable.",
+  "budgets": [
+    1024,
+    2048,
+    4096
+  ],
+  "id_order_seeds": [
+    0,
+    7,
+    19
+  ],
+  "memories": [
+    {
+      "key": "hobby",
+      "content": "周末喜欢园艺和种植番茄。",
+      "category": "preference"
+    },
+    {
+      "key": "food",
+      "content": "喜欢清淡的晚餐，不吃花生。",
+      "category": "preference"
+    },
+    {
+      "key": "remote",
+      "content": "期望远程工作，每周至多到岗一次。",
+      "category": "preference"
+    },
+    {
+      "key": "salary",
+      "content": "目标年薪三十万元以上。",
+      "category": "goal"
+    },
+    {
+      "key": "role",
+      "content": "下一份职位希望是后端开发。",
+      "category": "goal"
+    },
+    {
+      "key": "city",
+      "content": "只考虑杭州工作机会。",
+      "category": "preference"
+    },
+    {
+      "key": "kafka",
+      "content": "负责过 Kafka 消息重试与消费幂等改造。",
+      "category": "experience"
+    },
+    {
+      "key": "payment",
+      "content": "主导支付系统迁移，降低结算延迟。",
+      "category": "experience"
+    },
+    {
+      "key": "prep",
+      "content": "面试时需先说明项目背景，再描述个人贡献。",
+      "category": "preparation"
+    },
+    {
+      "key": "weak",
+      "content": "需要练习数据库事务隔离级别。",
+      "category": "preparation"
+    },
+    {
+      "key": "cpp",
+      "content": "使用 C++ 编写过网络服务。",
+      "category": "skill"
+    },
+    {
+      "key": "node",
+      "content": "维护过 Node.js 网关。",
+      "category": "skill"
+    },
+    {
+      "key": "legacy",
+      "content": "曾处理 Redis 热点键问题。",
+      "category": "unclassified"
+    },
+    {
+      "key": "stargazing",
+      "content": "业余喜欢天文观测。",
+      "category": "unclassified"
+    },
+    {
+      "key": "remote_copy",
+      "content": "期望远程工作，每周至多到岗一次。",
+      "category": "preference",
+      "group": "remote"
+    },
+    {
+      "key": "long",
+      "content": "大型迁移项目：负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。负责方案设计、压测和回滚演练。",
+      "category": "experience"
+    }
+  ],
+  "queries": [
+    {
+      "id": "interview_general",
+      "family": "interview",
+      "query": "准备面试",
+      "relevant": [
+        "kafka",
+        "payment",
+        "prep",
+        "weak",
+        "cpp",
+        "node",
+        "legacy",
+        "long"
+      ]
+    },
+    {
+      "id": "interview_kafka",
+      "family": "interview",
+      "query": "Kafka 面试怎么讲项目",
+      "relevant": [
+        "kafka",
+        "prep"
+      ]
+    },
+    {
+      "id": "interview_payment",
+      "family": "interview",
+      "query": "讲讲支付项目的贡献",
+      "relevant": [
+        "payment",
+        "prep"
+      ]
+    },
+    {
+      "id": "job_general",
+      "family": "jobs",
+      "query": "帮我推荐岗位",
+      "relevant": [
+        "remote",
+        "salary",
+        "role",
+        "city",
+        "kafka",
+        "payment",
+        "cpp",
+        "node",
+        "legacy",
+        "long"
+      ]
+    },
+    {
+      "id": "job_remote",
+      "family": "jobs",
+      "query": "推荐远程职位",
+      "relevant": [
+        "remote",
+        "role"
+      ]
+    },
+    {
+      "id": "job_location",
+      "family": "jobs",
+      "query": "杭州有没有合适的工作机会",
+      "relevant": [
+        "city",
+        "role"
+      ]
+    },
+    {
+      "id": "resume_general",
+      "family": "resume",
+      "query": "优化简历",
+      "relevant": [
+        "kafka",
+        "payment",
+        "cpp",
+        "node",
+        "legacy",
+        "long",
+        "role"
+      ]
+    },
+    {
+      "id": "resume_node",
+      "family": "resume",
+      "query": "优化 Node.js 经历的简历表达",
+      "relevant": [
+        "node"
+      ]
+    },
+    {
+      "id": "mixed",
+      "family": "mixed",
+      "query": "帮我准备面试并推荐岗位",
+      "relevant": [
+        "remote",
+        "salary",
+        "role",
+        "city",
+        "kafka",
+        "payment",
+        "prep",
+        "weak",
+        "cpp",
+        "node",
+        "legacy",
+        "long"
+      ]
+    },
+    {
+      "id": "syn_remote",
+      "family": "synonyms",
+      "query": "居家办公适合我吗",
+      "relevant": [
+        "remote"
+      ]
+    },
+    {
+      "id": "syn_remote_unlisted",
+      "family": "synonyms",
+      "query": "在家上班适合我吗",
+      "relevant": [
+        "remote"
+      ]
+    },
+    {
+      "id": "syn_salary",
+      "family": "synonyms",
+      "query": "聊聊我的薪酬期望",
+      "relevant": [
+        "salary"
+      ]
+    },
+    {
+      "id": "syn_resume",
+      "family": "synonyms",
+      "query": "帮我润色履历",
+      "relevant": [
+        "kafka",
+        "payment",
+        "cpp",
+        "node",
+        "legacy",
+        "long",
+        "role"
+      ]
+    },
+    {
+      "id": "legacy",
+      "family": "old_records",
+      "query": "以前处理过哪些 Redis 问题",
+      "relevant": [
+        "legacy"
+      ]
+    },
+    {
+      "id": "punctuation",
+      "family": "technical",
+      "query": "Kafka.",
+      "relevant": [
+        "kafka"
+      ]
+    },
+    {
+      "id": "cpp",
+      "family": "technical",
+      "query": "C++",
+      "relevant": [
+        "cpp"
+      ]
+    },
+    {
+      "id": "node",
+      "family": "technical",
+      "query": "Node.js",
+      "relevant": [
+        "node"
+      ]
+    },
+    {
+      "id": "chat_food",
+      "family": "chat",
+      "query": "今晚吃什么",
+      "relevant": [
+        "food"
+      ]
+    },
+    {
+      "id": "chat_garden",
+      "family": "chat",
+      "query": "聊聊种植番茄",
+      "relevant": [
+        "hobby"
+      ]
+    },
+    {
+      "id": "continuation",
+      "family": "readiness",
+      "query": "帮我准备一下",
+      "relevant": [
+        "kafka",
+        "payment",
+        "prep",
+        "weak",
+        "cpp",
+        "node",
+        "legacy",
+        "long"
+      ],
+      "readiness": true
+    },
+    {
+      "id": "unrelated_bound",
+      "family": "readiness",
+      "query": "今晚吃什么",
+      "relevant": [
+        "food"
+      ],
+      "readiness": true
+    },
+    {
+      "id": "unknown_continuation",
+      "family": "readiness",
+      "query": "咱们接着练吧",
+      "relevant": [
+        "kafka",
+        "payment",
+        "prep",
+        "weak",
+        "cpp",
+        "node",
+        "legacy",
+        "long"
+      ],
+      "readiness": true
+    },
+    {
+      "id": "negation",
+      "family": "adversarial",
+      "query": "不要推荐远程职位，我只想聊园艺",
+      "relevant": [
+        "hobby"
+      ]
+    },
+    {
+      "id": "unseen_topic",
+      "family": "no_hit",
+      "query": "解释量子纠缠",
+      "relevant": []
+    },
+    {
+      "id": "empty",
+      "family": "no_hit",
+      "query": "",
+      "relevant": []
+    },
+    {
+      "id": "long_budget",
+      "family": "budget",
+      "query": "大型迁移项目",
+      "relevant": [
+        "long"
+      ]
+    }
+  ]
+}

@@ -258,7 +258,16 @@ class ModelSurfaceProjector:
                 ("fallback_all_tools",)
                 if selection.full_catalog_fallback
                 else ("catalog_domain_union", "catalog_dependency_closure")
-            ) + (("history_images_omitted",) if omitted_image_count else ()),
+            ) + (("history_images_omitted",) if omitted_image_count else ()) + tuple(
+                signal for key, signal in (
+                    ("memory_strategy_version", "memory_retrieval_v1"),
+                    ("memory_lexical_match_count", "memory_lexical_match"),
+                    ("memory_scenario_match_count", "memory_scenario_match"),
+                    ("memory_expression_match_count", "memory_expression_match"),
+                    ("memory_irrelevant_count", "memory_irrelevant_omitted"),
+                    ("memory_duplicate_count", "memory_duplicate_omitted"),
+                ) if contributors["confirmed_memory"].diagnostics.get(key, 0)
+            ),
         )
         return FrozenModelSurface(
             model_call_id=request.model_call_id,

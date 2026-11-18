@@ -1,0 +1,638 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "purpose": "Independent synthetic validation set frozen before revised retrieval strategy; labels describe useful personal context, not all broadly related categories.",
+    "author": "/root/review_memory independent reviewer",
+    "authored_at_utc": "2026-11-18T16:44:25.203920+00:00",
+    "baseline_commit": "abf9d862b5346df5d238347c6245cc0cea5477c5",
+    "independence": "Author reviewed earlier v1 implementation but did not inspect revised strategy, development fixture, or its evaluation results. Only evaluation script fixture structure was read during this authoring task. No strategy executed.",
+    "label_policy": "General communication preferences are relevant except strict exact-output requests. Explicit topic changes override a readiness binding. Broad interview context alone does not make every skill or past project relevant. Career screening may use work constraints; a narrow named constraint question need not retrieve all career goals. No new facts are inferred.",
+    "data": "All fictional; no real user records.",
+    "readiness_scope": "Synthetic boolean represents a validated enabled readiness source. For ambiguous continuation cases labels include preparation memories but no arbitrary project; missing binding must not invent a task.",
+    "freeze": "Do not tune the strategy against this set before its first frozen evaluation; later fixes require reporting exposure.",
+    "graded_labels": "required: task-specific personal facts or constraints needed to satisfy the request; helpful: general communication preferences and plausible preparation context for an underspecified bound continuation. relevant is the union for legacy compatibility; all other memories are irrelevant."
+  },
+  "budgets": [
+    1600,
+    4096,
+    8192
+  ],
+  "id_order_seeds": [
+    13,
+    41,
+    97
+  ],
+  "memories": [
+    {
+      "key": "m01",
+      "content": "我曾为公益图书馆改造借阅排队系统，设计预约限流，节假日等待时间从四十分钟降到十五分钟。",
+      "category": "unclassified"
+    },
+    {
+      "key": "m02",
+      "content": "我负责过屋顶光伏监测服务，把断连告警按设备聚合，减少了值班人员重复确认。",
+      "category": "experience"
+    },
+    {
+      "key": "m03",
+      "content": "我用 Kotlin 开发过养老服务预约客户端，负责无障碍字号和离线表单。",
+      "category": "experience"
+    },
+    {
+      "key": "m04",
+      "content": "我在 Scala 数据流水线中处理过迟到事件，使用事件时间窗口重算统计结果。",
+      "category": "unclassified"
+    },
+    {
+      "key": "m05",
+      "content": "我最近重点练习系统设计面谈中的容量估算，希望别人追问估算依据。",
+      "category": "preparation"
+    },
+    {
+      "key": "m06",
+      "content": "我下周要做英语自我介绍演练，目前常把职业动机说得太长。",
+      "category": "preparation"
+    },
+    {
+      "key": "m07",
+      "content": "我的求职目标是医疗信息化领域的服务端研发，希望业务能改善患者就诊流程。",
+      "category": "goal"
+    },
+    {
+      "key": "m08",
+      "content": "我希望下一份工作做基础设施工程，优先考虑日志和可观测性方向。",
+      "category": "goal"
+    },
+    {
+      "key": "m09",
+      "content": "我只考虑乘地铁四十五分钟内可到达的办公地点，不打算为了工作搬家。",
+      "category": "preference"
+    },
+    {
+      "key": "m10",
+      "content": "我偏好每周四天工作制，不能接受固定每周六到岗。",
+      "category": "preference"
+    },
+    {
+      "key": "m11",
+      "content": "给我建议时，先列结论，再列待核实项。",
+      "category": "preference"
+    },
+    {
+      "key": "m12",
+      "content": "我读英文长段落很慢，请尽量用中文短句和编号说明。",
+      "category": "preference"
+    },
+    {
+      "key": "m13",
+      "content": "我能用 C 编写嵌入式串口驱动，但还没有承担过复杂的上层业务。",
+      "category": "skill"
+    },
+    {
+      "key": "m14",
+      "content": "我有 C++ 图形引擎优化经验，熟悉智能指针和对象生命周期。",
+      "category": "skill"
+    },
+    {
+      "key": "m15",
+      "content": "我学习过 Rust 的借用检查器，目前只完成了练习程序，没有生产使用经验。",
+      "category": "skill"
+    },
+    {
+      "key": "m16",
+      "content": "我休息时喜欢研究国际象棋残局，最近在练习车兵残局。",
+      "category": "preference"
+    },
+    {
+      "key": "m17",
+      "content": "我的阳台植物容易感染锈病，周末通常会检查叶片并剪除病叶。",
+      "category": "unclassified"
+    },
+    {
+      "key": "m18",
+      "content": "我参与的志愿活动中负责新人培训，用图解说明设备安装流程。",
+      "category": "experience"
+    },
+    {
+      "key": "m19",
+      "content": "我曾为公益图书馆改造借阅排队系统，设计预约限流，节假日等待时间从四十分钟降到十五分钟。",
+      "category": "unclassified",
+      "group": "m01"
+    },
+    {
+      "key": "m20",
+      "content": "我想补齐关系数据库事务隔离知识，尤其分不清可重复读和串行化的差别。",
+      "category": "goal"
+    },
+    {
+      "key": "m21",
+      "content": "我在以前的跨部门协作中做过需求澄清，习惯先确认验收条件再讨论技术实现。",
+      "category": "experience"
+    }
+  ],
+  "queries": [
+    {
+      "id": "v01",
+      "family": "wide_budget_targeted",
+      "query": "准备养老预约客户端的项目讲述，重点突出离线使用和可访问性。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m03"
+      ],
+      "required": [
+        "m03"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v02",
+      "family": "wide_budget_targeted",
+      "query": "帮我讲清光伏监测服务里告警降噪的个人贡献。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m02"
+      ],
+      "required": [
+        "m02"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v03",
+      "family": "wide_budget_targeted",
+      "query": "医疗软件公司和日志平台公司的后端职位，结合我的职业目标比较一下。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m07",
+        "m08",
+        "m09",
+        "m10"
+      ],
+      "required": [
+        "m07",
+        "m08",
+        "m09",
+        "m10"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v04",
+      "family": "legacy_experience",
+      "query": "我怎么把图书馆排队改造这段经历写进履历？",
+      "relevant": [
+        "m11",
+        "m12",
+        "m01"
+      ],
+      "required": [
+        "m01"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v05",
+      "family": "legacy_experience",
+      "query": "复盘迟到数据的处理经验，解释当时为什么按事件发生时间计算。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m04"
+      ],
+      "required": [
+        "m04"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v06",
+      "family": "legacy_experience",
+      "query": "以我的借阅预约优化项目为例，模拟一次追问量化成果的面谈。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m01"
+      ],
+      "required": [
+        "m01"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v07",
+      "family": "unrelated",
+      "query": "解释月食是怎样形成的，不需要联系我的求职经历。",
+      "relevant": [
+        "m11",
+        "m12"
+      ],
+      "required": [],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v08",
+      "family": "unrelated",
+      "query": "只输出算式 8×7 的结果，不要解释或任何个性化内容。",
+      "relevant": [],
+      "required": [],
+      "helpful": []
+    },
+    {
+      "id": "v09",
+      "family": "unrelated",
+      "query": "严格原样输出 OK 两个大写字母，除此之外不要输出任何内容。",
+      "relevant": [],
+      "required": [],
+      "helpful": []
+    },
+    {
+      "id": "v10",
+      "family": "synonym_rewrite",
+      "query": "我想找能改善病人就医体验的软件开发机会，有哪些方向适合我？",
+      "relevant": [
+        "m11",
+        "m12",
+        "m07",
+        "m09",
+        "m10"
+      ],
+      "required": [
+        "m07",
+        "m09",
+        "m10"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v11",
+      "family": "synonym_rewrite",
+      "query": "筛选职位时，把每天往返路上的时间和无需迁居作为约束。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m09"
+      ],
+      "required": [
+        "m09"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v12",
+      "family": "synonym_rewrite",
+      "query": "公司要求六天到岗，这和我的工作节奏偏好是否冲突？",
+      "relevant": [
+        "m11",
+        "m12",
+        "m10"
+      ],
+      "required": [
+        "m10"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v13",
+      "family": "negation_topic_change",
+      "query": "先不做面谈演练了，今天只想聊国际象棋的车兵残局。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m16"
+      ],
+      "readiness": true,
+      "required": [
+        "m16"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v14",
+      "family": "negation_topic_change",
+      "query": "不要再讲职业规划，帮我想想阳台叶片生锈斑该怎么记录观察。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m17"
+      ],
+      "readiness": true,
+      "required": [
+        "m17"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v15",
+      "family": "negation_topic_change",
+      "query": "简历先放一边。帮我准备英语自我介绍，尤其练习简短说明职业动机。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m06"
+      ],
+      "required": [
+        "m06"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v16",
+      "family": "negation_topic_change",
+      "query": "不考虑医疗行业这条路线了，只按我原有的可观测性目标看基础设施机会。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m08",
+        "m09",
+        "m10"
+      ],
+      "required": [
+        "m08",
+        "m09",
+        "m10"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v17",
+      "family": "technical_identity",
+      "query": "Assess my C experience for a microcontroller serial-driver role. Do not substitute C++ experience.",
+      "relevant": [
+        "m11",
+        "m12",
+        "m13"
+      ],
+      "required": [
+        "m13"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v18",
+      "family": "technical_identity",
+      "query": "梳理我在 C++ 引擎内存管理上的优势和可以举的例子。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m14"
+      ],
+      "required": [
+        "m14"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v19",
+      "family": "technical_identity",
+      "query": "我能否在简历上声称 Rust 有生产经验？请根据我的实际经历提醒我。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m15"
+      ],
+      "required": [
+        "m15"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v20",
+      "family": "technical_identity",
+      "query": "Help me frame the Scala late-event pipeline work for a technical interview.",
+      "relevant": [
+        "m11",
+        "m12",
+        "m04"
+      ],
+      "required": [
+        "m04"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v21",
+      "family": "ambiguous_binding",
+      "query": "按已经确认的准备安排，继续练一下，先给我一个问题。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m05",
+        "m06"
+      ],
+      "readiness": true,
+      "required": [],
+      "helpful": [
+        "m11",
+        "m12",
+        "m05",
+        "m06"
+      ]
+    },
+    {
+      "id": "v22",
+      "family": "ambiguous_binding",
+      "query": "按已经确认的准备安排，继续练一下，先给我一个问题。",
+      "relevant": [
+        "m11",
+        "m12"
+      ],
+      "required": [],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v23",
+      "family": "ambiguous_binding",
+      "query": "今天先换个轻松的话题，说说棋类爱好。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m16"
+      ],
+      "readiness": true,
+      "required": [
+        "m16"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v24",
+      "family": "global_expression",
+      "query": "请解释什么是公网和私网。",
+      "relevant": [
+        "m11",
+        "m12"
+      ],
+      "required": [],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v25",
+      "family": "global_expression",
+      "query": "给我一些整理书桌的建议。",
+      "relevant": [
+        "m11",
+        "m12"
+      ],
+      "required": [],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v26",
+      "family": "mixed_need",
+      "query": "用图书馆预约项目练习容量估算，回答时也指出我的估算假设哪里需要补证据。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m01",
+        "m05"
+      ],
+      "required": [
+        "m01",
+        "m05"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v27",
+      "family": "mixed_need",
+      "query": "我要申请医疗服务端岗位，帮我把养老预约客户端经历改成简历要点。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m03",
+        "m07"
+      ],
+      "required": [
+        "m03",
+        "m07"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v28",
+      "family": "targeted_skill_gap",
+      "query": "帮我安排事务隔离的复习，重点区分可重复读和串行化。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m20"
+      ],
+      "required": [
+        "m20"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v29",
+      "family": "targeted_experience",
+      "query": "面试官问如何澄清跨部门需求，我有哪些真实经历可用？",
+      "relevant": [
+        "m11",
+        "m12",
+        "m21"
+      ],
+      "required": [
+        "m21"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    },
+    {
+      "id": "v30",
+      "family": "targeted_experience",
+      "query": "讲讲我给志愿活动新人做培训的经历，突出沟通方法。",
+      "relevant": [
+        "m11",
+        "m12",
+        "m18"
+      ],
+      "required": [
+        "m18"
+      ],
+      "helpful": [
+        "m11",
+        "m12"
+      ]
+    }
+  ]
+}
