@@ -1857,3 +1857,81 @@ def test_memory_retrieval_reasons_reach_safe_manifest() -> None:
     manifest = validate_context_manifest_json(prepared.manifest_json)
     assert {"memory_retrieval_v1", "memory_irrelevant_omitted", "memory_lexical_match"} <= set(manifest["signals"])
     assert "Kafka" not in prepared.manifest_json
+
+
+def test_memory_default_experiment_and_rollback_reach_final_surface(tmp_path, monkeypatch) -> None:
+    """Real DB -> optional loader -> final surface; production's omitted flag stays baseline."""
+    from uuid import uuid4
+    from offerpilot.confirmed_memory.repository import ConfirmedMemoryRepository, MemoryMutation
+    from offerpilot.context_sources.contracts import ContextPolicies, ContributorPolicy
+    from offerpilot.context_sources.models import ContextContributorSettings
+    from offerpilot.context_sources import loader as optional_loader
+
+    path = tmp_path / "memory-default.db"
+    sessions = init_database(path)
+    with sessions() as session:
+        conversation = Conversation(title="synthetic release boundary")
+        session.add(conversation)
+        session.commit()
+        conversation_id = conversation.id
+    repository = ConfirmedMemoryRepository(sessions)
+
+    def remember(content, *, metadata=None):
+        return repository.mutate(None, MemoryMutation(mutation_id=uuid4(), action="confirm",
+            expected_version=0, confirmed=True, content=content, **({"metadata": metadata} if metadata else {})))
+
+    remember("番茄种植记录")
+    remember("Kafka 项目经历")
+    remember("Kafka expired", metadata={"category": "experience", "valid_until": "2000-01-01T00:00:00Z"})
+    deleted = remember("Kafka deleted")
+    repository.mutate(deleted["id"], MemoryMutation(mutation_id=uuid4(), action="delete",
+        expected_version=1, confirmed=True, content=""))
+    withdrawn = remember("Kafka withdrawn")
+    repository.mutate(withdrawn["id"], MemoryMutation(mutation_id=uuid4(), action="withdraw",
+        expected_version=1, confirmed=True, content=""))
+    actual_selector = optional_loader.select_memory
+    calls = []
+
+    def selector(*args, **kwargs):
+        calls.append(True)
+        return actual_selector(*args, **kwargs)
+
+    monkeypatch.setattr(optional_loader, "select_memory", selector)
+    loader = ContextSourceLoader(path)
+    try:
+        def surface(**options):
+            optional = optional_loader.load_optional_sources(loader, conversation_id, "Kafka", **options)
+            values = {item.name: item for item in contributors("Kafka")}
+            values.update({item.name: item for item in optional.contributors})
+            signals = ToolSelectionSignals(current_request="Kafka")
+            projected = ModelSurfaceProjector().project(ProjectionRequest(
+                model_call_id="default-memory", contributors=tuple(values.values()), history=(),
+                tool_signals=signals, provider_budgets=(ProviderBudget(),), selection=_selection_for(signals),
+                sources=optional.sources, optional_sources=optional))
+            text = "\n".join(message.content for message in projected.messages)
+            assert all(hidden not in text for hidden in ("Kafka expired", "Kafka deleted", "Kafka withdrawn"))
+            return optional, text
+
+        baseline, text = surface()
+        assert "番茄种植记录" in text and "Kafka 项目经历" in text
+        assert calls == []
+        assert "memory_strategy_version" not in baseline.contributors[1].diagnostics
+        assert baseline.sources[0].revision_identity == "confirmed_memory:v1"
+        experiment, text = surface(experimental_memory_retrieval=True)
+        assert "番茄种植记录" not in text and "Kafka 项目经历" in text
+        assert len(calls) == 1
+        assert experiment.contributors[1].diagnostics["memory_strategy_version"] == 1
+        rollback, text = surface(experimental_memory_retrieval=False)
+        assert rollback == baseline and "番茄种植记录" in text
+        assert len(calls) == 1
+        with sessions() as session:
+            session.add(ContextContributorSettings(id=1, revision=1, settings_json=ContextPolicies(
+                confirmed_memory=ContributorPolicy(enabled=False)).model_dump_json()))
+            session.commit()
+        for options in ({}, {"experimental_memory_retrieval": True}):
+            disabled, text = surface(**options)
+            assert disabled.contributors[1].status == "disabled"
+            assert "番茄种植记录" not in text and "Kafka 项目经历" not in text
+        assert len(calls) == 1
+    finally:
+        loader._pool.close()

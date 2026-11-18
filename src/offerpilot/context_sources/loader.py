@@ -118,6 +118,7 @@ def load_optional_sources(
     query: str,
     *,
     readiness_binding: ReadinessContextBinding | None = None,
+    experimental_memory_retrieval: bool = False,
 ) -> OptionalSources:
     def read(connection: sqlite3.Connection) -> OptionalSources:
         conversation = connection.execute("SELECT context_type, context_ref, archived_at FROM conversations WHERE id=?", (conversation_id,)).fetchone()
@@ -158,12 +159,14 @@ def load_optional_sources(
                 if name == "confirmed_readiness" and readiness_binding is not None
                 else None
             )
+            # Quality is not accepted: production callers keep the #72 baseline.
+            # Only an explicit internal experiment may change candidate admission.
             selection = select_memory(
                 items, query, confirmed_interview_context=bool(
                     contributors and contributors[0].name == "confirmed_readiness"
                     and contributors[0].status == "ready"
                 ),
-            ) if name == "confirmed_memory" and policy.enabled else None
+            ) if name == "confirmed_memory" and policy.enabled and experimental_memory_retrieval is True else None
             if selection is not None:
                 items = selection.items
                 source_revision = "confirmed_memory:retrieval-v1"

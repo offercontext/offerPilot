@@ -231,7 +231,7 @@ def test_irrelevant_memory_is_absent_from_projection_and_fingerprint(context):
     sessions, loader, conversation_id = context
     repository = ConfirmedMemoryRepository(sessions)
     save(repository, content="番茄种植记录")
-    result = load_optional_sources(loader, conversation_id, "Kafka")
+    result = load_optional_sources(loader, conversation_id, "Kafka", experimental_memory_retrieval=True)
     assert result.contributors[1].status == "not_applicable"
     assert result.contributors[1].diagnostics["memory_irrelevant_count"] == 1
     assert result.sources == ()
@@ -241,7 +241,7 @@ def test_memory_workspace_isolation_and_no_match_does_not_skip_validation(contex
     sessions, loader, conversation_id = context
     foreign = init_database(tmp_path / "other.db")
     save(ConfirmedMemoryRepository(foreign), content="Kafka private")
-    assert load_optional_sources(loader, conversation_id, "Kafka").sources == ()
+    assert load_optional_sources(loader, conversation_id, "Kafka", experimental_memory_retrieval=True).sources == ()
     # Candidate validation precedes relevance, even when the query cannot match.
     from sqlalchemy import select
     from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
@@ -250,7 +250,7 @@ def test_memory_workspace_isolation_and_no_match_does_not_skip_validation(contex
         session.scalar(select(ConfirmedMemoryVersionMetadata)).category = "invalid"
         session.commit()
     with pytest.raises(ProjectionError, match="source_load_failed"):
-        load_optional_sources(loader, conversation_id, "Kafka")
+        load_optional_sources(loader, conversation_id, "Kafka", experimental_memory_retrieval=True)
 
 
 def test_memory_confirmed_task_hint_and_current_request_precedence():

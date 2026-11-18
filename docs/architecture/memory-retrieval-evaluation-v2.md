@@ -177,3 +177,7 @@ artifacts/semantic-feasibility/venv/bin/python scripts/memory_experiments/probe_
 ```
 
 E5替换family=e5、目录=multilingual-e5-small。首次配置需要网络下载公开模型；编码不调用收费API。新脚本ruff通过；92项pytest通过；独立审查核验14个文件与官方预处理，修复下载落盘顺序及额外文件拒绝，最终重跑两模型成功且分数矩阵与初次完全一致。原始结果留在忽略目录，摘要和复现脚本入库；未跑release gate/Windows/真实用户数据/收费模型。生产代码、依赖、UI、数据库均未改，无破坏性变化。
+
+## 发布边界纠正
+
+独立复审发现之前仅把 V2/语义实验隔离，V1 仍被默认记忆加载直接调用。现已将 loader 的内部 `experimental_memory_retrieval` 参数设为默认 False；生产唯一调用不传，默认保持 #72 行为且不关闭用户记忆能力。显式 True 仅供内部实验，False/省略恢复基线，安全过滤先于两条路径。真实数据库到最终模型表面的新增回归和独立复验通过；相关三文件190项通过，ruff及loader mypy通过。个性化禁止和 C/C++ 排除仍未解决，这不是质量验收通过；保持 Draft。
