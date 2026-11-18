@@ -38,7 +38,9 @@ def _has(text: str, word: str) -> bool:
 
 
 def _tokens(text: str) -> set[str]:
-    tokens = set(re.findall(r"[a-z0-9][a-z0-9_+#.-]*", text)) - _ASCII_STOP
+    # Keep internal/leading dots and language suffixes (Node.js, .NET, C++/C#),
+    # but sentence punctuation must not become part of token identity.
+    tokens = {token.rstrip(".-_") for token in re.findall(r"\.?[a-z0-9][a-z0-9_+#.-]*", text)} - _ASCII_STOP
     for run in re.findall(r"[\u3400-\u9fff]+", text):
         tokens.update(run[index:index + 2] for index in range(len(run) - 1))
     return tokens - _STOP
@@ -64,7 +66,13 @@ def select_memory(
     scenarios = {name for name, (concept, _) in _SCENARIOS.items() if concept in concepts}
     # Only use a validated, enabled Readiness contributor as a fallback hint.
     # An explicit current request wins over a previously bound interview.
-    if not scenarios and confirmed_interview_context:
+    # Absence of scenario words does not imply continuation (e.g. dinner).
+    # A conservative full-phrase allowlist avoids borrowing stale task intent.
+    continuation = query.strip(" \t\r\n.!?。！？") in {
+        "继续", "继续吧", "请继续", "接着来", "帮我准备一下", "请帮我准备一下",
+        "continue", "please continue", "help me prepare",
+    }
+    if not scenarios and confirmed_interview_context and continuation:
         scenarios.add("interview")
     ranked: list[tuple[int, str, dict[str, object]]] = []
     lexical_count = 0

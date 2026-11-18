@@ -270,3 +270,35 @@ def test_explicit_expression_preference_is_available_across_scenarios():
             _memory("hobby", "爱好园艺", "preference")]
     for query in ("准备面试", "优化简历", "介绍 Kafka", "你好"):
         assert [item["id"] for item in select_memory(pool, query).items] == ["language"]
+
+
+@pytest.mark.parametrize("query", ["今晚吃什么", "推荐一道菜", "今天天气如何", "帮我准备晚餐", "继续聊晚饭", "你好", "", "what is for dinner?", "continue with dinner"])
+def test_readiness_hint_does_not_override_explicit_unrelated_requests(query):
+    from offerpilot.context_sources.memory import select_memory
+    result = select_memory([_memory("prep", "结构化回答训练", "preparation")], query,
+                           confirmed_interview_context=True)
+    assert result.items == []
+    assert result.diagnostics["memory_scenario_interview"] is False
+
+
+@pytest.mark.parametrize("query", ["继续", "请继续。", "帮我准备一下！", "接着来", "Please continue."])
+def test_readiness_hint_accepts_only_bounded_continuation_phrases(query):
+    from offerpilot.context_sources.memory import select_memory
+    pool = [_memory("prep", "结构化回答训练", "preparation")]
+    assert select_memory(pool, query).items == []
+    assert select_memory(pool, query, confirmed_interview_context=True).items == pool
+
+
+@pytest.mark.parametrize("term", ["Kafka", "C++", "C#", "Node.js", ".NET", "ASP.NET", "scikit-learn"])
+@pytest.mark.parametrize("suffix", [".", "-", "...", "。", "!"])
+def test_memory_technical_tokens_ignore_trailing_punctuation(term, suffix):
+    from offerpilot.context_sources.memory import select_memory
+    pool = [_memory("match", term)]
+    assert select_memory(pool, term + suffix).items == pool
+    assert select_memory([_memory("match", term + suffix)], term).items
+
+
+@pytest.mark.parametrize("left,right", [("C++", "C#"), ("C++", "C"), ("Node.js", "nodejs"), (".NET", "net"), ("scikit-learn", "scikitlearn")])
+def test_memory_technical_token_identity_is_preserved(left, right):
+    from offerpilot.context_sources.memory import select_memory
+    assert select_memory([_memory("other", left)], right).items == []

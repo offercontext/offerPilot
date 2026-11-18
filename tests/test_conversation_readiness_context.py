@@ -379,6 +379,9 @@ def test_memory_uses_only_enabled_validated_readiness_hint(readiness_case):
     hinted = load_optional_sources(case["loader"], case["conversation_id"], "帮我准备一下", readiness_binding=binding)
     assert hinted.contributors[1].status == "ready"
     assert hinted.contributors[1].diagnostics["memory_scenario_interview"] is True
+    unrelated = load_optional_sources(case["loader"], case["conversation_id"], "今晚吃什么", readiness_binding=binding)
+    assert unrelated.contributors[1].status == "not_applicable"
+    assert unrelated.contributors[1].diagnostics["memory_scenario_interview"] is False
     with case["sessions"]() as session:
         session.get(ContextContributorSettings, 1).settings_json = ContextPolicies().model_dump_json()
         session.commit()
