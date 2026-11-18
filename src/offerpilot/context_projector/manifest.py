@@ -52,6 +52,12 @@ MANIFEST_SIGNAL_VALUES = (
     "history_images_omitted",
     "catalog_dependency_closure",
     "catalog_domain_union",
+    "memory_retrieval_v1",
+    "memory_lexical_match",
+    "memory_scenario_match",
+    "memory_expression_match",
+    "memory_irrelevant_omitted",
+    "memory_duplicate_omitted",
 )
 _SIGNALS = frozenset(MANIFEST_SIGNAL_VALUES)
 

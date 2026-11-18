@@ -359,3 +359,29 @@ def test_non_application_conversations_have_no_readiness_owner(readiness_case) -
     assert repository.load_binding(conversation_id) is None
     with pytest.raises(ReadinessContextUnavailable, match="readiness_requires_application_conversation"):
         repository.read(conversation_id)
+
+
+def test_memory_uses_only_enabled_validated_readiness_hint(readiness_case):
+    from offerpilot.confirmed_memory.repository import ConfirmedMemoryRepository, MemoryMutation
+    case = readiness_case
+    repository = ReadinessContextRepository(case["sessions"])
+    _confirm(case, ordered_version_ids=[case["version_id"]])
+    binding = repository.load_binding(case["conversation_id"])
+    ConfirmedMemoryRepository(case["sessions"]).mutate(None, MemoryMutation(
+        mutation_id=uuid4(), action="confirm", expected_version=0, confirmed=True,
+        content="练习项目介绍", metadata={"category": "preparation", "valid_until": None}))
+    with case["sessions"]() as session:
+        settings = session.get(ContextContributorSettings, 1)
+        settings.settings_json = ContextPolicies(
+            confirmed_readiness=ContributorPolicy(enabled=True),
+            confirmed_memory=ContributorPolicy(enabled=True)).model_dump_json()
+        session.commit()
+    hinted = load_optional_sources(case["loader"], case["conversation_id"], "帮我准备一下", readiness_binding=binding)
+    assert hinted.contributors[1].status == "ready"
+    assert hinted.contributors[1].diagnostics["memory_scenario_interview"] is True
+    with case["sessions"]() as session:
+        session.get(ContextContributorSettings, 1).settings_json = ContextPolicies().model_dump_json()
+        session.commit()
+    disabled = load_optional_sources(case["loader"], case["conversation_id"], "帮我准备一下", readiness_binding=binding)
+    assert disabled.contributors[1].status == "not_applicable"
+    assert disabled.contributors[1].diagnostics["memory_scenario_interview"] is False

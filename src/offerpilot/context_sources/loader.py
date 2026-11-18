@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import sqlite3
 from typing import Any, cast
@@ -14,6 +14,7 @@ from offerpilot.context_projector.loader import ContextSourceLoader, SourceTempo
 from offerpilot.confirmed_memory.metadata import MemoryMetadata, temporal_status
 from .contracts import ContextPolicies, ContributorPolicy
 from .knowledge import recall_knowledge
+from .memory import select_memory
 from .readiness import ReadinessContextBinding, load_readiness_source
 from .summary import load_summary
 
@@ -157,12 +158,23 @@ def load_optional_sources(
                 if name == "confirmed_readiness" and readiness_binding is not None
                 else None
             )
+            selection = select_memory(
+                items, query, confirmed_interview_context=bool(
+                    contributors and contributors[0].name == "confirmed_readiness"
+                    and contributors[0].status == "ready"
+                ),
+            ) if name == "confirmed_memory" and policy.enabled else None
+            if selection is not None:
+                items = selection.items
+                source_revision = "confirmed_memory:retrieval-v1"
             contributor, source = _contributor(
                 name,
                 policy,
                 items,
                 source_revision=source_revision,
             )
+            if selection is not None:
+                contributor = replace(contributor, diagnostics={**contributor.diagnostics, **selection.diagnostics})
             contributors.append(contributor)
             if source is not None:
                 sources.append(source)

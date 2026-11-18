@@ -35,22 +35,22 @@ def test_next_projection_observes_edit_withdraw_and_independent_switch(context):
     sessions, loader, conversation_id = context
     repository = ConfirmedMemoryRepository(sessions)
     item = save(repository)
-    first = load_optional_sources(loader, conversation_id, "当前问题")
+    first = load_optional_sources(loader, conversation_id, "中文英文")
     by_name = {value.name: value for value in first.contributors}
     assert by_name["confirmed_memory"].status == "ready"
     assert all(by_name[name].status == "disabled" for name in ("confirmed_readiness", "knowledge_context", "older_conversation_summary"))
     save(repository, 1, memory_id=item["id"], content="改为英文")
-    second = load_optional_sources(loader, conversation_id, "当前问题")
+    second = load_optional_sources(loader, conversation_id, "中文英文")
     assert second.sources[0].content_revision_fingerprint != first.sources[0].content_revision_fingerprint
     assert "改为英文" in second.contributors[1].messages[0].content
     save(repository, 2, memory_id=item["id"], action="withdraw", content="")
-    assert load_optional_sources(loader, conversation_id, "当前问题").contributors[1].status == "not_applicable"
+    assert load_optional_sources(loader, conversation_id, "中文英文").contributors[1].status == "not_applicable"
     save(repository, 3, memory_id=item["id"], content="新确认")
     with sessions() as session:
         session.add(ContextContributorSettings(id=1, revision=1, settings_json=ContextPolicies(
             confirmed_memory=ContributorPolicy(enabled=False)).model_dump_json()))
         session.commit()
-    assert load_optional_sources(loader, conversation_id, "当前问题").contributors[1].status == "disabled"
+    assert load_optional_sources(loader, conversation_id, "中文英文").contributors[1].status == "disabled"
 
 
 def test_archived_conversation_fails_closed(context):
@@ -61,7 +61,7 @@ def test_archived_conversation_fails_closed(context):
         session.get(Conversation, conversation_id).archived_at = datetime.now(timezone.utc)
         session.commit()
     with pytest.raises(ProjectionError):
-        load_optional_sources(loader, conversation_id, "问题")
+        load_optional_sources(loader, conversation_id, "记忆长偏好")
 
 
 def test_large_item_is_omitted_atomically_by_own_budget(context):
@@ -71,7 +71,7 @@ def test_large_item_is_omitted_atomically_by_own_budget(context):
         session.add(ContextContributorSettings(id=1, revision=1, settings_json=ContextPolicies(
             confirmed_memory=ContributorPolicy(enabled=True, max_units=256)).model_dump_json()))
         session.commit()
-    result = load_optional_sources(loader, conversation_id, "问题")
+    result = load_optional_sources(loader, conversation_id, "记忆长偏好")
     assert result.contributors[1].messages == ()
     assert result.contributors[1].diagnostics["omitted_count"] == 1
 
@@ -118,12 +118,12 @@ def test_memory_delete_removes_current_and_old_text_from_actual_recall(context):
     repository = ConfirmedMemoryRepository(sessions)
     item = save(repository, content="旧记忆正文")
     save(repository, 1, memory_id=item["id"], content="更正后的记忆")
-    projected = load_optional_sources(loader, conversation_id, "问题")
+    projected = load_optional_sources(loader, conversation_id, "记忆长偏好")
     messages = str(projected.contributors[1].messages)
     assert "更正后的记忆" in messages
     assert "旧记忆正文" not in messages
     save(repository, 2, memory_id=item["id"], action="delete", content="")
-    projected = load_optional_sources(loader, conversation_id, "问题")
+    projected = load_optional_sources(loader, conversation_id, "记忆长偏好")
     assert projected.contributors[1].status == "not_applicable"
     assert projected.contributors[1].messages == ()
     assert not any(source.kind == "confirmed_memory" for source in projected.sources)
@@ -143,7 +143,7 @@ def test_memory_projection_preserves_category_evidence_and_excludes_expired(cont
         confirmed=True, content="expired personal claim", metadata={"category": "preparation", "valid_until": "2000-01-01T00:00:00Z"}))
     goal = repository.mutate(None, MemoryMutation(mutation_id=uuid4(), action="confirm", expected_version=0,
         confirmed=True, content="career personal claim", metadata={"category": "goal", "valid_until": None}))
-    result = load_optional_sources(loader, conversation_id, "current request")
+    result = load_optional_sources(loader, conversation_id, "personal claim")
     items = json.loads(result.contributors[1].messages[0].content.split("\n", 1)[1])["items"]
     by_id = {item["id"]: item for item in items}
     assert set(by_id) == {legacy["id"], goal["id"]}
@@ -166,4 +166,107 @@ def test_corrupt_memory_metadata_never_degrades_to_legacy_defaults(context, fiel
         setattr(record, field, value)
         session.commit()
     with pytest.raises(ProjectionError, match="source_load_failed"):
-        load_optional_sources(loader, conversation_id, "current request")
+        load_optional_sources(loader, conversation_id, "personal claim")
+
+
+def _memory(identity, content, category="unclassified", valid_until=None):
+    return {"id": identity, "version": 1, "content": content, "category": category,
+            "valid_until": valid_until, "evidence_status": "user_confirmed"}
+
+
+@pytest.mark.parametrize("query,expected", [
+    ("准备面试", {"project", "prep", "goal"}),
+    ("推荐职位", {"goal", "preference", "project"}),
+    ("优化履历", {"project", "goal"}),
+    ("居家办公", {"preference"}),
+    ("聊聊星空", set()),
+    ("", set()),
+    ("Kafka", {"legacy"}),
+    ("面试后找工作", {"goal", "preference", "project", "prep"}),
+])
+def test_memory_scenarios_and_lexical_aliases(query, expected):
+    from offerpilot.context_sources.memory import select_memory
+    pool = [_memory("project", "支付系统改造", "experience"),
+            _memory("prep", "需要练习结构化回答", "preparation"),
+            _memory("goal", "希望加入创业公司", "goal"),
+            _memory("preference", "偏好远程工作", "preference"),
+            _memory("legacy", "过去做过 Kafka 运维")]
+    result = select_memory(pool, query)
+    ids = {item["id"] for item in result.items}
+    assert expected == ids
+    if not expected:
+        assert ids == set()
+    assert all(type(value) in (int, bool) for value in result.diagnostics.values())
+    assert "Kafka" not in str(result.diagnostics)
+
+
+def test_memory_ranking_beats_id_order_at_same_budget():
+    import json
+    from offerpilot.context_sources.loader import _contributor
+    from offerpilot.context_sources.memory import select_memory
+    # Deliberately fixed IDs and equal-sized unrelated distractions, no real users.
+    pool = [_memory(f"a{i}", "园艺兴趣偏好" * 10, "preference") for i in range(8)]
+    pool += [_memory("z", "Kafka 项目经历", "experience")]
+    policy = ContributorPolicy(enabled=True, max_units=1100)
+    baseline, _ = _contributor("confirmed_memory", policy, pool)
+    ranked, _ = _contributor("confirmed_memory", policy, select_memory(pool, "Kafka 面试").items)
+    def ids(result):
+        return {item["id"] for item in json.loads(result.messages[0].content.split("\n", 1)[1])["items"]}
+    assert "z" not in ids(baseline)
+    assert "z" in ids(ranked)
+
+
+def test_memory_cross_scenario_duplicates_and_deterministic_ties():
+    from offerpilot.context_sources.memory import select_memory
+    pool = [_memory("b", "Kafka", "preference"), _memory("a", "Kafka", "preference"),
+            _memory("c", "Kafka", "goal"), _memory("d", "Kafka", "preference", "2099-01-01T00:00:00+00:00")]
+    first = select_memory(pool, "Kafka 面试")
+    second = select_memory(list(reversed(pool)), "Kafka 面试")
+    assert first == second
+    assert {item["id"] for item in first.items} == {"a", "c", "d"}
+    assert first.diagnostics["memory_duplicate_count"] == 1
+
+
+def test_irrelevant_memory_is_absent_from_projection_and_fingerprint(context):
+    sessions, loader, conversation_id = context
+    repository = ConfirmedMemoryRepository(sessions)
+    save(repository, content="番茄种植记录")
+    result = load_optional_sources(loader, conversation_id, "Kafka")
+    assert result.contributors[1].status == "not_applicable"
+    assert result.contributors[1].diagnostics["memory_irrelevant_count"] == 1
+    assert result.sources == ()
+
+
+def test_memory_workspace_isolation_and_no_match_does_not_skip_validation(context, tmp_path):
+    sessions, loader, conversation_id = context
+    foreign = init_database(tmp_path / "other.db")
+    save(ConfirmedMemoryRepository(foreign), content="Kafka private")
+    assert load_optional_sources(loader, conversation_id, "Kafka").sources == ()
+    # Candidate validation precedes relevance, even when the query cannot match.
+    from sqlalchemy import select
+    from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
+    save(ConfirmedMemoryRepository(sessions), content="园艺")
+    with sessions() as session:
+        session.scalar(select(ConfirmedMemoryVersionMetadata)).category = "invalid"
+        session.commit()
+    with pytest.raises(ProjectionError, match="source_load_failed"):
+        load_optional_sources(loader, conversation_id, "Kafka")
+
+
+def test_memory_confirmed_task_hint_and_current_request_precedence():
+    from offerpilot.context_sources.memory import select_memory
+    pool = [_memory("p", "练习结构化回答", "preparation"),
+            _memory("g", "期望远程工作", "goal")]
+    assert select_memory(pool, "帮我准备一下").items == []
+    hinted = select_memory(pool, "帮我准备一下", confirmed_interview_context=True)
+    assert hinted.items[0]["id"] == "p"
+    explicit = select_memory(pool, "推荐岗位", confirmed_interview_context=True)
+    assert [item["id"] for item in explicit.items] == ["g"]
+
+
+def test_explicit_expression_preference_is_available_across_scenarios():
+    from offerpilot.context_sources.memory import select_memory
+    pool = [_memory("language", "请始终用简洁中文回答", "preference"),
+            _memory("hobby", "爱好园艺", "preference")]
+    for query in ("准备面试", "优化简历", "介绍 Kafka", "你好"):
+        assert [item["id"] for item in select_memory(pool, query).items] == ["language"]

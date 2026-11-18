@@ -38,6 +38,16 @@ _DIAGNOSTIC_KEYS = frozenset(
         "omitted_count",
         "fallback_all_tools",
         "legacy_orphan_count",
+        "memory_strategy_version",
+        "memory_candidate_count",
+        "memory_irrelevant_count",
+        "memory_duplicate_count",
+        "memory_lexical_match_count",
+        "memory_scenario_match_count",
+        "memory_expression_match_count",
+        "memory_scenario_interview",
+        "memory_scenario_job",
+        "memory_scenario_resume",
     }
 )
 

@@ -1838,3 +1838,22 @@ def test_summary_replaces_only_matching_plain_prefix_and_falls_back_on_mismatch(
     fallback = ModelSurfaceProjector().project(replace(request, history=(frozen("user", "来源已编辑"),)))
     assert all("历史摘要" not in message.content for message in fallback.messages)
     assert any(message.content == "来源已编辑" for message in fallback.messages)
+
+
+def test_memory_retrieval_reasons_reach_safe_manifest() -> None:
+    bundle = _selector_bundle()
+    signals = ToolSelectionSignals(current_request="Kafka")
+    selection = select_tools(bundle.discovery_view(), bundle.authority_view(), signals)
+    values = tuple(replace(value, status="not_applicable", diagnostics={
+        "memory_strategy_version": 1, "memory_irrelevant_count": 2,
+        "memory_lexical_match_count": 1,
+    }) if value.name == "confirmed_memory" else value for value in contributors("Kafka"))
+    surface = ModelSurfaceProjector().project(ProjectionRequest(
+        model_call_id="memory-audit", contributors=values, history=(), tool_signals=signals,
+        provider_budgets=(ProviderBudget(),), selection=selection))
+    prepared = prepare_surface_manifest_v2(
+        surface.audit, key_id="11111111-1111-4111-8111-111111111111", secret=b"secret",
+        provider_identities=("provider/model",), provider_view=bundle.provider_view())
+    manifest = validate_context_manifest_json(prepared.manifest_json)
+    assert {"memory_retrieval_v1", "memory_irrelevant_omitted", "memory_lexical_match"} <= set(manifest["signals"])
+    assert "Kafka" not in prepared.manifest_json

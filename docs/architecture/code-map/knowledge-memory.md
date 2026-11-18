@@ -48,6 +48,7 @@ expected_version；省略元数据保留旧指纹并继承已有值，删除同�
 [load_optional_sources](../../../src/offerpilot/context_sources/loader.py) → [ContextSourceLoader](../../../src/offerpilot/context_projector/loader.py) 的有界只读快照 → Contributor → [context_projector](../../../src/offerpilot/context_projector/) 总预算与投影 → Pilot 模型输入。
 
 - Memory：版本与元数据关联后校验分类/UTC 期限，排除已到期项；投影为 content/category/valid_until/evidence_status，不把所有内容标为偏好。
+- Memory：`context_sources.memory.select_memory` 在 loader 的当前版本/期限硬过滤后按当前请求词法与软场景排序；已校验且启用的 Readiness 仅作模糊请求后备提示。去重后仍服从原子预算，固定理由码进入投影 manifest。规则与局限见 [ADR-0020](../decisions/0020-retrieve-memory-by-current-task.md)；测试见 `test_context_sources.py`、`test_conversation_readiness_context.py`、`test_context_projector.py`。
 - Knowledge：`recall_knowledge`（[context_sources/knowledge.py](../../../src/offerpilot/context_sources/knowledge.py)）同时召回当前 Note 与 Evidence，回读来源快照和有效性；[knowledge/search.py](../../../src/offerpilot/knowledge/search.py) `parse_query` 是检索解析入口。
 - Readiness：[readiness.py](../../../src/offerpilot/context_sources/readiness.py) 保存用户对目标面试/简历/确认版本的绑定；路由由 [readiness_api.py](../../../src/offerpilot/context_sources/readiness_api.py) 动态注册，不能从最近一次记录自动推断绑定。
 - 早期对话：[ConversationSummaryRepository.generate](../../../src/offerpilot/context_sources/summary.py) 显式生成确定性摘录，不调用模型；按精确来源替换可替换历史前缀。工具链、最近消息和 provider_blocks 不能被当成普通文本删去。
