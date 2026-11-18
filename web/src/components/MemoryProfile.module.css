@@ -48,3 +48,7 @@
 }
 @media (max-width:1100px) { .workspace { grid-template-columns:minmax(0,1fr); } .detail { min-height:200px; } }
 @media (max-width:600px) { .profile { padding:12px; } .header { align-items:flex-start; } .header h1 { font-size:23px; } .graph { grid-template-columns:1fr; gap:20px; } .cluster4,.me { grid-column:auto; } .canvas,.detail { padding:14px; } .toolbar { align-items:flex-start; flex-direction:column; } }
+
+.unclassified { position:relative; width:auto; margin-top:20px; }
+.metadataFields { display:grid; gap:8px; margin-top:20px; }
+.metadataFields select { padding:7px 11px; border:1px solid var(--op-border); border-radius:6px; background:var(--op-surface); color:var(--op-ink); font:inherit; }

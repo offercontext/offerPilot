@@ -11,7 +11,9 @@ import stat
 import sqlite3
 from contextlib import closing
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from sqlalchemy import Table
 from zipfile import ZipFile
 
 from offerpilot.backup_paths import archive_parts, validate_archive_index
@@ -102,8 +104,31 @@ def stage_archive(archive_path: Path, destination: Path, reference_db: Path) -> 
             if (not isinstance(manifest, dict) or manifest.get("format") != FORMAT
                     or manifest.get("files") != expected):
                 raise ValueError("archive_manifest_mismatch")
-        counts = validate_database(destination, reference_db)
+        # Only the precise immediate predecessor schema is eligible. Validate it
+        # read-only before running one fixed, additive DDL in the private stage.
+        counts = validate_database(destination, reference_db, allow_memory_predecessor=True)
+        with closing(_open_readonly(destination / "data.db")) as db:
+            needs_memory_metadata = not db.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='confirmed_memory_version_metadata'"
+            ).fetchone()
+        if needs_memory_metadata:
+            from sqlalchemy.dialects.sqlite import dialect
+            from sqlalchemy.schema import CreateTable
+            from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
+            ddl = str(CreateTable(cast(Table, ConfirmedMemoryVersionMetadata.__table__)).compile(dialect=dialect()))
+            with closing(sqlite3.connect(destination / "data.db")) as db:
+                db.execute("PRAGMA trusted_schema=OFF")
+                db.execute(ddl)
+                db.commit()
+            counts = validate_database(destination, reference_db)
+            if not legacy:
+                staged = workspace_files(destination)
+                (destination / MANIFEST).write_text(json.dumps({
+                    "format": FORMAT, "files": {name: value for name, value in staged.items() if name != MANIFEST}
+                }, ensure_ascii=False), encoding="utf-8")
+            files = workspace_files(destination)
         return {"files": files, "legacy": legacy, "counts": counts,
+                "schema_upgrade": "memory_metadata_v1" if needs_memory_metadata else None,
                 "sha256": file_digest(archive_path)}
     except BaseException:
         shutil.rmtree(destination)
@@ -138,15 +163,25 @@ def _attachment(root: Path, name: str, prefix: tuple[str, ...], *,
         raise ValueError("archive_attachment_mismatch")
 
 
-def validate_database(root: Path, reference_db: Path) -> dict[str, int]:
+def validate_database(root: Path, reference_db: Path, *, allow_memory_predecessor: bool = False) -> dict[str, int]:
     """Check exact current schema, relational integrity and owned attachment bytes."""
     if any((root / ("data.db" + suffix)).exists() for suffix in ("-wal", "-shm", "-journal")):
         raise ValueError("archive_database_sidecars")
     with closing(_open_readonly(root / "data.db")) as db, closing(
         _open_readonly(reference_db, immutable=False)
     ) as reference:
-        if _schema(db) != _schema(reference):
-            raise ValueError("archive_schema_mismatch")
+        actual_schema, expected_schema = _schema(db), _schema(reference)
+        if actual_schema != expected_schema:
+            from sqlalchemy.dialects.sqlite import dialect
+            from sqlalchemy.schema import CreateTable
+            from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
+            name = "confirmed_memory_version_metadata"
+            fixed_sql = str(CreateTable(cast(Table, ConfirmedMemoryVersionMetadata.__table__)).compile(dialect=dialect())).strip()
+            metadata_entry = ("table", name, name, fixed_sql)
+            predecessor = [entry for entry in expected_schema if entry != metadata_entry]
+            if not (allow_memory_predecessor and metadata_entry in expected_schema
+                    and actual_schema == predecessor):
+                raise ValueError("archive_schema_mismatch")
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)] or db.execute(
             "PRAGMA foreign_key_check"
         ).fetchone() is not None:

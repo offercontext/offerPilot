@@ -20,8 +20,9 @@ Readiness，也不替换原历史。作用域、完整性和未知读取错误�
 
 - Readiness 由用户在投递会话明确选择目标面试、简历和确认版本。复用领域 SelectionLoader 校验当前
   来源、Evidence、撤回状态与指纹；不推断目标、不转成长期能力标签。
-- Confirmed Memory 只保存用户明确确认的表达与排序偏好。提供查看、版本化编辑、撤回及删除；
-  幂等 Mutation/CAS 属于管理命令，Agent 不自动写入。Memory 不能证明外部事实。
+- Confirmed Memory 保存用户明确确认的个人记忆，分类与显式期限见 [ADR-0019](0019-version-memory-metadata.md)。
+  提供查看、版本化编辑、撤回及删除；过期停止后续召回但不自动删除，未知期限不从确认时间推断。
+  幂等 Mutation/CAS 属于管理命令，Agent 不自动写入。Memory 只作个性化参考，不能证明外部事实。
 - Knowledge 使用当前有效 Note 与 Evidence 两条召回通道，交替排序并分别保留预算；已被选中 Note
   覆盖的 Evidence 去重，未进入 Note 的 Evidence 仍可召回。引用必须回读到当前 Source Snapshot。
   Note 编辑产生新版本并保留 Evidence 绑定；归档、删除、源更新及撤回会阻止旧内容注入。

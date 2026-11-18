@@ -21,35 +21,48 @@ vi.mock('@/services/http', () => ({
 }));
 const { default: App } = await import('../../src/App');
 let root: Root; let client: QueryClient;
+let uiRun: { active: boolean; pending: Set<Promise<void>> };
+// Vitest's timeout does not cancel an async test body. Drain its in-flight act before
+// unmounting, and stop its continuation before it can touch the next test's root.
+async function uiAct(action: () => void | Promise<void>, run = uiRun) {
+  if (!run.active) throw new Error('UI test already disposed');
+  const pending = Promise.resolve(act(action));
+  run.pending.add(pending);
+  try { await pending; } finally { run.pending.delete(pending); }
+  if (!run.active) throw new Error('UI test already disposed');
+}
 const nativeComputedStyle = window.getComputedStyle.bind(window);
 function Harness() { const locale = useLocale(); return <QueryClientProvider client={client}><ThemeProvider><ConfigProvider locale={locale === 'en-US' ? enUS : zhCN}><AntApp><App /></AntApp></ConfigProvider></ThemeProvider></QueryClientProvider>; }
-async function flush() { await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); }); }
+async function flush() { await uiAct(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }); }
 async function waitForUi<T>(label: string, read: () => T | undefined): Promise<T> {
+  const run = uiRun; const queryClient = client; const api = state.api;
   try {
     return await vi.waitFor(async () => {
       // Lazy modules and query notifications must settle, not just a fixed number of timers.
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+      await uiAct(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); }, run);
       const value = read();
       expect(value, label).toBeDefined();
       return value!;
     }, { timeout: 2_000, interval: 20 });
   } catch (error) {
-    const queries = client.getQueryCache().getAll().map((query) => ({
+    if (!run.active) throw new Error('UI test already disposed');
+    const queries = queryClient.getQueryCache().getAll().map((query) => ({
       key: query.queryKey, status: query.state.status, fetchStatus: query.state.fetchStatus,
     }));
-    throw new Error(`${String(error)}\nURL: ${location.href}\nDOM: ${document.body.textContent}\nQueries: ${JSON.stringify(queries)}\nRequests: ${JSON.stringify(state.api.requests)}\nUnexpected: ${JSON.stringify(state.api.unexpected)}`);
+    throw new Error(`${String(error)}\nURL: ${location.href}\nDOM: ${document.body.textContent}\nQueries: ${JSON.stringify(queries)}\nRequests: ${JSON.stringify(api.requests)}\nUnexpected: ${JSON.stringify(api.unexpected)}`);
   }
 }
-async function mount(view: string) { history.replaceState({}, '', `/?view=${view}`); await act(async () => root.render(<Harness />)); for (let i = 0; i < 4; i++) await flush(); }
+async function mount(view: string) { history.replaceState({}, '', `/?view=${view}`); await uiAct(async () => root.render(<Harness />)); await uiAct(async () => { await vi.dynamicImportSettled(); }); await waitForUi('mounted queries settled', () => client.isFetching() === 0 ? true : undefined); }
 function buttons(text: string) { return [...document.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent?.replace(/\s+/g, '') === text.replace(/\s+/g, '') || b.getAttribute('aria-label') === text); }
-async function click(text: string) { const b = buttons(text).find((b) => !b.disabled); if (!b) throw new Error(`No button: ${text}\n${document.body.textContent}`); await act(async () => b.click()); await flush(); }
+async function click(text: string) { const b = buttons(text).find((b) => !b.disabled); if (!b) throw new Error(`No button: ${text}\n${document.body.textContent}`); await uiAct(async () => b.click()); await uiAct(async () => { await vi.dynamicImportSettled(); }); await flush(); }
 function fill(selector: string, value: string) { const el = document.querySelector<HTMLInputElement | HTMLTextAreaElement>(selector); if (!el) throw new Error(`Missing field ${selector}`); act(() => { Object.getOwnPropertyDescriptor(el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(el, value); el.dispatchEvent(new Event('input', { bubbles: true })); }); }
-async function switchLocale(locale: 'zh-CN' | 'en-US') { await act(async () => setLocale(locale)); await flush(); }
+async function switchLocale(locale: 'zh-CN' | 'en-US') { await uiAct(async () => setLocale(locale)); await flush(); }
 // Content-free session liveness is not a domain/model mutation. Keep all other writes guarded.
 function writes() { return state.api.requests.filter((r: any) => r.method !== 'GET' && !(r.method === 'POST' && r.path === '/api/companion/presence')); }
 function chineseUi() { const text = document.body.textContent ?? ''; return text.replaceAll('简体中文', '').replaceAll('用户原文保持不变 / user content stays unchanged', '').match(/[\u3400-\u9fff]+/g) ?? []; }
 
 beforeEach(() => {
+  uiRun = { active: true, pending: new Set() };
   state.api = createFixtureApi(); document.body.replaceChildren(); localStorage.clear(); setLocale('zh-CN');
   localStorage.setItem('offerpilot:pilot-mascot-visible', 'false');
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -66,9 +79,34 @@ beforeEach(() => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
   root = createRoot(document.body.appendChild(document.createElement('div')));
 });
-afterEach(() => { act(() => root.unmount()); client.clear(); vi.unstubAllGlobals(); vi.restoreAllMocks(); setLocale('zh-CN'); });
+afterEach(async () => {
+  uiRun.active = false;
+  await Promise.allSettled([...uiRun.pending]);
+  await act(async () => root.unmount());
+  await client.cancelQueries(); client.clear();
+  vi.unstubAllGlobals(); vi.restoreAllMocks(); setLocale('zh-CN');
+});
 
 describe('real AppShell localization with strict synthetic API fixtures', () => {
+  it('never lets a disposed UI waiter read the next test run', async () => {
+    const previous = uiRun;
+    const read = vi.fn(() => document.getElementById('next-run-target') ?? undefined);
+    const waiting = waitForUi('previous run target', read);
+    previous.active = false;
+    const next = { active: true, pending: new Set<Promise<void>>() };
+    uiRun = next;
+    const target = document.body.appendChild(document.createElement('div'));
+    target.id = 'next-run-target';
+    try {
+      await expect(waiting).rejects.toThrow('UI test already disposed');
+      expect(read).not.toHaveBeenCalled();
+      expect(next.pending.size).toBe(0);
+      expect(previous.pending.size).toBe(0);
+    } finally {
+      target.remove(); uiRun = previous; previous.active = true;
+    }
+  });
+
   it('retains the normal backend authored mail status fields in the browser fixture', () => {
     expect(state.api.handle('GET', '/api/job-mail/status').data).toMatchObject({
       execution_location: '本地/自托管后端', recognition_mode: 'offline_rules',
@@ -124,7 +162,7 @@ describe('real AppShell localization with strict synthetic API fixtures', () => 
   it('does not translate retained user and AI message bodies when the shared Pilot UI switches language', async () => {
     state.api = createFixtureApi({ retainedConversation: true }); await mount('pilot');
     const title = [...document.querySelectorAll<HTMLElement>('button,[role="button"]')].find((el) => el.textContent?.includes('Synthetic retained conversation'))!;
-    expect(title).toBeDefined(); await act(async () => title.click()); for (let i = 0; i < 4; i++) await flush();
+    expect(title).toBeDefined(); await uiAct(async () => title.click()); await waitForUi('retained message bodies', () => document.body.textContent?.includes(retainedUserBody) && document.body.textContent.includes(retainedAiBody) ? true : undefined);
     expect(document.body.textContent).toContain(retainedUserBody); expect(document.body.textContent).toContain(retainedAiBody);
     const before = writes().length; await switchLocale('en-US'); expect(document.body.textContent).toContain(retainedUserBody); expect(document.body.textContent).toContain(retainedAiBody);
     await switchLocale('zh-CN'); expect(document.body.textContent).toContain(retainedUserBody); expect(document.body.textContent).toContain(retainedAiBody);
@@ -134,7 +172,7 @@ describe('real AppShell localization with strict synthetic API fixtures', () => 
     await mount('interview'); await switchLocale('en-US');
     expect(document.querySelector('[data-testid="free-practice-workspace"]')).not.toBeNull();
     await click(t('快速模拟'));
-    for (let i = 0; i < 4; i++) await flush();
+    await waitForUi('interview practice surface', () => document.querySelector('[data-testid="interview-practice-surface"]') ?? undefined);
     expect(document.querySelector('[data-testid="interview-practice-surface"]')).not.toBeNull();
     const before = writes().length; await switchLocale('zh-CN');
     expect(document.querySelector('[data-testid="interview-practice-surface"]')).not.toBeNull(); expect(writes()).toHaveLength(before);
@@ -144,7 +182,7 @@ describe('real AppShell localization with strict synthetic API fixtures', () => 
     state.api.handle('POST', '/api/job-mail/imports', {});
     await mount('reminders'); await switchLocale('en-US');
     const suggestion = await waitForUi('generated email suggestion', () => [...document.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Interview invitation')));
-    expect(suggestion).toBeDefined(); await act(async () => suggestion.click()); await flush();
+    expect(suggestion).toBeDefined(); await uiAct(async () => suggestion.click()); await flush();
     await waitForUi('enabled email preview action', () => buttons('Preview final changes').find((button) => !button.disabled));
     await click('Preview final changes');
     await waitForUi('generated email confirmation preview', () => [...document.querySelectorAll('h3')].find((heading) => heading.textContent === 'Final confirmation summary'));

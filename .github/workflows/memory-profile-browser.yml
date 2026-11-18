@@ -11,6 +11,8 @@ on:
       - 'web/tests/memory-profile/**'
       - 'src/offerpilot/confirmed_memory/**'
       - 'src/offerpilot/api.py'
+      - 'src/offerpilot/context_sources/**'
+      - 'web/src/services/confirmedMemory.ts'
       - '.github/workflows/memory-profile-browser.yml'
 permissions:
   contents: read
@@ -19,7 +21,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   browser:
-    if: github.event.pull_request.head.repo.full_name == github.repository && ((github.event.pull_request.number == 70 && github.event.pull_request.head.ref == 'feat/20261115-editable-memory-profile') || github.event.pull_request.head.ref == 'fix/20261116-memory-visual-polish')
+    if: github.event.pull_request.head.repo.full_name == github.repository && ((github.event.pull_request.number == 70 && github.event.pull_request.head.ref == 'feat/20261115-editable-memory-profile') || github.event.pull_request.head.ref == 'fix/20261116-memory-visual-polish' || github.event.pull_request.head.ref == 'feat/20261116-memory-metadata-contract')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
