@@ -302,3 +302,28 @@ def test_memory_technical_tokens_ignore_trailing_punctuation(term, suffix):
 def test_memory_technical_token_identity_is_preserved(left, right):
     from offerpilot.context_sources.memory import select_memory
     assert select_memory([_memory("other", left)], right).items == []
+
+
+def test_exploratory_memory_metrics_do_not_reward_duplicates_or_no_hit_recall():
+    from scripts.evaluate_memory_retrieval import measure
+    result = measure([{"group": "a"}, {"group": "a"}, {"group": "other"}], ["a", "b"])
+    assert result["recall"] == 0.5
+    assert result["irrelevant_count"] == 1
+    assert result["duplicate_count"] == 1
+    assert result["missing"] == ["b"]
+    assert measure([], [])["recall"] is None
+    assert measure([], [])["empty_correct"] is True
+    assert measure([{"group": "a"}], [])["empty_correct"] is False
+
+
+def test_exploratory_memory_comparison_is_repeatable_and_budget_bounded():
+    import json
+    from pathlib import Path
+    from scripts.evaluate_memory_retrieval import evaluate
+    fixture = json.loads((Path(__file__).resolve().parents[1] / "evals/fixtures/memory-retrieval-exploratory-v1.json").read_text())
+    # Full scenario matrix, not a quality-pass threshold.
+    results = evaluate(fixture)
+    assert results == evaluate(fixture)
+    assert len(results) == len(fixture["queries"]) * len(fixture["budgets"]) * len(fixture["id_order_seeds"]) * 2
+    assert all(row["bytes"] <= row["budget"] for row in results)
+    assert all("long" in row["oversize_relevant"] for row in results if row["case"] == "long_budget")
