@@ -1,0 +1,100 @@
+[
+  {
+    "repo": "BAAI/bge-small-zh-v1.5",
+    "revision": "7999e1d3359715c523056ef9478215996d62a620",
+    "license": "mit",
+    "files": [
+      {
+        "name": "README.md",
+        "size": 27670,
+        "sha256": null,
+        "git_blob": "20e39cd51a31d3afb1d003a9a4239f527530b1c0"
+      },
+      {
+        "name": "config.json",
+        "size": 776,
+        "sha256": null,
+        "git_blob": "f79ec8dfc5812a1d5d7d2e69253eb9054be2246d"
+      },
+      {
+        "name": "model.safetensors",
+        "size": 95827648,
+        "sha256": "354763b9b1357bc9c44f62c6be2276321081ed2567773608c0d0785b61d5a026",
+        "git_blob": "f0a3ffbd80eb817ece290d57976319a542d3ce00"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "size": 125,
+        "sha256": null,
+        "git_blob": "a8b3208c2884c4efb86e49300fdd3dc877220cdf"
+      },
+      {
+        "name": "tokenizer.json",
+        "size": 439125,
+        "sha256": null,
+        "git_blob": "cdb3043fc938fc918c06e66cf704c2ba58f88747"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "size": 367,
+        "sha256": null,
+        "git_blob": "3a59388f0fd1bd22dec2ce7902c1be8e1fb84107"
+      },
+      {
+        "name": "vocab.txt",
+        "size": 109540,
+        "sha256": null,
+        "git_blob": "ca4f9781030019ab9b253c6dcb8c7878b6dc87a5"
+      }
+    ]
+  },
+  {
+    "repo": "intfloat/multilingual-e5-small",
+    "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+    "license": "mit",
+    "files": [
+      {
+        "name": "README.md",
+        "size": 497538,
+        "sha256": null,
+        "git_blob": "e56327af55e9742caf76bff9ba83b6904cd2003d"
+      },
+      {
+        "name": "config.json",
+        "size": 655,
+        "sha256": null,
+        "git_blob": "60a2a84020f1d74cc53ea9e8c4e91cf4af6c2b68"
+      },
+      {
+        "name": "model.safetensors",
+        "size": 470641600,
+        "sha256": "1a55775f53449dac10a2bcbc312469fac40b96d53198c407081a831f81c98477",
+        "git_blob": "fe4cbb2a14318b79019748874f6ca4a61a02c6f6"
+      },
+      {
+        "name": "sentencepiece.bpe.model",
+        "size": 5069051,
+        "sha256": "cfc8146abe2a0488e9e2a0c56de7952f7c11ab059eca145a0a727afce0db2865",
+        "git_blob": "7a3f40a75f870bc1f21700cd414dc2acc431583c"
+      },
+      {
+        "name": "special_tokens_map.json",
+        "size": 167,
+        "sha256": null,
+        "git_blob": "e0b1d18ecd0ae4ff1d47bd297d910c0cf83e504b"
+      },
+      {
+        "name": "tokenizer.json",
+        "size": 17082730,
+        "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+        "git_blob": "c9b2fea3119ca8886380e5f47bffc5ea7a6e0ffa"
+      },
+      {
+        "name": "tokenizer_config.json",
+        "size": 443,
+        "sha256": null,
+        "git_blob": "059214673d9d6d2ee319411e2ffec8c024b816d5"
+      }
+    ]
+  }
+]
