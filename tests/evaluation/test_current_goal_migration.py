@@ -115,17 +115,17 @@ def _wire_evidence(tmp_path, mutation):
     fixture = json.loads(
         (ROOT / "evals/fixtures/synthetic-e09-current-goal-v1.json").read_bytes()
     )
-    unit = dict(id="memory-1", version=1, preference=fixture["memory"])
+    unit = dict(id="memory-1", version=1, content=fixture["memory"], category="unclassified", valid_until=None, evidence_status="user_confirmed")
     selected, wire = deepcopy(unit), deepcopy(unit)
     for field, replacement in [
-        ("id", "other-memory"), ("version", 2), ("preference", "替换过的偏好")
+        ("id", "other-memory"), ("version", 2), ("content", "替换过的偏好")
     ]:
         if mutation == f"selected_{field}":
             selected[field] = replacement
         if mutation == f"wire_{field}":
             wire[field] = replacement
     content = canonical_json(wire).decode()
-    needle = wire["preference"].encode()
+    needle = wire["content"].encode()
     start = content.encode().find(needle)
     current = fixture["current_request"] if mutation != "missing_current_request" else "其他请求"
     raw = json.dumps(dict(messages=[
@@ -178,8 +178,8 @@ def _wire_evidence(tmp_path, mutation):
 
 @pytest.mark.parametrize("mutation,expected", [
     ("complete", True), ("selected_id", False), ("selected_version", False),
-    ("selected_preference", False), ("wire_id", False), ("wire_version", False),
-    ("wire_preference", False), ("missing_current_request", False),
+    ("selected_content", False), ("wire_id", False), ("wire_version", False),
+    ("wire_content", False), ("missing_current_request", False),
     ("wrong_call", None), ("wrong_execution", None), ("missing_final", None),
     ("missing_file", None), ("wrong_hash", None), ("content_only", False),
     ("bad_range", False),

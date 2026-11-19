@@ -1,0 +1,155 @@
+........................................................................ [ 18%]
+.......................F........................ss...................... [ 36%]
+........................................................................ [ 55%]
+........................................................................ [ 73%]
+........................................................................ [ 91%]
+................................                                         [100%]
+=================================== FAILURES ===================================
+_______ test_unknown_late_release_waits_for_committed_execution_terminal _______
+
+tmp_path = PosixPath('/tmp/pytest-of-agent/pytest-7/test_unknown_late_release_wait0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x7fb74e2d0b30>
+
+    def test_unknown_late_release_waits_for_committed_execution_terminal(tmp_path, monkeypatch):
+        database = tmp_path / "data.db"
+        with sqlite3.connect(database) as conn:
+            conn.execute(
+                "CREATE TABLE pilot_executions (turn_id TEXT, generation INTEGER, conversation_id INTEGER, state TEXT, protocol TEXT)"
+            )
+            conn.execute(
+                "INSERT INTO pilot_executions VALUES ('turn',2,1,'running','pilot-runtime-v1')"
+            )
+
+        def state():
+            with sqlite3.connect(database) as conn:
+                return conn.execute("SELECT state FROM pilot_executions").fetchone()[0]
+
+        confirmed = False
+        released = False
+        sleeps = []
+        pending = dict(
+            tool_name="update_application_event",
+            operation_id="operation",
+            confirmation_token="synthetic",
+            args=dict(id=1, scheduled_at="2026-10-14T15:00:00+08:00"),
+        )
+        identity = dict(
+            turn_id="turn",
+            conversation_id=1,
+            execution_generation=2,
+            protocol_version="pilot-runtime-v1",
+        )
+
+>       class Driver:
+
+tests/evaluation/test_unknown_cleanup_boundary.py:44:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests/evaluation/test_unknown_cleanup_boundary.py:46: in Driver
+    client = httpx.Client()
+             ^^^^^^^^^^^^^^
+.venv/lib/python3.12/site-packages/httpx/_client.py:700: in __init__
+    else self._init_proxy_transport(
+.venv/lib/python3.12/site-packages/httpx/_client.py:750: in _init_proxy_transport
+    return HTTPTransport(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <httpx.HTTPTransport object at 0x7fb74e2d2b40>, verify = True
+cert = None, trust_env = True, http1 = True, http2 = False
+limits = Limits(max_connections=100, max_keepalive_connections=20, keepalive_expiry=5.0)
+proxy = Proxy('socks5h://127.0.0.1:41081'), uds = None, local_address = None
+retries = 0, socket_options = None
+
+    def __init__(
+        self,
+        verify: ssl.SSLContext | str | bool = True,
+        cert: CertTypes | None = None,
+        trust_env: bool = True,
+        http1: bool = True,
+        http2: bool = False,
+        limits: Limits = DEFAULT_LIMITS,
+        proxy: ProxyTypes | None = None,
+        uds: str | None = None,
+        local_address: str | None = None,
+        retries: int = 0,
+        socket_options: typing.Iterable[SOCKET_OPTION] | None = None,
+    ) -> None:
+        import httpcore
+
+        proxy = Proxy(url=proxy) if isinstance(proxy, (str, URL)) else proxy
+        ssl_context = create_ssl_context(verify=verify, cert=cert, trust_env=trust_env)
+
+        if proxy is None:
+            self._pool = httpcore.ConnectionPool(
+                ssl_context=ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                uds=uds,
+                local_address=local_address,
+                retries=retries,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("http", "https"):
+            self._pool = httpcore.HTTPProxy(
+                proxy_url=httpcore.URL(
+                    scheme=proxy.url.raw_scheme,
+                    host=proxy.url.raw_host,
+                    port=proxy.url.port,
+                    target=proxy.url.raw_path,
+                ),
+                proxy_auth=proxy.raw_auth,
+                proxy_headers=proxy.headers.raw,
+                ssl_context=ssl_context,
+                proxy_ssl_context=proxy.ssl_context,
+                max_connections=limits.max_connections,
+                max_keepalive_connections=limits.max_keepalive_connections,
+                keepalive_expiry=limits.keepalive_expiry,
+                http1=http1,
+                http2=http2,
+                socket_options=socket_options,
+            )
+        elif proxy.url.scheme in ("socks5", "socks5h"):
+            try:
+                import socksio  # noqa
+            except ImportError:  # pragma: no cover
+>               raise ImportError(
+                    "Using SOCKS proxy, but the 'socksio' package is not installed. "
+                    "Make sure to install httpx using `pip install httpx[socks]`."
+                ) from None
+E               ImportError: Using SOCKS proxy, but the 'socksio' package is not installed. Make sure to install httpx using `pip install httpx[socks]`.
+
+.venv/lib/python3.12/site-packages/httpx/_transports/default.py:191: ImportError
+=============================== warnings summary ===============================
+tests/pilot_runtime/test_confirmation_cutover.py: 31 warnings
+  /workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/src/offerpilot/api.py:1610: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("startup")
+
+tests/pilot_runtime/test_confirmation_cutover.py: 62 warnings
+  /workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/.venv/lib/python3.12/site-packages/fastapi/applications.py:4675: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+tests/pilot_runtime/test_confirmation_cutover.py: 31 warnings
+  /workspace/scratch/ec4f8dbd42da/memory-gate-2ba470fa/src/offerpilot/api.py:1618: DeprecationWarning:
+          on_event is deprecated, use lifespan event handlers instead.
+
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+
+    @app.on_event("shutdown")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+SKIPPED [2] tests/evaluation/test_windows_owner.py:9: Windows token ownership
+1 failed, 389 passed, 2 skipped, 124 warnings in 579.51s (0:09:39)

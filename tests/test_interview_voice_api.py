@@ -43,10 +43,15 @@ def start(tmp_path, quick=False):
 @pytest.mark.parametrize("quick", [False, True])
 def test_both_contexts_auto_save_recover_and_report_provenance(tmp_path, ready_runtime, quick):
     client, base, attempt, context = start(tmp_path, quick)
-    granted = client.post("/api/interview-voice/sessions", json={
+    consent_payload = {
         **context, "attempt_id": attempt, "turn_no": 1, "request_key": "grant",
         "consent": True, "consent_revision": "interview-realtime-v1",
-    })
+    }
+    rejected = client.post("/api/interview-voice/sessions", json=consent_payload,
+                           headers={"Origin": "https://untrusted.invalid", "Sec-Fetch-Site": "cross-site"})
+    assert rejected.status_code == 403 and rejected.json()["error_code"] == "voice_origin_rejected"
+    granted = client.post("/api/interview-voice/sessions", json=consent_payload,
+                          headers={"Origin": "http://testserver"})
     assert granted.status_code == 200, granted.text
     grant = granted.json()
     path = f"{base}/{attempt}/turns"
@@ -112,3 +117,59 @@ def test_runtime_proxy_never_targets_nonlocal_or_credentialed_urls(monkeypatch, 
     monkeypatch.setenv("OFFERPILOT_VOICE_RUNTIME_URL", url)
     with pytest.raises(ValueError):
         routes.runtime_url()
+
+
+def test_workspace_backup_keeps_accepted_answer_but_revokes_microphone_grant(tmp_path, ready_runtime):
+    from contextlib import closing
+    from io import BytesIO
+    import sqlite3
+    from zipfile import ZipFile
+
+    from offerpilot import backup_restore
+    from offerpilot.backup_archive import MANIFEST, workspace_files
+    from tests.test_memory_metadata_backup import pack
+
+    root = tmp_path / "live"
+    client, base, attempt, context = start(root)
+    grant = client.post("/api/interview-voice/sessions", json={
+        **context, "attempt_id": attempt, "turn_no": 1, "request_key": "grant",
+        "consent": True, "consent_revision": "interview-realtime-v1",
+    }).json()
+    answer = {"turn_no": 1, "answer_text": "保留已经保存的答案", "turn_idempotency_key": "answer",
+              "input_source": "voice", "acceptance_method": "session_auto",
+              "voice_session_id": grant["session_id"], "voice_session_epoch": grant["epoch"],
+              "voice_consent_revision": grant["consent_revision"], "voice_session_token": grant["token"]}
+    assert client.post(f"{base}/{attempt}/turns", json=answer).status_code == 200
+    before = workspace_files(root)
+    export = client.get("/api/backups/export")
+    assert export.status_code == 200, export.text
+    assert workspace_files(root) == before
+    assert client.post(f"/api/interview-voice/sessions/{grant['session_id']}/snapshot",
+                       json={"token": grant["token"]}).json()["active"]
+    source = tmp_path / "exported"
+    with ZipFile(BytesIO(export.content)) as archive:
+        archive.extractall(source)  # trusted test-owned archive
+    with closing(sqlite3.connect(source / "data.db")) as db:
+        assert db.execute("SELECT state FROM interview_voice_sessions").fetchall() == [("revoked",)]
+        assert db.execute("SELECT acceptance_method FROM mock_interview_answer_acceptance").fetchall() == [
+            ("session_auto",),
+        ]
+        # Simulate a compatible older exporter that serialized a live grant.
+        db.execute("UPDATE interview_voice_sessions SET state='active'")
+        db.commit()
+    assert (source / MANIFEST).is_file()
+    candidate_zip = tmp_path / "candidate.zip"
+    pack(source, candidate_zip)
+    before = workspace_files(root)
+    preview = client.post("/api/backups/restore/preview", content=candidate_zip.read_bytes())
+    assert preview.status_code == 200, preview.text
+    assert workspace_files(root) == before
+    state = backup_restore.read_record(root)
+    stage, _, _ = backup_restore.operation_paths(root, state)
+    assert workspace_files(stage) == state["files"]
+    with closing(sqlite3.connect(stage / "data.db")) as db:
+        assert db.execute("SELECT state FROM interview_voice_sessions").fetchall() == [("revoked",)]
+        assert db.execute("SELECT answer_text FROM mock_interview_turns").fetchall() == [(answer["answer_text"],)]
+        assert db.execute("SELECT acceptance_method FROM mock_interview_answer_acceptance").fetchall() == [
+            ("session_auto",),
+        ]

@@ -21,6 +21,7 @@ import {
 import styles from './Sidebar.module.css';
 
 const MODULE_ICONS: Record<ModuleKey, React.ReactNode> = {
+  memory: <BulbOutlined />,
   today: <DashboardOutlined />,
   applications: <AppstoreOutlined />,
   interview: <AudioOutlined />,

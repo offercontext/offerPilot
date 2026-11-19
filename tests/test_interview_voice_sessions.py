@@ -51,9 +51,9 @@ def test_auto_answer_requires_live_scoped_consent_and_replay_survives_close(tmp_
     interviews.submit_answer(request.attempt_id, 1, "我的回答", "answer-key", acceptance=acceptance)
     with factory() as db:
         turn = db.scalar(select(MockInterviewTurn).where(MockInterviewTurn.attempt_id == request.attempt_id))
-        assert turn.acceptance_method == "session_auto"
-        assert turn.input_source == "voice"
-        assert turn.voice_consent_revision == CONSENT_REVISION
+        assert turn.voice_acceptance.acceptance_method == "session_auto"
+        assert turn.voice_acceptance.input_source == "voice"
+        assert turn.voice_acceptance.voice_consent_revision == CONSENT_REVISION
         assert db.scalar(select(InterviewVoiceSession)).state == "revoked"
     with pytest.raises(VoiceAdmissionError, match="接受方式"):
         interviews.submit_answer(request.attempt_id, 1, "我的回答", "answer-key")
@@ -134,7 +134,7 @@ def test_expired_lease_is_not_revived_and_manual_fallback_is_allowed(tmp_path):
     with pytest.raises(VoiceAdmissionError):
         interviews.submit_answer(request.attempt_id, 1, "late", "key", acceptance=_acceptance(grant))
     interviews.submit_answer(request.attempt_id, 1, "manual", "key", acceptance=AnswerAcceptance(input_source="voice"))
-    assert interviews.get_turn(request.attempt_id, 1).acceptance_method == "manual"
+    assert interviews.get_turn(request.attempt_id, 1).voice_acceptance.acceptance_method == "manual"
 
 
 @pytest.mark.parametrize("consent", [False, 1, "true"])
@@ -166,15 +166,14 @@ def test_additive_migration_preserves_historical_answers_without_invented_proven
     interviews.submit_answer(request.attempt_id, 1, "history", "old-key")
     factory.kw["bind"].dispose()
     path = tmp_path / "voice.db"
-    columns = ("input_source", "acceptance_method", "voice_session_id", "voice_session_epoch", "voice_consent_revision")
     with sqlite3.connect(path) as db:
-        for column in columns:
-            db.execute(f"ALTER TABLE mock_interview_turns DROP COLUMN {column}")
+        db.execute("DROP TABLE mock_interview_answer_acceptance")
         db.execute("DROP TABLE interview_voice_sessions")
-        db.execute("DELETE FROM schema_migrations WHERE version = '0033_interview_voice_sessions'")
+        db.execute("DELETE FROM schema_migrations WHERE version = '0041_interview_voice_sessions'")
     for _ in range(2):
         migrated = init_database(path)
         migrated.kw["bind"].dispose()
     with sqlite3.connect(path) as db:
-        assert db.execute("SELECT answer_text, input_source, acceptance_method FROM mock_interview_turns").fetchone() == ("history", None, None)
-        assert db.execute("SELECT count(*) FROM schema_migrations WHERE version = '0033_interview_voice_sessions'").fetchone()[0] == 1
+        assert db.execute("SELECT answer_text FROM mock_interview_turns").fetchone() == ("history",)
+        assert db.execute("SELECT COUNT(*) FROM mock_interview_answer_acceptance").fetchone()[0] == 0
+        assert db.execute("SELECT count(*) FROM schema_migrations WHERE version = '0041_interview_voice_sessions'").fetchone()[0] == 1

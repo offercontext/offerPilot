@@ -1,4 +1,4 @@
-# ADR-0013: 用受限会话接入实时面试语音
+# ADR-0020: 用受限会话接入实时面试语音
 
 - Status: Accepted（实验功能，非发布验收通过）
 - 日期: 2026-10-13
@@ -19,7 +19,8 @@ worker 聚合流式修订并撤销被续说打断的结束候选；只有模型�
 
 暂停/隐藏/离开收音视图先同步停止 tracks，再撤销会话，不取消已发出的业务写入。浏览器请求前保留原恢复身份；重启连接需要再次授权。资料变化、连接失效、失败恢复不得静默恢复收音。题目播报只消费主服务校验后的当前题；中断以 generation 丢弃旧音频，并保存有界内存回执（question_id、playback_id、近似位置），不声称精确听闻内容。
 
-新增 additive migration 0033：会话表及 turn provenance，可空历史字段明确显示来源未知。记录 input_source、acceptance_method、voice_session_id、epoch 和 consent_revision。通用 Chat/Agent 写工具的 HITL 不变。
+新增 additive migration 0041：会话与回答来源各用一张独立表，旧 turn 表不变，可空历史字段明确显示来源未知。记录 input_source、acceptance_method、voice_session_id、epoch 和 consent_revision。通用 Chat/Agent 写工具的 HITL 不变。
+工作区备份保留已提交回答及接受来源，但不会恢复麦克风授权。导入只对受支持的旧版精确 schema 在隔离副本添加固定表，不改原始 ZIP 或当前工作区。
 
 ## Consequences
 

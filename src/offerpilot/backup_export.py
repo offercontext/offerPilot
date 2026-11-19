@@ -11,7 +11,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from offerpilot.backup_archive import (
     FORMAT, MANIFEST, MAX_COMPRESSED, MAX_EXPANDED, MAX_MANIFEST,
-    stage_archive, validate_database, workspace_files,
+    revoke_archived_voice_leases, stage_archive, validate_database, workspace_files,
 )
 from offerpilot.backup_paths import archive_parts
 
@@ -35,6 +35,9 @@ def export_archive(root: Path, redacted_config: str) -> bytes:
                 sqlite3.connect(stage / "data.db")
             ) as target:
                 source.backup(target)
+                # A workspace backup preserves answers, not live microphone authority.
+                revoke_archived_voice_leases(target)
+                target.commit()
             total = (stage / "data.db").stat().st_size
             for name in workspace_files(root):
                 if name in _EXCLUDED or name.startswith(".agent-journal-key.json."):

@@ -1,0 +1,57 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> offerpilot-web@0.1.0 test
+> vitest run src/components/MemoryProfile.test.tsx src/layout/navigation.test.ts src/layout/viewRoute.test.ts src/lib/pilotPageContext.test.ts src/i18n/catalogs.test.ts
+
+
+ RUN  v2.1.9 /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web
+
+ ✓ src/layout/viewRoute.test.ts (13 tests) 4ms
+ ✓ src/layout/navigation.test.ts (3 tests) 2ms
+ ✓ src/lib/pilotPageContext.test.ts (15 tests) 15ms
+ ✓ src/i18n/catalogs.test.ts (2 tests) 661ms
+   ✓ authored UI translation coverage > covers literal translation requests and prevents new raw Chinese JSX copy 589ms
+stderr | src/components/MemoryProfile.test.tsx > cancels without a write and reopens the saved content
+Warning: `NaN` is an invalid value for the `height` css style property.
+    at textarea
+    at DomWrapper (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-resize-observer/lib/SingleObserver/DomWrapper.js:21:34)
+    at SingleObserver (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-resize-observer/lib/SingleObserver/index.js:18:24)
+    at ResizeObserver (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-resize-observer/lib/index.js:24:24)
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-textarea/lib/ResizableTextArea.js:30:22
+    at span
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-input/lib/BaseInput.js:20:23
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-textarea/lib/TextArea.js:27:27
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/antd/lib/input/TextArea.js:38:18
+    at div
+    at div
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-dialog/lib/Dialog/Content/MemoChildren.js:12:23
+    at div
+    at div
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-dialog/lib/Dialog/Content/Panel.js:30:25
+    at DomWrapper (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-motion/lib/DomWrapper.js:20:34)
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-motion/lib/CSSMotion.js:42:32
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-dialog/lib/Dialog/Content/index.js:21:25
+    at div
+    at div
+    at Dialog (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-dialog/lib/Dialog/index.js:26:32)
+    at /workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/@rc-component/portal/lib/Portal.js:35:20
+    at DialogWrap (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/rc-dialog/lib/DialogWrap.js:27:23)
+    at NoFormStyle (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/antd/lib/form/context.js:32:3)
+    at NoCompactStyle (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/antd/lib/space/Compact.js:52:5)
+    at ContextIsolator (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/antd/lib/_util/ContextIsolator.js:14:5)
+    at Modal (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/antd/lib/modal/Modal.js:55:18)
+    at section
+    at MemoryProfile (/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/src/components/MemoryProfile.tsx:29:26)
+    at QueryClientProvider (file:///workspace/scratch/ec4f8dbd42da/memory-profile-20261115/web/node_modules/@tanstack/react-query/build/modern/QueryClientProvider.js:20:3)
+
+ ✓ src/components/MemoryProfile.test.tsx (6 tests) 2450ms
+   ✓ cancels without a write and reopens the saved content 690ms
+   ✓ locks duplicate submits and immediately replaces stale cached text 445ms
+   ✓ reuses the original mutation identity after an uncertain response 431ms
+   ✓ requires deletion confirmation and clears detail and cached history 333ms
+   ✓ does not expose a cached previous version after external update and history read failure 312ms
+
+ Test Files  5 passed (5)
+      Tests  39 passed (39)
+   Start at  12:20:25
+   Duration  6.87s (transform 1.75s, setup 0ms, collect 4.16s, tests 3.13s, environment 160ms, prepare 239ms)

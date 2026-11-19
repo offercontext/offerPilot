@@ -6,14 +6,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, model_validator
-from sqlalchemy import select, text, update
+from sqlalchemy import delete, select, text, update
 from sqlalchemy.orm import Session, sessionmaker
 
-from .models import ConfirmedMemory, ConfirmedMemoryMutation, ConfirmedMemoryVersion
+from .models import ConfirmedMemory, ConfirmedMemoryMutation, ConfirmedMemoryVersion, ConfirmedMemoryVersionMetadata
+from .metadata import MemoryMetadata, temporal_status
 
 
 class MemoryMutation(BaseModel):
@@ -24,6 +25,8 @@ class MemoryMutation(BaseModel):
     confirmed: StrictBool
     content: str = Field(default="", max_length=2000)
 
+    metadata: MemoryMetadata | None = None
+
     @model_validator(mode="after")
     def check_confirmation(self) -> MemoryMutation:
         if self.confirmed is not True:
@@ -33,6 +36,8 @@ class MemoryMutation(BaseModel):
             raise ValueError("确认内容不能为空")
         if self.action != "confirm" and self.content:
             raise ValueError("撤回与删除不能包含正文")
+        if "metadata" in self.model_fields_set and (self.metadata is None or self.action != "confirm"):
+            raise ValueError("元数据仅可随确认操作提供，且不能为 null")
         return self
 
 
@@ -58,16 +63,20 @@ class ConfirmedMemoryRepository:
             rows = session.scalars(query.order_by(ConfirmedMemory.id).limit(101)).all()
             if len(rows) > 100:
                 raise MemoryConflict("memory_capacity_exceeded")
-            return [self._view(session, row) for row in rows]
+            now = datetime.now(timezone.utc)
+            views = [self._view(session, row, now=now) for row in rows]
+            return [view for view in views if not active_only or view["temporal_status"] != "expired"]
 
     def get(self, memory_id: str) -> dict[str, object]:
         with self.sessions() as session:
             row = session.get(ConfirmedMemory, memory_id)
             if row is None or row.state == "deleted":
                 raise MemoryGone("memory_gone")
-            view = self._view(session, row)
+            now = datetime.now(timezone.utc)
+            view = self._view(session, row, now=now)
             view["versions"] = [{"version": version.version, "content": version.content,
-                                 "confirmed_at": version.confirmed_at}
+                                 "confirmed_at": version.confirmed_at,
+                                 **self._metadata_view(session, version, now)}
                                 for version in session.scalars(select(ConfirmedMemoryVersion).where(
                                     ConfirmedMemoryVersion.memory_id == row.id).order_by(
                                         ConfirmedMemoryVersion.version).limit(100))]
@@ -77,6 +86,9 @@ class ConfirmedMemoryRepository:
         # 确认、撤回和删除都受版本及 mutation_id 保护；撤回保留内容，删除清空全部版本正文。
         # 同 mutation 的重放核对输入指纹，但返回当前可见状态，不恢复被后续删除的内容。
         body = command.model_dump(mode="json")
+        # Omission preserves the exact pre-metadata request fingerprint.
+        if "metadata" not in command.model_fields_set:
+            body.pop("metadata")
         body["memory_id"] = memory_id
         fingerprint = sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         with self.sessions() as session:
@@ -117,13 +129,24 @@ class ConfirmedMemoryRepository:
             row.current_version += 1
             if command.action == "confirm":
                 row.state = "active"
-                session.add(ConfirmedMemoryVersion(id=str(uuid4()), memory_id=row.id,
+                version = ConfirmedMemoryVersion(id=str(uuid4()), memory_id=row.id,
                     version=row.current_version, content=command.content,
-                    confirmed_at=datetime.now(timezone.utc).isoformat()))
+                    confirmed_at=datetime.now(timezone.utc).isoformat())
+                session.add(version)
+                session.flush()
+                metadata = command.metadata
+                if metadata is None:
+                    prior_metadata = self._metadata_view(session, self._latest_version_before(session, row, version.version), datetime.now(timezone.utc))["metadata"]
+                    metadata = MemoryMetadata.model_validate({k: prior_metadata[k] for k in ("category", "valid_until")})
+                session.add(ConfirmedMemoryVersionMetadata(version_id=version.id,
+                    category=metadata.category, valid_until=metadata.valid_until))
             elif command.action == "withdraw":
                 row.state = "withdrawn"
             else:
                 row.state = "deleted"
+                session.execute(delete(ConfirmedMemoryVersionMetadata).where(
+                    ConfirmedMemoryVersionMetadata.version_id.in_(select(ConfirmedMemoryVersion.id).where(
+                        ConfirmedMemoryVersion.memory_id == row.id))))
                 session.execute(update(ConfirmedMemoryVersion).where(
                     ConfirmedMemoryVersion.memory_id == row.id).values(content=""))
             session.add(ConfirmedMemoryMutation(id=str(command.mutation_id), memory_id=row.id,
@@ -134,10 +157,29 @@ class ConfirmedMemoryRepository:
             return result
 
     @staticmethod
-    def _view(session: Session, row: ConfirmedMemory) -> dict[str, object]:
-        version = session.scalar(select(ConfirmedMemoryVersion).where(
+    def _latest_version_before(session: Session, row: ConfirmedMemory, version: int) -> ConfirmedMemoryVersion | None:
+        return session.scalar(select(ConfirmedMemoryVersion).where(
+            ConfirmedMemoryVersion.memory_id == row.id, ConfirmedMemoryVersion.version < version
+        ).order_by(ConfirmedMemoryVersion.version.desc()).limit(1))
+
+    @staticmethod
+    def _latest_version(session: Session, row: ConfirmedMemory) -> ConfirmedMemoryVersion | None:
+        return session.scalar(select(ConfirmedMemoryVersion).where(
             ConfirmedMemoryVersion.memory_id == row.id).order_by(
                 ConfirmedMemoryVersion.version.desc()).limit(1))
+
+    @staticmethod
+    def _metadata_view(session: Session, version: ConfirmedMemoryVersion | None, now: datetime) -> dict[str, Any]:
+        record = session.get(ConfirmedMemoryVersionMetadata, version.id) if version else None
+        metadata = MemoryMetadata.model_validate({"category": record.category if record else "unclassified",
+                                                  "valid_until": record.valid_until if record else None})
+        return {"metadata": {**metadata.model_dump(), "evidence_status": "user_confirmed"},
+                "temporal_status": temporal_status(metadata.valid_until, now)}
+
+    @classmethod
+    def _view(cls, session: Session, row: ConfirmedMemory, *, now: datetime | None = None) -> dict[str, object]:
+        version = cls._latest_version(session, row)
         return {"id": row.id, "current_version": row.current_version, "state": row.state,
                 "content": version.content if version and row.state != "deleted" else "",
-                "confirmed_at": version.confirmed_at if version and row.state != "deleted" else None}
+                "confirmed_at": version.confirmed_at if version and row.state != "deleted" else None,
+                **cls._metadata_view(session, version, now or datetime.now(timezone.utc))}

@@ -12,6 +12,7 @@ export type ViewMode =
   | 'questions'
   | 'resumes'
   | 'pilot'
+  | 'memory'
   | 'settings';
 
 export type ModuleKey =
@@ -21,6 +22,7 @@ export type ModuleKey =
   | 'offers'
   | 'resources'
   | 'pilot'
+  | 'memory'
   | 'settings';
 
 export type NavigationGroupKey = 'primary' | 'resources' | 'utility';
@@ -54,6 +56,7 @@ export const MODULE_NAV: ModuleNavItem[] = [
   { key: 'interview', get label() { return t("面试"); }, defaultView: 'interview', group: 'primary' },
   { key: 'offers', label: 'Offer', defaultView: 'offers', group: 'primary' },
   { key: 'resources', get label() { return t("素材库"); }, defaultView: 'resumes', group: 'resources' },
+  { key: 'memory', get label() { return t("记忆画像"); }, defaultView: 'memory', group: 'resources' },
   { key: 'settings', get label() { return t("设置"); }, defaultView: 'settings', group: 'utility' },
 ];
 
@@ -80,6 +83,7 @@ export const MODULE_TABS: Record<ModuleKey, ModuleTabItem[]> = {
     { view: 'knowledge', get label() { return t("参考知识"); } },
   ],
   pilot: [{ view: 'pilot', get label() { return t("会话中心"); } }],
+  memory: [{ view: 'memory', get label() { return t("记忆画像"); } }],
   settings: [{ view: 'settings', get label() { return t("设置"); } }],
 };
 
@@ -96,6 +100,7 @@ const VIEW_TO_MODULE: Partial<Record<ViewMode, ModuleKey>> = {
   offers: 'offers',
   interview: 'interview',
   pilot: 'pilot',
+  memory: 'memory',
   settings: 'settings',
 };
 
@@ -106,6 +111,7 @@ const DEFAULT_VIEW_BY_MODULE: Record<ModuleKey, ViewMode> = {
   offers: 'offers',
   resources: 'resumes',
   pilot: 'pilot',
+  memory: 'memory',
   settings: 'settings',
 };
 

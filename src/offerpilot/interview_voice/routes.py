@@ -6,7 +6,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -49,11 +49,22 @@ async def runtime_request(path: str, payload: dict[str, Any] | None = None) -> d
         ) from exc
 
 
+def _check_same_origin(request: Request) -> None:
+    # Native runtimes send no browser origin. A browser cannot grant itself a
+    # microphone lease on a different workspace origin.
+    origin = request.headers.get("origin")
+    if request.headers.get("sec-fetch-site") == "cross-site" or (
+        origin is not None and origin != f"{request.url.scheme}://{request.url.netloc}"
+    ):
+        raise VoiceAdmissionError("voice_origin_rejected", "实时语音请求来源无效。", 403)
+
+
 def register_interview_voice_routes(
     app: FastAPI, sessions: sessionmaker[Session], secret: str,
     serialize_turn: Callable[[Any, list[Any]], dict[str, Any]],
 ) -> None:
     repository = InterviewVoiceRepository(sessions, secret)
+    router = APIRouter(dependencies=[Depends(_check_same_origin)])
 
     @app.exception_handler(VoiceAdmissionError)
     async def admission_error(_request: Request, exc: VoiceAdmissionError) -> JSONResponse:
@@ -72,7 +83,7 @@ def register_interview_voice_routes(
         ]
         return result
 
-    @app.get("/api/interview-voice/capabilities")
+    @router.get("/api/interview-voice/capabilities")
     async def capabilities() -> dict[str, Any]:
         try:
             health = await runtime_request("/health")
@@ -86,7 +97,7 @@ def register_interview_voice_routes(
             "stores_audio": False,
         }
 
-    @app.post("/api/interview-voice/sessions")
+    @router.post("/api/interview-voice/sessions")
     async def create_session(payload: VoiceSessionCreate) -> dict[str, Any]:
         if not (await capabilities())["available"]:
             raise VoiceAdmissionError("voice_runtime_unavailable", "语音模型尚未就绪。", 503)
@@ -95,28 +106,28 @@ def register_interview_voice_routes(
         except MockInterviewSourceChanged as exc:
             raise VoiceAdmissionError("voice_source_changed", "冻结来源已变化，请重新开始练习。") from exc
 
-    @app.post("/api/interview-voice/sessions/{session_id}/heartbeat")
+    @router.post("/api/interview-voice/sessions/{session_id}/heartbeat")
     def heartbeat(session_id: str, payload: VoiceSessionAccess) -> dict[str, bool]:
         repository.heartbeat(session_id, payload.token)
         return {"active": True}
 
-    @app.post("/api/interview-voice/sessions/{session_id}/close")
+    @router.post("/api/interview-voice/sessions/{session_id}/close")
     def close(session_id: str, payload: VoiceSessionAccess) -> dict[str, bool]:
         repository.close(session_id, payload.token)
         return {"active": False}
 
-    @app.post("/api/interview-voice/sessions/{session_id}/snapshot")
+    @router.post("/api/interview-voice/sessions/{session_id}/snapshot")
     def read_snapshot(session_id: str, payload: VoiceSessionAccess) -> dict[str, Any]:
         return snapshot(session_id, payload.token)
 
-    @app.post("/api/interview-voice/sessions/{session_id}/offer")
+    @router.post("/api/interview-voice/sessions/{session_id}/offer")
     async def offer(session_id: str, payload: VoiceOffer) -> dict[str, Any]:
         snapshot(session_id, payload.token, active=True)
         return await runtime_request("/offer", {
             "session_id": session_id, "token": payload.token, "sdp": payload.sdp, "type": "offer",
         })
 
-    @app.post(RUNTIME_INSPECT_PATH)
+    @router.post(RUNTIME_INSPECT_PATH)
     def runtime_inspect(payload: VoiceRuntimeInspect) -> dict[str, Any]:
         # This one route uses the narrowly scoped capability instead of the workspace token.
         # It is read-only, checks the live lease, and never exposes unrelated workspace data.
@@ -127,3 +138,5 @@ def register_interview_voice_routes(
             "turn_no", "question", "turn_status", "question_idempotency_key",
         )} if last else None)
         return result
+
+    app.include_router(router)

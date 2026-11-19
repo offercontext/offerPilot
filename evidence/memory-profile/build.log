@@ -1,0 +1,89 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> offerpilot-web@0.1.0 build
+> tsc -b && vite build
+
+vite v5.4.21 building for production...
+transforming...
+✓ 4135 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                 0.63 kB │ gzip:   0.36 kB
+dist/assets/ort-wasm-simd-threaded-CSWrxU1M.mjs                24.18 kB
+dist/assets/ort-wasm-simd-threaded.asyncify-CVnZHRES.mjs       47.39 kB
+dist/assets/offlineWhisper.worker-BamyWiDu.js                 291.68 kB
+dist/assets/transformers.web-71CQpuRV.js                      557.74 kB
+dist/assets/pdf.worker.min-wgc6bjNh.mjs                     1,078.61 kB
+dist/assets/haru-window-light-Db8DCCxc.png                  1,643.80 kB
+dist/assets/haru-window-dark-LJoxYlT0.png                   1,654.40 kB
+dist/assets/ort-wasm-simd-threaded-DG5OvNve.wasm           12,942.61 kB
+dist/assets/ort-wasm-simd-threaded.asyncify-DMmc6YqF.wasm  23,567.05 kB
+dist/assets/InterviewV01View-k0GsvgQ-.css                       0.56 kB │ gzip:   0.33 kB
+dist/assets/ActionDetailDrawer-CjNR_d7B.css                     0.59 kB │ gzip:   0.33 kB
+dist/assets/ApplicationListView-DpbVief4.css                    1.23 kB │ gzip:   0.54 kB
+dist/assets/RemindersView-5hszgocO.css                          1.80 kB │ gzip:   0.75 kB
+dist/assets/index-0bV8_Nm8.css                                  3.46 kB │ gzip:   1.23 kB
+dist/assets/MemoryProfile-CUMrZORe.css                          3.74 kB │ gzip:   1.24 kB
+dist/assets/QuestionBankView-DBKfSxPa.css                       4.08 kB │ gzip:   1.23 kB
+dist/assets/SettingsView-DLh4zqkC.css                           4.37 kB │ gzip:   1.34 kB
+dist/assets/jobMail-CvzVQuzV.css                                5.93 kB │ gzip:   1.56 kB
+dist/assets/VoiceCoachingGrowthView-B8uM8zW0.css                6.49 kB │ gzip:   1.76 kB
+dist/assets/CalendarView-6HkdP3mX.css                           6.59 kB │ gzip:   1.87 kB
+dist/assets/ExperienceMaterialsView-BximN_rN.css                6.89 kB │ gzip:   1.74 kB
+dist/assets/InterviewPracticeView-BLOc1kmk.css                  8.00 kB │ gzip:   2.10 kB
+dist/assets/OfferCenterView-BBg_AVpC.css                        8.29 kB │ gzip:   2.16 kB
+dist/assets/InterviewReadinessCenter-B1Dokilm.css              10.54 kB │ gzip:   2.40 kB
+dist/assets/DesktopHaruWindow-Dmz4Yn07.css                     11.60 kB │ gzip:   3.02 kB
+dist/assets/ResumeLibraryView-Dn9NqMas.css                     19.14 kB │ gzip:   4.01 kB
+dist/assets/DashboardView-DKym1AGd.css                         23.20 kB │ gzip:   4.63 kB
+dist/assets/index-By2edGqm.css                                 27.14 kB │ gzip:   5.86 kB
+dist/assets/App-DFaAR_pc.css                                  150.24 kB │ gzip:  27.09 kB
+dist/assets/modal-CNRdNmif.js                                   0.34 kB │ gzip:   0.27 kB
+dist/assets/pilotEvidenceFocus-CHL-nUn7.js                      0.51 kB │ gzip:   0.35 kB
+dist/assets/HolderOutlined-DEUG3vzB.js                          0.58 kB │ gzip:   0.34 kB
+dist/assets/DownloadOutlined-ChjyA7I1.js                        0.63 kB │ gzip:   0.43 kB
+dist/assets/StarOutlined-CjW5gv_B.js                            0.80 kB │ gzip:   0.54 kB
+dist/assets/UserOutlined-tfGYq-Xj.js                            1.01 kB │ gzip:   0.62 kB
+dist/assets/adaptiveInterviewPractice-BsQiOgCf.js               1.33 kB │ gzip:   0.81 kB
+dist/assets/jobMail.module-BXsamRpK.js                          1.41 kB │ gzip:   0.65 kB
+dist/assets/ActionDetailDrawer-Bd7DMJtg.js                      2.15 kB │ gzip:   1.04 kB
+dist/assets/unsafe-eval-IWUFebYZ.js                             3.82 kB │ gzip:   1.12 kB
+dist/assets/index-cDR1tDOH.js                                   5.73 kB │ gzip:   2.72 kB
+dist/assets/JobMailImport-CU70C5H4.js                           6.66 kB │ gzip:   3.88 kB
+dist/assets/VoiceCoachingGrowthView-DmBXNlqK.js                 9.20 kB │ gzip:   4.05 kB
+dist/assets/index-Bp3o1vCM.js                                  10.71 kB │ gzip:   3.96 kB
+dist/assets/MemoryProfile-B-W8DM-6.js                          11.00 kB │ gzip:   5.20 kB
+dist/assets/InterviewV01View-Dwo9aujN.js                       11.13 kB │ gzip:   4.63 kB
+dist/assets/DesktopHaruWindow-D_pO-N4p.js                      11.21 kB │ gzip:   4.59 kB
+dist/assets/materialClassification-CYygzGTf.js                 13.63 kB │ gzip:   4.32 kB
+dist/assets/CalendarView-BPXgEgaE.js                           14.61 kB │ gzip:   6.30 kB
+dist/assets/QuestionBankView-BEJPI3Ph.js                       15.00 kB │ gzip:   6.26 kB
+dist/assets/live2dRuntime-DuPdZwcw.js                          15.28 kB │ gzip:   7.49 kB
+dist/assets/AISettingsDrawer-BGCqjghY.js                       15.84 kB │ gzip:   6.66 kB
+dist/assets/date-Cwq_fdqx.js                                   18.54 kB │ gzip:   7.19 kB
+dist/assets/InterviewReadinessCenter-_Pj2fsdJ.js               21.22 kB │ gzip:   8.06 kB
+dist/assets/ExperienceMaterialsView-BWRhWASr.js                22.77 kB │ gzip:   7.75 kB
+dist/assets/RemindersView-DSxTY85M.js                          23.59 kB │ gzip:   9.43 kB
+dist/assets/OfferCenterView-C-XgzePH.js                        30.25 kB │ gzip:  11.88 kB
+dist/assets/DashboardView-DFrZuyZt.js                          30.68 kB │ gzip:  11.58 kB
+dist/assets/InterviewPracticeView-DmXXx9Ru.js                  31.74 kB │ gzip:  11.75 kB
+dist/assets/index-CK2mVRGe.js                                  34.95 kB │ gzip:  12.37 kB
+dist/assets/SettingsView--fpJ7ZED.js                           68.39 kB │ gzip:  27.54 kB
+dist/assets/ResumeLibraryView-CHdpKxFw.js                      77.31 kB │ gzip:  29.00 kB
+dist/assets/query-COwRRUep.js                                  93.05 kB │ gzip:  31.56 kB
+dist/assets/cubism4.es-DK2M4X0m.js                            119.79 kB │ gzip:  30.19 kB
+dist/assets/react-ChEbJDhd.js                                 142.86 kB │ gzip:  45.78 kB
+dist/assets/ApplicationListView-dA2fb6ZT.js                   153.10 kB │ gzip:  50.29 kB
+dist/assets/markdown-JlBgymW1.js                              156.91 kB │ gzip:  47.46 kB
+dist/assets/KnowledgeSourcesView-XeNSyLK7.js                  218.54 kB │ gzip:  69.05 kB
+dist/assets/pixi-DRrj84mv.js                                  259.04 kB │ gzip:  68.11 kB
+dist/assets/core-CwWOxmwm.js                                  269.90 kB │ gzip:  78.36 kB
+dist/assets/pdf-C2NMrW9w.js                                   445.50 kB │ gzip: 131.75 kB
+dist/assets/index-Cm12nlV6.js                                 552.46 kB │ gzip: 219.06 kB
+dist/assets/App-2zHq-kP5.js                                 1,559.45 kB │ gzip: 490.27 kB
+
+(!) Some chunks are larger than 1500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 9.02s

@@ -29,3 +29,11 @@ class ConfirmedMemoryMutation(Base):
     memory_id: Mapped[str] = mapped_column(ForeignKey("confirmed_memories.id"), nullable=False)
     fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ConfirmedMemoryVersionMetadata(Base):
+    """Immutable metadata for one confirmed version; absent legacy rows are unknown."""
+    __tablename__ = "confirmed_memory_version_metadata"
+    version_id: Mapped[str] = mapped_column(ForeignKey("confirmed_memory_versions.id"), primary_key=True)
+    category: Mapped[str] = mapped_column(String(24), nullable=False)
+    valid_until: Mapped[str | None] = mapped_column(String(40), nullable=True)

@@ -73,7 +73,9 @@ export class RealtimeVoiceController {
       this.grant = grant;
       this.abort = new AbortController();
       this.heartbeat = setInterval(() => {
-        void this.deps.action(grant, 'heartbeat').catch(() => this.pause('语音授权已失效，请恢复后重新开启。'));
+        void this.deps.action(grant, 'heartbeat').catch(() => {
+          if (generation === this.generation) void this.pause('语音授权已失效，请恢复后重新开启。');
+        });
       }, 10000);
       const media = await this.deps.connect(grant,
         (data) => { if (generation === this.generation) void this.receive(data); },
@@ -148,7 +150,7 @@ export class RealtimeVoiceController {
     this.patch({ transcript: '', supplemental: false });
   }
   async pause(message = '已暂停。重新开启需要再次授权本场自动记录。', manual = false) {
-    ++this.generation;
+    const generation = ++this.generation;
     this.abort?.abort();
     this.abort = undefined;
     this.media?.close();
@@ -160,31 +162,34 @@ export class RealtimeVoiceController {
     if (grant) {
       try { await this.deps.action(grant, 'close'); }
       catch {
-        this.patch({ locked: true, revocationPending: true });
+        if (generation === this.generation) this.patch({ locked: true, revocationPending: true });
         return;
       }
+      if (generation !== this.generation) return;
       if (this.grant === grant) this.grant = undefined;
     }
     this.patch({ locked: false });
   }
 }
 
-async function connectMedia(
+export async function connectMedia(
   grant: VoiceGrant, message: (data: unknown) => void, disconnected: () => void,
   signal: AbortSignal,
 ): Promise<MediaConnection> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: {
-    echoCancellation: true, noiseSuppression: true, autoGainControl: true,
-  } });
   const peer = new RTCPeerConnection({ iceServers: [] });
-  const audio = new Audio();
+  let stream: MediaStream | undefined;
+  let audio: HTMLAudioElement;
+  let channel: RTCDataChannel;
+  try {
+    audio = new Audio();
+    channel = peer.createDataChannel('pipecat');
+  } catch (error) { peer.close(); throw error; }
   audio.autoplay = true;
   let closed = false;
   let playback = -1;
   let playbackStart = -1;
   let questionId: unknown;
   let ping: ReturnType<typeof setInterval> | undefined;
-  const channel = peer.createDataChannel('pipecat');
   const media: MediaConnection = {
     send: (data) => { if (channel.readyState === 'open') channel.send(JSON.stringify(data)); },
     mute: () => {
@@ -195,7 +200,7 @@ async function connectMedia(
     close: () => {
       closed = true;
       clearInterval(ping);
-      stream.getTracks().forEach((track) => track.stop());
+      stream?.getTracks().forEach((track) => track.stop());
       audio.pause(); audio.srcObject = null;
       channel.close(); peer.close();
     },
@@ -203,8 +208,14 @@ async function connectMedia(
   signal.addEventListener('abort', media.close, { once: true });
   if (signal.aborted) { media.close(); throw new Error('Voice connection cancelled'); }
   try {
-    stream.getTracks().forEach((track) => {
-      peer.addTrack(track, stream);
+    const opened = await navigator.mediaDevices.getUserMedia({ audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+    } });
+    stream = opened;
+    // getUserMedia cannot be aborted while a native permission dialog is open.
+    if (signal.aborted) throw new Error('Voice connection cancelled');
+    opened.getTracks().forEach((track) => {
+      peer.addTrack(track, opened);
       track.onended = () => { if (!closed) disconnected(); };
     });
     peer.ontrack = (event) => {
@@ -254,5 +265,5 @@ async function connectMedia(
     await peer.setRemoteDescription(answer);
     await open;
     return media;
-  } catch (error) { media.close(); throw error; }
+  } catch (error) { signal.removeEventListener('abort', media.close); media.close(); throw error; }
 }

@@ -1,0 +1,58 @@
+name: Memory profile real browser acceptance
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'web/src/components/MemoryProfile*'
+      - 'web/src/components/ConfirmedMemorySettings.tsx'
+      - 'web/src/layout/**'
+      - 'web/src/i18n/**'
+      - 'web/tests/memory-profile/**'
+      - 'src/offerpilot/confirmed_memory/**'
+      - 'src/offerpilot/api.py'
+      - 'src/offerpilot/context_sources/**'
+      - 'web/src/services/confirmedMemory.ts'
+      - '.github/workflows/memory-profile-browser.yml'
+permissions:
+  contents: read
+concurrency:
+  group: memory-profile-browser-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  browser:
+    if: github.event.pull_request.head.repo.full_name == github.repository && ((github.event.pull_request.number == 70 && github.event.pull_request.head.ref == 'feat/20261115-editable-memory-profile') || github.event.pull_request.head.ref == 'fix/20261116-memory-visual-polish' || github.event.pull_request.head.ref == 'feat/20261116-memory-metadata-contract')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: uv sync --frozen
+      - run: npm ci --prefix web
+      - run: npm run build --prefix web
+      - name: Install Chromium and CJK fonts
+        working-directory: web
+        run: |
+          npx --no-install playwright-core install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-noto-cjk
+      - name: Exercise actual UI and isolated HTTP backend
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node web/tests/memory-profile/run.mjs artifacts/memory-profile-browser
+      - name: Preserve exact-source screenshots and assertions
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memory-profile-browser-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/memory-profile-browser
+          if-no-files-found: error
+          retention-days: 14

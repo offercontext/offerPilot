@@ -1,0 +1,27 @@
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/features/reviewReadiness/reviewReadinessNegativeFixtures.test.ts > review readiness negative fixture gate > keeps the production frontend inside the closed ownership and privacy boundary
+AssertionError: expected [ 'navigation:top-level-expanded' ] to deeply equal []
+
+- Expected
++ Received
+
+- Array []
++ Array [
++   "navigation:top-level-expanded",
++ ]
+
+ ❯ src/features/reviewReadiness/reviewReadinessNegativeFixtures.test.ts:8936:46
+    8934|
+    8935|   it('keeps the production frontend inside the closed ownership and pr…
+    8936|     expect(auditProductionOnce().violations).toEqual([]);
+       |                                              ^
+    8937|   });
+    8938| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed | 312 passed (313)
+      Tests  1 failed | 3175 passed (3176)
+   Start at  13:30:47
+   Duration  74.45s (transform 13.43s, setup 0ms, collect 129.58s, tests 87.96s, environment 30.35s, prepare 11.44s)

@@ -4664,6 +4664,7 @@ def test_chat_page_context_validation_does_not_append_to_existing_conversation(t
         "reviews",
         "offers",
         "knowledge",
+        "memory",
         "questions",
         "resumes",
         "pilot",

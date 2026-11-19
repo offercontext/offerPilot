@@ -1,0 +1,89 @@
+ERROR:    Exception in ASGI application
+Traceback (most recent call last):
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 136, in app
+    response = await f(request)
+               ^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 739, in app
+    raise validation_error
+fastapi.exceptions.RequestValidationError: 1 validation error:
+  {'type': 'value_error', 'loc': ('body',), 'msg': 'Value error, 请明确确认此项操作', 'input': {'mutation_id': '9d2c3e25-3843-415b-8919-7a3b7f3488c6', 'expected_version': 2, 'content': 'unconfirmed', 'action': 'confirm', 'confirmed': False}, 'ctx': {'error': ValueError('请明确确认此项操作')}}
+
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/src/offerpilot/confirmed_memory/api.py", line 34, in change_memory
+    POST /api/confirmed-memory/{memory_id}
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/uvicorn/protocols/http/httptools_impl.py", line 422, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/uvicorn/middleware/proxy_headers.py", line 63, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/applications.py", line 1163, in __call__
+    await super().__call__(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/applications.py", line 90, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 186, in __call__
+    raise exc
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/middleware/errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/middleware/base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/src/offerpilot/api.py", line 1396, in cors_middleware
+    response = await call_next(request)
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/middleware/base.py", line 168, in call_next
+    raise app_exc from app_exc.__cause__ or app_exc.__context__
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/middleware/base.py", line 144, in coro
+    await self.app(scope, receive_or_disconnect, send_no_error)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/middleware/exceptions.py", line 63, in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 53, in wrapped_app
+    raise exc
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 42, in wrapped_app
+    await app(scope, receive, sender)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/middleware/asyncexitstack.py", line 18, in __call__
+    await self.app(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/routing.py", line 660, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 2683, in app
+    await route.handle(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 1266, in handle
+    await super().handle(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/routing.py", line 276, in handle
+    await self.app(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/fastapi/routing.py", line 150, in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/_exception_handler.py", line 59, in wrapped_app
+    response = await handler(conn, exc)  # type: ignore[arg-type]
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/src/offerpilot/api.py", line 1444, in validation_exception_handler
+    return JSONResponse(
+           ^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/responses.py", line 192, in __init__
+    super().__init__(content, status_code, headers, media_type, background)
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/responses.py", line 45, in __init__
+    self.body = self.render(content)
+                ^^^^^^^^^^^^^^^^^^^^
+  File "/workspace/scratch/ec4f8dbd42da/memory-profile-20261115/.venv/lib/python3.12/site-packages/starlette/responses.py", line 195, in render
+    return json.dumps(
+           ^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/json/__init__.py", line 238, in dumps
+    **kw).encode(obj)
+          ^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/json/encoder.py", line 200, in encode
+    chunks = self.iterencode(o, _one_shot=True)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/json/encoder.py", line 258, in iterencode
+    return _iterencode(o, 0)
+           ^^^^^^^^^^^^^^^^^
+  File "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/lib/python3.12/json/encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type ValueError is not JSON serializable
+Traceback (most recent call last):
+  File "<stdin>", line 36, in <module>
+AssertionError

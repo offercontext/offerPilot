@@ -1,1 +1,1 @@
-"""Explicitly confirmed workspace preferences; never inferred from model output."""
+"""Explicitly confirmed personal memory; never inferred from model output."""

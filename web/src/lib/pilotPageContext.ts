@@ -19,6 +19,7 @@ export const PILOT_VIEW_LABELS: Record<ViewMode, string> = {
   get questions() { return t("题库"); },
   get resumes() { return t("简历"); },
   pilot: 'Pilot',
+  get memory() { return t("记忆画像"); },
   get settings() { return t("设置"); },
 };
 
@@ -103,7 +104,7 @@ export function displayPilotPageLabel(context: PilotPageContext): string {
     dashboard: '今日', board: '投递看板', 'applications-list': '投递列表',
     calendar: '投递日历', reminders: '提醒', interview: '面试', reviews: '经历素材',
     offers: 'Offer', knowledge: '参考资料', questions: '题库', resumes: '简历',
-    pilot: 'Pilot', settings: '设置',
+    memory: '记忆画像', pilot: 'Pilot', settings: '设置',
   };
   return sources[context.view] ? translateKnownLabel(sources[context.view], context.label) : context.label;
 }

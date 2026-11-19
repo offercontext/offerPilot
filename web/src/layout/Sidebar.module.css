@@ -151,3 +151,13 @@
     transition: none;
   }
 }
+
+/* The global compact shell uses a horizontal navigation strip. Do not retain
+   the desktop viewport height or vertically pinned utility section. */
+@media (max-width: 700px) {
+  .sidebar { height: auto; position: relative; overflow-y: hidden; }
+  .group, .utility { flex-direction: row; align-items: center; margin: 0; padding: 0; }
+  .groupLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .navItem, .utilityButton { width: auto; flex-shrink: 0; }
+  .mascotSlot { display: none; }
+}

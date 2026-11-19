@@ -41,9 +41,14 @@ def test_unknown_late_release_waits_for_committed_execution_terminal(tmp_path, m
         protocol_version="pilot-runtime-v1",
     )
 
+    def reject_network(request):
+        pytest.fail("offline cleanup-boundary test attempted a network request")
+
     class Driver:
         deadline = time.monotonic() + 10
-        client = httpx.Client()
+        # Keep httpx request serialization, but never consult proxy configuration
+        # or send traffic: this driver's request method is an in-process fixture.
+        client = httpx.Client(transport=httpx.MockTransport(reject_network))
 
         def request(self, method, path, body=None, allowed=(200, 202)):
             nonlocal confirmed

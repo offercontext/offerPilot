@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { RealtimeVoiceController, type RealtimeAnswer } from './realtimeVoiceController';
+import { connectMedia, RealtimeVoiceController, type RealtimeAnswer } from './realtimeVoiceController';
 import { automaticAcceptance } from '@/services/interviewVoice';
 import { createStudioState, reduceStudioState } from '@/features/interviewStudio/interviewStudioController';
 
@@ -16,7 +16,7 @@ function setup(answer = vi.fn<(answer: RealtimeAnswer) => Promise<'saved' | 'unk
   const controller = new RealtimeVoiceController({ onState: vi.fn(), onAnswer: answer }, deps);
   return { controller, answer, media, deps };
 }
-afterEach(() => vi.useRealTimers());
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe('realtime voice ownership and business boundary', () => {
   it('ignores late manual and control messages from an already saved turn', async () => {
@@ -103,6 +103,41 @@ describe('realtime voice ownership and business boundary', () => {
     expect(controller.state.status).toBe('manual');
     expect(controller.state.transcript).toBe('不能改动的原文');
     expect(controller.state.message).toContain('原尝试恢复');
+  });
+
+  it('ignores an expired heartbeat from a prior generation after reopen', async () => {
+    vi.useFakeTimers();
+    const { controller, deps, media } = setup();
+    let reject!: (reason: Error) => void;
+    const abandoned = new Promise<void>((_resolve, deny) => { reject = deny; });
+    await controller.start(input);
+    deps.action.mockReturnValueOnce(abandoned);
+    await vi.advanceTimersByTimeAsync(10000);
+    await controller.pause();
+    const replacement = { ...grant, session_id: 'replacement' };
+    deps.create.mockResolvedValueOnce(replacement);
+    await controller.start(input);
+    reject(new Error('old lease expired'));
+    await Promise.resolve();
+    expect(controller.state.status).toBe('listening');
+    expect(media.close).toHaveBeenCalledOnce();
+    expect(deps.action).not.toHaveBeenCalledWith(replacement, 'close');
+    await controller.pause();
+  });
+
+  it('does not ask for microphone access when WebRTC setup throws', async () => {
+    const close = vi.fn();
+    const getUserMedia = vi.fn();
+    vi.stubGlobal('RTCPeerConnection', class {
+      close = close;
+      createDataChannel() { throw new Error('cannot create data channel'); }
+    });
+    vi.stubGlobal('Audio', class {});
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+    await expect(connectMedia(grant, vi.fn(), vi.fn(), new AbortController().signal))
+      .rejects.toThrow('cannot create data channel');
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it('expires media when heartbeats fail', async () => {

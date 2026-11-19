@@ -489,6 +489,7 @@ CHAT_PAGE_CONTEXT_VIEWS = {
     "reviews",
     "offers",
     "knowledge",
+    "memory",
     "questions",
     "resumes",
     "pilot",
@@ -1091,15 +1092,16 @@ def _mock_interview_turn_json(turn: Any, turns: list[Any]) -> dict[str, Any]:
                 "excerpt": previous_answer[:160],
             }
             basis_refs = [parent_ref] + [ref for ref in basis_refs if ref != parent_ref]
+    acceptance = turn.voice_acceptance
     return {
         "turn_no": turn.turn_no,
         "question": turn.question_text,
         "answer": turn.answer_text,
-        "input_source": turn.input_source,
-        "acceptance_method": turn.acceptance_method,
-        "voice_session_id": turn.voice_session_id,
-        "voice_session_epoch": turn.voice_session_epoch,
-        "voice_consent_revision": turn.voice_consent_revision,
+        "input_source": acceptance.input_source if acceptance is not None else None,
+        "acceptance_method": acceptance.acceptance_method if acceptance is not None else None,
+        "voice_session_id": acceptance.voice_session_id if acceptance is not None else None,
+        "voice_session_epoch": acceptance.voice_session_epoch if acceptance is not None else None,
+        "voice_consent_revision": acceptance.voice_consent_revision if acceptance is not None else None,
         "question_kind": question_kind,
         "parent_turn_no": parent_turn_no,
         "topic_root_turn_no": topic_root_turn_no,
@@ -1436,6 +1438,9 @@ def create_app(
         if request.url.path.startswith("/api/job-mail/"):
             # Mail and credentials must not be echoed in validation diagnostics.
             return error_response(422, "邮件请求字段无效，请检查必填字段、时间与确认内容", code="job_mail_invalid_payload")
+        if request.url.path == "/api/confirmed-memory" or request.url.path.startswith("/api/confirmed-memory/"):
+            # Memory validators carry ValueError in ctx; never serialize it or echo private text.
+            return error_response(422, "记忆请求无效，请明确确认内容与操作", code="memory_invalid_payload")
         errors = exc.errors()
         if errors and all(
             err.get("type") == "int_parsing"
@@ -9313,6 +9318,7 @@ def _chat_page_context_messages(page_context: dict[str, Any] | None) -> list[Mes
         "reviews": "notes",
         "offers": "offers",
         "knowledge": "workspace",
+        "memory": "workspace",
         "questions": "workspace",
         "resumes": "resumes",
         "pilot": "workspace",

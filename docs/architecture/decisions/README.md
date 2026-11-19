@@ -7,7 +7,7 @@
 
 ### 面试语音
 
-- [ADR-0013: 用受限会话接入实时面试语音](./0013-scope-realtime-interview-voice.md) — Accepted（实验功能）
+- [ADR-0020: 用受限会话接入实时面试语音](./0020-scope-realtime-interview-voice.md) — Accepted（实验功能）
 
 ### 简历与材料
 
@@ -57,7 +57,9 @@ Knowledge 长期领域模型与数据流见 [Knowledge 系统主文档](../knowl
 - [ADR-0010: 由 Runtime 持有 Pilot 执行，客户端只订阅进度](./0010-own-pilot-execution-in-runtime.md) — Accepted
 - [ADR-0011: 按确认、范围和预算装配可选上下文](./0011-bound-optional-context-sources.md) — Accepted
 - [ADR-0012: 持久化有界的本地主动任务](./0012-bound-local-proactive-jobs.md) — Accepted
-- [ADR-0013: 持久化受当前模型能力约束的原生图片消息](./0013-persist-native-image-messages.md) — Accepted
+- [ADR-0020: 持久化受当前模型能力约束的原生图片消息](./0013-persist-native-image-messages.md) — Accepted
+
+- [ADR-0019: 版本化个人记忆分类与显式有效期](./0019-version-memory-metadata.md) — Proposed（实现验证中）
 
 ### 决策链
 

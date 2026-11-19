@@ -53,4 +53,4 @@ uv run python scripts/evaluate_turns.py --manifest corpus.json --min-samples 200
 
 已验证引擎的失败/恢复边界，以及使用合成音频的真实 WebRTC 连接、出声、停止和授权失效。真实本地模型 smoke 已发现中文识别误差，尤其是短指令；短文本安全降级不能消除长文本误识别。尚未完成 200 条真实中文标注语料、用户麦克风、耳机及外放回声验收，不能据此宣称误截断率或延迟达标。采用自动记录前请确认该实验功能适合当前练习；需要准确文本时使用人工核对模式。
 
-架构边界见 [ADR-0013](../docs/architecture/decisions/0013-scope-realtime-interview-voice.md)。
+架构边界见 [ADR-0020](../docs/architecture/decisions/0020-scope-realtime-interview-voice.md)。

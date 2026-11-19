@@ -18,7 +18,7 @@ export const UI_CONTROLS = Object.freeze(['unspecified', 'quick-open', 'button-p
   '上传 Markdown / Text', '上传图文资料', '粘贴正文', '开始导入', '编辑标题', '永久删除该资料',
   '新建故事', '手动编写并保存', '确认手动保存故事版本', '查看版本', '关闭历史',
   '录入第一份 Offer', '录入另一份 Offer', '返回 Offer 中心', '调整对比项', '恢复全部明细', '准备谈薪',
-  '上下文面板', '打开 Pilot tab', '重置 Haru 位置', '配置 AI', '返回设置', '添加偏好', '导出备份', '导出完整数据']);
+  '上下文面板', '打开 Pilot tab', '重置 Haru 位置', '配置 AI', '返回设置', '添加记忆', '导出备份', '导出完整数据']);
 export function bindUiSteps(page, reporter) { reports.set(page, reporter); }
 export function validUiStep(step, control = 'unspecified') {
   assert.ok(UI_STEPS.includes(step), 'unapproved diagnostic step');

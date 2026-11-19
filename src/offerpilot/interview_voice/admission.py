@@ -9,7 +9,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from offerpilot.models import InterviewVoiceSession, MockInterviewAttempt, MockInterviewTurn
+from offerpilot.models import (
+    InterviewVoiceSession, MockInterviewAnswerAcceptance, MockInterviewAttempt, MockInterviewTurn,
+)
 
 CONSENT_REVISION = "interview-realtime-v1"
 KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$"
@@ -30,7 +32,7 @@ class AnswerAcceptance(BaseModel):
     voice_session_id: str | None = Field(default=None, min_length=1, max_length=128)
     voice_session_epoch: int | None = Field(default=None, gt=0)
     voice_consent_revision: str | None = Field(default=None, max_length=64)
-    voice_session_token: str | None = Field(default=None, min_length=32, max_length=128)
+    voice_session_token: str | None = Field(default=None, min_length=32, max_length=128, repr=False)
 
     @model_validator(mode="after")
     def scope_auto_acceptance(self) -> AnswerAcceptance:
@@ -118,11 +120,13 @@ def check_answer_admission(
 
     if replay:
         # Pre-feature history has no measured provenance; do not invent it on replay.
-        if turn.acceptance_method is None and acceptance.acceptance_method == "manual":
+        if turn.voice_acceptance is None and acceptance.acceptance_method == "manual":
             return
         fields = ("input_source", "acceptance_method", "voice_session_id",
                   "voice_session_epoch", "voice_consent_revision")
-        if any(getattr(turn, name) != getattr(acceptance, name) for name in fields):
+        if turn.voice_acceptance is None or any(
+            getattr(turn.voice_acceptance, name) != getattr(acceptance, name) for name in fields
+        ):
             raise VoiceAdmissionError("voice_acceptance_conflict", "原回答的接受方式不能修改。")
         return
 
@@ -135,6 +139,10 @@ def check_answer_admission(
 
 
 def set_answer_acceptance(turn: MockInterviewTurn, acceptance: AnswerAcceptance) -> None:
-    for field in ("input_source", "acceptance_method", "voice_session_id",
-                  "voice_session_epoch", "voice_consent_revision"):
-        setattr(turn, field, getattr(acceptance, field))
+    turn.voice_acceptance = MockInterviewAnswerAcceptance(
+        input_source=acceptance.input_source,
+        acceptance_method=acceptance.acceptance_method,
+        voice_session_id=acceptance.voice_session_id,
+        voice_session_epoch=acceptance.voice_session_epoch,
+        voice_consent_revision=acceptance.voice_consent_revision,
+    )

@@ -857,7 +857,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
 
   const finish = async () => {
     const businessGeneration = businessGenerationRef.current;
-    if (!state || !attemptId || working || state.phase === 'answer_submitting' || state.phase === 'next_question_generating' || !isBusinessRequestCurrent(businessGeneration)) return;
+    if (!state || !attemptId || working || realtimeController.state.locked || state.phase === 'answer_submitting' || state.phase === 'next_question_generating' || !isBusinessRequestCurrent(businessGeneration)) return;
     const feedbackKey = state.feedbackKey ?? key('feedback');
     update({ type: 'feedback_submitting', feedbackKey });
     setWorking(true);
@@ -1020,7 +1020,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
             onClick={() => void finish()}
             loading={feedbackGenerating}
             aria-busy={feedbackGenerating}
-            disabled={!attemptId || !state || working || Boolean(proposal) || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || ['preflight', 'reading_question', 'waiting_for_speech', 'listening', 'end_candidate', 'transcribing', 'reviewing_transcript', 'submitting_confirmed_answer', 'generating_next_question', 'paused', 'result_unknown'].includes(continuousState.status)}
+            disabled={!attemptId || !state || working || realtimeState.locked || Boolean(proposal) || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || ['preflight', 'reading_question', 'waiting_for_speech', 'listening', 'end_candidate', 'transcribing', 'reviewing_transcript', 'submitting_confirmed_answer', 'generating_next_question', 'paused', 'result_unknown'].includes(continuousState.status)}
           >
             {feedbackGenerating ? t("正在生成复盘…") : t("结束并生成复盘")}
           </Button>

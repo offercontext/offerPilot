@@ -5,6 +5,48 @@
 
 ## 当前记录
 
+## 新记忆入口遗漏导航和安装验收契约（2026-11-15）
+
+**现象：** 全前端回归3175项通过、1项拒绝新增memory入口；Windows run 43680241395 的安装helper因页面清单漏memory失败。此前浏览器功能验收通过不能替代这些门禁。
+
+**根因：** 实现已批准的独立记忆入口后，固定导航序列、安装root/surface覆盖与设置内旧确认弹窗名称未同步。
+
+**修复：** 仅把已授权memory纳入精确固定序列，更新所有基线fixture，新增缺项/未知/重复/重排负例；安装覆盖增至14 roots/140目标/46 surfaces，R14必须匹配memory路由，设置嵌入页不能冒充；S27仍验证空内容禁止保存和取消，诊断控件名保持白名单。独立审查后全前端3177项通过，锁定helper工具链741通过/1跳过，未删除或跳过失败断言。
+
+**教训：** 新入口必须同步闭合导航契约及真实安装页面身份/覆盖清单；保留旧失败，不能因截图通过而放宽覆盖与所有权检查。
+
+## 离线终态测试意外读取 SOCKS 代理（2026-11-15）
+
+**现象：** 完整 release gate 第四组的 unknown cleanup boundary 测试在 Client 构造时因缺少可选 socksio 失败，业务断言尚未执行；单独重现相同失败。
+
+**根因：** 测试 Driver.request 已是本地 stub，client 仅需要 build_request 序列化，却默认构造可联网 transport 并读取执行器代理环境。
+
+**修复：** 使用任何请求都 pytest.fail 的 MockTransport，保留真实 httpx JSON 序列化、现有全部断言及关闭流程。不修改代理、权限、产品或依赖锁。独立审查确认该 E08 分支不需要网络；整文件15项及ruff通过，完整门禁需重新执行。
+
+**教训：** 离线测试的辅助客户端也应显式拒绝联网，不应因机器代理配置而在行为断言前退出。
+
+## 窄屏导航覆盖记忆页面（2026-11-15）
+
+**现象：** Chromium 390 × 844 实际验收中导航占满视口，点击记忆节点被 nav 拦截（run 43679015074）。桌面编辑、删除、刷新与召回断言均已通过，窄屏不可用。
+
+**根因：** 全局窄屏样式把侧栏改为横向，却保留组件的 `height:100dvh`、sticky 定位和 utility 自动顶边距；旧的直接子元素选择器也不适配分组 section。
+
+**修复：** 组件在 700px 以下使用自然高度、相对定位和横向分组，隐藏空 mascot dock，保留可访问的组标签及可横向滚动导航。
+
+**教训：** document 无横向溢出不足以证明页面可操作；用真实窄屏点击及详情滚动截图验证遮挡。
+
+
+## 记忆确认校验错误无法序列化（2026-11-15）
+
+**现象：** 真实 HTTP 提交未确认记忆时，写入被拒绝，但返回 500 而不是 422。
+
+**根因：** Pydantic 模型校验器的 errors ctx 包含 ValueError，通用 JSONResponse 无法序列化。
+
+**修复：** 记忆接口返回固定 422 / memory_invalid_payload，不回显私人正文或异常对象；不放宽确认、字段或版本校验。
+
+**教训：** repository 校验测试不足以证明 HTTP 错误路径可用；增加两条记忆路由的错误响应及无写入回归。
+
+
 ## Windows 备份导出与恢复落盘兼容（2026-11-13）
 
 **现象：** 恢复专项 run `43364222596` 在 Linux 通过；Windows 出现候选文件 `fsync` 的 EBADF，以及含嵌套附件的导出误报 `unsafe_archive_entry`。
@@ -1988,3 +2030,27 @@ MockTransport 和 owned loopback。实现见 [ADR-0014](architecture/decisions/0
 - 其余边界：首轮另有一个 P0 负对照及两个 PowerShell 编排失败，同一未修改提交的 3 项定向复验通过；原 pytest 临时私有证据恢复时已不存在，具体首轮原因仍未知，不能据此归因负载或宣称已修复。为编排断言附带实际子进程输出，帮助未来失败定位，不改其成功条件。
 - 验证范围：预算拒绝与失败观测两个模块、上述三个失败节点、ruff，以及最终冻结快照的完整正式 gate。首轮 9,551 通过、32 跳过、16 失败和 aggregate 非零全部保留；后续结果另建目录，不能把局部复验拼成首轮通过。
 - 教训：隔离 I/O 的测试夹具仍须跟随活动用例身份与驱动入口；排查必须确认已进入目标异常路径，不能放宽版本检查或异常归因来迎合旧 stub。
+
+
+## 2026-11-15：记忆页面参数新增后遗漏分片隔离复审摘要
+
+- 现象：PR #70 head `567de946981c90f9eb1e8ee3a5aae5cc6f624c37` 的 Windows run [43682202894](https://github.com/offercontext/offerPilot/actions/runs/43682202894) 终态失败。19 个分片成功，shard 14 job `132716177091` 为 901 passed / 1 failed，唯一失败是 `test_node_split_source_change_requires_a_new_isolation_review`；最终 release regression 被依赖检查阻断。
+- 根因：`test_chat_api.py` 新增 supported-view 参数 `memory` 后，仍绑定旧隔离审查摘要 `8f0aa82abb4cea49106c76456fdb46c2f6347156bc9dd72cf66b33978c85c0b9`。门禁正确要求重新审查，不能以重跑代替。
+- 独立复审：恢复工作树对比 master `5fb4f2437bfb4d05d8f1b14fc504d1f4806e527f`，该文件仅增加上述一行。每个参数创建独立 CapturingScriptedModel、TestClient/create_app，使用 function-scoped tmp_path。未改 globals、动态 fixture、setup/teardown 或 fixture 生命周期；conftest.app_client、timeout helper 与 selection plugin 均无差异。保持摘要断言、真实分片精确覆盖及共享状态拒绝检查。
+- 修复：记录以上审查并绑定实际 SHA256 `ecf048a62fda059debb2b572ede4b52ecc769bf51c69ab660f22663b049506ae`。本次不改变产品代码或门禁行为。
+- 原失败证据：artifact `14153272620`，ZIP SHA256 `27b5a9d974bea451da3d4950a24306d07fca1c087cbc05a5f8fe989c3948b10a`；保留原 run，不改写为成功。新 head 必须单独完成完整 CI 和真实 UI/召回验收。
+- 平台边界：旧 Linux 官方 gate 因缺 PowerShell 失败，不能宣称其成功。旧 Windows shard 19 artifact `14156420902`（ZIP SHA256 `0e4e6b930075f009f3b4883c06da3d62ae5ee3ac5375cd6e48ef00067c455487`）仅作为旧轮平台覆盖证据，新轮仍须重新验证。
+- 本地验证：独立恢复树修复前 21 passed / 1 failed（仅摘要）/ 118 deselected；修复后运行全部 14 个 supported-view 参数，加 node_split、reviewed_split、shared_fixture、split_fixture、shared_parameter、dynamic_or_cached、xunit_module、indirect_parametrization 相关 guards，25 passed / 115 deselected。包括真实两分片执行与共享 fixture 拒绝。目标 ruff 与 diff --check 通过；不计作完整 gate。
+- 旧 Windows 的具体替代覆盖：`tests/test_application_jd_browser_harness.py::test_application_jd_harness_parses_and_uses_explicit_stage_contract` 的 setup/call/teardown 全部 passed、xfail=false，call 3.8876 秒，shard exit_code=0。
+- 教训：改变可按 node 拆分的测试源时，先审查状态所有权和 fixture 生命周期，再同步审查说明与摘要；摘要更新本身不等于隔离审查。
+
+
+## 2026-11-15：快路由相对超时往返绝对时钟引入浮点误差
+
+- 现象：PR70 Windows run 43727842493 attempt 2 的 shard18（job132917290913）1177 passed / 1 failed，唯一失败是 `test_fast_routes_keep_original_thirty_second_cap[POST-/other]` 的 read timeout 为 29.99999999999997 而非 30。最终 gate 被依赖失败阻断，不能由旧轮通过抵消。
+- 根因：CoreHTTPDriver 将快路由 30 秒预算先加到 monotonic 起点，再减去起点交给 HTTPX；固定起点 255.9 可复现向下舍入，226.1 可复现超过 30。基础 HTTPDriver 原本直接使用 `min(30, remaining)`。
+- 修复：快路由恢复相对预算计算，严格保持 30 秒上限和剩余 trial 预算。绝对 deadline 对迟到响应的拒绝、脚本次数限制、blocking worker 的等待和 cleanup reserve 逻辑不变；不以近似断言掩盖问题。
+- 回归：固定模块局部时钟覆盖三类快路由、三个浮点起点及充足/不足预算，严格核对 HTTPX 四类 timeout；到期发送零请求，截止返回拒绝且不重发。真实 HTTP worker 的 deadline、cleanup、late-result 与取消相关专项另行运行。
+- 失败证据：[attempt 2](https://github.com/offercontext/offerPilot/actions/runs/43727842493/attempts/2)，artifact14182049486，ZIP SHA256 `3c1a57c78ded9053ea8fb8008a20b6682d225d79a65d914123db85260cbc6bce`。原失败不覆盖；attempt1 的 runner 失联是独立历史故障。
+- 验证：最终严格回归对旧实现在内存中运行，10 failed / 12 passed（浮点反例稳定失败）；修复后 deadline 整模块 32 passed，相关 integrity/failure attribution/cleanup/cancellation 专项 170 passed / 4 skipped；ruff、目标 mypy 与独立只读审查通过。完整新轮 CI 单独跟踪，局部成功不代替完整门禁。
+- 教训：相对传输预算直接从策略上限和剩余预算求最小值；绝对时钟用于截止判定，避免相对值往返绝对浮点时间带来不必要舍入。
