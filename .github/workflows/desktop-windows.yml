@@ -406,14 +406,17 @@ jobs:
   # roughly 16-27 minutes at observed overhead, plus repeated fixture costs.
   # Twenty was chosen for planning-scenario margin; estimates are not guarantees.
   # Four shards may run at once in the authorized concurrency trial; packaging
-  # may use another runner. Quota, wall time and billing are not guaranteed. Each retains
-  # its 120-minute limit (2400 aggregate shard-minute ceiling).
+  # may use another runner. Quota, wall time and billing are not guaranteed.
+  # Run 44526746254 reached the 120-minute runner cap during shard 17, with
+  # 815 complete passing nodes and no failed assertion before interruption.
+  # Its outer job envelope is temporarily 150 minutes; the other 19 stay at
+  # 120 (2430 aggregate shard-minute ceiling), pending duration rebalancing.
   # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
   # duration-lpt-v1 uses pinned historical durations only to balance scheduling;
   # every collected node still runs exactly once under the full manifest gate.
   # Whole-file isolation and the reviewed chat-node exception remain unchanged.
   # Estimates do not certify passing tests; each shard keeps its 120-minute limit
-  # and at most four pytest shards run concurrently.
+  # except for shard 17 as noted above; at most four run concurrently.
   pytest-shards:
     name: Complete pytest shard ${{ matrix.shard }} of 20
     env:
@@ -421,7 +424,7 @@ jobs:
     if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     needs: [pr-feedback, pytest-manifest]
     runs-on: windows-2022
-    timeout-minutes: 120
+    timeout-minutes: ${{ matrix.shard == 17 && 150 || 120 }}
     strategy:
       fail-fast: false
       max-parallel: 4

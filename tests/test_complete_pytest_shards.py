@@ -671,10 +671,10 @@ def test_invalid_frozen_duration_cost_cannot_silently_fall_back(
         gate.load_duration_history()
 
 
-def test_workflow_preserves_120_minute_shard_budget():
+def test_workflow_only_extends_shard_17_outer_budget():
     workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
     shard_job = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
-    assert "timeout-minutes: 120" in shard_job
+    assert "    timeout-minutes: ${{ matrix.shard == 17 && 150 || 120 }}" in shard_job.splitlines()
     assert "      max-parallel: 4" in shard_job.splitlines()
     assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]" in shard_job
 
