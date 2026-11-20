@@ -118,6 +118,10 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    _record_migration(
+        engine, "0041_interview_voice_sessions",
+        "Add scoped voice session ownership and answer acceptance provenance",
+    )
     _record_migration(engine, "0040_confirmed_memory_metadata", "Add immutable user-confirmed memory category and explicit validity metadata")
     _record_migration(engine, "0039_training_evidence", "Add opt-in plan-local training evidence and content-free command receipts")
     from offerpilot.training_evidence.migration import ensure_decision_schema

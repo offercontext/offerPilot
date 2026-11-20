@@ -1,0 +1,41 @@
+name: Realtime interview voice synthetic acceptance
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - 'voice-runtime/**'
+      - 'src/offerpilot/interview_voice/**'
+      - 'web/src/features/mockInterviewVoice/**'
+      - 'web/src/features/interviewStudio/**'
+      - 'web/src/services/interviewVoice.ts'
+      - 'web/vite.config.ts'
+      - '.github/workflows/interview-realtime-voice.yml'
+permissions:
+  contents: read
+concurrency:
+  group: interview-realtime-voice-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  synthetic-offline:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: voice-runtime
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.12.19'
+      - run: uv sync --frozen
+      - run: uv run --frozen ruff check src tests scripts
+      - run: uv run --frozen pytest -q

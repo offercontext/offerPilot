@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   restore:
-    if: github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.head.ref == 'feat/20261112-backup-complete-restore' || github.event.pull_request.head.ref == 'feat/20261116-memory-metadata-contract')
+    if: github.event.pull_request.head.repo.full_name == github.repository && (github.event.pull_request.head.ref == 'feat/20261112-backup-complete-restore' || github.event.pull_request.head.ref == 'feat/20261116-memory-metadata-contract' || github.event.pull_request.head.ref == 'feat/20261013-realtime-voice-interview')
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +36,7 @@ jobs:
       - run: uv sync --frozen --group dev
       - run: npm ci --prefix web --ignore-scripts
       - name: Native restore, shared locks, actual Knowledge API and historical ZIP
-        run: uv run pytest -q tests/test_backup_paths.py tests/test_backup_archive.py tests/test_backup_export.py tests/test_backup_restore_control.py tests/test_backup_install.py tests/test_backup_config_concurrency.py tests/test_backup_restore_api.py tests/test_backup_legacy.py tests/test_backup_image_roundtrip.py tests/test_workspace_lock.py tests/test_memory_metadata_backup.py
+        run: uv run pytest -q tests/test_backup_paths.py tests/test_backup_archive.py tests/test_backup_export.py tests/test_backup_restore_control.py tests/test_backup_install.py tests/test_backup_config_concurrency.py tests/test_backup_restore_api.py tests/test_backup_legacy.py tests/test_backup_image_roundtrip.py tests/test_workspace_lock.py tests/test_memory_metadata_backup.py tests/test_interview_voice_api.py tests/test_interview_voice_sessions.py
       - run: npm run build --prefix web
       - name: Install Chromium
         working-directory: web

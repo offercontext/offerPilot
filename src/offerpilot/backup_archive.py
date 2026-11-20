@@ -104,22 +104,11 @@ def stage_archive(archive_path: Path, destination: Path, reference_db: Path) -> 
             if (not isinstance(manifest, dict) or manifest.get("format") != FORMAT
                     or manifest.get("files") != expected):
                 raise ValueError("archive_manifest_mismatch")
-        # Only the precise immediate predecessor schema is eligible. Validate it
-        # read-only before running one fixed, additive DDL in the private stage.
-        counts = validate_database(destination, reference_db, allow_memory_predecessor=True)
-        with closing(_open_readonly(destination / "data.db")) as db:
-            needs_memory_metadata = not db.execute(
-                "SELECT 1 FROM sqlite_master WHERE name='confirmed_memory_version_metadata'"
-            ).fetchone()
-        if needs_memory_metadata:
-            from sqlalchemy.dialects.sqlite import dialect
-            from sqlalchemy.schema import CreateTable
-            from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
-            ddl = str(CreateTable(cast(Table, ConfirmedMemoryVersionMetadata.__table__)).compile(dialect=dialect()))
-            with closing(sqlite3.connect(destination / "data.db")) as db:
-                db.execute("PRAGMA trusted_schema=OFF")
-                db.execute(ddl)
-                db.commit()
+        # Accept only precise supported predecessor schemas. Never run general
+        # startup migrations or uploaded DDL against the archive/database.
+        counts = validate_database(destination, reference_db, allow_predecessor=True)
+        upgrades, changed = _upgrade_staged_database(destination / "data.db")
+        if changed:
             counts = validate_database(destination, reference_db)
             if not legacy:
                 staged = workspace_files(destination)
@@ -128,7 +117,7 @@ def stage_archive(archive_path: Path, destination: Path, reference_db: Path) -> 
                 }, ensure_ascii=False), encoding="utf-8")
             files = workspace_files(destination)
         return {"files": files, "legacy": legacy, "counts": counts,
-                "schema_upgrade": "memory_metadata_v1" if needs_memory_metadata else None,
+                "schema_upgrade": "+".join(upgrades) or None,
                 "sha256": file_digest(archive_path)}
     except BaseException:
         shutil.rmtree(destination)
@@ -149,6 +138,59 @@ def _schema(db: sqlite3.Connection) -> list[tuple[Any, ...]]:
                       "WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").fetchall()
 
 
+def _additive_schema() -> tuple[tuple[str, dict[tuple[str, str, str, str], str]], ...]:
+    from sqlalchemy.dialects.sqlite import dialect
+    from sqlalchemy.schema import CreateIndex, CreateTable
+    from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
+    from offerpilot.models import InterviewVoiceSession, MockInterviewAnswerAcceptance
+
+    sqlite = dialect()
+
+    def entries(*tables: Table) -> dict[tuple[str, str, str, str], str]:
+        result = {}
+        for table in tables:
+            ddl = str(CreateTable(table).compile(dialect=sqlite)).strip()
+            result[("table", table.name, table.name, ddl)] = ddl
+            for index in sorted(table.indexes, key=lambda item: str(item.name)):
+                ddl = str(CreateIndex(index).compile(dialect=sqlite)).strip()
+                result[("index", str(index.name), table.name, ddl)] = ddl
+        return result
+
+    return (
+        ("memory_metadata_v1", entries(cast(Table, ConfirmedMemoryVersionMetadata.__table__))),
+        ("interview_voice_v1", entries(
+            cast(Table, InterviewVoiceSession.__table__), cast(Table, MockInterviewAnswerAcceptance.__table__),
+        )),
+    )
+
+
+def _upgrade_staged_database(path: Path) -> tuple[list[str], bool]:
+    with closing(_open_readonly(path)) as db:
+        schema = set(_schema(db))
+    missing = [(label, ddl) for label, ddl in _additive_schema() if not ddl.keys() <= schema]
+    # The export does not carry an active microphone grant. Also strip active
+    # leases from a valid imported ZIP, without changing historical provenance.
+    with closing(_open_readonly(path)) as db:
+        active = not any(label == "interview_voice_v1" for label, _ in missing) and db.execute(
+            "SELECT 1 FROM interview_voice_sessions WHERE state = 'active' LIMIT 1"
+        ).fetchone() is not None
+    if not (missing or active):
+        return [], False
+    with closing(sqlite3.connect(path)) as db:
+        db.execute("PRAGMA trusted_schema=OFF")
+        db.execute("BEGIN IMMEDIATE")
+        for _, statements in missing:
+            for statement in statements.values():
+                db.execute(statement)
+        revoke_archived_voice_leases(db)
+        db.commit()
+    return [label for label, _ in missing], True
+
+
+def revoke_archived_voice_leases(db: sqlite3.Connection) -> None:
+    db.execute("UPDATE interview_voice_sessions SET state = 'revoked' WHERE state = 'active'")
+
+
 def _attachment(root: Path, name: str, prefix: tuple[str, ...], *,
                 digest: str | None = None, size: int | None = None) -> None:
     parts = archive_parts(name)
@@ -163,7 +205,7 @@ def _attachment(root: Path, name: str, prefix: tuple[str, ...], *,
         raise ValueError("archive_attachment_mismatch")
 
 
-def validate_database(root: Path, reference_db: Path, *, allow_memory_predecessor: bool = False) -> dict[str, int]:
+def validate_database(root: Path, reference_db: Path, *, allow_predecessor: bool = False) -> dict[str, int]:
     """Check exact current schema, relational integrity and owned attachment bytes."""
     if any((root / ("data.db" + suffix)).exists() for suffix in ("-wal", "-shm", "-journal")):
         raise ValueError("archive_database_sidecars")
@@ -172,15 +214,14 @@ def validate_database(root: Path, reference_db: Path, *, allow_memory_predecesso
     ) as reference:
         actual_schema, expected_schema = _schema(db), _schema(reference)
         if actual_schema != expected_schema:
-            from sqlalchemy.dialects.sqlite import dialect
-            from sqlalchemy.schema import CreateTable
-            from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
-            name = "confirmed_memory_version_metadata"
-            fixed_sql = str(CreateTable(cast(Table, ConfirmedMemoryVersionMetadata.__table__)).compile(dialect=dialect())).strip()
-            metadata_entry = ("table", name, name, fixed_sql)
-            predecessor = [entry for entry in expected_schema if entry != metadata_entry]
-            if not (allow_memory_predecessor and metadata_entry in expected_schema
-                    and actual_schema == predecessor):
+            actual, expected = set(actual_schema), set(expected_schema)
+            absent = expected - actual
+            memory, voice = (set(ddl) for _, ddl in _additive_schema())
+            # Supported history: previous master did not have any voice schema;
+            # the older master also lacked the confirmed memory metadata table.
+            if not (allow_predecessor and actual <= expected and (
+                absent == voice or absent == memory | voice
+            )):
                 raise ValueError("archive_schema_mismatch")
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)] or db.execute(
             "PRAGMA foreign_key_check"

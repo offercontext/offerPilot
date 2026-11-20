@@ -1,0 +1,8 @@
+.models/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.wav
+evaluation-results.json

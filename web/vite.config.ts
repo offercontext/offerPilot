@@ -14,8 +14,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       // Mail writes compare Origin with Host. Preserve the browser authority
-      // only for this guarded API; keep the existing proxy behavior elsewhere.
+      // only for guarded APIs; keep the existing proxy behavior elsewhere.
       '^/api/job-mail(?:/|$)': {
+        target: 'http://localhost:8080',
+        changeOrigin: false,
+      },
+      '^/api/interview-voice(?:/|$)': {
         target: 'http://localhost:8080',
         changeOrigin: false,
       },

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -10,16 +12,33 @@ import pytest
 from offerpilot import backup_restore as restore
 from offerpilot.backup_archive import workspace_files
 from offerpilot.backup_export import export_archive
-from offerpilot.workspace_lock import acquire_workspace
+from offerpilot.db import init_database
+from offerpilot.workspace_lock import acquire_workspace, has_lease
+
+
+@pytest.fixture(scope="module")
+def backup_install_seed(tmp_path_factory: pytest.TempPathFactory) -> bytes:
+    # init_database retains a lifetime lease. Only the throwaway seed workspace
+    # may get that lease in pytest; each live restore target belongs to its child.
+    database = tmp_path_factory.mktemp("backup-install-seed") / "data.db"
+    sessions = init_database(database)
+    sessions.kw["bind"].dispose()
+    assert all(not database.with_name(database.name + suffix).exists()
+               for suffix in ("-wal", "-shm", "-journal")), "Backup seed must be self-contained"
+    with closing(sqlite3.connect(database.as_uri() + "?mode=ro&immutable=1", uri=True)) as db:
+        assert db.execute("PRAGMA quick_check").fetchall() == [("ok",)]
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+    return database.read_bytes()
 
 
 @pytest.fixture
-def queued(tmp_path: Path):
+def queued(tmp_path: Path, backup_install_seed: bytes):
     root = tmp_path / "live"
-    subprocess.run([sys.executable, "-c", "from pathlib import Path; "
-                    "from offerpilot.db import init_database; "
-                    f"s=init_database(Path({str(root / 'data.db')!r})); s.kw['bind'].dispose()"],
-                   check=True, timeout=20)
+    root.mkdir()
+    # Immutable bytes, not a shared SQLite file or open database handle.
+    # Each test still exports, stages and queues its own fresh live workspace.
+    (root / "data.db").write_bytes(backup_install_seed)
+    assert not has_lease(root)
     (root / "中文.txt").write_text("backup", encoding="utf-8")
     archive = tmp_path / "backup.zip"
     archive.write_bytes(export_archive(root, '{}'))
@@ -113,8 +132,6 @@ install.ensure_workspace_lease(Path({str(root)!r}), apply_restore=True)
 def test_restored_authorities_are_disabled_and_local_secrets_retained(tmp_path: Path):
     import base64
     import json
-    import sqlite3
-    from contextlib import closing
     from offerpilot.config import Config
 
     root = tmp_path / "live"

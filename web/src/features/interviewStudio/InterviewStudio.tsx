@@ -19,7 +19,7 @@ import {
   type InterviewStudioContext as InterviewApiContext,
 } from '@/services/mockInterviews';
 import { saveInterviewStudioVoiceCoachingSnapshot } from '@/services/voiceCoaching';
-import type { MockInterviewProposalResponse, MockInterviewTurn } from '@/types/mockInterview';
+import type { AnswerAcceptance, MockInterviewProposalResponse, MockInterviewTurn } from '@/types/mockInterview';
 import { resolveErrorRecovery, type RecoveryDecision } from '@/lib/recoveryPolicy/recoveryPolicy';
 import type { RecoveryAttemptRetention, RecoveryUserAction } from '@/lib/recoveryPolicy/generatedRecoveryPolicy';
 import {
@@ -32,6 +32,8 @@ import { buildEvidenceEntries, evidenceKey, type StudioEvidenceEntry } from './e
 import styles from './InterviewStudio.module.css';
 import { EvidenceTechnicalDetails } from '@/components/ui/EvidenceTechnicalDetails';
 import ContinuousVoiceModePanel from './ContinuousVoiceModePanel';
+import RealtimeVoicePanel from './RealtimeVoicePanel';
+import { RealtimeVoiceController, initialRealtimeState, type RealtimeAnswer } from '@/features/mockInterviewVoice/realtimeVoiceController';
 
 export interface InterviewStudioContext {
   kind: 'application_event';
@@ -246,6 +248,15 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
   const [selectedEvidenceKey, setSelectedEvidenceKey] = useState<string | null>(null);
   const [jdExpanded, setJdExpanded] = useState(false);
   const [working, setWorking] = useState(false);
+  const [realtimeState, setRealtimeState] = useState(initialRealtimeState);
+  const realtimeSubmitRef = useRef<(answer: RealtimeAnswer) => Promise<'saved' | 'unknown' | 'failed'>>();
+  const answerInFlightRef = useRef(false);
+  const realtimeControllerRef = useRef<RealtimeVoiceController>();
+  if (!realtimeControllerRef.current) realtimeControllerRef.current = new RealtimeVoiceController({
+    onState: setRealtimeState,
+    onAnswer: (answer) => realtimeSubmitRef.current?.(answer) ?? Promise.resolve('failed'),
+  });
+  const realtimeController = realtimeControllerRef.current;
   const [startError, setStartError] = useState<string | null>(() => startRecovery?.message ?? null);
   const [terminalFailure, setTerminalFailure] = useState<StudioTerminalFailure | null>(null);
   const [voiceReview, setVoiceReview] = useState<VoiceReview | null>(() => recovery?.voiceReview ?? null);
@@ -308,12 +319,33 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
         continuousSubmitRef.current = undefined;
         continuousGenerateRef.current = undefined;
         continuousController.close();
+        void realtimeController.pause();
+        realtimeSubmitRef.current = undefined;
         continuousCleanupTimerRef.current = null;
       }, 0);
     };
     // The deferred cleanup survives React StrictMode's effect probe without creating a second controller.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const hidden = () => {
+      if (document.hidden && realtimeController.state.locked) void realtimeController.pause('页面已隐藏，麦克风和自动记录已暂停。');
+    };
+    const leaving = () => { if (realtimeController.state.locked) void realtimeController.pause(); };
+    document.addEventListener('visibilitychange', hidden);
+    window.addEventListener('pagehide', leaving);
+    return () => {
+      document.removeEventListener('visibilitychange', hidden);
+      window.removeEventListener('pagehide', leaving);
+    };
+  }, [realtimeController]);
+
+  useEffect(() => {
+    if (state?.phase === 'question_ready') realtimeController.questionReady(state.turnNo);
+    if (state?.phase === 'completed' && realtimeController.state.locked) void realtimeController.pause('本场回答已完成，麦克风已关闭。');
+    if (['result_unknown', 'contract_failed'].includes(state?.phase ?? '') && realtimeController.state.locked) void realtimeController.pause('业务状态待恢复，已停止实时对话；请使用原尝试恢复。');
+  }, [realtimeController, state?.phase, state?.turnNo]);
 
   useEffect(() => {
     try {
@@ -386,6 +418,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
       if (event.key === 'Escape') {
         event.preventDefault();
         if (mobileWorkspaceOpenRef.current) {
+          if (realtimeController.state.locked) void realtimeController.pause('回答工作台已关闭，实时对话已暂停。');
           setMobileWorkspaceOpen(false);
           window.requestAnimationFrame(() => mobileWorkspaceTriggerRef.current?.focus());
           return;
@@ -427,8 +460,8 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
 
   useEffect(() => {
     setWorkspaceTab('answer');
-    setMobileWorkspaceOpen(false);
-  }, [state?.turnNo]);
+    if (!realtimeController.state.locked) setMobileWorkspaceOpen(false);
+  }, [realtimeController, state?.turnNo]);
 
   useEffect(() => {
     if (initialQuestionFocusedRef.current || !state || !timeline.length) return;
@@ -598,8 +631,12 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serviceContext]);
 
-  const appendConfirmedAnswer = (answer: string) => {
-    setTimeline((current) => current.map((turn) => turn.turn_no === state?.turnNo ? { ...turn, answer, confirmed: true } : turn));
+  const appendConfirmedAnswer = (answer: string, acceptance: AnswerAcceptance) => {
+    setTimeline((current) => current.map((turn) => turn.turn_no === state?.turnNo ? {
+      ...turn, answer, confirmed: true, input_source: acceptance.input_source,
+      acceptance_method: acceptance.acceptance_method, voice_session_id: acceptance.voice_session_id,
+      voice_session_epoch: acceptance.voice_session_epoch, voice_consent_revision: acceptance.voice_consent_revision,
+    } : turn));
   };
 
   const saveVoiceReview = async (review: VoiceReview, currentAttemptId: number): Promise<boolean> => {
@@ -673,6 +710,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
     continuousSubmitRef.current = undefined;
     continuousGenerateRef.current = undefined;
     continuousController.close();
+    void realtimeController.pause();
     onCloseRef.current();
   };
   closeRequestRef.current = requestClose;
@@ -682,6 +720,19 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
     if (!isBusinessRequestCurrent(businessGeneration)) return;
     const questionKey = currentState.questionKey ?? key('question');
     if (continuousState.status === 'result_unknown') continuousController.retryNextQuestion();
+    const generatingState = reduceStudioState(currentState, { type: 'question_submitting', questionKey });
+    try {
+      window.sessionStorage.setItem(studioRecoveryKey, JSON.stringify({
+        attemptKey: attemptKeyRef.current, attemptId: currentAttemptId,
+        state: { ...generatingState, phase: 'result_unknown', resultUnknown: true,
+          error: '下一题生成结果待确认，请使用原尝试恢复。' },
+        timeline: timeline.map((turn) => turn.turn_no === currentState.turnNo && currentState.answer
+          ? { ...turn, answer: currentState.answer, confirmed: true,
+            input_source: currentState.answerAcceptance?.input_source,
+            acceptance_method: currentState.answerAcceptance?.acceptance_method }
+          : turn),
+      } satisfies StudioBusinessRecovery));
+    } catch { /* Recovery storage can be unavailable; keep the same key in memory. */ }
     update({ type: 'question_submitting', questionKey });
     setWorking(true);
     try {
@@ -732,18 +783,34 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
 
   // 排查链见 docs/architecture/code-map/interview-mock.md：回答提交和下一题是
   // 两个请求。先取得回答保存成功，再决定是否出题；连续语音由其控制器续接。
-  const submitAnswer = async (answerOverride?: string) => {
+  const submitAnswer = async (answerOverride?: string, realtime?: RealtimeAnswer): Promise<'saved' | 'unknown' | 'failed'> => {
     const answer = (answerOverride ?? state?.answer ?? '').trim();
     const businessGeneration = businessGenerationRef.current;
-    if (!state || !attemptId || !answer || working || !isBusinessRequestCurrent(businessGeneration)) return;
-    const turnKey = state.turnKey ?? key('turn');
+    if (!state || !attemptId || !answer || working || answerInFlightRef.current || !isBusinessRequestCurrent(businessGeneration)) return 'failed';
+    if (realtime && realtime.turnNo !== state.turnNo) return 'failed';
+    if (!realtime && realtimeController.state.locked) return 'failed';
+    const turnKey = state.turnKey ?? realtime?.turnKey ?? key('turn');
+    const acceptance = state.answerAcceptance ?? realtime?.acceptance ?? {
+      input_source: state.answerMode === 'voice' ? 'voice' : 'text', acceptance_method: 'manual',
+    } as AnswerAcceptance;
+    const submittingState = reduceStudioState(state, { type: 'answer_submitting', turnKey, answer, acceptance });
+    // Persist the exact request before sending. Reloads recover the original capability/key/text,
+    // even if the page disappears before the response arrives or the grant is then revoked.
+    try {
+      window.sessionStorage.setItem(studioRecoveryKey, JSON.stringify({
+        attemptKey: attemptKeyRef.current, attemptId, timeline,
+        state: { ...submittingState, phase: 'result_unknown', resultUnknown: true,
+          error: '上次回答的保存结果待确认，请使用原尝试恢复。' },
+      } satisfies StudioBusinessRecovery));
+    } catch { /* Server idempotency remains authoritative; storage may be unavailable. */ }
+    answerInFlightRef.current = true;
     if (continuousState.status === 'result_unknown') continuousController.retryAnswerSubmission();
-    update({ type: 'answer_submitting', turnKey });
+    update({ type: 'answer_submitting', turnKey, answer, acceptance });
     setWorking(true);
     try {
-      await submitInterviewStudioAnswer({ context: serviceContext, attemptId, turnNo: state.turnNo, answerText: answer, turnKey });
-      if (!isBusinessRequestCurrent(businessGeneration)) return;
-      appendConfirmedAnswer(answer);
+      await submitInterviewStudioAnswer({ context: serviceContext, attemptId, turnNo: state.turnNo, answerText: answer, turnKey, acceptance });
+      if (!isBusinessRequestCurrent(businessGeneration)) return 'saved';
+      appendConfirmedAnswer(answer, acceptance);
       const reviewForTurn = voiceReviewRef.current?.turnNo === state.turnNo ? voiceReviewRef.current : null;
       if (reviewForTurn) {
         void saveVoiceReview(reviewForTurn, attemptId);
@@ -751,15 +818,16 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
       clearStudioBusinessRecovery();
       update({ type: 'answer_succeeded' });
       setVoiceSubmitRevision((revision) => revision + 1);
-      const confirmedState = { ...state, phase: 'answer_confirmed' as const };
+      const confirmedState = { ...submittingState, phase: 'answer_confirmed' as const };
       const hasNextQuestion = shouldGenerateNextQuestion(confirmedState);
       if (continuousState.status !== 'disabled' && continuousState.status !== 'fallback_standard') {
         continuousController.answerSubmissionSucceeded(hasNextQuestion);
         if (!hasNextQuestion) setState((current) => current ? reduceStudioState(current, { type: 'answer_succeeded' }) : current);
       } else if (hasNextQuestion) await generateNextQuestion(confirmedState, attemptId);
       else setState((current) => current ? reduceStudioState(current, { type: 'answer_succeeded' }) : current);
+      return 'saved';
     } catch (error) {
-      if (!isBusinessRequestCurrent(businessGeneration)) return;
+      if (!isBusinessRequestCurrent(businessGeneration)) return 'unknown';
       const failure = resolveErrorRecovery(error, 'answer');
       if (failure.disposition === 'retry_same_key') {
         update({ type: 'result_unknown', operation: 'answer', message: failure.message });
@@ -777,16 +845,19 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
         update({ type: 'contract_failed', message: failure.message });
         continuousController.fallback(failure.message);
       }
+      return failure.disposition === 'retry_same_key' ? 'unknown' : 'failed';
     } finally {
+      answerInFlightRef.current = false;
       if (isBusinessRequestCurrent(businessGeneration)) setWorking(false);
     }
   };
 
   continuousSubmitRef.current = (answer) => { void submitAnswer(answer); };
+  realtimeSubmitRef.current = (answer) => submitAnswer(answer.text, answer);
 
   const finish = async () => {
     const businessGeneration = businessGenerationRef.current;
-    if (!state || !attemptId || working || state.phase === 'answer_submitting' || state.phase === 'next_question_generating' || !isBusinessRequestCurrent(businessGeneration)) return;
+    if (!state || !attemptId || working || realtimeController.state.locked || state.phase === 'answer_submitting' || state.phase === 'next_question_generating' || !isBusinessRequestCurrent(businessGeneration)) return;
     const feedbackKey = state.feedbackKey ?? key('feedback');
     update({ type: 'feedback_submitting', feedbackKey });
     setWorking(true);
@@ -898,7 +969,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
   const feedbackItems = proposal
     ? [...proposal.proposal.strengths, ...proposal.proposal.practice_points, ...proposal.proposal.next_practice_steps].slice(0, 4)
     : [];
-  const canSubmit = Boolean(state?.answer.trim()) && !working && !state?.resultUnknown && state?.phase !== 'completed' && !continuousInProgress;
+  const canSubmit = Boolean(state?.answer.trim()) && !working && !state?.resultUnknown && state?.phase !== 'completed' && !continuousInProgress && !realtimeState.locked;
   const hasConfirmedAnswer = Boolean(state && timeline.some((turn) => turn.turn_no === state.turnNo && turn.confirmed));
   const currentTimelineTurn = timeline.find((turn) => turn.turn_no === state?.turnNo) ?? timeline[timeline.length - 1];
   const currentEvidence = buildEvidenceEntries(currentTimelineTurn?.basis_refs);
@@ -909,6 +980,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
   };
 
   const focusEvidence = (entry: StudioEvidenceEntry) => {
+    if (realtimeController.state.locked) void realtimeController.pause('已切换到依据，实时对话已暂停。');
     setWorkspaceTab('evidence');
     setMobileWorkspaceOpen(true);
     setSelectedEvidenceKey(entry.key);
@@ -948,7 +1020,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
             onClick={() => void finish()}
             loading={feedbackGenerating}
             aria-busy={feedbackGenerating}
-            disabled={!attemptId || !state || working || Boolean(proposal) || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || ['preflight', 'reading_question', 'waiting_for_speech', 'listening', 'end_candidate', 'transcribing', 'reviewing_transcript', 'submitting_confirmed_answer', 'generating_next_question', 'paused', 'result_unknown'].includes(continuousState.status)}
+            disabled={!attemptId || !state || working || realtimeState.locked || Boolean(proposal) || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || ['preflight', 'reading_question', 'waiting_for_speech', 'listening', 'end_candidate', 'transcribing', 'reviewing_transcript', 'submitting_confirmed_answer', 'generating_next_question', 'paused', 'result_unknown'].includes(continuousState.status)}
           >
             {feedbackGenerating ? t("正在生成复盘…") : t("结束并生成复盘")}
           </Button>
@@ -956,8 +1028,8 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
       </header>
 
       <main className={styles.main}>
-        <section className={`${styles.timeline} ${styles.conversationPane}`} aria-label={t("面试对话时间线")}>
-          <div className={styles.timelineHeader}><div><span className={styles.kicker}>{t("面试对话")}</span><h2>{t("保持对话，答案由你确认")}</h2></div><span className={styles.livePill}><i /> {state?.phase === 'contract_failed' ? t("需要重新开始") : state?.phase === 'result_unknown' ? t("需要对账") : t("本轮进行中")}</span></div>
+        <section className={`${styles.timeline} ${styles.conversationPane}`} aria-label={t('面试对话时间线')}>
+          <div className={styles.timelineHeader}><div><span className={styles.kicker}>{t('面试对话')}</span><h2>{realtimeState.locked ? t('实时对话，回答自动记录') : t('保持对话，答案由你确认')}</h2></div><span className={styles.livePill}><i /> {state?.phase === 'contract_failed' ? t('需要重新开始') : state?.phase === 'result_unknown' ? t('需要对账') : t('本轮进行中')}</span></div>
           {feedbackGenerating ? (
             <div className={`${styles.studioStatus} ${styles.feedbackProgress}`} data-interview-studio-status role="status" aria-live="polite">
               <span className={styles.loader} />
@@ -1002,7 +1074,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                 <article key={turn.turn_no} className={`${styles.turn} ${turn.turn_no === state?.turnNo ? styles.activeTurn : ''}`}>
                   <div className={styles.turnMarker}>{String(turn.turn_no).padStart(2, '0')}</div>
                   <div className={styles.turnBody}>
-                    <div className={styles.turnMeta}><span>{t("面试官")}</span>{turn.turn_no > 1 ? <Tag>{questionLabel(turn)}</Tag> : null}<span className={styles.turnState}>{turn.confirmed ? t("回答已确认") : turn.turn_no === state?.turnNo ? t("等待回答") : ''}</span></div>
+                    <div className={styles.turnMeta}><span>{t('面试官')}</span>{turn.turn_no > 1 ? <Tag>{questionLabel(turn)}</Tag> : null}<span className={styles.turnState}>{turn.confirmed ? (turn.acceptance_method === 'session_auto' ? t('语音自动记录 · 未人工校对') : turn.acceptance_method === 'manual' ? t('人工提交 · 已保存') : t('回答已保存 · 来源未知')) : turn.turn_no === state?.turnNo ? t('等待回答') : ''}</span></div>
                     <h3 ref={turn.turn_no === state?.turnNo ? questionHeadingRef : undefined} tabIndex={turn.turn_no === state?.turnNo ? -1 : undefined} data-interview-studio-question>{turn.question}</h3>
                     {buildEvidenceEntries(turn.basis_refs).length ? (
                       <div className={styles.turnEvidence} aria-label={t("提问依据")} data-interview-studio-evidence-trigger>
@@ -1018,7 +1090,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                         if (entry) focusEvidence(entry);
                       }}>{t("上一轮回答 → 当前追问")}</button>
                     ) : null}
-                    {turn.turn_no === state?.turnNo && !turn.confirmed ? <span className={styles.questionHint}>{t("当前问题 · 先回答，再由你确认提交")}</span> : null}
+                    {turn.turn_no === state?.turnNo && !turn.confirmed ? <span className={styles.questionHint}>{realtimeState.locked ? t('当前问题 · 本场已授权自动记录') : t('当前问题 · 先回答，再由你确认提交')}</span> : null}
                     {turn.answer && turn.confirmed ? (
                       <div className={styles.candidateMessage} data-interview-speaker="candidate">
                         <span>{t("你")}</span>
@@ -1049,11 +1121,15 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
 
         <aside id="interview-answer-workspace" className={`${styles.answerWorkspace} ${mobileWorkspaceOpen ? styles.mobileWorkspaceOpen : ''}`} aria-label={t("回答与依据工作台")}>
           <div className={styles.workspaceHeader}>
-            <div className={styles.workspaceTabs} role="tablist" aria-label={t("回答工作台视图")}>
-              <button ref={answerTabRef} type="button" role="tab" aria-selected={workspaceTab === 'answer'} aria-controls="interview-answer-panel" className={workspaceTab === 'answer' ? styles.activeWorkspaceTab : ''} onClick={() => setWorkspaceTab('answer')}>{t("回答")}</button>
-              <button type="button" role="tab" aria-selected={workspaceTab === 'evidence'} aria-controls="interview-evidence-panel" className={workspaceTab === 'evidence' ? styles.activeWorkspaceTab : ''} onClick={() => setWorkspaceTab('evidence')}>{t("依据")}</button>
+            <div className={styles.workspaceTabs} role="tablist" aria-label={t('回答工作台视图')}>
+              <button ref={answerTabRef} type="button" role="tab" aria-selected={workspaceTab === 'answer'} aria-controls="interview-answer-panel" className={workspaceTab === 'answer' ? styles.activeWorkspaceTab : ''} onClick={() => setWorkspaceTab('answer')}>{t('回答')}</button>
+              <button type="button" role="tab" aria-selected={workspaceTab === 'evidence'} aria-controls="interview-evidence-panel" className={workspaceTab === 'evidence' ? styles.activeWorkspaceTab : ''} onClick={() => {
+                if (realtimeController.state.locked) void realtimeController.pause('已切换到依据，实时对话已暂停。');
+                setWorkspaceTab('evidence');
+              }}>{t('依据')}</button>
             </div>
             <Button className={styles.mobileWorkspaceClose} type="text" onClick={() => {
+              if (realtimeController.state.locked) void realtimeController.pause('回答工作台已关闭，实时对话已暂停。');
               setMobileWorkspaceOpen(false);
               window.requestAnimationFrame(() => mobileWorkspaceTriggerRef.current?.focus());
             }}>{t("关闭回答工作台")}</Button>
@@ -1062,11 +1138,24 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
           {workspaceTab === 'answer' ? (
             <div id="interview-answer-panel" role="tabpanel" className={styles.answerWorkspacePanel} data-interview-studio-answer aria-label={t("回答工作台")}>
               <div className={styles.answerWorkspaceBody}>
+                <RealtimeVoicePanel
+                  state={realtimeState}
+                  disabled={!state || !attemptId || working || continuousInProgress || Boolean(startError) || Boolean(terminalFailure) || !['question_ready', 'answering', 'transcript_review'].includes(state?.phase ?? '') || Boolean(state?.answer.trim()) || voiceDirty}
+                  onStart={(consentRevision, takeover) => {
+                    setMobileWorkspaceOpen(true);
+                    if (state && attemptId) void realtimeController.start({ context: serviceContext, attemptId, turnNo: state.turnNo, consentRevision, takeover });
+                  }}
+                  onPause={() => void realtimeController.pause()}
+                  onStop={() => realtimeController.stopForReview()}
+                  onRepeat={() => realtimeController.repeat()}
+                  onDiscard={() => realtimeController.discardTranscript()}
+                  onManual={(text) => { update({ type: 'answer_mode', mode: 'voice' }); update({ type: 'transcript_ready', answer: text }); }}
+                />
                 <ContinuousVoiceModePanel
                   status={continuousState.status}
                   countdownSeconds={continuousState.countdownSeconds}
                   error={continuousState.error}
-                  disabled={!state || working || Boolean(startError) || Boolean(terminalFailure) || ['result_unknown', 'contract_failed', 'completed', 'next_question_generating', 'answer_submitting', 'feedback_submitting'].includes(state?.phase ?? '')}
+                  disabled={realtimeState.locked || !state || working || Boolean(startError) || Boolean(terminalFailure) || ['result_unknown', 'contract_failed', 'completed', 'next_question_generating', 'answer_submitting', 'feedback_submitting'].includes(state?.phase ?? '')}
                   onEnable={enableContinuous}
                   onDisable={disableContinuous}
                   onSkipReading={() => continuousController.skipReading()}
@@ -1078,7 +1167,7 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                 />
                 <VoiceAnswerComposer
                   question={currentQuestion}
-                  disabled={!state || Boolean(startError) || Boolean(terminalFailure) || working || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || state?.phase === 'completed' || state?.phase === 'next_question_generating'}
+                  disabled={realtimeState.locked || !state || Boolean(startError) || Boolean(terminalFailure) || working || state?.phase === 'result_unknown' || state?.phase === 'contract_failed' || state?.phase === 'completed' || state?.phase === 'next_question_generating'}
                   textValue={state?.answer ?? ''}
                   onTextChange={(answer) => update({ type: 'draft_changed', answer })}
                   submitRevision={voiceSubmitRevision}

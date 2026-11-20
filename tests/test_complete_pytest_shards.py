@@ -671,12 +671,12 @@ def test_invalid_frozen_duration_cost_cannot_silently_fall_back(
         gate.load_duration_history()
 
 
-def test_workflow_preserves_120_minute_shard_budget():
+def test_workflow_keeps_uniform_shard_job_deadlines():
     workflow = (ROOT / ".github/workflows/desktop-windows.yml").read_text()
     shard_job = workflow.split("  pytest-shards:\n", 1)[1].split("  full-regression:\n", 1)[0]
-    assert "timeout-minutes: 120" in shard_job
+    assert "    timeout-minutes: 120" in shard_job.splitlines()
     assert "      max-parallel: 4" in shard_job.splitlines()
-    assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]" in shard_job
+    assert "shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]" in shard_job
 
 
 @pytest.fixture
@@ -793,9 +793,9 @@ def test_refreshed_history_partition_keeps_exact_nodes_and_module_lifecycles():
     # Include retained historical skips and new, unmeasured nodes: none may be dropped.
     nodes = sorted(history["duration_ms"] | history["historical_skips"])
     nodes += ["tests/test_future_module.py::test_first", "tests/test_future_module.py::test_second"]
-    shards = gate.partition(nodes, 20)
-    assert len(shards) == 20 and all(shards)
-    assert shards == gate.partition(list(reversed(nodes)), 20)
+    shards = gate.partition(nodes, 24)
+    assert len(shards) == 24 and all(shards)
+    assert shards == gate.partition(list(reversed(nodes)), 24)
     assert sorted(sum(shards, [])) == sorted(nodes)
     assert len(set(sum(shards, []))) == len(nodes)
     for filename in {node.split("::", 1)[0] for node in nodes} - gate.NODE_SPLIT_FILES:
@@ -804,7 +804,7 @@ def test_refreshed_history_partition_keeps_exact_nodes_and_module_lifecycles():
                 "shards": shards, "allowed_skips": None}
     gate.validate_manifest(manifest)
     assert manifest["allowed_skips"] is None
-    assert gate.digest(manifest) == gate.digest({**manifest, "shards": gate.partition(nodes[::-1], 20)})
+    assert gate.digest(manifest) == gate.digest({**manifest, "shards": gate.partition(nodes[::-1], 24)})
 
 
 def test_windows_v3_conservatively_preserves_v2_and_full_source_audit(frozen_v3_history, duration_refresh):
@@ -1153,7 +1153,15 @@ def test_v4_archive_requires_complete_successful_execution(v4_archive, duration_
         duration_refresh.refresh_v4(package())
 
 
-def test_windows_v4_preserves_v3_costs_skips_and_complete_audit(duration_refresh):
+@pytest.fixture
+def frozen_v4_history(duration_refresh, monkeypatch):
+    monkeypatch.setattr(gate, "DURATION_HISTORY_PATH", SCRIPT.with_name("durations-v4.json.gz"))
+    monkeypatch.setattr(gate, "DURATION_HISTORY_VERSION", 4)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_SHA256", duration_refresh.V4_OUTPUT_SHA256)
+    monkeypatch.setattr(gate, "DURATION_HISTORY_COMPRESSED_SHA256", duration_refresh.V4_OUTPUT_COMPRESSED_SHA256)
+
+
+def test_windows_v4_preserves_v3_costs_skips_and_complete_audit(duration_refresh, frozen_v4_history):
     baseline = json.loads(duration_refresh.zlib.decompress(
         SCRIPT.with_name("durations-v3.json.gz").read_bytes(), wbits=31))
     history = gate.load_duration_history()
@@ -1190,7 +1198,7 @@ def test_windows_v4_preserves_v3_costs_skips_and_complete_audit(duration_refresh
     assert shards == gate.partition(nodes[::-1], 20)
 
 
-def test_v4_writer_reproduces_checked_in_bytes(tmp_path, duration_refresh):
+def test_v4_writer_reproduces_checked_in_bytes(tmp_path, duration_refresh, frozen_v4_history):
     history = gate.load_duration_history()
     path = tmp_path / "v4.json.gz"
     if duration_refresh.zlib.ZLIB_RUNTIME_VERSION != duration_refresh.V4_ENCODER_ZLIB_VERSION:
@@ -1202,3 +1210,86 @@ def test_v4_writer_reproduces_checked_in_bytes(tmp_path, duration_refresh):
         history["fallback_ms"] += 1
         with pytest.raises(ValueError, match="raw history size or digest"):
             duration_refresh.write_v4_compressed(path, history)
+
+
+
+def test_v5_history_pins_two_complete_v4_runs_and_never_promotes_partial_observations(duration_refresh):
+    baseline = json.loads(duration_refresh.zlib.decompress(
+        SCRIPT.with_name("durations-v4.json.gz").read_bytes(), wbits=31))
+    history = gate.load_duration_history()
+    source = history["source"]
+    assert history["version"] == 5
+    assert source["previous_history_sha256"] == duration_refresh.V4_OUTPUT_SHA256
+    assert source["scope"] == "scheduling-only; not completed execution evidence"
+    assert source["policy"] == "max-old-and-complete-passed-total-phases-v1"
+    assert history["historical_skips"] == baseline["historical_skips"]
+    for run, pin, audit, attempt in zip(
+        source["runs"], duration_refresh.V5_SOURCES, source["execution_audit"], ("2", "1"), strict=True,
+    ):
+        assert all(run[key] == value for key, value in pin.items())
+        assert run["identity"]["commit"] == "07989bd1aa8e3aa0cd937985c647eda7bd84480b"
+        assert run["identity"]["attempt"] == attempt
+        assert run["manifest_nodes"] == 10740
+        assert [s["shard"] for s in run["shards"]] == list(range(20))
+        assert all(s["exit_code"] == 0 for s in run["shards"])
+        assert sum(s["complete_passed_nodes"] for s in run["shards"]) == audit["passed"] == 10716
+        assert audit["run_id"] == pin["run_id"]
+        assert audit["collection_skips"] == [] and len(audit["skipped"]) == 24
+    expected = dict(baseline["duration_ms"])
+    for node, observation in source["node_observations"].items():
+        assert observation["previous_ms"] == baseline["duration_ms"].get(node)
+        assert [p["run_id"] for p in observation["observations"]] == ["44076307737", "44335603296"]
+        expected[node] = max(expected.get(node, 0), *(p["observed_ms"] for p in observation["observations"]))
+        assert expected[node] == observation["effective_ms"]
+    assert history["duration_ms"] == expected
+    assert history["fallback_ms"] == max(expected.values())
+    assert source["added_nodes"] == 346 and source["raised_nodes"] == 2322
+
+
+def test_v5_refresh_rejects_partial_second_archive_even_after_first_validates(tmp_path, duration_refresh, monkeypatch):
+    baseline_raw = duration_refresh.zlib.decompress(
+        SCRIPT.with_name("durations-v4.json.gz").read_bytes(), wbits=31)
+    baseline = json.loads(baseline_raw)
+    nodes = [f"tests/test_v5_synthetic_{i:02}.py::test_case" for i in range(20)]
+    paths, pins = [], []
+    for attempt in (1, 2):
+        identity = {"run": f"synthetic-{attempt}", "platform": "Windows"}
+        shards = gate._partition(nodes, 20, baseline)
+        manifest = {"version": 4, "identity": identity, "nodes": nodes, "shards": shards,
+                    "partition": {"history_sha256": duration_refresh.V4_OUTPUT_SHA256},
+                    "allowed_skips": None, "collection_skips": []}
+        raw = json.dumps(manifest).encode()
+        path = tmp_path / f"source-{attempt}.zip"
+        with zipfile.ZipFile(path, "w") as archive:
+            archive.writestr("pytest-evidence/manifest.json", raw)
+            for i, selected in enumerate(shards):
+                result = {"identity": identity, "manifest": gate.digest(manifest), "index": i,
+                          "exit_code": 2 if attempt == 2 and i == 19 else 0, "selected": selected,
+                          "reports": {selected[0]: [
+                              {"when": p, "outcome": "passed", "reason": "", "xfail": False,
+                               "duration_seconds": .001}
+                              for p in ("setup", "call", "teardown")]}}
+                archive.writestr(f"pytest-evidence/shard-{i}.json", json.dumps(result))
+        paths.append(path)
+        pins.append({"run_id": identity["run"], "artifact_id": attempt,
+                     "artifact_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                     "manifest_sha256": gate.digest(manifest),
+                     "manifest_file_sha256": hashlib.sha256(raw).hexdigest()})
+    monkeypatch.setattr(duration_refresh, "V5_SOURCES", pins)
+    with pytest.raises(ValueError, match="Shard 19: unsuccessful or mismatched evidence"):
+        duration_refresh.refresh_v5(paths)
+
+
+def test_v5_writer_reproduces_checked_in_payload_and_rejects_digest_drift(tmp_path, duration_refresh):
+    history = gate.load_duration_history()
+    path = tmp_path / "v5.json.gz"
+    assert duration_refresh.v5_raw_bytes(history) == gate._duration_history_bytes()
+    if duration_refresh.zlib.ZLIB_RUNTIME_VERSION != duration_refresh.V5_ENCODER_ZLIB_VERSION:
+        with pytest.raises(ValueError, match="requires zlib"):
+            duration_refresh.write_v5_compressed(path, history)
+    else:
+        duration_refresh.write_v5_compressed(path, history)
+        assert path.read_bytes() == gate.DURATION_HISTORY_PATH.read_bytes()
+        history["fallback_ms"] += 1
+        with pytest.raises(ValueError, match="raw history size or digest"):
+            duration_refresh.write_v5_compressed(path, history)

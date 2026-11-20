@@ -13,7 +13,7 @@ function matchRule(requestPath: string): ProxyOptions {
 
 describe('job mail development same-origin boundary', () => {
   it('matches the dedicated mail rule before the generic API rule', () => {
-    expect(Object.keys(rules)).toEqual(['^/api/job-mail(?:/|$)', '/api']);
+    expect(Object.keys(rules).indexOf('^/api/job-mail(?:/|$)')).toBeLessThan(Object.keys(rules).indexOf('/api'));
     for (const path of ['/api/job-mail', '/api/job-mail/status', '/api/job-mail/imports', '/api/job-mail/suggestions/id/confirm']) {
       expect(matchRule(path)).toMatchObject({ target: 'http://localhost:8080', changeOrigin: false });
     }

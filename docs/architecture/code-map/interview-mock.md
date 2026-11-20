@@ -24,6 +24,10 @@
 
 ## 2. 层间边界
 
+实时语音分支补充（2026-11-15，`d3f7d3a2` 合并主线 `5fb4f243`）：[RealtimeVoicePanel](../../../web/src/features/interviewStudio/RealtimeVoicePanel.tsx) → [RealtimeVoiceController](../../../web/src/features/mockInterviewVoice/realtimeVoiceController.ts) → [语音会话 service](../../../web/src/services/interviewVoice.ts) → `/api/interview-voice/*` 的 [register_interview_voice_routes](../../../src/offerpilot/interview_voice/routes.py)。可选[语音进程](../../../voice-runtime/README.md)只读取已授权当前题；最终回答仍走上述两类 `submitInterviewStudioAnswer` 路径。`MockInterviewRepository.submit_answer` 在同一事务通过 [check_answer_admission](../../../src/offerpilot/interview_voice/admission.py) 检查会话、epoch、来源与重放元数据。回答来源与人工/自动接受标记在当前 Studio 展示；主线已删除旧 `MockInterviewDrawer`，不要重新接回退役入口。
+
+实时模式的未知结果必须保留原 key、原文和 acceptance；隐藏收音工作台时暂停并撤销授权。排查与回归入口为 [会话测试](../../../tests/test_interview_voice_sessions.py)、[API 测试](../../../tests/test_interview_voice_api.py)、[实时控制器测试](../../../web/src/features/mockInterviewVoice/realtimeVoiceController.test.ts)、[Studio 交互](../../../web/src/features/interviewStudio/InterviewStudio.test.tsx)。此说明不表示真人语料或发布验收已经完成，约束见 [ADR-0020](../decisions/0020-scope-realtime-interview-voice.md)。
+
 1. **页面状态**：[interviewStudioController.ts](../../../web/src/features/interviewStudio/interviewStudioController.ts) 的 `reduceStudioState` / `shouldGenerateNextQuestion` 决定是否进入下一题。回答未确认、结果未知或轮数达到上限时不能据“回答框有文字”推定可以出题。
 2. **请求与归属**：service 根据 `context.kind` 选路径；handler 核对事件或 case。快速模拟和事件绑定复用执行服务，不共用归属 ID。
 3. **生成权与重放**：Repository 的 `claim_question` / `claim_feedback` 在事务中读取状态、冻结本次对话、处理租约和生成代次。无 claim 不等于调用 Provider 失败；可能正在生成或应返回已保存结果。

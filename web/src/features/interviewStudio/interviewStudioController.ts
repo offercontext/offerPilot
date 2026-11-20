@@ -1,3 +1,5 @@
+import type { AnswerAcceptance } from '@/types/mockInterview';
+
 // 业务地图：docs/architecture/code-map/interview-mock.md。
 // 本状态机只决定页面下一步；回答保存成功后才能进入下一题。
 // question_succeeded 清理上一题 key，result_unknown 则保留原 key 用于对账。
@@ -27,6 +29,7 @@ export interface StudioState {
   pendingOperation: StudioOperation | null;
   resultUnknown: boolean;
   error: string | null;
+  answerAcceptance?: AnswerAcceptance;
 }
 
 export type StudioAction =
@@ -34,7 +37,7 @@ export type StudioAction =
   | { type: 'draft_changed'; answer: string }
   | { type: 'transcript_ready'; answer: string }
   | { type: 'transcript_confirmed' }
-  | { type: 'answer_submitting'; turnKey: string }
+  | { type: 'answer_submitting'; turnKey: string; answer?: string; acceptance?: AnswerAcceptance }
   | { type: 'answer_succeeded' }
   | { type: 'question_submitting'; questionKey: string }
   | { type: 'question_succeeded'; turnNo: number; question: string }
@@ -77,7 +80,9 @@ export function reduceStudioState(state: StudioState, action: StudioAction): Stu
     case 'transcript_confirmed':
       return { ...state, phase: 'answering', error: null };
     case 'answer_submitting':
-      return { ...state, turnKey: action.turnKey, phase: 'answer_submitting', pendingOperation: 'answer', resultUnknown: false, error: null };
+      return { ...state, turnKey: action.turnKey, answer: action.answer ?? state.answer,
+        answerAcceptance: action.acceptance ?? state.answerAcceptance,
+        phase: 'answer_submitting', pendingOperation: 'answer', resultUnknown: false, error: null };
     case 'answer_succeeded':
       return shouldGenerateNextQuestion({ ...state, phase: 'answer_confirmed' })
         ? { ...state, phase: 'next_question_generating', pendingOperation: 'question', error: null }
@@ -85,7 +90,7 @@ export function reduceStudioState(state: StudioState, action: StudioAction): Stu
     case 'question_submitting':
       return { ...state, questionKey: action.questionKey, phase: 'next_question_generating', pendingOperation: 'question', error: null };
     case 'question_succeeded':
-      return { ...state, turnNo: action.turnNo, question: action.question, answer: '', turnKey: null, questionKey: null, phase: 'question_ready', pendingOperation: null, error: null };
+      return { ...state, turnNo: action.turnNo, question: action.question, answer: '', answerAcceptance: undefined, turnKey: null, questionKey: null, phase: 'question_ready', pendingOperation: null, resultUnknown: false, error: null };
     case 'feedback_submitting':
       return { ...state, feedbackKey: action.feedbackKey, pendingOperation: 'feedback', error: null };
     case 'contract_failed':

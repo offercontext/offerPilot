@@ -25,6 +25,9 @@ def predecessor(tmp_path):
         zipped.extractall(extracted)  # trusted test-owned archive
     with closing(sqlite3.connect(extracted / "data.db")) as db:
         db.execute("DROP TABLE confirmed_memory_version_metadata")
+        db.execute("DROP TABLE mock_interview_answer_acceptance")
+        db.execute("DROP TABLE interview_voice_sessions")
+        db.execute("DELETE FROM schema_migrations WHERE version='0041_interview_voice_sessions'")
         db.execute("DELETE FROM schema_migrations WHERE version='0040_confirmed_memory_metadata'")
         db.execute("INSERT INTO confirmed_memories VALUES ('legacy-memory',2,'active')")
         db.execute("INSERT INTO confirmed_memory_versions VALUES ('legacy-v1','legacy-memory',1,'旧内容','2000-01-01T00:00:00+00:00')")
@@ -61,7 +64,7 @@ def test_predecessor_private_upgrade_and_cold_install(tmp_path):
     candidate, _, _ = restore.operation_paths(root, record)
     assert workspace_files(root) == before
     assert archive.read_bytes() == original_archive
-    assert record["schema_upgrade"] == "memory_metadata_v1"
+    assert record["schema_upgrade"] == "memory_metadata_v1+interview_voice_v1"
     assert record["files"] == workspace_files(candidate)
     manifest = json.loads((candidate / MANIFEST).read_text())
     assert manifest["files"] == {k: v for k, v in record["files"].items() if k != MANIFEST}

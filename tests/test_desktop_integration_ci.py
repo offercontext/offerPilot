@@ -83,6 +83,17 @@ def test_prs_use_full_read_only_merge_candidate_validation_without_duplicate_can
     assert "${{ github.sha }}" in WORKFLOW
 
 
+def test_validation_installer_upload_is_attempt_scoped_without_overwriting():
+    package = _job("validation-package")
+    upload = package.split("      - name: Upload experimental validation installer\n", 1)[1]
+    upload = upload.split("\n      - ", 1)[0]
+    assert "uses: actions/upload-artifact@" in upload
+    assert re.findall(r"^          name: (.+)$", upload, re.M) == [
+        "offerpilot-windows-experimental-validation-${{ github.sha }}-${{ github.run_attempt }}",
+    ]
+    assert re.findall(r"^          overwrite: (.+)$", upload, re.M) in ([], ["false"])
+
+
 def test_package_only_escape_hatch_is_bound_to_old_push_branch():
     expression = ("github.event_name == 'push' && "
                   "github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && "
@@ -97,7 +108,9 @@ def test_package_only_escape_hatch_is_bound_to_old_push_branch():
         assert re.findall(r'^    if: (.+)$', _job(job), re.M) == [
             f'"${{{{ {guard} }}}}"',
         ], f"Mode guard for {job} must stay bound to the old push branch"
-    assert "timeout-minutes: 120" in WORKFLOW and "max-parallel: 4" in WORKFLOW
+    shards = _job("pytest-shards")
+    assert "    timeout-minutes: 120" in shards.splitlines()
+    assert "      max-parallel: 4" in shards.splitlines()
     assert "scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence" in WORKFLOW
 
 

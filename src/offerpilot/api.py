@@ -123,6 +123,8 @@ from offerpilot.config import (
     resolve_data_dir,
     save_config,
 )
+from offerpilot.interview_voice.admission import InterviewAnswerIn, VoiceAdmissionError
+from offerpilot.interview_voice.routes import RUNTIME_INSPECT_PATH, register_interview_voice_routes
 from offerpilot.context_projector.loader import ContextSourceLoader, SourceTemporarilyUnavailable, fetch_rows
 from offerpilot.context_projector.contracts import ProjectionError
 from offerpilot.context_projector.budget import PROVIDER_FRAMING_RESERVE
@@ -1090,10 +1092,16 @@ def _mock_interview_turn_json(turn: Any, turns: list[Any]) -> dict[str, Any]:
                 "excerpt": previous_answer[:160],
             }
             basis_refs = [parent_ref] + [ref for ref in basis_refs if ref != parent_ref]
+    acceptance = turn.voice_acceptance
     return {
         "turn_no": turn.turn_no,
         "question": turn.question_text,
         "answer": turn.answer_text,
+        "input_source": acceptance.input_source if acceptance is not None else None,
+        "acceptance_method": acceptance.acceptance_method if acceptance is not None else None,
+        "voice_session_id": acceptance.voice_session_id if acceptance is not None else None,
+        "voice_session_epoch": acceptance.voice_session_epoch if acceptance is not None else None,
+        "voice_consent_revision": acceptance.voice_consent_revision if acceptance is not None else None,
         "question_kind": question_kind,
         "parent_turn_no": parent_turn_no,
         "topic_root_turn_no": topic_root_turn_no,
@@ -1346,6 +1354,9 @@ def create_app(
     register_readiness_context_routes(app, session_factory)
     register_summary_routes(app, session_factory)
     register_knowledge_note_routes(app, session_factory)
+    register_interview_voice_routes(
+        app, session_factory, app_config.confirmation_secret, _mock_interview_turn_json,
+    )
 
     @app.middleware("http")
     async def cors_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -1444,6 +1455,10 @@ def create_app(
                 "语音复盘数据不完整，请检查后重试。",
                 code="voice_coaching_invalid_payload",
             )
+        if request.url.path.startswith("/api/interview-voice/"):
+            return error_response(422, "语音会话请求不完整。", code="voice_invalid_payload")
+        if "/mock-interview/attempts/" in request.url.path and request.url.path.endswith("/turns"):
+            return recovery_error("mock_interview_invalid_payload", "回答或接受方式无效。")
         return JSONResponse(
             status_code=422,
             content={"error": "validation_failed", "detail": errors},
@@ -7095,16 +7110,18 @@ def create_app(
 
     @app.post("/api/interview-practice-cases/{case_id}/mock-interview/attempts/{attempt_id}/turns")
     def answer_quick_practice_turn(
-        case_id: int, attempt_id: int, payload: dict[str, Any] = Body(...)
+        case_id: int, attempt_id: int, payload: InterviewAnswerIn
     ) -> JSONResponse:
         try:
-            turn_no = int(payload["turn_no"])
-            answer_text = payload["answer_text"]
-            turn_key = str(payload["turn_idempotency_key"])
-            if not isinstance(answer_text, str):
-                raise ValueError("answer_text must be a string")
+            turn_no = payload.turn_no
+            answer_text = payload.answer_text
+            turn_key = payload.turn_idempotency_key
             mock_interviews.quick_feedback_context(attempt_id, case_id)
-            attempt = mock_interviews.submit_answer(attempt_id, turn_no, answer_text, turn_key)
+            attempt = mock_interviews.submit_answer(
+                attempt_id, turn_no, answer_text, turn_key, acceptance=payload.acceptance(),
+            )
+        except VoiceAdmissionError:
+            raise
         except KeyError as exc:
             return recovery_error("mock_interview_invalid_payload", f"missing field: {exc.args[0]}")
         except MockInterviewTurnIdempotencyConflict:
@@ -7254,16 +7271,18 @@ def create_app(
         application_id: int,
         event_id: int,
         attempt_id: int,
-        payload: dict[str, Any] = Body(...),
+        payload: InterviewAnswerIn,
     ) -> JSONResponse:
         try:
-            turn_no = int(payload["turn_no"])
-            answer_text = payload["answer_text"]
-            turn_key = str(payload["turn_idempotency_key"])
-            if not isinstance(answer_text, str):
-                raise ValueError("answer_text must be a string")
+            turn_no = payload.turn_no
+            answer_text = payload.answer_text
+            turn_key = payload.turn_idempotency_key
             mock_interviews.feedback_context(attempt_id, application_id, event_id)
-            attempt = mock_interviews.submit_answer(attempt_id, turn_no, answer_text, turn_key)
+            attempt = mock_interviews.submit_answer(
+                attempt_id, turn_no, answer_text, turn_key, acceptance=payload.acceptance(),
+            )
+        except VoiceAdmissionError:
+            raise
         except KeyError as exc:
             return recovery_error("mock_interview_invalid_payload", f"missing field: {exc.args[0]}")
         except MockInterviewTurnIdempotencyConflict:
@@ -9036,6 +9055,9 @@ def _runtime_http_response(outcome: object) -> JSONResponse:
 def _auth_guard_response(request: Request, data_dir: Path) -> JSONResponse | None:
     # API 登录鉴权与业务作用域校验分层：通过此处仍须通过各 Repository/工具的归属和来源检查。
     path = request.url.path
+    if path == RUNTIME_INSPECT_PATH and request.method == "POST":
+        # The handler checks a live, read-only, single-interview capability.
+        return None
     if not path.startswith("/api/") or path in {"/api/health", "/api/auth/status"}:
         return None
     cfg = load_config(data_dir)
