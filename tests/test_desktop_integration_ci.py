@@ -98,7 +98,7 @@ def test_package_only_escape_hatch_is_bound_to_old_push_branch():
             f'"${{{{ {guard} }}}}"',
         ], f"Mode guard for {job} must stay bound to the old push branch"
     shards = _job("pytest-shards")
-    assert "    timeout-minutes: ${{ matrix.shard == 17 && 150 || 120 }}" in shards.splitlines()
+    assert "    timeout-minutes: 120" in shards.splitlines()
     assert "      max-parallel: 4" in shards.splitlines()
     assert "scripts/release-gate.ps1 -Install -PytestEvidence pytest-evidence" in WORKFLOW
 

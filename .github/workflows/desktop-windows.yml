@@ -360,7 +360,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Collection uses HEAD/index only, but fail before launching 20 shards
+          # Collection uses HEAD/index only, but fail before launching 24 shards
           # if the historical backend/frontend source gates cannot run.
           fetch-depth: 0
           persist-credentials: false
@@ -392,7 +392,7 @@ jobs:
       - run: |
           npm.cmd ci --prefix web
           if ($LASTEXITCODE -ne 0) { throw "Frontend dependency install failed" }
-          uv run --frozen python scripts/test_shards/gate.py collect --count 20 --manifest pytest-evidence/manifest.json
+          uv run --frozen python scripts/test_shards/gate.py collect --count 24 --manifest pytest-evidence/manifest.json
           if ($LASTEXITCODE -ne 0) { throw "Complete pytest collection failed" }
       - uses: actions/upload-artifact@v4
         with:
@@ -401,35 +401,25 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # Capacity planning, not a measured guarantee: run 38937939551 used
-  # 729.25 total job-minutes across 12 shards. Twenty shards add eight startups,
-  # roughly 16-27 minutes at observed overhead, plus repeated fixture costs.
-  # Twenty was chosen for planning-scenario margin; estimates are not guarantees.
-  # Four shards may run at once in the authorized concurrency trial; packaging
-  # may use another runner. Quota, wall time and billing are not guaranteed.
-  # Run 44526746254 reached the 120-minute runner cap during shard 17, with
-  # 815 complete passing nodes and no failed assertion before interruption.
-  # Its outer job envelope is temporarily 150 minutes; the other 19 stay at
-  # 120 (2430 aggregate shard-minute ceiling), pending duration rebalancing.
-  # Sharding reduces wall-clock/timeout pressure, not total resource consumption.
-  # duration-lpt-v1 uses pinned historical durations only to balance scheduling;
-  # every collected node still runs exactly once under the full manifest gate.
-  # Whole-file isolation and the reviewed chat-node exception remain unchanged.
-  # Estimates do not certify passing tests; each shard keeps its 120-minute limit
-  # except for shard 17 as noted above; at most four run concurrently.
+  # Timing-only v5 uses two complete pinned Windows cohorts. Capacity replay
+  # motivates 24 shards, not a runtime guarantee. Whole-file affinity and the
+  # reviewed chat-node exception are unchanged. Each collected node still runs
+  # exactly once in the complete shard matrix; E06 remains a separate diagnostic.
+  # At most four shards at once; uniform 120-minute outer job limits
+  # (2880 aggregate shard-minute ceiling). No per-case or evidence changes.
   pytest-shards:
-    name: Complete pytest shard ${{ matrix.shard }} of 20
+    name: Complete pytest shard ${{ matrix.shard }} of 24
     env:
       OFFERPILOT_P0_DIAGNOSTIC_CONTEXT: shard
     if: "${{ needs.pr-feedback.outputs.mode != 'selected' && !(github.event_name == 'push' && github.ref == 'refs/heads/feat/20261005-windows-desktop-validation' && startsWith(github.event.head_commit.message, 'build: AI [windows-package-only] ')) }}"
     needs: [pr-feedback, pytest-manifest]
     runs-on: windows-2022
-    timeout-minutes: ${{ matrix.shard == 17 && 150 || 120 }}
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       max-parallel: 4
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
     steps:
       - uses: actions/checkout@v4
         with:

@@ -137,20 +137,20 @@ def test_shard_timeout_adds_bounded_headroom_without_relaxing_gates():
         assert re.findall(r"^    timeout-minutes: (\d+)$", _job(job), re.M) == [minutes]
     shards = _job("pytest-shards")
     assert re.findall(r"^    timeout-minutes: (.+)$", shards, re.M) == [
-        "${{ matrix.shard == 17 && 150 || 120 }}",
+        "120",
     ]
     assert re.findall(r"^      fail-fast: (.+)$", shards, re.M) == ["false"]
     assert re.findall(r"^      max-parallel: (\d+)$", shards, re.M) == ["4"]
     matrix = re.findall(r"^        shard: \[([^\]]+)\]$", shards, re.M)
     assert len(matrix) == 1
-    assert [int(value.strip()) for value in matrix[0].split(",")] == list(range(20))
-    assert "gate.py collect --count 20 --manifest" in _job("pytest-manifest")
-    assert "name: Complete pytest shard ${{ matrix.shard }} of 20" in shards
+    assert [int(value.strip()) for value in matrix[0].split(",")] == list(range(24))
+    assert "gate.py collect --count 24 --manifest" in _job("pytest-manifest")
+    assert "name: Complete pytest shard ${{ matrix.shard }} of 24" in shards
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in WORKFLOW
     assert "continue-on-error:" not in WORKFLOW
     assert 'if ($LASTEXITCODE -ne 0) { throw "Full pytest shard failed" }' in shards
     assert "if: ${{ always() }}\n        uses: actions/upload-artifact@v4" in shards
-    assert "2430 aggregate shard-minute ceiling" in WORKFLOW
+    assert "2880 aggregate shard-minute ceiling" in WORKFLOW
 
 
 @pytest.mark.parametrize("job", ["pytest-manifest", "pytest-shards", "full-regression"])
