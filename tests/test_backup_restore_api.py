@@ -9,9 +9,9 @@ from fastapi.testclient import TestClient
 from offerpilot.api import create_app
 from offerpilot.backup_restore import status
 from offerpilot.config import Config, save_config
-from tests.test_backup_install import queued
+from tests.test_backup_install import backup_install_seed, queued
 
-__all__ = ["queued"]
+__all__ = ["backup_install_seed", "queued"]
 
 
 def test_api_preview_confirm_cancel(tmp_path: Path):

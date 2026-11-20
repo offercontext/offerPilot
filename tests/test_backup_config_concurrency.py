@@ -5,9 +5,9 @@ import subprocess
 import sys
 
 from offerpilot import backup_restore as restore
-from tests.test_backup_install import cold, queued
+from tests.test_backup_install import backup_install_seed, cold, queued
 
-__all__ = ["queued"]
+__all__ = ["backup_install_seed", "queued"]
 
 
 def test_config_read_write_process_blocks_install_until_it_exits(queued):
