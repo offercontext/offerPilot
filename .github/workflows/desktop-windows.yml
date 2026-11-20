@@ -299,7 +299,7 @@ jobs:
       - name: Upload experimental validation installer
         uses: actions/upload-artifact@v4
         with:
-          name: offerpilot-windows-experimental-validation-${{ github.sha }}
+          name: offerpilot-windows-experimental-validation-${{ github.sha }}-${{ github.run_attempt }}
           if-no-files-found: error
           retention-days: 14
           path: |
