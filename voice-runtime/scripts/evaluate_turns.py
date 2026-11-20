@@ -8,6 +8,7 @@ import os
 import threading
 import time
 import wave
+from contextlib import closing
 from pathlib import Path
 
 import numpy as np
@@ -100,15 +101,18 @@ async def run(args):
             if type(end) not in (int, float) or not math.isfinite(end) or end < 0:
                 raise ValueError("Each corpus case requires a finite non-negative end_ms label")
     if args.smoke:
-        for text in (
-            "我首先检查日志，定位问题以后完成回滚，最后通过指标验证修复结果。",
-            "让我想一下",
-            "请重复题目",
-        ):
-            audio = models.synthesize(text, threading.Event())
-            cases.append(
-                {"id": text, "samples": soxr.resample(audio.samples, audio.sample_rate, 16000)}
-            )
+        with closing(models.make_tts()) as tts:
+            if not tts.available:
+                raise ValueError("Synthetic smoke requires the optional local TTS model")
+            for text in (
+                "我首先检查日志，定位问题以后完成回滚，最后通过指标验证修复结果。",
+                "让我想一下",
+                "请重复题目",
+            ):
+                audio = tts.synthesize(text, threading.Event())
+                cases.append(
+                    {"id": text, "samples": soxr.resample(audio.samples, audio.sample_rate, 16000)}
+                )
     if not cases or len(cases) < args.min_samples:
         raise ValueError(f"At least {args.min_samples} labeled cases are required")
     results = []

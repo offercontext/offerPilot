@@ -41,12 +41,16 @@ from .models import LocalModels
 logger.disable("pipecat")
 
 
+RUNTIME_PROTOCOL = "offerpilot-voice-v2"
+
+
 class Offer(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     session_id: str = Field(min_length=1, max_length=128)
     token: str = Field(min_length=32, max_length=128, repr=False)
     sdp: str = Field(min_length=1, max_length=100_000, repr=False)
     type: Literal["offer"]
+    protocol: Literal["offerpilot-voice-v2"] | None = None
 
 
 async def inspect(grant: Offer):
@@ -69,7 +73,8 @@ async def inspect(grant: Offer):
 class SpeechProcessor(FrameProcessor):
     def __init__(self, models, connection, grant):
         super().__init__()
-        self.models, self.connection, self.grant = models, connection, grant
+        self.connection, self.grant = connection, grant
+        self.tts = models.make_tts()
         self.engine = TurnEngine(models, self.emit, self.interrupt)
         self.vad = SileroVADAnalyzer(
             sample_rate=16000,
@@ -81,6 +86,7 @@ class SpeechProcessor(FrameProcessor):
         )
         self.vad.set_sample_rate(16000)
         self.playback_generation = 0
+        self.playback_issue_turn = 0
         self.speaker: asyncio.Task | None = None
         self.command_lock = asyncio.Lock()
         self.cancel_speech = threading.Event()
@@ -93,29 +99,44 @@ class SpeechProcessor(FrameProcessor):
 
     async def interrupt(self):
         self.playback_generation += 1
+        generation = self.playback_generation
         self.cancel_speech.set()
         if self.speaker:
             self.speaker.cancel()
-        await self.emit("interrupted", playback_id=self.playback_generation)
+        await self.emit("interrupted", playback_id=generation)
         await self.broadcast_interruption()
+        return generation
+
+    async def playback_issue(self, turn_no, reason):
+        if turn_no != self.playback_issue_turn:
+            self.playback_issue_turn = turn_no
+            await self.emit("playback_issue", reason=reason, turn_no=turn_no)
 
     async def speak(self, question):
-        await self.interrupt()
-        generation = self.playback_generation
+        generation = await self.interrupt()
+        if generation != self.playback_generation:
+            return  # Candidate speech can interrupt even during playback setup.
+        turn_no = self.engine.turn_no
+        question_id = self.question_id
+        if not self.tts.available:
+            await self.playback_issue(turn_no, "unavailable")
+            return
         cancelled = self.cancel_speech = threading.Event()
 
         async def run():
             try:
                 # Sentence chunks bound non-cancellable native inference; stale output is discarded.
                 for sentence in re.findall(r"[^。！？!?\n]{1,160}[。！？!?\n]?", question):
-                    audio = await asyncio.to_thread(self.models.synthesize, sentence, cancelled)
-                    if generation != self.playback_generation or audio is None:
+                    audio = await asyncio.to_thread(self.tts.synthesize, sentence, cancelled)
+                    if generation != self.playback_generation:
                         return
+                    if audio is None or len(audio.samples) == 0:
+                        raise ValueError("No synthesized audio")
                     await self.emit(
                         "playback",
                         playback_id=generation,
-                        question_id=self.question_id,
-                        turn_no=self.engine.turn_no,
+                        question_id=question_id,
+                        turn_no=turn_no,
                     )
                     pcm = (np.clip(audio.samples, -1, 1) * 32767).astype(np.int16).tobytes()
                     size = int(audio.sample_rate * 0.02) * 2
@@ -134,7 +155,8 @@ class SpeechProcessor(FrameProcessor):
             except asyncio.CancelledError:
                 pass
             except Exception:  # noqa: BLE001 -- isolate native synthesis failure
-                await self.engine.manual("题目播报失败，请使用文字题目。")
+                if generation == self.playback_generation:
+                    await self.playback_issue(turn_no, "failed")
 
         self.speaker = asyncio.create_task(run())
 
@@ -153,7 +175,10 @@ class SpeechProcessor(FrameProcessor):
                         self.engine.begin(turn["turn_no"])
                 if self.engine.phase in {"listening", "waiting"}:
                     self.question_id = str(turn.get("question_idempotency_key") or turn["turn_no"])
-                    await self.speak(turn["question"])
+                    if message.get("read_questions") is True:
+                        await self.speak(turn["question"])
+                    elif self.speaker and not self.speaker.done():
+                        await self.interrupt()
                     await self.emit("ready", turn_no=turn["turn_no"])
             elif kind == "stop":
                 await self.interrupt()
@@ -205,15 +230,18 @@ class SpeechProcessor(FrameProcessor):
 
     async def cleanup(self):
         self.cancel_speech.set()
-        if self.command_task:
-            self.command_task.cancel()
-            await asyncio.gather(self.command_task, return_exceptions=True)
-        await self.engine.close()
-        if self.speaker:
-            self.speaker.cancel()
-            await asyncio.gather(self.speaker, return_exceptions=True)
-        await self.vad.cleanup()
-        await super().cleanup()
+        try:
+            if self.command_task:
+                self.command_task.cancel()
+                await asyncio.gather(self.command_task, return_exceptions=True)
+            if self.speaker:
+                self.speaker.cancel()
+                await asyncio.gather(self.speaker, return_exceptions=True)
+            await self.engine.close()
+        finally:
+            await asyncio.to_thread(self.tts.close)
+            await self.vad.cleanup()
+            await super().cleanup()
 
 
 def create_app():
@@ -239,10 +267,12 @@ def create_app():
 
     @app.get("/health")
     async def health():
-        return {"ready": models is not None, "protocol": "offerpilot-voice-v1"}
+        return {"ready": models is not None, "protocol": RUNTIME_PROTOCOL}
 
     @app.post("/offer")
     async def offer(grant: Offer):
+        if grant.protocol != RUNTIME_PROTOCOL:
+            raise HTTPException(409, "Incompatible voice protocol")
         async with gate:
             if models is None:
                 raise HTTPException(503, "Local models unavailable")

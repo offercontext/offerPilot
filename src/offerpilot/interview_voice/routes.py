@@ -16,6 +16,7 @@ from offerpilot.interview_voice.repository import (
 )
 from offerpilot.repositories.mock_interviews import MockInterviewSourceChanged
 
+RUNTIME_PROTOCOL = "offerpilot-voice-v2"
 RUNTIME_INSPECT_PATH = "/api/interview-voice/runtime/inspect"
 
 
@@ -87,8 +88,11 @@ def register_interview_voice_routes(
     async def capabilities() -> dict[str, Any]:
         try:
             health = await runtime_request("/health")
-            ready = health.get("ready") is True and health.get("protocol") == "offerpilot-voice-v1"
-            reason = "" if ready else "语音模型尚未就绪，请检查独立语音进程。"
+            if health.get("protocol") != RUNTIME_PROTOCOL:
+                ready, reason = False, "实时语音版本不匹配，请同步更新主服务和独立语音进程。"
+            else:
+                ready = health.get("ready") is True
+                reason = "" if ready else "语音模型尚未就绪，请检查独立语音进程。"
         except VoiceAdmissionError as exc:
             ready, reason = False, str(exc)
         return {
@@ -125,6 +129,7 @@ def register_interview_voice_routes(
         snapshot(session_id, payload.token, active=True)
         return await runtime_request("/offer", {
             "session_id": session_id, "token": payload.token, "sdp": payload.sdp, "type": "offer",
+            "protocol": RUNTIME_PROTOCOL,
         })
 
     @router.post(RUNTIME_INSPECT_PATH)

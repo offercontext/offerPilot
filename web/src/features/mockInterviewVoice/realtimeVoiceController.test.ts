@@ -66,7 +66,7 @@ describe('realtime voice ownership and business boundary', () => {
     controller.questionReady(2);
     expect(controller.state.supplemental).toBe(true);
     expect(controller.state.transcript).toBe('还有一件事');
-    expect(media.send).not.toHaveBeenCalledWith({ type: 'sync' });
+    expect(media.send).not.toHaveBeenCalled();
     pending.resolve('saved'); await request;
   });
 

@@ -9,7 +9,7 @@ afterEach(() => setLocale('zh-CN'));
 vi.mock('@/services/interviewVoice', () => ({
   voiceCapabilities: vi.fn().mockResolvedValue({ available: true, consent_revision: 'v1' }),
 }));
-it('requires explicit per-connection consent and clears consent after a pause', async () => {
+it('requires per-connection consent and resets opt-in narration after a pause', async () => {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true;
   const host = document.createElement('div'); document.body.append(host);
   const root = createRoot(host);
@@ -21,14 +21,19 @@ it('requires explicit per-connection consent and clears consent after a pause', 
   try {
     await render(false);
     const start = () => Array.from(host.querySelectorAll('button')).find(b => b.textContent === '开启实时对话')!;
+    const checkboxes = () => Array.from(host.querySelectorAll<HTMLInputElement>('input[type=checkbox]'));
     expect(start().disabled).toBe(true);
-    await act(async () => { (host.querySelector('input[type=checkbox]') as HTMLInputElement).click(); });
+    expect(checkboxes()[1].checked).toBe(false);
+    await act(async () => checkboxes()[1].click());
+    expect(start().disabled).toBe(true);
+    await act(async () => checkboxes()[0].click());
     expect(start().disabled).toBe(false);
     await act(async () => start().click());
-    expect(props.onStart).toHaveBeenCalledWith('v1', false);
+    expect(props.onStart).toHaveBeenCalledWith('v1', false, true);
     await render(true);
     await render(false);
     expect(start().disabled).toBe(true);
+    expect(checkboxes()[1].checked).toBe(false);
   } finally { await act(async () => root.unmount()); host.remove(); }
 });
 it('switches authored status and consent copy without translating transcripts or starting media', async () => {
