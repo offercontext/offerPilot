@@ -1141,9 +1141,9 @@ export default function InterviewStudio({ context, onClose, onActivityChange, on
                 <RealtimeVoicePanel
                   state={realtimeState}
                   disabled={!state || !attemptId || working || continuousInProgress || Boolean(startError) || Boolean(terminalFailure) || !['question_ready', 'answering', 'transcript_review'].includes(state?.phase ?? '') || Boolean(state?.answer.trim()) || voiceDirty}
-                  onStart={(consentRevision, takeover) => {
+                  onStart={(consentRevision, takeover, readQuestions) => {
                     setMobileWorkspaceOpen(true);
-                    if (state && attemptId) void realtimeController.start({ context: serviceContext, attemptId, turnNo: state.turnNo, consentRevision, takeover });
+                    if (state && attemptId) void realtimeController.start({ context: serviceContext, attemptId, turnNo: state.turnNo, consentRevision, takeover, readQuestions });
                   }}
                   onPause={() => void realtimeController.pause()}
                   onStop={() => realtimeController.stopForReview()}

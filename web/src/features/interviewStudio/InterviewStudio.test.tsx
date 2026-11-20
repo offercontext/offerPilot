@@ -3,6 +3,7 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setLocale } from '@/i18n';
+import { createVoiceSession, voiceCapabilities, voiceOffer, voiceSessionAction } from '@/services/interviewVoice';
 import ContinuousVoiceModePanel from './ContinuousVoiceModePanel';
 import InterviewStudio from './InterviewStudio';
 import { RealtimeVoiceController } from '@/features/mockInterviewVoice/realtimeVoiceController';
@@ -31,6 +32,9 @@ vi.mock('@/services/voiceCoaching', () => ({
 vi.mock('@/services/interviewVoice', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/interviewVoice')>(),
   voiceCapabilities: vi.fn().mockResolvedValue({ available: false, reason: '测试未启用语音进程' }),
+  createVoiceSession: vi.fn(),
+  voiceOffer: vi.fn(),
+  voiceSessionAction: vi.fn(),
 }));
 
 vi.mock('@/features/mockInterviewVoice/VoiceAnswerComposer', () => ({
@@ -86,6 +90,7 @@ afterEach(async () => {
   root = undefined;
   host = undefined;
   window.sessionStorage.clear();
+  vi.unstubAllGlobals();
   setLocale('zh-CN');
 });
 
@@ -167,6 +172,124 @@ describe('InterviewStudio continuous voice integration', () => {
     serviceSpies.nextQuestion.mockClear();
     serviceSpies.discard.mockClear();
     serviceSpies.saveVoiceReview.mockClear();
+  });
+
+  it.each(['off', 'blocked', 'audible'])('keeps questions visible and advances exactly once with %s playback', async (playbackMode) => {
+    const readQuestions = playbackMode !== 'off';
+    const revision = 'interview-realtime-v1';
+    const capability = vi.mocked(voiceCapabilities).mockResolvedValueOnce({
+      available: true, reason: '', consent_revision: revision, audio_processing: 'offerpilot_host',
+      third_party_speech: false, stores_audio: false,
+    });
+    const grant = { session_id: 'session', attempt_id: 41, epoch: 3, token: 't'.repeat(64), consent_revision: revision };
+    vi.mocked(createVoiceSession).mockResolvedValueOnce(grant);
+    vi.mocked(voiceOffer).mockResolvedValueOnce({ type: 'answer', sdp: 'synthetic' });
+    vi.mocked(voiceSessionAction).mockResolvedValue(undefined).mockClear();
+    const channel = {
+      readyState: 'open', send: vi.fn(), close: vi.fn(),
+      onopen: undefined as (() => void) | undefined,
+      onmessage: undefined as ((event: { data: string }) => void) | undefined,
+    };
+    const stop = vi.fn();
+    const capture = vi.fn().mockResolvedValue({ getTracks: () => [{ stop }] });
+    const originalMedia = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices');
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: capture } });
+    const play = playbackMode === 'blocked' ? vi.fn().mockRejectedValue(new Error('autoplay denied')) : vi.fn().mockResolvedValue(undefined);
+    const makeAudio = vi.fn<(node: { muted: boolean }) => void>();
+    vi.stubGlobal('Audio', class {
+      play = play;
+      pause = vi.fn();
+      muted = false;
+      currentTime = 0;
+      constructor() { makeAudio(this); }
+    });
+    vi.stubGlobal('RTCPeerConnection', class {
+      iceGatheringState = 'complete';
+      localDescription = { sdp: 'synthetic' };
+      ontrack?: (event: { streams: Array<object> }) => void;
+      addTrack = vi.fn();
+      createDataChannel() { return channel; }
+      async createOffer() { return {}; }
+      async setLocalDescription() { /* fake transport */ }
+      async setRemoteDescription() { this.ontrack?.({ streams: [{}] }); channel.onopen?.(); }
+      close = vi.fn();
+    });
+    const receive = (data: object) => channel.onmessage?.({ data: JSON.stringify(data) });
+    try {
+      await act(async () => {
+        root = createRoot(host = document.createElement('div'));
+        document.body.appendChild(host);
+        root.render(<InterviewStudio context={{ kind: 'application_event', applicationId: 7, eventId: 8,
+          resumeId: 9, jdVersionId: 10, jdText: '排障' }} onClose={vi.fn()} />);
+      });
+      expect(capability).toHaveBeenCalled();
+      const conversation = host!.querySelector('[data-interview-conversation-scroll]');
+      expect(conversation?.textContent).toContain('请介绍一次排障经历。');
+      const check = (label: string) => Array.from(host!.querySelectorAll('label'))
+        .find((item) => item.textContent?.includes(label))!.querySelector('input')!;
+      const read = check('朗读面试题');
+      expect(read.checked).toBe(false);
+      await act(async () => {
+        check('授权本次连接自动记录回答').click();
+        if (readQuestions) read.click();
+      });
+      await act(async () => { button('开启实时对话').click(); });
+      expect(capture).toHaveBeenCalledOnce();
+      expect(channel.send).toHaveBeenCalledWith(JSON.stringify({ type: 'ready', read_questions: readQuestions }));
+      expect(makeAudio).toHaveBeenCalledTimes(Number(readQuestions));
+
+      await act(async () => {
+        receive({ type: 'playback', turn_no: 1, playback_id: 1, question_id: 'first' });
+        if (playbackMode === 'blocked') {
+          receive({ type: 'playback_issue', reason: 'failed', turn_no: 1 });
+          receive({ type: 'playback_issue', reason: 'unavailable', turn_no: 1 });
+        }
+      });
+      expect(play).toHaveBeenCalledTimes(Number(readQuestions));
+      expect(host!.textContent!.split('题目无法朗读，请阅读文字。').length - 1).toBe(Number(playbackMode === 'blocked'));
+      if (playbackMode === 'audible') {
+        const audio = makeAudio.mock.calls[0][0];
+        expect(audio.muted).toBe(false);
+        await act(async () => { receive({ type: 'interrupted', playback_id: 2 }); });
+        expect(audio.muted).toBe(true);
+        expect(channel.send).toHaveBeenCalledWith(JSON.stringify({
+          type: 'playback_receipt', playback_id: 1, question_id: 'first', position_seconds: 0,
+        }));
+      }
+      expect(conversation?.textContent).toContain('请介绍一次排障经历。');
+      expect(stop).not.toHaveBeenCalled();
+      expect(voiceSessionAction).not.toHaveBeenCalled();
+      expect(serviceSpies.answer).not.toHaveBeenCalled();
+
+      await act(async () => {
+        receive({ type: 'candidate', turn_no: 1, text: '我先定位日志，再完成回滚。' });
+        receive({ type: 'candidate', turn_no: 1, text: '重复消息不得保存' });
+      });
+      expect(serviceSpies.answer).toHaveBeenCalledOnce();
+      expect(serviceSpies.nextQuestion).toHaveBeenCalledOnce();
+      expect(conversation?.textContent).toContain('你如何验证修复？');
+      expect(stop).not.toHaveBeenCalled();
+      if (playbackMode === 'audible') {
+        await act(async () => {
+          receive({ type: 'playback', turn_no: 1, playback_id: 4, question_id: 'stale-first' });
+          receive({ type: 'playback_issue', reason: 'failed', turn_no: 1 });
+        });
+        expect(play).toHaveBeenCalledOnce();
+        expect(host!.textContent).not.toContain('题目无法朗读');
+        await act(async () => { receive({ type: 'playback', turn_no: 2, playback_id: 3, question_id: 'second' }); });
+        expect(play).toHaveBeenCalledTimes(2);
+      }
+
+      await act(async () => {
+        receive({ type: 'manual', turn_no: 2, text: '可核对转写', reason: '识别失败' });
+      });
+      expect(stop).toHaveBeenCalled();
+      expect(voiceSessionAction).toHaveBeenCalledWith(grant, 'close');
+      expect(button('带入文字框手动核对')).toBeDefined();
+    } finally {
+      if (originalMedia) Object.defineProperty(navigator, 'mediaDevices', originalMedia);
+      else Reflect.deleteProperty(navigator, 'mediaDevices');
+    }
   });
 
   it('switches workspace labels without restarting the attempt or translating source content', async () => {

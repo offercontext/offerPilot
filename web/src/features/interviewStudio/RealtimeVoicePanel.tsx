@@ -8,7 +8,7 @@ import { t, useLocale } from '@/i18n';
 interface Props {
   state: RealtimeState;
   disabled: boolean;
-  onStart: (revision: string, takeover: boolean) => void;
+  onStart: (revision: string, takeover: boolean, readQuestions: boolean) => void;
   onPause: () => void;
   onStop: () => void;
   onRepeat: () => void;
@@ -21,6 +21,7 @@ export default function RealtimeVoicePanel(props: Props) {
   const [capabilities, setCapabilities] = useState<VoiceCapabilities>();
   const [consent, setConsent] = useState(false);
   const [takeover, setTakeover] = useState(false);
+  const [readQuestions, setReadQuestions] = useState(false);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState(false);
   const refresh = () => {
@@ -36,24 +37,26 @@ export default function RealtimeVoicePanel(props: Props) {
         if (!running && !props.state.locked) setExpanded(event.currentTarget.open);
       }}>
       <summary style={{ cursor: 'pointer' }}><strong>{t('实时对话 · 实验功能')}</strong>{!running ? t(' · 自动接话与打断') : ''}</summary>
-      <p className={styles.description}>{t('自动识别回答结束并记录，可打断播报。音频会发送到 OfferPilot 所在设备或服务器，由本地模型完成识别、轮次检测与播报；不保存原始音频，不切换到云端语音。面试出题仍使用当前配置的 AI 服务。')}</p>
+      <p className={styles.description}>{t('自动识别回答结束并记录。题目始终显示为文字，可选择同时朗读并开口打断。音频由 OfferPilot 所在设备或服务器上的本地模型处理，不保存原始音频，不切换到云端语音。面试出题仍使用当前配置的 AI 服务。')}</p>
       {!running && !props.state.locked ? (
         <Space direction="vertical" size="small" style={{ width: '100%' }}>
           <Checkbox checked={consent} disabled={props.disabled} onChange={(event) => setConsent(event.target.checked)}>{t('授权本次连接自动记录回答（未经逐轮人工校对）')}</Checkbox>
+          <Checkbox checked={readQuestions} disabled={props.disabled} onChange={(event) => setReadQuestions(event.target.checked)}>{t('朗读面试题（仅本次连接）')}</Checkbox>
           {props.state.message.includes('接管') ? <Checkbox checked={takeover} onChange={(event) => setTakeover(event.target.checked)}>{t('接管此练习，停止其他页面的实时语音授权')}</Checkbox> : null}
           <Button disabled={props.disabled || Boolean(props.state.transcript.trim()) || !consent || !capabilities?.available} onClick={() => {
-            props.onStart(capabilities!.consent_revision, takeover); setTakeover(false);
+            props.onStart(capabilities!.consent_revision, takeover, readQuestions); setTakeover(false); setReadQuestions(false);
           }}>{t('开启实时对话')}</Button>
         </Space>
       ) : (
         <Space wrap>
           <Button onClick={props.onPause}>{t('暂停并撤销自动记录')}</Button>
-          <Button disabled={!running || props.state.status === 'submitting'} onClick={props.onRepeat}>{t('重播当前题')}</Button>
+          {props.state.readQuestions ? <Button disabled={!running || props.state.status === 'submitting' || props.state.playbackIssue === 'browser'} onClick={props.onRepeat}>{t('重播当前题')}</Button> : null}
           <Button disabled={!running} onClick={props.onStop}>{t('结束收音并核对文字')}</Button>
         </Space>
       )}
       {!capabilities?.available ? <p>{t(error || capabilities?.reason || '正在检查语音服务…')} <Button type="link" size="small" onClick={refresh}>{t('重新检查')}</Button></p> : null}
       {props.state.message ? <p role="status" aria-live="polite" aria-atomic="true">{t(props.state.message)}{props.state.revocationPending ? ` ${t('授权撤销尚未确认，请重试暂停。')}` : ''}</p> : null}
+      {running && props.state.playbackIssue ? <p role="status">{t('题目无法朗读，请阅读文字。实时语音回答不受影响。')}</p> : null}
       {props.state.transcript ? (
         <div>
           <strong>{props.state.supplemental ? t('待处理补充（未保存）') : t('实时转写（可能有误）')}</strong>
