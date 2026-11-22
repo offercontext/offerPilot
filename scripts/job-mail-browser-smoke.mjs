@@ -13,9 +13,18 @@ await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, chromiumSandbox: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
 const blocked = [];
+const preparationWrites = [];
+let auditPreparation = false;
 await context.route('**/*', route => {
   const target = new URL(route.request().url());
   if (target.origin !== new URL(base).origin) { blocked.push(target.origin); return route.abort(); }
+  const method = route.request().method();
+  if (auditPreparation && target.pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    // Fail the assertion below without letting a regressed CTA mutate the
+    // fixture or reach any model or communication handler.
+    preparationWrites.push(`${method} ${target.pathname}`);
+    return route.abort();
+  }
   return route.continue();
 });
 const page = await context.newPage();
@@ -107,6 +116,11 @@ try {
   assert.equal((await api('/application-events')).length, 0);
   await snap('04c-missing-duration-inline-validation');
   await dialog.getByLabel('时长', { exact: true }).fill('45');
+  // A checked-in calendar date eventually expires; this case requires a live
+  // scheduled B. Set it through the same human-reviewed form.
+  const scheduledB = new Date(Date.now() + 7 * 86400_000);
+  scheduledB.setUTCSeconds(0, 0);
+  await dialog.getByLabel('开始时间', { exact: true }).fill(scheduledB.toISOString());
   const evidence = dialog.locator('details[aria-label="邮件原文依据"]');
   await evidence.locator(':scope > summary').click();
   assert.equal(await evidence.locator('pre').isVisible(), true);
@@ -147,6 +161,8 @@ try {
   assert.equal(events[0].application_id, app.id);
   assert.equal(events[0].duration_minutes, 45);
   assert.equal(events[0].location, '合成会议室 B');
+  const eventB = events[0];
+  assert.equal(Date.parse(eventB.scheduled_at), scheduledB.getTime());
   assert.equal((await api('/applications/' + app.id)).status, app.status);
   const receiptFocus = await dialog.evaluate(element => ({
     tag: document.activeElement?.tagName,
@@ -187,6 +203,77 @@ try {
   assert.deepEqual(blocked, []);
   checks.push('Cancellation/injection is manual-only and never loads external resources; mobile review verified');
   await page.setViewportSize({ width: 1440, height: 1100 });
+
+  // Preserve the one-write assertions above; introduce the earlier eligible
+  // sibling now, before reopening the actual persisted B confirmation receipt.
+  const eventA = await api('/application-events', { method: 'POST', data: {
+    application_id: app.id, event_type: 'interview', status: 'todo', round: 1,
+    scheduled_at: new Date(scheduledB.getTime() - 86400_000).toISOString(),
+    duration_minutes: 30, location: '合成会议室 A',
+  } });
+  assert.notEqual(eventA.id, eventB.id);
+  assert.equal(eventA.application_id, eventB.application_id);
+  assert.ok(Date.parse(eventA.scheduled_at) > Date.now());
+  assert.ok(Date.parse(eventA.scheduled_at) < Date.parse(eventB.scheduled_at));
+  const jd = '合成岗位资料：维护 Python API 和 SQL 服务。';
+  await api(`/applications/${app.id}/job-description/versions`, { method: 'POST', data: {
+    jd_text: jd, expected_current_version_id: null, idempotency_key: 'synthetic-mail-exact-interview-jd',
+  } });
+  const resumeTitle = '合成面试准备简历';
+  await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'backend', title: resumeTitle } });
+  // The existing readiness flow can identify a single visible resume on its
+  // own. Two viable fixtures let us exercise a real manual choice.
+  await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'frontend', title: '合成备用简历' } });
+  const processed = await api('/job-mail/suggestions?status=processed');
+  const invitation = processed.items.find(item => item.evidence?.subject === '【合成样本】面试邀请');
+  assert.ok(invitation, 'Confirmed invitation must remain in Processed');
+  const suggestionPath = `/job-mail/suggestions/${encodeURIComponent(invitation.id)}`;
+  const receiptBefore = (await api(suggestionPath)).receipt;
+  assert.equal(receiptBefore.application_id, app.id);
+  assert.equal(receiptBefore.application_event_id, eventB.id);
+  const eventsBefore = await api(`/application-events?application_id=${app.id}`);
+  assert.deepEqual(new Set(eventsBefore.map(event => event.id)), new Set([eventA.id, eventB.id]));
+  const applicationBefore = await api(`/applications/${app.id}`);
+
+  await page.goto(base + '/?view=reminders');
+  await inbox.getByRole('button', { name: '处理历史', exact: true }).click();
+  await inbox.getByRole('button', { name: /【合成样本】面试邀请/ }).click();
+  await dialog.getByText('已确认写入', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: '查看记录', exact: true }).waitFor();
+  auditPreparation = true;
+  await dialog.getByRole('button', { name: '打开面试准备', exact: true }).click();
+  await dialog.waitFor({ state: 'hidden' });
+  const locked = page.getByTestId('locked-real-preparation');
+  await locked.getByText('事件已锁定', { exact: true }).waitFor();
+  await locked.getByText(jd, { exact: true }).waitFor();
+  const startPreparation = locked.getByRole('button', { name: '开始准备', exact: true });
+  assert.equal(await startPreparation.isEnabled(), false, 'Mail CTA must not implicitly select a resume or start preparation');
+  await snap('06c-mail-receipt-locked-readiness', locked);
+  assert.deepEqual(preparationWrites, [], 'Opening the exact mail event must be read-only');
+
+  // Existing explicit controls carry the locked task identity into its real
+  // host. Check that positive canonical identity, not just the absence of A.
+  await locked.getByRole('combobox').click();
+  await page.locator('.ant-select-dropdown:visible').getByText(resumeTitle).click();
+  await waitForMailState(() => startPreparation.isEnabled(), Boolean);
+  await startPreparation.click();
+  const taskKey = `application.interview_prepare:applicationId=${app.id}:eventId=${eventB.id}`;
+  const exactOwner = page.locator(`[data-core-task-key="${taskKey}"]`);
+  const generate = exactOwner.getByTestId('interview-preparation-generate');
+  await generate.waitFor();
+  await waitForMailState(() => generate.isEnabled(), Boolean);
+  const siblingKey = `application.interview_prepare:applicationId=${app.id}:eventId=${eventA.id}`;
+  assert.equal(await page.locator(`[data-core-task-key="${siblingKey}"]`).count(), 0);
+  await snap('06d-explicit-preparation-exact-owner', exactOwner);
+  assert.deepEqual(preparationWrites, [], 'Opening/continuing preparation must not write, resubmit, send or generate');
+  auditPreparation = false;
+  assert.deepEqual(await api(`/application-events?application_id=${app.id}`), eventsBefore);
+  assert.deepEqual(await api(`/applications/${app.id}`), applicationBefore);
+  assert.deepEqual((await api(suggestionPath)).receipt, receiptBefore);
+  checks.push('Persisted mail receipt opens the exact later event B, despite eligible earlier A; explicit resume and preparation actions retain B and make no API writes, sends or model calls');
+  const exactPreparation = { applicationId: app.id, earlierEventId: eventA.id, receiptEventId: eventB.id, taskKey, browserApiWrites: preparationWrites };
+
+
   await page.goto(base + '/?view=settings');
   await settings.getByRole('button', { name: '断开邮箱', exact: true }).click();
   await page.getByRole('dialog', { name: '断开求职邮箱？' }).getByRole('button', { name: '确认断开', exact: true }).click();
@@ -227,13 +314,13 @@ try {
   assert.equal(removed.configured, false);
   assert.equal(removed.deletion_pending, false);
   assert.deepEqual(await api('/job-mail/fixture-safety'), { synthetic_only: true, body_read_attempts: 0, vault_entries: 0 });
-  assert.equal((await api('/application-events')).length, 1);
+  assert.equal((await api('/application-events')).length, 2);
   assert.deepEqual(blocked, []);
   await deletion.waitFor({ state: 'hidden' });
   await snap('09-synthetic-vault-deletion-receipt', settings);
   checks.push('Synthetic vault setup requires separate test/save consent, explicit Chinese folder scope, manual mode, and confirmed deletion; no IMAP body or native vault use');
   assert.deepEqual(pageErrors, []);
-  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));
