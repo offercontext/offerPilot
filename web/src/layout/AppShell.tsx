@@ -1106,6 +1106,8 @@ function AppShellContent() {
   const [pilotInterviewReviewApplicationId, setPilotInterviewReviewApplicationId] = useState<number | null>(null);
   const [pilotInterviewPreparationApplicationId, setPilotInterviewPreparationApplicationId] = useState<number | null>(null);
   const [pilotInterviewPreparationEventId, setPilotInterviewPreparationEventId] = useState<number | null>(null);
+  const [mailInterviewSeed, setMailInterviewSeed] = useState<{ generation: number; app: Application; event: ScheduleEvent; appsRevision: number; eventsRevision: number } | null>(null);
+  const mailNavigationEpoch = useRef(0);
   const [interviewPreparationSelection, setInterviewPreparationSelection] = useState<InterviewPreparationSelection | null>(null);
   const [interviewStudioContext, setInterviewStudioContext] = useState<(RealInterviewStudioContext | QuickPracticeStudioContext) | null>(null);
   const [interviewStudioHaruVisible, setInterviewStudioHaruVisible] = useState(false);
@@ -1183,15 +1185,24 @@ function AppShellContent() {
   // and request an explicit save-and-exit confirmation.
   useDesktopUpdateSafety(() => readDesktopUpdateSafety(() => desktopUpdateInputRef.current()));
 
+  const qc = useQueryClient();
   const { data: mailPendingCount = 0 } = useQuery({ queryKey: JOB_MAIL_COUNT_KEY, queryFn: getJobMailPendingCount, retry: false, refetchInterval: 30_000 });
-  const { data: applications = [], isLoading, isError: appsError } = useQuery({
+  const { data: applications = [], isLoading, isError: appsError, dataUpdatedAt: appsUpdatedAt } = useQuery({
     queryKey: ['applications'],
     queryFn: () => listApplications(),
   });
-  const { data: eventsData, isLoading: eventsLoading, isError: eventsError } = useQuery({
+  const { data: eventsData, isLoading: eventsLoading, isError: eventsError, dataUpdatedAt: eventsUpdatedAt } = useQuery({
     queryKey: ['events'],
     queryFn: () => listEvents(),
   });
+  const appsRevision = qc.getQueryState?.(['applications'])?.dataUpdateCount ?? appsUpdatedAt;
+  const eventsRevision = qc.getQueryState?.(['events'])?.dataUpdateCount ?? eventsUpdatedAt;
+  const mailSourceRevisions = useRef({ appsRevision, eventsRevision });
+  mailSourceRevisions.current = { appsRevision, eventsRevision };
+  // A fresh click bridges an older shell cache, but cannot override a later
+  // authoritative refresh (including deletion/cancellation) indefinitely.
+  const currentMailSeed = mailInterviewSeed && mailInterviewSeed.appsRevision === appsRevision
+    && mailInterviewSeed.eventsRevision === eventsRevision ? mailInterviewSeed : null;
   const { data: offersData, isLoading: offersLoading, isError: offersError } = useQuery({
     queryKey: ['offers'],
     queryFn: () => listOffers(),
@@ -1299,7 +1310,6 @@ function AppShellContent() {
   };
 
 
-  const qc = useQueryClient();
   const refreshWorkspaceData = () => {
     void qc.invalidateQueries({ queryKey: ['applications'] });
     void qc.invalidateQueries({ queryKey: ['events'] });
@@ -1375,8 +1385,11 @@ function AppShellContent() {
   );
   const actions = useMemo(() => toLegacyActionItems(pipelineActions), [pipelineActions]);
 
+  const mailSelectedApp = currentMailSeed && coreTaskSurfaceState.active?.generation === currentMailSeed.generation
+    && coreTaskSurfaceState.active.ref.taskId === 'application.interview_prepare'
+    && coreTaskSurfaceState.active.ref.applicationId === currentMailSeed.app.id ? currentMailSeed.app : null;
   const selectedApp = selected
-    ? apps.find((a) => a.id === selected.id) ?? null
+    ? (mailSelectedApp?.id === selected.id ? mailSelectedApp : apps.find((a) => a.id === selected.id)) ?? null
     : null;
   const selectedNextStepSuggestions = selectedApp
     ? deriveNextStepSuggestions(buildNextStepFacts(selectedApp.id), 'detail', now.toDate())
@@ -1465,11 +1478,11 @@ function AppShellContent() {
   }, [selectedApp?.id, view]);
 
   useEffect(() => {
-    if (selected && !apps.some((app) => app.id === selected.id)) {
+    if (selected && !selectedApp) {
       closeCoreTaskSurface();
       setSelected(null);
     }
-  }, [apps, closeCoreTaskSurface, selected]);
+  }, [selectedApp, closeCoreTaskSurface, selected]);
 
   const shouldShowContextualPilot = view !== 'pilot';
   const contextualPilotRailMode = shouldShowContextualPilot
@@ -1583,6 +1596,7 @@ function AppShellContent() {
   };
 
   const navigateToView = (nextView: ViewMode, { preserveEvidenceFocus = false }: { preserveEvidenceFocus?: boolean } = {}) => {
+    mailNavigationEpoch.current += 1;
     if (nextView !== 'pilot') lastNonPilotViewRef.current = nextView;
     const activeBeforeNavigation = coreTaskController.getState().active;
     closeCoreTaskSurface();
@@ -1804,7 +1818,7 @@ function AppShellContent() {
     openApplicationDetail(app);
   };
 
-  function openExactInterviewTask(request: TaskLaunchRequest): CoreTaskLaunchResult {
+  function openExactInterviewTask(request: TaskLaunchRequest, fresh?: { app: Application; event: ScheduleEvent; appsRevision: number; eventsRevision: number }): CoreTaskLaunchResult {
     const { ref } = request;
     const applicationId = ref.applicationId;
     const eventId = ref.eventId;
@@ -1817,13 +1831,17 @@ function AppShellContent() {
     ) {
       return { kind: 'invalid', reason: 'invalid_task_identity' };
     }
-    const app = apps.find((item) => item.id === applicationId);
+    const active = coreTaskController.getState().active;
+    const seed = fresh ?? (currentMailSeed && active?.generation === currentMailSeed.generation
+      && currentMailSeed.app.id === applicationId && currentMailSeed.event.id === eventId
+      ? currentMailSeed : null);
+    const app = seed?.app ?? apps.find((item) => item.id === applicationId);
     const exactEvent = resolveExecutableInterviewTask({
       taskId: ref.taskId,
       applicationId: applicationId!,
       eventId: eventId!,
-      events: eventsData,
-      sourceState: eventSourceState,
+      events: seed ? [seed.event] : eventsData,
+      sourceState: seed ? 'ready' : eventSourceState,
       now: now.valueOf(),
     });
     if (!app || !exactEvent.ok) {
@@ -1832,6 +1850,7 @@ function AppShellContent() {
     }
     const result = launchCoreTask(request);
     if (result.kind !== 'launched' && result.kind !== 'focused_existing') return result;
+    if (fresh) setMailInterviewSeed({ ...fresh, generation: result.generation });
     setPilotApplicationContext(null);
     setPilotInterviewPreparationApplicationId(null);
     setPilotInterviewPreparationEventId(null);
@@ -1871,6 +1890,31 @@ function AppShellContent() {
     setView('board');
     return result;
   }
+
+  // Mail receipts identify an exact persisted event, never a default neighbouring
+  // interview. Read current sources on click; late reads cannot take over a route.
+  const openMailInterviewPreparation = async (applicationId: number, eventId: number, isCurrent: () => boolean): Promise<boolean> => {
+    const epoch = ++mailNavigationEpoch.current;
+    const owner = coreTaskController.getState().active;
+    const readRevisions = () => ({
+      appsRevision: qc.getQueryState?.(['applications'])?.dataUpdateCount ?? mailSourceRevisions.current.appsRevision,
+      eventsRevision: qc.getQueryState?.(['events'])?.dataUpdateCount ?? mailSourceRevisions.current.eventsRevision,
+    });
+    const started = readRevisions();
+    const [currentApps, currentEvents] = await Promise.all([
+      listApplications(), listEvents({ application_id: applicationId }),
+    ]);
+    if (!isCurrent() || epoch !== mailNavigationEpoch.current || coreTaskController.getState().active !== owner) return false;
+    const finished = readRevisions();
+    if (started.appsRevision !== finished.appsRevision || started.eventsRevision !== finished.eventsRevision) return false;
+    const matches = currentApps.filter((app) => app.id === applicationId && !app.deleted_at);
+    const exact = resolveExecutableInterviewTask({ taskId: 'application.interview_prepare', applicationId, eventId,
+      events: currentEvents, sourceState: 'ready', now: Date.now() });
+    if (matches.length !== 1 || !exact.ok) return false;
+    const result = openExactInterviewTask({ ref: { taskId: 'application.interview_prepare', applicationId, eventId },
+      source: 'job_mail', focus: 'current' }, { app: matches[0], event: exact.event, ...started });
+    return result.kind === 'launched' || result.kind === 'focused_existing';
+  };
 
   function launchTaskFromApplicationDetail(request: TaskLaunchRequest): CoreTaskLaunchResult {
     return request.ref.taskId === 'application.interview_prepare'
@@ -2285,15 +2329,20 @@ function AppShellContent() {
     ? coreTaskSurfaceState.active
     : null;
   const activeInterviewPreparationApplication = activeInterviewPreparation?.ref.applicationId
-    ? apps.find((item) => item.id === activeInterviewPreparation.ref.applicationId) ?? null
+    ? (currentMailSeed?.generation === activeInterviewPreparation.generation ? currentMailSeed.app
+      : apps.find((item) => item.id === activeInterviewPreparation.ref.applicationId)) ?? null
     : null;
   const activeInterviewPreparationEvent = activeInterviewPreparation?.ref.eventId
     ? (() => {
-      const resolved = resolveUniqueInterviewEvent(
-        activeInterviewPreparation.ref.applicationId ?? 0,
-        activeInterviewPreparation.ref.eventId ?? 0,
-        evs,
-      );
+      const resolved = (mailInterviewSeed?.generation === activeInterviewPreparation.generation || activeInterviewPreparation.request.source === 'job_mail')
+        ? resolveExecutableInterviewTask({ taskId: 'application.interview_prepare',
+          applicationId: activeInterviewPreparation.ref.applicationId ?? 0,
+          eventId: activeInterviewPreparation.ref.eventId ?? 0,
+          events: currentMailSeed?.generation === activeInterviewPreparation.generation ? [currentMailSeed.event] : evs,
+          sourceState: currentMailSeed?.generation === activeInterviewPreparation.generation ? 'ready' : eventSourceState,
+          now: now.valueOf() })
+        : resolveUniqueInterviewEvent(activeInterviewPreparation.ref.applicationId ?? 0,
+          activeInterviewPreparation.ref.eventId ?? 0, evs);
       return resolved.ok ? resolved.event : null;
     })()
     : null;
@@ -2430,7 +2479,7 @@ function AppShellContent() {
             />
           )}
           {view === 'reminders' && (
-            <RemindersView onNavigate={navigateToView} onOpenDetailById={goDetailById} />
+            <RemindersView onOpenInterviewPreparation={openMailInterviewPreparation} onNavigate={navigateToView} onOpenDetailById={goDetailById} />
           )}
           {view === 'offers' && (
             <OfferCenterView

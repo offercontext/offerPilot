@@ -35,6 +35,7 @@ export const CORE_TASK_ENTRYPOINT_CATEGORIES = [
 ] as const satisfies readonly CoreTaskEntrypointCategory[];
 
 export type TaskLaunchSource =
+  | 'job_mail'
   | 'application_header'
   | 'application_task_card'
   | 'interview_event_card'

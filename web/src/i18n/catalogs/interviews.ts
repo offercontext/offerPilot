@@ -1,5 +1,8 @@
 // Authored interview, practice, review, and local voice UI copy.
 const interviews: Record<string, string> = {
+  "打开面试准备": "Open interview preparation",
+  "指定面试当前不可用，请查看记录核对。": "This interview is unavailable. Check its record.",
+  "指定面试读取失败，未执行任何写入。请重试或查看记录。": "Could not read this interview. Nothing was written. Retry or check its record.",
   "还需要练": "Needs more practice",
   "关键步骤还不够顺畅": "Key steps still need work",
   "更清楚了": "Clearer now",

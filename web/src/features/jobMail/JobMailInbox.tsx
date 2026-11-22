@@ -3,14 +3,15 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Alert, Button, Pagination } from 'antd';
 import { JOB_MAIL_SUGGESTIONS_KEY, listJobMailSuggestions } from '@/services/jobMail';
+import type { OpenMailInterviewPreparation } from '@/types/jobMail';
 import type { ViewMode } from '@/layout/navigation';
 import { mailActionLabel, mailStatusLabel } from './jobMailModel';
 import JobMailImport from './JobMailImport';
 import JobMailReview from './JobMailReview';
 import styles from './jobMail.module.css';
 
-interface Props { onNavigate: (view: ViewMode) => void; onOpenDetailById: (id: number) => void; }
-export default function JobMailInbox({ onNavigate, onOpenDetailById }: Props) {
+interface Props { onOpenInterviewPreparation?: OpenMailInterviewPreparation; onNavigate: (view: ViewMode) => void; onOpenDetailById: (id: number) => void; }
+export default function JobMailInbox({ onNavigate, onOpenDetailById, onOpenInterviewPreparation }: Props) {
   useLocale();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
@@ -34,7 +35,7 @@ export default function JobMailInbox({ onNavigate, onOpenDetailById }: Props) {
       </button>)}
     </div>}
     {!!query.data?.total && query.data.total > 20 && <Pagination current={page} pageSize={20} total={query.data.total} showSizeChanger={false} onChange={setPage} />}
-    {selectedId !== null && <JobMailReview suggestionId={selectedId} onClose={() => setSelectedId(null)} onOpenRecord={onOpenDetailById} onNavigate={onNavigate} />}
+    {selectedId !== null && <JobMailReview onOpenInterviewPreparation={onOpenInterviewPreparation} suggestionId={selectedId} onClose={() => setSelectedId(null)} onOpenRecord={onOpenDetailById} onNavigate={onNavigate} />}
     {importOpen && <JobMailImport onClose={() => setImportOpen(false)} />}
   </section>;
 }

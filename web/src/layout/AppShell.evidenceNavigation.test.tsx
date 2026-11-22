@@ -4,6 +4,11 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AppShell from './AppShell';
 
+const mailReads = vi.hoisted(() => ({ apps: vi.fn(), events: vi.fn(), revision: 1, hideApps: false, cancelledB: false }));
+vi.mock('@/services/applications', () => ({ listApplications: mailReads.apps }));
+vi.mock('@/services/events', () => ({ listEvents: mailReads.events }));
+vi.mock('@/features/reminders/RemindersView', () => ({ default: (props: any) => <button data-testid="mail-prepare" onClick={() => void props.onOpenInterviewPreparation(7, 42, () => true)}>Mail B</button> }));
+
 const app = {
   id: 7,
   company_name: 'ByteDance',
@@ -12,6 +17,7 @@ const app = {
 };
 
 const queryClientState = vi.hoisted(() => ({
+  getQueryState: () => ({ dataUpdateCount: mailReads.revision }),
   getQueryCache: () => ({ subscribe: () => () => undefined }),
   invalidateQueries: vi.fn(),
 }));
@@ -21,7 +27,7 @@ vi.mock('@tanstack/react-query', () => ({
   useQuery: (options: any) => {
     const key = options.queryKey?.[0];
     const dataByKey: Record<string, unknown> = {
-      applications: [app],
+      applications: mailReads.hideApps ? [] : [app],
       events: [{
         id: 11,
         application_id: 7,
@@ -41,7 +47,8 @@ vi.mock('@tanstack/react-query', () => ({
       offers: [],
       questions: undefined,
     };
-    return { data: dataByKey[key], isError: false, isLoading: false };
+    if (key === 'events' && mailReads.cancelledB) dataByKey[key] = [{ id: 42, application_id: 7, event_type: 'interview', status: 'done', scheduled_at: '2099-02-01T09:00:00Z', duration_minutes: 60 }];
+    return { data: dataByKey[key], isError: false, isLoading: false, dataUpdatedAt: mailReads.revision };
   },
   useQueryClient: () => queryClientState,
 }));
@@ -76,6 +83,7 @@ vi.mock('antd', () => {
 vi.mock('./Sidebar', () => ({
   default: (props: any) => (
     <nav>
+      <button data-testid="nav-reminders" onClick={() => props.onChange('reminders')}>Mail</button>
       <button type="button" data-testid="nav-pilot" onClick={() => props.onChange('pilot')}>Pilot</button>
       <button type="button" data-testid="nav-board" onClick={() => props.onChange('board')}>Board</button>
       <button type="button" data-testid="nav-offers" onClick={() => props.onChange('offers')}>Offers</button>
@@ -90,7 +98,7 @@ vi.mock('@/components/ResumeUploadModal', () => ({ default: () => <div /> }));
 vi.mock('@/components/AISettingsDrawer', () => ({ default: () => <div /> }));
 vi.mock('@/components/ApplicationDetail', () => ({
   default: (props: any) => (
-    <section data-testid="application-detail">
+    <section data-testid="application-detail" data-task-event-id={props.interviewPreparationSelection?.eventId ?? 'none'}>
       {props.application.id}
       {props.pilotInterviewPreparationApplicationId ? (
         <section
@@ -130,7 +138,7 @@ vi.mock('@/features/interviewReadiness/InterviewReadinessCenter', () => ({
       data-testid="interview-readiness-center"
       data-application-id={props.lockedEvent?.applicationId ?? 'none'}
       data-event-id={props.lockedEvent?.eventId ?? 'none'}
-    />
+    ><button data-testid="choose-mail-resume" onClick={() => props.onOpenTask({ ref: { taskId: 'application.interview_prepare', applicationId: props.lockedEvent.applicationId, eventId: props.lockedEvent.eventId }, source: 'interview_event_card', hints: { suggestedResumeId: 3 } })}>Choose resume</button></section>
   ),
 }));
 vi.mock('@/components/ChatPanel', () => ({
@@ -230,6 +238,7 @@ async function flush() {
 }
 
 beforeEach(() => {
+  mailReads.revision = 1; mailReads.hideApps = false; mailReads.cancelledB = false;
   window.history.replaceState(null, '', '/');
   window.matchMedia = () => ({
     addEventListener: () => undefined,
@@ -361,5 +370,61 @@ describe('AppShell evidence navigation', () => {
     await flush();
 
     expect(view.querySelector('[data-testid="suggestion-session-state"]')?.textContent).toBe('');
+  });
+});
+
+
+describe('JobMail exact preparation in mounted shell', () => {
+  const eventB = { id: 42, application_id: 7, event_type: 'interview', scheduled_at: '2099-02-01T09:00:00Z', duration_minutes: 60, status: 'todo' };
+  async function openMail() { const view = render(<AppShell />); await flush(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="nav-reminders"]')!.click()); await flush(); return view; }
+  it('carries freshly read B into locked readiness despite shell cache containing only A', async () => {
+    mailReads.apps.mockResolvedValue([app]); mailReads.events.mockResolvedValue([{ ...eventB, id: 11 }, eventB]);
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click()); await flush(); await flush();
+    const center = view.querySelector('[data-testid="interview-readiness-center"]');
+    expect(center?.getAttribute('data-event-id')).toBe('42'); expect(center?.getAttribute('data-application-id')).toBe('7');
+    expect(mailReads.events).toHaveBeenCalledWith({ application_id: 7 });
+  });
+  it('keeps exact B through explicit resume selection with a newly visible uncached application', async () => {
+    mailReads.hideApps = true; mailReads.apps.mockResolvedValue([app]); mailReads.events.mockResolvedValue([eventB]);
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click()); await flush(); await flush();
+    act(() => view.querySelector<HTMLButtonElement>('[data-testid="choose-mail-resume"]')!.click()); await flush();
+    expect(view.querySelector('[data-testid="application-detail"]')?.getAttribute('data-task-event-id')).toBe('42');
+  });
+  it('rejects a completed scoped read if a newer global refresh arrived while applications were pending', async () => {
+    let resolve!: (apps: unknown[]) => void;
+    mailReads.apps.mockReturnValue(new Promise(r => { resolve = r; })); mailReads.events.mockResolvedValue([eventB]);
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click()); await flush();
+    // Simulate QueryClient updating before React renders the newer source.
+    mailReads.revision += 1;
+    await act(async () => resolve([app])); await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')).toBeNull();
+  });
+  it('revokes the locked mail target when a later refresh cancels B', async () => {
+    mailReads.apps.mockResolvedValue([app]); mailReads.events.mockResolvedValue([eventB]);
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click()); await flush(); await flush();
+    mailReads.cancelledB = true; mailReads.revision += 1; act(() => root!.render(<AppShell />)); await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')?.getAttribute('data-event-id')).toBe('none');
+  });
+  it('does not let its fresh seed override a later authoritative cache refresh', async () => {
+    mailReads.apps.mockResolvedValue([app]); mailReads.events.mockResolvedValue([eventB]);
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click()); await flush(); await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')?.getAttribute('data-event-id')).toBe('42');
+    mailReads.revision += 1;
+    act(() => root!.render(<AppShell />)); await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')?.getAttribute('data-event-id')).toBe('none');
+  });
+  it.each([[], [{ ...eventB, application_id: 8 }], [{ ...eventB, status: 'done' }], [eventB, eventB]].map(events => ({ events })))('does not fall back to cached A for unusable fresh B %j', async ({ events }) => {
+    mailReads.apps.mockResolvedValue([app]); mailReads.events.mockResolvedValue(events);
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click()); await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')).toBeNull();
+    expect(view.querySelector('[data-testid="mail-prepare"]')).not.toBeNull();
+  });
+  it('ignores late reads after navigation even if source still reports current', async () => {
+    let resolve!: (events: unknown[]) => void;
+    mailReads.apps.mockResolvedValue([app]); mailReads.events.mockReturnValue(new Promise((r) => { resolve = r; }));
+    const view = await openMail(); act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click());
+    act(() => view.querySelector<HTMLButtonElement>('[data-testid="nav-board"]')!.click());
+    await act(async () => resolve([eventB])); await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')).toBeNull();
   });
 });
