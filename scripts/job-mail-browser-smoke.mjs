@@ -14,11 +14,18 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
 const blocked = [];
 const preparationWrites = [];
+const presenceHeartbeats = [];
 let auditPreparation = false;
 await context.route('**/*', route => {
   const target = new URL(route.request().url());
   if (target.origin !== new URL(base).origin) { blocked.push(target.origin); return route.abort(); }
   const method = route.request().method();
+  if (auditPreparation && method === 'POST' && target.pathname === '/api/companion/presence') {
+    // The global Haru heartbeat is independent of Mail/Interview. Its
+    // endpoint only updates presence and does not reconcile or call models.
+    presenceHeartbeats.push(target.pathname);
+    return route.continue();
+  }
   if (auditPreparation && target.pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     // Fail the assertion below without letting a regressed CTA mutate the
     // fixture or reach any model or communication handler.
@@ -249,7 +256,7 @@ try {
   const startPreparation = locked.getByRole('button', { name: '开始准备', exact: true });
   assert.equal(await startPreparation.isEnabled(), false, 'Mail CTA must not implicitly select a resume or start preparation');
   await snap('06c-mail-receipt-locked-readiness', locked);
-  assert.deepEqual(preparationWrites, [], 'Opening the exact mail event must be read-only');
+  assert.deepEqual(preparationWrites, [], 'Opening the exact mail event must not write to mail/interview or trigger automation');
 
   // Existing explicit controls carry the locked task identity into its real
   // host. Check that positive canonical identity, not just the absence of A.
@@ -270,8 +277,8 @@ try {
   assert.deepEqual(await api(`/application-events?application_id=${app.id}`), eventsBefore);
   assert.deepEqual(await api(`/applications/${app.id}`), applicationBefore);
   assert.deepEqual((await api(suggestionPath)).receipt, receiptBefore);
-  checks.push('Persisted mail receipt opens the exact later event B, despite eligible earlier A; explicit resume and preparation actions retain B and make no API writes, sends or model calls');
-  const exactPreparation = { applicationId: app.id, earlierEventId: eventA.id, receiptEventId: eventB.id, taskKey, browserApiWrites: preparationWrites };
+  checks.push('Persisted mail receipt opens the exact later event B, despite eligible earlier A; explicit resume and preparation actions retain B and make no mail/interview writes, sends or model calls (global presence heartbeat recorded separately)');
+  const exactPreparation = { applicationId: app.id, earlierEventId: eventA.id, receiptEventId: eventB.id, taskKey, unexpectedApiWrites: preparationWrites, presenceHeartbeatCount: presenceHeartbeats.length };
 
 
   await page.goto(base + '/?view=settings');
