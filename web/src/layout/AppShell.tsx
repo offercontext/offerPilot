@@ -1354,6 +1354,8 @@ function AppShellContent() {
 
   useEffect(() => subscribeToWorkspaceView((nextView) => {
     if (nextView === currentViewRef.current) return;
+    // Browser history changes bypass navigateToView; invalidate before React unmounts Mail.
+    mailNavigationEpoch.current += 1;
     skipNextHistorySyncRef.current = true;
     closeCoreTaskSurface();
     setSelected(null);

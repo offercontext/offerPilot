@@ -7,7 +7,14 @@ import AppShell from './AppShell';
 const mailReads = vi.hoisted(() => ({ apps: vi.fn(), events: vi.fn(), revision: 1, hideApps: false, cancelledB: false }));
 vi.mock('@/services/applications', () => ({ listApplications: mailReads.apps }));
 vi.mock('@/services/events', () => ({ listEvents: mailReads.events }));
-vi.mock('@/features/reminders/RemindersView', () => ({ default: (props: any) => <button data-testid="mail-prepare" onClick={() => void props.onOpenInterviewPreparation(7, 42, () => true)}>Mail B</button> }));
+vi.mock('@/features/reminders/RemindersView', async () => {
+  const { useEffect, useRef } = await import('react');
+  return { default: (props: any) => {
+    const live = useRef(true);
+    useEffect(() => { live.current = true; return () => { live.current = false; }; }, []);
+    return <button data-testid="mail-prepare" onClick={() => void props.onOpenInterviewPreparation(7, 42, () => live.current)}>Mail B</button>;
+  } };
+});
 
 const app = {
   id: 7,
@@ -426,5 +433,22 @@ describe('JobMail exact preparation in mounted shell', () => {
     act(() => view.querySelector<HTMLButtonElement>('[data-testid="nav-board"]')!.click());
     await act(async () => resolve([eventB])); await flush();
     expect(view.querySelector('[data-testid="interview-readiness-center"]')).toBeNull();
+  });
+  it('cannot win over Back when reads resolve before unmount commit', async () => {
+    let resolve!: (events: unknown[]) => void;
+    mailReads.apps.mockResolvedValue([app]); mailReads.events.mockReturnValue(new Promise((r) => { resolve = r; }));
+    const view = await openMail();
+    act(() => view.querySelector<HTMLButtonElement>('[data-testid="mail-prepare"]')!.click());
+    await act(async () => {
+      window.history.replaceState(null, '', '/?view=board');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+      expect(view.querySelector('[data-testid="mail-prepare"]')).not.toBeNull();
+      resolve([eventB]);
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+    });
+    await flush();
+    expect(view.querySelector('[data-testid="interview-readiness-center"]')).toBeNull();
+    expect(view.querySelector('[data-testid="board"]')).not.toBeNull();
+    expect(new URL(window.location.href).searchParams.get('view')).toBe('board');
   });
 });
