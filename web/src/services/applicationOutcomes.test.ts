@@ -32,6 +32,14 @@ describe('application outcome service', () => {
     ]);
   });
 
+  it('can cancel an application-scoped snapshot read without switching route or writing', async () => {
+    const turn = new AbortController();
+    http.get.mockResolvedValue({ data: [] });
+    await expect(listSubmissionSnapshots(7, turn.signal)).resolves.toEqual([]);
+    expect(http.get).toHaveBeenCalledWith('/applications/7/submission-snapshots', { signal: turn.signal });
+    expect(http.post).not.toHaveBeenCalled();
+  });
+
   it('sends only the explicit immutable snapshot and append-only outcome payloads', async () => {
     http.post.mockResolvedValue({ data: { id: 1 } });
     const snapshot = {

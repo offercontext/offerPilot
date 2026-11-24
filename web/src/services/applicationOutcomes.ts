@@ -9,8 +9,11 @@ import { createApiClient } from './http';
 
 const http = createApiClient({ baseURL: '/api', timeout: 20_000 });
 
-export async function listSubmissionSnapshots(applicationId: number): Promise<ApplicationSubmissionSnapshot[]> {
-  const { data } = await http.get<ApplicationSubmissionSnapshot[]>(`/applications/${applicationId}/submission-snapshots`);
+export async function listSubmissionSnapshots(applicationId: number, signal?: AbortSignal): Promise<ApplicationSubmissionSnapshot[]> {
+  const path = `/applications/${applicationId}/submission-snapshots`;
+  const { data } = signal
+    ? await http.get<ApplicationSubmissionSnapshot[]>(path, { signal })
+    : await http.get<ApplicationSubmissionSnapshot[]>(path);
   return data;
 }
 

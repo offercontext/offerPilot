@@ -16,11 +16,15 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 1100
 const blocked = [];
 const preparationWrites = [];
 const presenceHeartbeats = [];
+const archivedReads = [];
 let auditPreparation = false;
 await context.route('**/*', route => {
   const target = new URL(route.request().url());
   if (target.origin !== new URL(base).origin) { blocked.push(target.origin); return route.abort(); }
   const method = route.request().method();
+  if (method === 'GET' && /^\/api\/applications\/\d+\/submission-snapshots$/.test(target.pathname)) {
+    archivedReads.push(target.pathname);
+  }
   if (auditPreparation && method === 'POST' && target.pathname === '/api/companion/presence') {
     // The global Haru heartbeat is independent of Mail/Interview. Its
     // endpoint only updates presence and does not reconcile or call models.
@@ -225,15 +229,28 @@ try {
   assert.equal(eventA.application_id, eventB.application_id);
   assert.ok(Date.parse(eventA.scheduled_at) > Date.now());
   assert.ok(Date.parse(eventA.scheduled_at) < Date.parse(eventB.scheduled_at));
+  const archivedJd = '合成旧岗位说明\n' + '旧版 JD 完整内容。'.repeat(600) + '\n归档末行：完整词尾';
+  const archivedVersion = await api(`/applications/${app.id}/job-description/versions`, { method: 'POST', data: {
+    jd_text: archivedJd, expected_current_version_id: null, idempotency_key: 'synthetic-old-interview-jd',
+  } });
   const jd = '合成岗位资料：维护 Python API 和 SQL 服务。';
   const jdVersion = await api(`/applications/${app.id}/job-description/versions`, { method: 'POST', data: {
-    jd_text: jd, expected_current_version_id: null, idempotency_key: 'synthetic-mail-exact-interview-jd',
+    jd_text: jd, expected_current_version_id: archivedVersion.id, idempotency_key: 'synthetic-mail-exact-interview-jd',
   } });
   const resumeTitle = '合成面试准备简历';
   const resume = await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'backend', title: resumeTitle } });
   // The existing readiness flow can identify a single visible resume on its
   // own. Two viable fixtures let us exercise a real manual choice.
-  await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'frontend', title: '合成备用简历' } });
+  const archivedResume = await api('/resumes', { method: 'POST', data: {
+    title: '合成归档简历', text: '合成提取原文',
+    content_json: { experience: [{ company: '合成历史公司', highlights: ['归档的实际结构化成绩'] }], raw_text: '合成提取原文' },
+  } });
+  const archivePath = `/applications/${app.id}/submission-snapshots`;
+  const archivedRecord = await api(archivePath, { method: 'POST', data: {
+    resume_id: archivedResume.id, jd_version_id: archivedVersion.id, material_kit_id: null,
+    submitted_at: new Date(Date.now() - 86400_000).toISOString(), note: '', idempotency_key: 'synthetic-explicit-archive',
+  } });
+  const archiveBefore = await api(archivePath);
   const processed = await api('/job-mail/suggestions?status=processed');
   const invitation = processed.items.find(item => item.evidence?.subject === '【合成样本】面试邀请');
   assert.ok(invitation, 'Confirmed invitation must remain in Processed');
@@ -249,7 +266,8 @@ try {
   const exactOwner = page.locator(`[data-core-task-key="${taskKey}"]`);
   const siblingKey = `application.interview_prepare:applicationId=${app.id}:eventId=${eventA.id}`;
 
-  async function reopenReceiptAndChoosePreparation(expectedStart, readinessShot, ownerShot) {
+  async function reopenReceiptAndChoosePreparation(expectedStart, readinessShot, ownerShot, inspectArchive = false) {
+    const readsAtStart = archivedReads.length;
     const navigation = await page.goto(base + '/?view=reminders');
     assert.ok(navigation?.ok(), 'Reopen must load a new document and AppShell');
     await inbox.getByRole('button', { name: '处理历史', exact: true }).click();
@@ -277,6 +295,31 @@ try {
     const startPreparation = locked.getByRole('button', { name: '开始准备', exact: true });
     assert.equal(await startPreparation.isEnabled(), false, 'Receipt must not implicitly choose a resume or start preparation');
     await snap(readinessShot, locked);
+    const archive = locked.getByTestId('saved-submission-materials');
+    const openArchive = archive.getByRole('button', { name: '查看已保存的投递材料', exact: true });
+    assert.equal(await openArchive.getAttribute('aria-expanded'), 'false');
+    assert.equal(archivedReads.length, readsAtStart, 'Opening readiness alone must not fetch private archive contents');
+    if (inspectArchive) {
+      await openArchive.click();
+      const archivePicker = archive.getByRole('combobox');
+      await archivePicker.waitFor();
+      assert.deepEqual(archivedReads.slice(readsAtStart), ['/api' + archivePath]);
+      assert.equal(await archivePicker.inputValue(), '');
+      const frozen = archive.getByTestId('submission-archive-record');
+      assert.equal(await frozen.count(), 0, 'A singleton still requires explicit choice');
+      await archivePicker.selectOption(String(archivedRecord.id));
+      await frozen.getByText('归档的实际结构化成绩', { exact: true }).waitFor();
+      assert.equal(await frozen.locator('pre').textContent(), archivedJd);
+      const raw = frozen.locator('details').filter({ hasText: '简历原始提取文本（非结构化）' });
+      assert.equal(await raw.evaluate(element => element.open), false);
+      await raw.locator('summary').click();
+      await raw.getByText('合成提取原文', { exact: true }).waitFor();
+      await snap('06h-explicit-frozen-submission-materials', archive);
+      await archive.getByRole('button', { name: '收起已保存的投递材料', exact: true }).click();
+      assert.equal(await frozen.count(), 0);
+      assert.equal(await startPreparation.isEnabled(), false, 'Archive choice must not choose a current résumé');
+      await locked.getByText(jd, { exact: true }).waitFor();
+    }
     assert.deepEqual(preparationWrites, [], 'Opening the exact mail event must not write to mail/interview or trigger automation');
 
     // Check a positive canonical host identity after the existing explicit
@@ -293,7 +336,9 @@ try {
     assert.deepEqual(preparationWrites, [], 'Opening/continuing preparation must not write, resubmit, send or generate');
   }
 
-  await reopenReceiptAndChoosePreparation(scheduledB, '06c-mail-receipt-locked-readiness', '06d-explicit-preparation-exact-owner');
+  await reopenReceiptAndChoosePreparation(scheduledB, '06c-mail-receipt-locked-readiness', '06d-explicit-preparation-exact-owner', true);
+  assert.deepEqual(await api(archivePath), archiveBefore);
+  checks.push('Locked interview loads only its own archive on explicit open, requires explicit record choice, shows frozen structured résumé and full archived JD, and leaves current preparation unchanged');
   auditPreparation = false;
   assert.deepEqual(await api(`/application-events?application_id=${app.id}`), eventsBefore);
   assert.deepEqual(await api(`/applications/${app.id}`), applicationBefore);
