@@ -5,10 +5,12 @@ Run: OFFERPILOT_MAIL_FIXTURE_DATA=/tmp/mail-fixture PYTHONPATH=src python tests/
 """
 from __future__ import annotations
 
+import json
 import os
 import socket
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 _original_connect = socket.socket.connect
 
@@ -23,9 +25,26 @@ socket.socket.connect = _local_only  # type: ignore[method-assign]
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 import uvicorn
 
+from offerpilot.ai.interview_preparation_proposals import safe_empty_interview_preparation_proposal
+from offerpilot.ai.types import Assistant, Message
 from offerpilot.api import create_app
 from offerpilot.job_mail.extraction import ParsedMail
 from offerpilot.job_mail.transport import FakeIMAPTransport, QQIMAPTransport
+
+
+class SyntheticPreparationModel:
+    """No provider or socket: exactly one explicitly seeded preparation attempt."""
+
+    calls = 0
+
+    def complete(
+        self, messages: list[Message], tools: list[Any],
+        response_format: dict[str, Any] | None = None,
+    ) -> Assistant:
+        self.calls += 1
+        assert self.calls == 1 and not tools
+        assert any("合成岗位资料：维护 Python API 和 SQL 服务。" in message.content for message in messages)
+        return Assistant(content=json.dumps(safe_empty_interview_preparation_proposal(), ensure_ascii=False))
 
 
 class SyntheticVault:
@@ -79,7 +98,9 @@ fixture = ParsedMail(1, "1", "INBOX", "<synthetic-acceptance@example.invalid>",
 transport = FakeIMAPTransport([fixture])
 transport.generations["Recruitment"] = "1"
 transport.generations["Private-not-selected"] = "1"
-app = create_app(data_dir=root, static_dir=Path("web/dist"), job_mail_transport=transport,
+preparation_model = SyntheticPreparationModel()
+app = create_app(data_dir=root, static_dir=Path("web/dist"), chat_model=preparation_model,
+                 job_mail_transport=transport,
                  job_mail_local_setup_enabled=True)
 vault = SyntheticVault()
 app.state.job_mail_secure_setup.vault_factory = lambda: vault
@@ -90,7 +111,7 @@ app.state.job_mail_secure_setup.transport_factory = SyntheticQQTransport
 def fixture_safety() -> dict[str, int | bool]:
     # Fixed counters only, never dump vault keys/values, config, or environment.
     return {"synthetic_only": True, "body_read_attempts": SyntheticQQTransport.body_read_attempts,
-            "vault_entries": len(vault.values)}
+            "vault_entries": len(vault.values), "preparation_model_calls": preparation_model.calls}
 
 
 # create_app registers its SPA fallback last. The fixture route must precede

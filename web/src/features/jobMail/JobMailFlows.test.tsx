@@ -278,3 +278,67 @@ describe('job mail live localization', () => {
     expect(api.confirmJobMail).not.toHaveBeenCalled();
   });
 });
+
+
+describe('exact interview receipt handoff', () => {
+  const exactReceipt = { ...receipt, application_id: 7, after: { ...receipt.after, event_type: 'interview' } };
+  const openPreparation = vi.fn();
+  function exactReview() { return <JobMailReview suggestionId={suggestionId} onClose={close} onOpenRecord={openRecord} onNavigate={navigate} onOpenInterviewPreparation={openPreparation} />; }
+  it('opens only persisted event B on explicit click without confirming again', async () => {
+    suggestion = { ...suggestion, status: 'applied', receipt: exactReceipt };
+    openPreparation.mockResolvedValue(true);
+    await render(exactReview());
+    expect(openPreparation).not.toHaveBeenCalled();
+    await click(button('打开面试准备'));
+    expect(openPreparation).toHaveBeenCalledWith(7, 42, expect.any(Function));
+    expect(api.confirmJobMail).not.toHaveBeenCalled();
+    expect(api.previewJobMail).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+  it('offers exact handoff after confirmation and after recovering the original receipt', async () => {
+    api.confirmJobMail.mockResolvedValue(exactReceipt); openPreparation.mockResolvedValue(true);
+    await render(exactReview()); await click(button('预览最终变更')); await click(button('确认加入日程'));
+    expect(button('打开面试准备')).toBeTruthy();
+    await render(null); suggestion = structuredClone(baseSuggestion);
+    api.confirmJobMail.mockRejectedValue(new Error('timeout')); api.getJobMailReceipt.mockResolvedValue(exactReceipt);
+    await render(exactReview()); await click(button('预览最终变更')); await click(button('确认加入日程')); await click(button('核对回执'));
+    const submissions = api.confirmJobMail.mock.calls.length;
+    await click(button('打开面试准备'));
+    expect(openPreparation).toHaveBeenCalledWith(7, 42, expect.any(Function));
+    expect(api.confirmJobMail).toHaveBeenCalledTimes(submissions);
+  });
+  it.each([
+    { after: null }, { after: undefined }, { application_id: undefined }, { application_id: '7' }, { application_event_id: 0 },
+    { suggestion_id: 'different' }, { after: { ...exactReceipt.after, application_id: 8 } },
+    { after: { ...exactReceipt.after, id: 11 } },
+  ])('keeps generic record fallback for invalid receipt identity %j', async (patch) => {
+    suggestion = { ...suggestion, status: 'applied', receipt: { ...exactReceipt, ...patch } as JobMailReceipt };
+    await render(exactReview());
+    expect(container.textContent).not.toContain('打开面试准备');
+    expect(button('查看记录')).toBeTruthy();
+  });
+  it('keeps receipt and record fallback when exact event is unavailable', async () => {
+    suggestion = { ...suggestion, status: 'applied', receipt: exactReceipt };
+    openPreparation.mockResolvedValue(false);
+    await render(exactReview()); await click(button('打开面试准备'));
+    expect(close).not.toHaveBeenCalled(); expect(button('查看记录')).toBeTruthy();
+    expect(container.textContent).toContain('指定面试当前不可用');
+  });
+  it('revokes late handoff when receipt is unmounted and prevents duplicate taps', async () => {
+    suggestion = { ...suggestion, status: 'applied', receipt: exactReceipt };
+    const work = deferred<boolean>(); openPreparation.mockReturnValue(work.promise);
+    await render(exactReview()); await click(button('打开面试准备'));
+    const isCurrent = openPreparation.mock.calls[0][2]; expect(isCurrent()).toBe(true);
+    await render(null); expect(isCurrent()).toBe(false);
+    await act(async () => work.resolve(true)); expect(close).not.toHaveBeenCalled();
+    expect(openPreparation).toHaveBeenCalledTimes(1);
+  });
+  it('rejects recovery receipt from a different suggestion without clearing recovery', async () => {
+    api.confirmJobMail.mockRejectedValue(new Error('timeout'));
+    await render(exactReview()); await click(button('预览最终变更')); await click(button('确认加入日程'));
+    api.getJobMailReceipt.mockResolvedValue({ ...exactReceipt, suggestion_id: 'other' });
+    await click(button('核对回执'));
+    expect(container.textContent).not.toContain('已确认写入');
+    expect(readMailRecovery()[suggestionId]).toBeTruthy();
+  });
+});

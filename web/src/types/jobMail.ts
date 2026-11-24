@@ -23,7 +23,10 @@ export interface JobMailEvidence {
   cleared_at: string | null;
 }
 
+export type OpenMailInterviewPreparation = (applicationId: number, eventId: number, isCurrent: () => boolean) => Promise<boolean>;
+
 export interface JobMailReceipt {
+  application_id?: number;
   operation_id: string;
   suggestion_id: string;
   application_event_id: number;

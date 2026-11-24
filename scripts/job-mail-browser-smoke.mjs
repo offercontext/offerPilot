@@ -1,4 +1,5 @@
-// Synthetic-only cloud browser acceptance. No personal mailbox or model calls.
+// Synthetic-only cloud browser acceptance. No personal mailbox or real model calls.
+// One explicit fixture-only in-process fake call seeds frozen preparation history.
 // Set PLAYWRIGHT_MODULE to an installed official playwright-core index.mjs.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
@@ -13,9 +14,25 @@ await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, chromiumSandbox: true });
 const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
 const blocked = [];
+const preparationWrites = [];
+const presenceHeartbeats = [];
+let auditPreparation = false;
 await context.route('**/*', route => {
   const target = new URL(route.request().url());
   if (target.origin !== new URL(base).origin) { blocked.push(target.origin); return route.abort(); }
+  const method = route.request().method();
+  if (auditPreparation && method === 'POST' && target.pathname === '/api/companion/presence') {
+    // The global Haru heartbeat is independent of Mail/Interview. Its
+    // endpoint only updates presence and does not reconcile or call models.
+    presenceHeartbeats.push(target.pathname);
+    return route.continue();
+  }
+  if (auditPreparation && target.pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    // Fail the assertion below without letting a regressed CTA mutate the
+    // fixture or reach any model or communication handler.
+    preparationWrites.push(`${method} ${target.pathname}`);
+    return route.abort();
+  }
   return route.continue();
 });
 const page = await context.newPage();
@@ -107,6 +124,13 @@ try {
   assert.equal((await api('/application-events')).length, 0);
   await snap('04c-missing-duration-inline-validation');
   await dialog.getByLabel('时长', { exact: true }).fill('45');
+  // A checked-in calendar date eventually expires; this case requires a live
+  // scheduled B. Set it through the same human-reviewed form.
+  const scheduledB = new Date(Date.now() + 7 * 86400_000);
+  // 15:55 UTC is 23:55 in Beijing; the later +10 minute move crosses
+  // midnight in UTC+8 while staying on the same UTC day.
+  scheduledB.setUTCHours(15, 55, 0, 0);
+  await dialog.getByLabel('开始时间', { exact: true }).fill(scheduledB.toISOString());
   const evidence = dialog.locator('details[aria-label="邮件原文依据"]');
   await evidence.locator(':scope > summary').click();
   assert.equal(await evidence.locator('pre').isVisible(), true);
@@ -147,6 +171,8 @@ try {
   assert.equal(events[0].application_id, app.id);
   assert.equal(events[0].duration_minutes, 45);
   assert.equal(events[0].location, '合成会议室 B');
+  const eventB = events[0];
+  assert.equal(Date.parse(eventB.scheduled_at), scheduledB.getTime());
   assert.equal((await api('/applications/' + app.id)).status, app.status);
   const receiptFocus = await dialog.evaluate(element => ({
     tag: document.activeElement?.tagName,
@@ -187,6 +213,163 @@ try {
   assert.deepEqual(blocked, []);
   checks.push('Cancellation/injection is manual-only and never loads external resources; mobile review verified');
   await page.setViewportSize({ width: 1440, height: 1100 });
+
+  // Preserve the one-write assertions above; introduce the earlier eligible
+  // sibling now, before reopening the actual persisted B confirmation receipt.
+  const eventA = await api('/application-events', { method: 'POST', data: {
+    application_id: app.id, event_type: 'interview', status: 'todo', round: 1,
+    scheduled_at: new Date(scheduledB.getTime() - 86400_000).toISOString(),
+    duration_minutes: 30, location: '合成会议室 A',
+  } });
+  assert.notEqual(eventA.id, eventB.id);
+  assert.equal(eventA.application_id, eventB.application_id);
+  assert.ok(Date.parse(eventA.scheduled_at) > Date.now());
+  assert.ok(Date.parse(eventA.scheduled_at) < Date.parse(eventB.scheduled_at));
+  const jd = '合成岗位资料：维护 Python API 和 SQL 服务。';
+  const jdVersion = await api(`/applications/${app.id}/job-description/versions`, { method: 'POST', data: {
+    jd_text: jd, expected_current_version_id: null, idempotency_key: 'synthetic-mail-exact-interview-jd',
+  } });
+  const resumeTitle = '合成面试准备简历';
+  const resume = await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'backend', title: resumeTitle } });
+  // The existing readiness flow can identify a single visible resume on its
+  // own. Two viable fixtures let us exercise a real manual choice.
+  await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'frontend', title: '合成备用简历' } });
+  const processed = await api('/job-mail/suggestions?status=processed');
+  const invitation = processed.items.find(item => item.evidence?.subject === '【合成样本】面试邀请');
+  assert.ok(invitation, 'Confirmed invitation must remain in Processed');
+  const suggestionPath = `/job-mail/suggestions/${encodeURIComponent(invitation.id)}`;
+  const receiptBefore = (await api(suggestionPath)).receipt;
+  assert.equal(receiptBefore.application_id, app.id);
+  assert.equal(receiptBefore.application_event_id, eventB.id);
+  const eventsBefore = await api(`/application-events?application_id=${app.id}`);
+  assert.deepEqual(new Set(eventsBefore.map(event => event.id)), new Set([eventA.id, eventB.id]));
+  const applicationBefore = await api(`/applications/${app.id}`);
+
+  const taskKey = `application.interview_prepare:applicationId=${app.id}:eventId=${eventB.id}`;
+  const exactOwner = page.locator(`[data-core-task-key="${taskKey}"]`);
+  const siblingKey = `application.interview_prepare:applicationId=${app.id}:eventId=${eventA.id}`;
+
+  async function reopenReceiptAndChoosePreparation(expectedStart, readinessShot, ownerShot) {
+    const navigation = await page.goto(base + '/?view=reminders');
+    assert.ok(navigation?.ok(), 'Reopen must load a new document and AppShell');
+    await inbox.getByRole('button', { name: '处理历史', exact: true }).click();
+    await inbox.getByRole('button', { name: /【合成样本】面试邀请/ }).click();
+    await dialog.getByText('已确认写入', { exact: true }).waitFor();
+    await dialog.getByRole('button', { name: '查看记录', exact: true }).waitFor();
+    auditPreparation = true;
+    const [eventsResponse] = await Promise.all([
+      page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return response.ok() && response.request().method() === 'GET'
+          && url.origin === new URL(base).origin && url.pathname === '/api/application-events'
+          && url.searchParams.get('application_id') === String(app.id);
+      }),
+      dialog.getByRole('button', { name: '打开面试准备', exact: true }).click(),
+    ]);
+    const currentEvents = await eventsResponse.json();
+    const matched = currentEvents.filter(event => event.id === eventB.id && event.application_id === app.id);
+    assert.equal(matched.length, 1);
+    assert.equal(Date.parse(matched[0].scheduled_at), expectedStart.getTime(), 'CTA reads the current B schedule, not the stored receipt timestamp');
+    await dialog.waitFor({ state: 'hidden' });
+    const locked = page.getByTestId('locked-real-preparation');
+    await locked.getByText('事件已锁定', { exact: true }).waitFor();
+    await locked.getByText(jd, { exact: true }).waitFor();
+    const startPreparation = locked.getByRole('button', { name: '开始准备', exact: true });
+    assert.equal(await startPreparation.isEnabled(), false, 'Receipt must not implicitly choose a resume or start preparation');
+    await snap(readinessShot, locked);
+    assert.deepEqual(preparationWrites, [], 'Opening the exact mail event must not write to mail/interview or trigger automation');
+
+    // Check a positive canonical host identity after the existing explicit
+    // controls, not just absence of A. Never click Generate.
+    await locked.getByRole('combobox').click();
+    await page.locator('.ant-select-dropdown:visible').getByText(resumeTitle).click();
+    await waitForMailState(() => startPreparation.isEnabled(), Boolean);
+    await startPreparation.click();
+    const generate = exactOwner.getByTestId('interview-preparation-generate');
+    await generate.waitFor();
+    await waitForMailState(() => generate.isEnabled(), Boolean);
+    assert.equal(await page.locator(`[data-core-task-key="${siblingKey}"]`).count(), 0);
+    await snap(ownerShot, exactOwner);
+    assert.deepEqual(preparationWrites, [], 'Opening/continuing preparation must not write, resubmit, send or generate');
+  }
+
+  await reopenReceiptAndChoosePreparation(scheduledB, '06c-mail-receipt-locked-readiness', '06d-explicit-preparation-exact-owner');
+  auditPreparation = false;
+  assert.deepEqual(await api(`/application-events?application_id=${app.id}`), eventsBefore);
+  assert.deepEqual(await api(`/applications/${app.id}`), applicationBefore);
+  assert.deepEqual((await api(suggestionPath)).receipt, receiptBefore);
+  checks.push('Persisted mail receipt opens the exact later event B, despite eligible earlier A; explicit resume and preparation actions retain B and make no mail/interview writes, sends or model calls (global presence heartbeat recorded separately)');
+  const proposalsPath = `/applications/${app.id}/interview-preparation-proposals`;
+  assert.deepEqual(await api(proposalsPath), [], 'First open did not implicitly prepare a proposal');
+  assert.equal((await api('/job-mail/fixture-safety')).preparation_model_calls, 0);
+
+  // Fixture-only seed via the real API and its fixed, in-process fake model.
+  // This deliberate pre-move setup is not a browser navigation side effect.
+  const prior = await api(proposalsPath, { method: 'POST', data: {
+    event_id: eventB.id, resume_id: resume.id, jd_version_id: jdVersion.id,
+    knowledge_selections: [], user_assertions: [], idempotency_key: 'synthetic-mail-ready-before-reschedule',
+  } });
+  assert.equal(prior.event_id, eventB.id);
+  assert.equal(prior.attempt_status, 'ready');
+  assert.equal(prior.proposal_status, 'safe_empty', 'The fake only produces a deterministic empty proposal');
+  assert.equal(prior.source_states.event, 'current');
+  assert.ok(prior.proposal_hash);
+  assert.equal((await api('/job-mail/fixture-safety')).preparation_model_calls, 1);
+
+  const moved = new Date(scheduledB.getTime() + 10 * 60_000);
+  const localDay = date => new Date(date.getTime() + 8 * 3600_000).toISOString().slice(0, 10);
+  assert.equal(moved.toISOString().slice(0, 10), scheduledB.toISOString().slice(0, 10));
+  assert.notEqual(localDay(moved), localDay(scheduledB));
+  const movedB = await api(`/application-events/${eventB.id}`, {
+    method: 'PUT', data: { ...eventB, scheduled_at: moved.toISOString() },
+  });
+  assert.equal(movedB.id, eventB.id);
+  assert.equal(movedB.status, 'todo');
+  assert.equal(Date.parse(movedB.scheduled_at), moved.getTime());
+  assert.ok(Date.parse(eventA.scheduled_at) > Date.now());
+  assert.ok(Date.parse(eventA.scheduled_at) < Date.parse(movedB.scheduled_at));
+  const eventsAfterMove = await api(`/application-events?application_id=${app.id}`);
+  assert.deepEqual(eventsAfterMove.find(event => event.id === eventA.id), eventsBefore.find(event => event.id === eventA.id));
+  assert.deepEqual(new Set(eventsAfterMove.map(event => event.id)), new Set([eventA.id, eventB.id]));
+
+  // Reload the document to discard the prior AppShell/task owner. The original
+  // persisted receipt still names B at its old date; current lookup must win.
+  assert.equal(Date.parse(receiptBefore.after.scheduled_at), scheduledB.getTime());
+  await reopenReceiptAndChoosePreparation(moved, '06e-mail-rescheduled-locked-readiness', '06f-rescheduled-exact-owner');
+  const history = exactOwner.getByRole('complementary', { name: '历史面试准备建议', exact: true });
+  await history.getByText('历史资料来源已变化，本提案仍保持冻结，可查看但不作为当前来源。', { exact: true }).waitFor();
+  const [priorResponse] = await Promise.all([
+    page.waitForResponse(response => (
+      response.url() === base + '/api' + proposalsPath + '/' + prior.id
+      && response.request().method() === 'GET' && response.ok()
+    )),
+    history.getByRole('button', { name: /^查看/ }).click(),
+  ]);
+  const reopenedPrior = await priorResponse.json();
+  await exactOwner.getByText('暂无可验证的面试准备建议', { exact: true }).waitFor();
+  assert.equal(reopenedPrior.id, prior.id);
+  assert.equal(reopenedPrior.event_id, eventB.id);
+  assert.equal(reopenedPrior.attempt_status, 'ready');
+  assert.equal(reopenedPrior.source_states.event, 'source_changed');
+  assert.equal(reopenedPrior.proposal_hash, prior.proposal_hash);
+  assert.deepEqual(reopenedPrior.proposal, prior.proposal);
+  await snap('06g-prior-proposal-stays-frozen-after-move', exactOwner);
+  assert.deepEqual(preparationWrites, [], 'Fresh reopen and frozen history read must not write, send or regenerate');
+  auditPreparation = false;
+  assert.deepEqual(await api(`/application-events?application_id=${app.id}`), eventsAfterMove);
+  assert.deepEqual(await api(`/applications/${app.id}`), applicationBefore);
+  assert.deepEqual((await api(suggestionPath)).receipt, receiptBefore);
+  assert.deepEqual(await api(proposalsPath), [reopenedPrior]);
+  assert.equal((await api('/job-mail/fixture-safety')).preparation_model_calls, 1);
+  checks.push('After crossing UTC+8 midnight, the original receipt cold-reopens the same B; its old READY attempt can be read as frozen history and no fresh generation occurs');
+  const exactPreparation = {
+    applicationId: app.id, earlierEventId: eventA.id, receiptEventId: eventB.id, taskKey,
+    unexpectedApiWrites: preparationWrites, presenceHeartbeatCount: presenceHeartbeats.length,
+    rescheduled: { before: eventB.scheduled_at, after: movedB.scheduled_at,
+      beforeLocalDay: localDay(scheduledB), afterLocalDay: localDay(moved), priorAttemptId: prior.id,
+      frozenHashUnchanged: true, eventSourceState: reopenedPrior.source_states.event, syntheticSeedCalls: 1 },
+  };
+
   await page.goto(base + '/?view=settings');
   await settings.getByRole('button', { name: '断开邮箱', exact: true }).click();
   await page.getByRole('dialog', { name: '断开求职邮箱？' }).getByRole('button', { name: '确认断开', exact: true }).click();
@@ -226,14 +409,14 @@ try {
   const removed = await api('/job-mail/secure-setup/status');
   assert.equal(removed.configured, false);
   assert.equal(removed.deletion_pending, false);
-  assert.deepEqual(await api('/job-mail/fixture-safety'), { synthetic_only: true, body_read_attempts: 0, vault_entries: 0 });
-  assert.equal((await api('/application-events')).length, 1);
+  assert.deepEqual(await api('/job-mail/fixture-safety'), { synthetic_only: true, body_read_attempts: 0, vault_entries: 0, preparation_model_calls: 1 });
+  assert.equal((await api('/application-events')).length, 2);
   assert.deepEqual(blocked, []);
   await deletion.waitFor({ state: 'hidden' });
   await snap('09-synthetic-vault-deletion-receipt', settings);
   checks.push('Synthetic vault setup requires separate test/save consent, explicit Chinese folder scope, manual mode, and confirmed deletion; no IMAP body or native vault use');
   assert.deepEqual(pageErrors, []);
-  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));

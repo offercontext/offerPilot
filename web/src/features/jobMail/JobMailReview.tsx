@@ -7,7 +7,7 @@ import { Alert, Button, Modal, Skeleton } from 'antd';
 import { listApplications } from '@/services/applications';
 import { listEvents } from '@/services/events';
 import { confirmJobMail, getJobMailReceipt, getJobMailSuggestion, ignoreJobMail, JOB_MAIL_QUERY_KEY, previewJobMail } from '@/services/jobMail';
-import type { JobMailFields, JobMailPreview, JobMailPreviewInput, JobMailReceipt, JobMailSuggestion } from '@/types/jobMail';
+import type { JobMailFields, JobMailPreview, JobMailPreviewInput, JobMailReceipt, JobMailSuggestion, OpenMailInterviewPreparation } from '@/types/jobMail';
 import type { ViewMode } from '@/layout/navigation';
 import { displayMailWarning, displayMailField, displayMailTime, fieldLabel, isDefiniteMailRejection, mailActionLabel, mailErrorText, mailFieldErrors, mergeMailFields, readMailRecovery, saveMailRecovery, validateMailFields } from './jobMailModel';
 import styles from './jobMail.module.css';
@@ -17,6 +17,7 @@ interface Props {
   onClose: () => void;
   onOpenRecord: (applicationId: number) => void;
   onNavigate: (view: ViewMode) => void;
+  onOpenInterviewPreparation?: OpenMailInterviewPreparation;
 }
 export function MailRecord({ value, kind = 'event' }: { value: Record<string, unknown> | null; kind?: 'event' | 'application' }) {
   useLocale();
@@ -48,7 +49,7 @@ export default function JobMailReview(props: Props) {
   </Modal>;
 }
 
-function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProcessing }: Props & { suggestion: JobMailSuggestion; onProcessing: (processing: boolean) => void }) {
+function ReviewContent({ suggestion, suggestionId, onClose, onOpenRecord, onNavigate, onProcessing, onOpenInterviewPreparation }: Props & { suggestion: JobMailSuggestion; onProcessing: (processing: boolean) => void }) {
   useLocale();
   const queryClient = useQueryClient();
   const appsQuery = useQuery({ queryKey: ['applications'], queryFn: () => listApplications(), retry: false });
@@ -155,6 +156,7 @@ function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProces
     lock.current = true; setBusy('receipt'); setError('');
     try {
       const result = await getJobMailReceipt(uncertainOperation);
+      if (result.suggestion_id !== suggestion.id) throw new Error('receipt_identity_mismatch');
       saveMailRecovery(suggestion.id, null);
       if (live.current) { setReceipt(result); setUncertainOperation(''); setPreview(null); }
       await refreshAll();
@@ -171,6 +173,31 @@ function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProces
       if (live.current) onClose();
     } catch (err) { if (live.current) setError(mailErrorText(err, t("忽略操作未确认成功，请刷新建议状态。"))); }
     finally { lock.current = false; if (live.current) { setBusy(''); setIgnoreOpen(false); } }
+  }
+  const receiptAfter = receipt?.after;
+  const recordId = receipt?.application_id ?? receiptAfter?.application_id;
+  const validRecordId = typeof recordId === 'number' && Number.isSafeInteger(recordId) && recordId > 0 ? recordId : null;
+  const receiptTarget = receipt && suggestion.id === suggestionId && receipt.suggestion_id === suggestion.id
+    && receiptAfter && typeof receiptAfter === 'object' && receiptAfter.event_type === 'interview'
+    && Number.isSafeInteger(receipt.application_id) && receipt.application_id! > 0
+    && Number.isSafeInteger(receipt.application_event_id) && receipt.application_event_id > 0
+    && (receipt.after.application_id === undefined || receipt.after.application_id === receipt.application_id)
+    && (receipt.after.id === undefined || receipt.after.id === receipt.application_event_id)
+    ? { applicationId: receipt.application_id!, eventId: receipt.application_event_id } : null;
+  async function openPreparation() {
+    if (lock.current || !receiptTarget || !onOpenInterviewPreparation) return;
+    const currentGeneration = generation.current;
+    lock.current = true; setBusy('preparation'); setError('');
+    const isCurrent = () => live.current && generation.current === currentGeneration;
+    try {
+      const opened = await onOpenInterviewPreparation(receiptTarget.applicationId, receiptTarget.eventId, isCurrent);
+      if (isCurrent()) {
+        if (opened) onClose();
+        else setError(t("指定面试当前不可用，请查看记录核对。"));
+      }
+    } catch {
+      if (isCurrent()) setError(t("指定面试读取失败，未执行任何写入。请重试或查看记录。"));
+    } finally { lock.current = false; if (live.current) setBusy(''); }
   }
   function fieldHint(key: keyof JobMailFields) {
     const issue = fieldErrors[key];
@@ -207,7 +234,8 @@ function ReviewContent({ suggestion, onClose, onOpenRecord, onNavigate, onProces
         <div ref={receiptFocus} tabIndex={-1} aria-label={t("邮件写入回执")}><Alert type="success" showIcon message={t("已确认写入")} description={t("事件 #{application_event_id} · {value}", { application_event_id: receipt.application_event_id, value: displayMailTime(receipt.confirmed_at) })} /></div>
         <MailRecord value={receipt.after} />
         <p className={styles.muted}>{t("操作回执：")}{receipt.operation_id}</p>
-        <div><Button type="primary" onClick={() => { onClose(); onOpenRecord(Number(receipt.after.application_id)); }}>{t("查看记录")}</Button></div>
+        {receiptTarget && onOpenInterviewPreparation && <Button type="primary" loading={busy === 'preparation'} disabled={!!busy} onClick={() => void openPreparation()}>{t("打开面试准备")}</Button>}
+        <div><Button disabled={!!busy || validRecordId === null} type="primary" onClick={() => { if (validRecordId !== null) { onClose(); onOpenRecord(validRecordId); } }}>{t("查看记录")}</Button></div>
         <details className={styles.disclosure}><summary>{t("查看处理历史与原记录")}</summary><MailRecord value={receipt.before} /></details>
       </> : readOnly ? <Alert type="info" message={suggestion.status === 'ignored' ? t("此建议已忽略") : t("此建议已处理，请刷新查看回执")} /> : manualOnly ? <>
         <Alert type="warning" showIcon message={t("此类建议需要人工处理")} description={t("第一批不自动应用截止、时间窗口、时间未定、Offer、取消、复杂改期或阶段变化。不会虚构开始时间和时长。")} />

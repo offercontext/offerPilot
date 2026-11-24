@@ -22,7 +22,10 @@ import ActionDetailDrawer from '@/features/pipeline/ActionDetailDrawer';
 import type { ViewMode } from '@/layout/navigation';
 import styles from './reminders.module.css';
 
+import type { OpenMailInterviewPreparation } from '@/types/jobMail';
+
 interface Props {
+  onOpenInterviewPreparation?: OpenMailInterviewPreparation;
   onNavigate: (v: ViewMode) => void;
   onOpenDetailById: (id: number) => void;
 }
@@ -72,7 +75,7 @@ function findInsightAction(item: PipelineInsight, actionId: string): DetailActio
   );
 }
 
-export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
+export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInterviewPreparation }: Props) {
   useLocale();
   const [now, setNow] = useState(() => dayjs());
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
@@ -158,7 +161,7 @@ export default function RemindersView({ onNavigate, onOpenDetailById }: Props) {
 
   return (
     <div className={styles.wrap}>
-      <JobMailInbox onNavigate={onNavigate} onOpenDetailById={onOpenDetailById} />
+      <JobMailInbox onOpenInterviewPreparation={onOpenInterviewPreparation} onNavigate={onNavigate} onOpenDetailById={onOpenDetailById} />
       <ProactiveInbox representedCandidateIds={filteredInsights.filter((item) => item.candidate).map((item) => item.id)} />
       {reminderCandidatesQ.isPending && <div role="status">{t("正在加载提醒")}</div>}
       {reminderCandidatesQ.isError && <div role="alert">

@@ -91,7 +91,10 @@ describe('AppShell source contract', () => {
   });
 
   it('closes stale application detail when a selected application disappears', () => {
-    expect(source).toContain('!apps.some((app) => app.id === selected.id)');
+    expect(source).toContain('mailSelectedApp?.id === selected.id ? mailSelectedApp : apps.find((a) => a.id === selected.id)');
+    expect(source).toContain('if (selected && !selectedApp) {');
+    expect(source).toContain('closeCoreTaskSurface();');
+    expect(source).toContain('[selectedApp, closeCoreTaskSurface, selected]');
     expect(source).toContain('setSelected(null)');
   });
 
