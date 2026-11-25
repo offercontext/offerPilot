@@ -86,7 +86,8 @@ export async function verifyCommunicationDates({ browser, base, output }) {
         [scenario.timeZone, scenario.key === 'singapore' ? -480 : 300]);
       const card = page.locator('[data-kanban-card]').filter({ hasText: companyName });
       await card.getByTitle(scenario.details, { exact: true }).click();
-      await page.getByRole('button', { name: scenario.facts, exact: true }).click();
+      await page.locator('#application-preparation-tab').click();
+      await page.locator('#application-preparation-panel').getByRole('button', { name: scenario.facts, exact: true }).click();
       const panel = page.locator('section[aria-labelledby="communication-draft-title"]');
       await panel.getByRole('button', { name: scenario.generate, exact: true }).click();
       const body = panel.locator('#communication-body');
