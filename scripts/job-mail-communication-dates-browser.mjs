@@ -89,7 +89,9 @@ export async function verifyCommunicationDates({ browser, base, output }) {
       await page.locator('#application-preparation-tab').click();
       await page.locator('#application-preparation-panel').getByRole('button', { name: scenario.facts, exact: true }).click();
       const panel = page.locator('section[aria-labelledby="communication-draft-title"]');
-      await panel.getByRole('button', { name: scenario.generate, exact: true }).click();
+      await panel.waitFor();
+      const panelButton = label => panel.getByRole('button').filter({ hasText: label });
+      await panelButton(scenario.generate).click();
       const body = panel.locator('#communication-body');
       const subject = panel.locator('#communication-subject');
       assert.ok((await body.inputValue()).includes(scenario.bodyDate), scenario.key + ': follow-up body uses the projected calendar day');
@@ -98,20 +100,22 @@ export async function verifyCommunicationDates({ browser, base, output }) {
       const editedBody = await body.inputValue() + '\nSynthetic manual addition.';
       await subject.fill(editedSubject);
       await body.fill(editedBody);
-      await panel.getByRole('button', { name: scenario.copy, exact: true }).click();
+      await panelButton(scenario.copy).click();
       await panel.getByText(scenario.copied, { exact: true }).waitFor({ state: 'attached' });
       assert.equal(await page.evaluate(() => window.__syntheticDraftClipboard), editedSubject + '\n\n' + editedBody);
 
-      await panel.getByRole('button', { name: new RegExp(scenario.thank, 'i') }).click();
+      console.log('Communication dates: edited follow-up copied in ' + scenario.timeZone);
+      await panelButton(scenario.thank).click();
       await panel.locator('#communication-outcome').click();
       const outcomeOption = page.locator('.ant-select-dropdown:visible').getByText(scenario.outcomeDay + ' · ' + scenario.outcomeResult, { exact: true });
       await outcomeOption.click();
       await panel.getByText(scenario.linkedEvent + ' · ' + scenario.eventDay, { exact: true }).waitFor();
-      await panel.getByRole('button', { name: scenario.generate, exact: true }).click();
+      await panelButton(scenario.generate).click();
       await panel.getByText(scenario.submissionEvidence + ' · ' + scenario.submissionDay, { exact: true }).waitFor();
       assert.equal(await panel.getByText(new RegExp('^' + scenario.outcomeEvidence + ' #' + outcome.id + ' ·')).count(), 1);
       const eventEvidence = panel.getByText(new RegExp('^' + scenario.eventEvidence + ' #' + event.id + ' ·.* · ' + scenario.eventDay + '$'));
       await eventEvidence.waitFor();
+      console.log('Communication dates: linked outcome and event verified in ' + scenario.timeZone);
       await panel.screenshot({ path: path.join(output, 'communication-dates-' + scenario.key + '.png') });
       assert.deepEqual(await api(appPath + '/submission-snapshots'), archivesBefore);
       assert.deepEqual(await api(appPath + '/outcomes'), outcomesBefore);
