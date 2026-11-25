@@ -13,7 +13,7 @@ const cases = [
     submitted: '2026-07-15T04:30:00', event: '2026-07-16T04:30:00Z', outcome: '2026-07-17T04:30:00',
     submissionDay: '2026-07-15', eventDay: '2026-07-16', outcomeDay: '2026-07-17', bodyDate: '7/15/2026',
     details: 'View details', facts: 'Application facts and outcomes', generate: 'Generate draft', copy: 'Copy full content',
-    copied: 'Full draft copied', thank: 'Interview thank-you', submissionEvidence: 'Submission time', eventEvidence: 'Event',
+    copied: 'Full draft copied', thank: 'Interview thank-you', submissionEvidence: 'Applied', eventEvidence: 'Event',
     outcomeEvidence: 'Outcome', outcomeResult: 'Advanced to next stage', linkedEvent: 'Interview round 2' },
 ];
 
