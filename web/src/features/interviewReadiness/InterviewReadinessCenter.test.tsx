@@ -6,11 +6,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import source from './InterviewReadinessCenter.tsx?raw';
 import InterviewReadinessCenter from './InterviewReadinessCenter';
 import { createResumeSelectionLease } from '@/features/interviewEvents/resumeSelectionLease';
+import { getCurrentApplicationJd } from '@/services/applicationJdVersions';
+import { listSubmissionSnapshots } from '@/services/applicationOutcomes';
+import type { ApplicationSubmissionSnapshot } from '@/types/applicationOutcome';
 import { createInterviewPracticeCase } from '@/services/interviewPracticeCases';
 
 vi.mock('@/services/interviewPracticeCases', () => ({
   createInterviewPracticeCase: vi.fn(),
 }));
+
+vi.mock('@/services/applicationJdVersions', () => ({ getCurrentApplicationJd: vi.fn() }));
+const currentJd = vi.mocked(getCurrentApplicationJd);
+
+vi.mock('@/services/applicationOutcomes', () => ({ listSubmissionSnapshots: vi.fn() }));
+const snapshots = vi.mocked(listSubmissionSnapshots);
 
 const createPracticeCaseMock = vi.mocked(createInterviewPracticeCase);
 
@@ -80,6 +89,8 @@ async function selectQuickDraft(root: ReturnType<typeof createRoot>) {
 beforeEach(() => {
   document.body.replaceChildren();
   createPracticeCaseMock.mockReset();
+  snapshots.mockReset();
+  currentJd.mockReset().mockRejectedValue(new Error('Current JD read unavailable'));
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
@@ -300,5 +311,149 @@ describe('InterviewReadinessCenter', () => {
     expect(markup).toContain('data-readiness-mode="quick"');
     expect(markup).toContain('secondaryAction');
     expect(styles).toMatch(/prefers-reduced-motion:[^}]+reduce[\s\S]*transform:\s*none/);
+  });
+});
+
+
+describe('saved submission materials in locked readiness', () => {
+  const archivedJd = `Archived first line
+${'archived full text '.repeat(320)}
+Archived final line`;
+  const record = (overrides: Partial<ApplicationSubmissionSnapshot> = {}): ApplicationSubmissionSnapshot => ({
+    id: 52, application_id: 7, resume_id: 50, resume_title: 'Do not label from live resume',
+    jd_version_id: 4, jd_version_number: 1, material_kit_id: null,
+    resume_snapshot: { experience: [{ company: 'Frozen employer', highlights: ['Frozen nested achievement'] }],
+      skills: ['Frozen skill'], raw_text: 'Untrusted <img src=x> raw extraction' },
+    jd_snapshot: archivedJd, material_snapshot: null, note: '', source_kind: 'ui',
+    source_states: { resume: 'changed', jd: 'changed', material: 'missing' },
+    submitted_at: '2026-11-01T10:00:00Z', created_at: '2026-11-02T10:00:00Z',
+    ...overrides,
+  });
+
+  const button = (host: HTMLElement, title: string) => [...host.querySelectorAll<HTMLButtonElement>('button')]
+    .find((candidate) => candidate.textContent?.trim() === title)!;
+  const archive = (host: HTMLElement) => host.querySelector<HTMLElement>('[data-testid="saved-submission-materials"]')!;
+  async function click(host: HTMLElement, title: string) { await act(async () => button(host, title).click()); }
+  function choose(host: HTMLElement, id: string) {
+    const select = archive(host).querySelector('select')!;
+    act(() => { select.value = id; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  }
+  const open = '查看已保存的投递材料';
+  const close = '收起已保存的投递材料';
+
+  function mount() {
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    const launch = vi.fn();
+    const render = (applicationId = 7, eventId = 8, generation = 1, useLiveJd = false) => act(() => root.render(
+      <InterviewReadinessCenter fixedMode="real"
+        lockedEvent={{ applicationId, eventId }} generation={generation}
+        resumes={[{ id: 11, deleted_at: null } as never]} selectedResumeId={11}
+        jdSource={useLiveJd ? undefined : { status: 'ready', id: 3, text: 'Live current JD' }}
+        onLaunchTask={launch} />,
+    ));
+    return { host, render, launch, unmount: () => act(() => root.unmount()) };
+  }
+
+  it('reads only after opening; even a singleton needs explicit selection, and full frozen inputs never become current inputs', async () => {
+    snapshots.mockResolvedValue([record()]);
+    const { host, render, launch, unmount } = mount();
+    render();
+    expect(snapshots).not.toHaveBeenCalled();
+    expect(button(host, open).getAttribute('aria-expanded')).toBe('false');
+    await click(host, open);
+    expect(snapshots).toHaveBeenCalledTimes(1);
+    expect(snapshots).toHaveBeenCalledWith(7, expect.any(AbortSignal));
+    expect(archive(host).querySelector('select')?.value).toBe('');
+    expect(archive(host).textContent).not.toContain('Frozen nested achievement');
+    expect(archive(host).textContent).not.toContain('Do not label from live resume');
+    choose(host, '52');
+    expect(archive(host).textContent).toContain('Frozen nested achievement');
+    expect(archive(host).textContent).toContain('Frozen skill');
+    expect(archive(host).querySelector('pre')?.textContent).toBe(archivedJd);
+    const raw = archive(host).querySelector('details');
+    expect(raw?.textContent).toContain('Untrusted <img src=x> raw extraction');
+    expect(raw?.open).toBe(false);
+    expect(raw?.querySelector('img')).toBeNull();
+    expect(host.textContent).toContain('Live current JD');
+    expect(launch).not.toHaveBeenCalled();
+    await click(host, '开始准备↗');
+    expect(launch.mock.calls[0][0]).toMatchObject({ ref: { applicationId: 7, eventId: 8 }, hints: { suggestedResumeId: 11 } });
+    await click(host, close);
+    expect(archive(host).querySelector('article')).toBeNull();
+    await click(host, open);
+    expect(archive(host).querySelector('select')?.value).toBe('');
+    unmount();
+  });
+
+  it('suppresses a closed, switched event, switched application, or replaced owner response even if fetch ignores abort', async () => {
+    const pending: Array<(rows: ApplicationSubmissionSnapshot[]) => void> = [];
+    snapshots.mockImplementation(() => new Promise(resolve => pending.push(resolve)));
+    const { host, render, unmount } = mount();
+    render();
+    await click(host, open);
+    await click(host, close);
+    await click(host, open);
+    await act(async () => pending[0]([record()]));
+    expect(archive(host).textContent).toContain('正在读取');
+    expect(archive(host).querySelector('select')).toBeNull();
+    render(7, 9);
+    expect(button(host, open).getAttribute('aria-expanded')).toBe('false');
+    await click(host, open);
+    render(8, 9);
+    await click(host, open);
+    render(8, 9, 2);
+    for (const resolve of pending.slice(1)) await act(async () => resolve([record()]));
+    expect(button(host, open).getAttribute('aria-expanded')).toBe('false');
+    expect(host.textContent).not.toContain('Frozen employer');
+    expect(snapshots.mock.calls.map(([id]) => id)).toEqual([7, 7, 7, 8]);
+    expect(snapshots.mock.calls.every(([, signal]) => signal?.aborted)).toBe(true);
+    unmount();
+  });
+
+  it('ignores foreign or duplicate records and distinguishes legacy/blank, empty and retryable failures', async () => {
+    snapshots.mockRejectedValueOnce(new Error('permission failure')).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([record({ id: 53, application_id: 8 }), record({ id: 54 }), record({ id: 54 }),
+        record({ resume_snapshot: { experience: 'legacy prose', raw_text: 'only raw' }, jd_snapshot: '' })]);
+    const { host, render, unmount } = mount();
+    render();
+    await click(host, open);
+    expect(archive(host).querySelector('[role="alert"]')?.textContent).toContain('暂时无法读取');
+    await click(host, '重试');
+    expect(archive(host).textContent).toContain('还没有已保存的材料');
+    await click(host, close);
+    await click(host, open);
+    expect([...archive(host).querySelectorAll('option')].map(({ value }) => value)).toEqual(['', '52']);
+    choose(host, '52');
+    expect(archive(host).textContent).toContain('没有可展示的结构化简历');
+    expect(archive(host).querySelector('details')?.textContent).toContain('legacy prose');
+    expect(archive(host).textContent).toContain('only raw');
+    expect(archive(host).textContent).toContain('未保存岗位描述');
+    unmount();
+  });
+
+  it('shows a genuine empty legacy résumé with a saved JD but cannot substitute for a failed current JD read', async () => {
+    snapshots.mockResolvedValue([record({ resume_snapshot: {} })]);
+    const { host, render, launch, unmount } = mount();
+    await act(async () => render(7, 8, 1, true));
+    expect(currentJd).toHaveBeenCalledWith(7);
+    expect(host.textContent).toContain('岗位资料暂时无法读取');
+    expect(host.textContent).toContain('已选择一份已保存简历');
+    expect(button(host, '开始准备↗').disabled).toBe(true);
+    await click(host, open);
+    choose(host, '52');
+    expect(archive(host).textContent).toContain('没有可展示的结构化简历');
+    expect(archive(host).querySelector('pre')?.textContent).toBe(archivedJd);
+    expect(button(host, '开始准备↗').disabled).toBe(true);
+    expect(launch).not.toHaveBeenCalled();
+    unmount();
+  });
+
+  it('does not expose archive or fetch records in quick practice, even with locked event props', () => {
+    const markup = renderToStaticMarkup(<InterviewReadinessCenter initialMode="quick" fixedMode="quick"
+      lockedEvent={{ applicationId: 7, eventId: 8 }} />);
+    expect(markup).not.toContain('saved-submission-materials');
+    expect(snapshots).not.toHaveBeenCalled();
   });
 });

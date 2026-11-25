@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { message } from 'antd';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AdaptivePracticeOwnerDraft } from '@/types/adaptiveInterviewPractice';
 
@@ -98,7 +99,24 @@ beforeEach(() => {
   root = createRoot(container);
 });
 
-afterEach(() => { act(() => root?.unmount()); container?.remove(); vi.restoreAllMocks(); });
+async function closeWorkspace() {
+  await act(async () => {
+    // Ant Design's static notices use a separate React root. Dispose live
+    // notices before jsdom teardown, not when a delayed expiry eventually fires.
+    message.destroy();
+    root?.unmount();
+  });
+  root = undefined;
+}
+
+afterEach(async () => {
+  try {
+    await closeWorkspace();
+  } finally {
+    container?.remove();
+    vi.restoreAllMocks();
+  }
+});
 
 describe('AdaptiveInterviewPracticeWorkspace', () => {
   it.each(['false', 'throw'] as const)('does not start when exact frozen Practice persistence returns %s', async (failure) => {
@@ -120,6 +138,12 @@ describe('AdaptiveInterviewPracticeWorkspace', () => {
       pendingOperation: 'start', startInput: expect.objectContaining({ idempotency_key: expect.any(String) }),
     }), undefined);
     expect(service.start).not.toHaveBeenCalled();
+    // This is the real Ant Design static notification, not a mocked method.
+    // The blocked write produces a notice outside the workspace's React root.
+    expect(document.querySelector('.ant-message-notice')?.textContent)
+      .toContain('无法安全保存本次练习操作');
+    await closeWorkspace();
+    expect(document.querySelector('.ant-message')).toBeNull();
   });
 
   it.each(['false', 'throw'] as const)('does not complete when exact frozen Practice persistence returns %s', async (failure) => {

@@ -90,3 +90,13 @@
 .controls :global(.ant-input), .controls :global(.ant-input-affix-wrapper) { border-color: var(--op-border); border-radius: 10px; background: var(--op-surface); color: var(--op-ink); }
 .controls :global(.ant-input:focus), .controls :global(.ant-input:hover) { border-color: var(--op-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--op-primary) 14%, transparent); }
 .confirmLabel :global(.ant-checkbox-wrapper) { color: var(--op-ink); font-weight: 600; }
+
+.savedSubmission { min-width: 0; padding: 12px 14px; border: 1px solid var(--op-border); border-radius: 10px; }
+.archiveButton { padding: 6px 9px; border: 1px solid var(--op-border); border-radius: 8px; background: var(--op-surface); color: var(--op-primary); cursor: pointer; font: inherit; }
+.archiveSelector { display: grid; gap: 6px; }
+.archiveSelector select { width: 100%; min-width: 0; padding: 7px; border: 1px solid var(--op-border); border-radius: 8px; background: var(--op-surface); color: var(--op-ink); }
+.savedSubmission article { overflow-wrap: anywhere; }
+.savedSubmission h4, .savedSubmission h5 { margin-block: 10px 4px; }
+.savedSubmission dd { margin-inline-start: 12px; }
+.savedSubmission summary { cursor: pointer; }
+.archiveText { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--op-ink); font: inherit; }

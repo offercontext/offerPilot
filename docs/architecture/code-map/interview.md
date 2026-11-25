@@ -27,6 +27,7 @@
 | 层 | 位置与符号 | 本层需要确认的事实 |
 |---|---|---|
 | 页面入口 | [InterviewReadinessCenter](../../../web/src/features/interviewReadiness/InterviewReadinessCenter.tsx)、[InterviewPreparationProposalDrawer](../../../web/src/components/InterviewPreparationProposalDrawer.tsx) | 用户选择的事件、简历、JD 和可选资料，以及被禁用的真实原因 |
+| 查看已保存的投递材料 | [SavedSubmissionMaterials](../../../web/src/features/interviewReadiness/SavedSubmissionMaterials.tsx) → [listSubmissionSnapshots](../../../web/src/services/applicationOutcomes.ts) → `GET /api/applications/{app_id}/submission-snapshots` | 仅在有效真实面试中显式展开后按锁定投递读取，再显式选记录；展示冻结的简历和完整 JD，不代表用人方回执、不改变本次准备，不写入或调用模型 |
 | 前端请求 | [interviewPreparationProposals.ts](../../../web/src/services/interviewPreparationProposals.ts) | 请求体与 `idempotency_key`，是否重用原尝试 |
 | HTTP | [api.py](../../../src/offerpilot/api.py)：`create_interview_preparation_proposal`、`_interview_preparation_request_payload` | `POST /api/applications/{app_id}/interview-preparation-proposals`；参数解析、当前 JD 版本、前置校验发生在模型调用前 |
 | 业务与恢复 | [InterviewPreparationProposalsRepository](../../../src/offerpilot/repositories/interview_preparation_proposals.py)：`preflight`、`create_generated`、`_handle_existing`、`_call_and_store` | 读取/恢复原尝试、冻结来源、生成权与来源有效性；不要把 pending 或未知当作安全创建新任务的信号 |

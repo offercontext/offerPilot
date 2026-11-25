@@ -1,6 +1,7 @@
 import { t, useLocale } from '@/i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Checkbox, Input, Select } from 'antd';
+import SavedSubmissionMaterials from './SavedSubmissionMaterials';
 import type { Resume } from '@/types/resume';
 import { getCurrentApplicationJd } from '@/services/applicationJdVersions';
 import { createInterviewPracticeCase } from '@/services/interviewPracticeCases';
@@ -383,6 +384,9 @@ function LockedRealSurface({
         <span>{t("当前 JD（只读）")}</span>
         <p>{jd.status === 'ready' ? jd.text : jd.status === 'unknown' ? t("正在读取当前已确认版本…") : jd.status === 'source_changed' ? t("岗位资料版本已变化，请先确认最新版本。") : jd.status === 'unavailable' ? t("岗位资料暂时无法读取。") : t("尚未找到当前已确认的岗位资料版本。")}</p>
       </div>
+      {/* The read-only archive belongs to this event/owner, not to a prior
+          mounted owner or the current preparation's input selection. */}
+      <SavedSubmissionMaterials key={`${event.applicationId}:${event.eventId}:${generation ?? 0}`} applicationId={event.applicationId} />
       <div className={styles.controls}>
         <label>{t("选择简历")}<Select
             id="locked-readiness-resume"
