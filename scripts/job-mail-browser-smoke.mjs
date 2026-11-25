@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { verifyCommunicationDates } from './job-mail-communication-dates-browser.mjs';
 import { waitForMailState } from './job-mail-browser-wait.mjs';
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
 const base = process.env.MAIL_FIXTURE_URL || 'http://127.0.0.1:38091';
@@ -461,7 +462,9 @@ try {
   await snap('09-synthetic-vault-deletion-receipt', settings);
   checks.push('Synthetic vault setup requires separate test/save consent, explicit Chinese folder scope, manual mode, and confirmed deletion; no IMAP body or native vault use');
   assert.deepEqual(pageErrors, []);
-  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
+  const communicationDates = await verifyCommunicationDates({ browser, base, output });
+  checks.push('Communication drafts project normal API timestamps in Singapore and New York; editable copy does not write or send');
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, communicationDates, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));

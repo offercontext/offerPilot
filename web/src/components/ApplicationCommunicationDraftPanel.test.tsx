@@ -268,4 +268,35 @@ describe('ApplicationCommunicationDraftPanel', () => {
     expect(document.body.querySelector('textarea[aria-label="邮件正文"]')).toBeNull();
     expect(document.body.textContent).not.toContain('日程 #31');
   });
+  it('keeps the bare archive dates and an unzoned event separate in the copy-only UI', async () => {
+    const resolved = Intl.DateTimeFormat.prototype.resolvedOptions;
+    vi.spyOn(Intl.DateTimeFormat.prototype, 'resolvedOptions').mockImplementation(function (this: Intl.DateTimeFormat) {
+      return { ...resolved.call(this), timeZone: 'America/New_York' };
+    });
+    vi.spyOn(Date.prototype, 'getTimezoneOffset').mockReturnValue(300);
+    act(() => root.render(
+      <AntApp>
+        <ApplicationCommunicationDraftPanel application={application}
+          snapshots={[{ ...snapshot, submitted_at: '2026-07-15T04:30:00' }]}
+          outcomes={[{ ...outcome, occurred_at: '2026-07-17T04:30:00' }]}
+          events={[{ ...event, scheduled_at: '2026-07-16T04:30:00' }]}
+        />
+      </AntApp>,
+    ));
+    act(() => button('生成草稿').click());
+    expect(document.body.textContent).toContain('投递时间 · 2026-07-15');
+    const body = document.body.querySelector<HTMLTextAreaElement>('#communication-body')!;
+    expect(body.value).toContain('2026年7月15日');
+    input('#communication-body', body.value + '\n测试手动补充。');
+    await act(async () => button('复制完整内容').click());
+    expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining('2026年7月15日'));
+    expect(clipboardWrite).toHaveBeenCalledWith(expect.stringContaining('测试手动补充。'));
+    act(() => button('面试感谢信').click());
+    await selectOption('面试结果', '2026-07-17 · 进入下一阶段');
+    expect(document.body.textContent).toContain('第 2 轮面试 · 日期未知');
+    act(() => button('生成草稿').click());
+    expect(document.body.textContent).toContain('日程 #31 · 第 2 轮面试');
+    expect(document.body.textContent).not.toContain('日程 #31 · 第 2 轮面试 · 2026-07-16');
+  });
+
 });

@@ -15,10 +15,12 @@ import type { Application } from '@/types/application';
 import type { ApplicationOutcome, ApplicationSubmissionSnapshot } from '@/types/applicationOutcome';
 import type { ScheduleEvent } from '@/types/event';
 import {
+  applicationCommunicationCalendarDate,
   buildApplicationCommunicationDraft,
   isThankYouDraftAvailable,
   type ApplicationCommunicationDraft,
   type ApplicationCommunicationDraftKind,
+  type CommunicationDateSource,
 } from '@/lib/applicationCommunicationDraft';
 import styles from './ApplicationCommunicationDraftPanel.module.css';
 
@@ -38,14 +40,8 @@ const RESULT_LABELS: Record<ApplicationOutcome['result'], string> = {
   get other() { return t("其他"); },
 };
 
-function dateLabel(value: string, timezoneOffsetMinutes: number): string {
-  const instant = Date.parse(value);
-  if (!Number.isFinite(instant)) return t("日期未知");
-  const local = new Date(instant - timezoneOffsetMinutes * 60_000);
-  const year = local.getUTCFullYear();
-  const month = String(local.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(local.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+function dateLabel(value: string, timeZone: string, source: CommunicationDateSource): string {
+  return applicationCommunicationCalendarDate(value, timeZone, source) ?? t("日期未知");
 }
 
 export default function ApplicationCommunicationDraftPanel({ application, snapshots, outcomes, events }: Props) {
@@ -62,7 +58,7 @@ export default function ApplicationCommunicationDraftPanel({ application, snapsh
   const [body, setBody] = useState('');
   const [validationError, setValidationError] = useState('');
   const [copyStatus, setCopyStatus] = useState('');
-  const timezoneOffsetMinutes = new Date().getTimezoneOffset();
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 
   const selectedSnapshot = snapshots.find((snapshot) => snapshot.id === snapshotId) ?? null;
   const interviewOutcomes = useMemo(
@@ -129,7 +125,7 @@ export default function ApplicationCommunicationDraftPanel({ application, snapsh
         event: selectedEvent,
         recipientName,
         highlight,
-        timezoneOffsetMinutes,
+        timeZone,
       });
       setDraft(next);
       setSubject(next.subject);
@@ -191,7 +187,7 @@ export default function ApplicationCommunicationDraftPanel({ application, snapsh
             onChange={(value) => { setSnapshotId(value); invalidateDraft(); }}
             options={snapshots.map((snapshot) => ({
               value: snapshot.id,
-              label: `${dateLabel(snapshot.submitted_at, timezoneOffsetMinutes)} · ${snapshot.resume_title} · JD v${snapshot.jd_version_number}`,
+              label: `${dateLabel(snapshot.submitted_at, timeZone, 'archive_utc')} · ${snapshot.resume_title} · JD v${snapshot.jd_version_number}`,
             }))}
           />
           {selectedSnapshot ? (
@@ -200,7 +196,7 @@ export default function ApplicationCommunicationDraftPanel({ application, snapsh
               <dl>
                 <div><dt>{t("简历")}</dt><dd>{selectedSnapshot.resume_title}</dd></div>
                 <div><dt>{t("岗位资料")}</dt><dd>JD v{selectedSnapshot.jd_version_number}</dd></div>
-                <div><dt>{t("投递时间")}</dt><dd>{dateLabel(selectedSnapshot.submitted_at, timezoneOffsetMinutes)}</dd></div>
+                <div><dt>{t("投递时间")}</dt><dd>{dateLabel(selectedSnapshot.submitted_at, timeZone, 'archive_utc')}</dd></div>
               </dl>
             </div>
           ) : null}
@@ -223,9 +219,9 @@ export default function ApplicationCommunicationDraftPanel({ application, snapsh
                   setEventId(linkedEvent?.id);
                   invalidateDraft();
                 }}
-                options={interviewOutcomes.map((outcome) => ({ value: outcome.id, label: `${dateLabel(outcome.occurred_at, timezoneOffsetMinutes)} · ${RESULT_LABELS[outcome.result]}` }))}
+                options={interviewOutcomes.map((outcome) => ({ value: outcome.id, label: `${dateLabel(outcome.occurred_at, timeZone, 'archive_utc')} · ${RESULT_LABELS[outcome.result]}` }))}
               />
-              {selectedEvent ? <div className={styles.linkedEvent}><span>{t("关联日程")}</span><strong>{t("第 {round} 轮面试 · {date}", { round: selectedEvent.round, date: dateLabel(selectedEvent.scheduled_at, timezoneOffsetMinutes) })}</strong></div> : null}
+              {selectedEvent ? <div className={styles.linkedEvent}><span>{t("关联日程")}</span><strong>{t("第 {round} 轮面试 · {date}", { round: selectedEvent.round, date: dateLabel(selectedEvent.scheduled_at, timeZone, 'event_rfc3339') })}</strong></div> : null}
             </div>
           ) : null}
 

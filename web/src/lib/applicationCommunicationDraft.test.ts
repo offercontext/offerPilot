@@ -3,6 +3,7 @@ import type { Application } from '@/types/application';
 import type { ApplicationOutcome, ApplicationSubmissionSnapshot } from '@/types/applicationOutcome';
 import type { ScheduleEvent } from '@/types/event';
 import {
+  applicationCommunicationCalendarDate,
   buildApplicationCommunicationDraft,
   isThankYouDraftAvailable,
 } from './applicationCommunicationDraft';
@@ -70,7 +71,7 @@ describe('applicationCommunicationDraft', () => {
       application,
       snapshot,
       recipientName: '林女士',
-      timezoneOffsetMinutes: -480,
+      timeZone: 'Asia/Singapore',
     });
 
     expect(result.subject).toBe('关于「高级后端工程师」申请进展的跟进');
@@ -92,7 +93,7 @@ describe('applicationCommunicationDraft', () => {
       event: interviewEvent,
       outcome: interviewOutcome,
       highlight: '服务稳定性与可观测性',
-      timezoneOffsetMinutes: -480,
+      timeZone: 'Asia/Singapore',
     });
 
     expect(result.subject).toBe('感谢「高级后端工程师」面试交流');
@@ -114,7 +115,7 @@ describe('applicationCommunicationDraft', () => {
       application,
       snapshot: { ...snapshot, submitted_at: 'not-a-date' },
       recipientName: '   ',
-      timezoneOffsetMinutes: -480,
+      timeZone: 'Asia/Singapore',
     });
 
     expect(result.body.startsWith('您好：')).toBe(true);
@@ -130,7 +131,7 @@ describe('applicationCommunicationDraft', () => {
       event: interviewEvent,
       outcome: interviewOutcome,
       highlight: '🙂'.repeat(241),
-      timezoneOffsetMinutes: -480,
+      timeZone: 'Asia/Singapore',
     })).toThrow('交流亮点不能超过 240 个字符');
   });
 
@@ -142,30 +143,74 @@ describe('applicationCommunicationDraft', () => {
 
   it('rejects missing or mismatched thank-you sources', () => {
     expect(() => buildApplicationCommunicationDraft({
-      kind: 'thank_you', application, snapshot, timezoneOffsetMinutes: -480,
+      kind: 'thank_you', application, snapshot, timeZone: 'Asia/Singapore',
     })).toThrow('请选择一条已记录的面试结果');
     expect(() => buildApplicationCommunicationDraft({
       kind: 'thank_you', application, snapshot, outcome: interviewOutcome,
-      event: { ...interviewEvent, id: 99 }, timezoneOffsetMinutes: -480,
+      event: { ...interviewEvent, id: 99 }, timeZone: 'Asia/Singapore',
     })).toThrow('面试日程与结果记录不匹配');
     expect(() => buildApplicationCommunicationDraft({
       kind: 'thank_you', application, snapshot, outcome: interviewOutcome,
-      event: { ...interviewEvent, status: 'cancelled' }, timezoneOffsetMinutes: -480,
+      event: { ...interviewEvent, status: 'cancelled' }, timeZone: 'Asia/Singapore',
     })).toThrow('面试日程不可用于感谢信');
     expect(() => buildApplicationCommunicationDraft({
       kind: 'thank_you', application, snapshot: { ...snapshot, id: 12 }, outcome: interviewOutcome,
-      timezoneOffsetMinutes: -480,
+      timeZone: 'Asia/Singapore',
     })).toThrow('面试结果不属于所选投递档案');
   });
 
-  it('renders calendar dates with an explicit timezone offset', () => {
+  it('renders calendar dates with a named time zone', () => {
     const result = buildApplicationCommunicationDraft({
       kind: 'follow_up',
       application,
       snapshot: { ...snapshot, submitted_at: '2026-08-12T16:30:00Z' },
-      timezoneOffsetMinutes: -480,
+      timeZone: 'Asia/Singapore',
     });
     expect(result.body).toContain('2026年8月13日');
     expect(result.evidenceLabels).toContain('投递时间 · 2026-08-13');
   });
+  it('projects legacy bare UTC and explicit offsets onto the same Singapore date', () => {
+    for (const submitted_at of ['2026-11-30T16:05:00', '2026-11-30T16:05:00Z', '2026-12-01T00:05:00+08:00']) {
+      const result = buildApplicationCommunicationDraft({
+        kind: 'follow_up', application, snapshot: { ...snapshot, submitted_at }, timeZone: 'Asia/Singapore',
+      });
+      expect(result.body).toContain('2026年12月1日');
+      expect(result.evidenceLabels).toContain('投递时间 · 2026-12-01');
+    }
+  });
+
+  it('uses the actual New York summer offset and keeps the selected event distinct from the submission', () => {
+    const summer = '2026-07-15T04:30:00Z';
+    const result = buildApplicationCommunicationDraft({
+      kind: 'thank_you', application, snapshot: { ...snapshot, submitted_at: '2026-07-14T03:30:00' },
+      outcome: interviewOutcome, event: { ...interviewEvent, scheduled_at: summer }, timeZone: 'America/New_York',
+    });
+    expect(result.evidenceLabels).toContain('投递时间 · 2026-07-13');
+    expect(result.evidenceLabels).toContain('日程 #31 · 第 2 轮面试 · 2026-07-15');
+    expect(applicationCommunicationCalendarDate('2026-07-15T04:30:00', 'America/New_York', 'archive_utc')).toBe('2026-07-15');
+    expect(applicationCommunicationCalendarDate(summer, 'UTC', 'event_rfc3339')).toBe('2026-07-15');
+  });
+
+  it.each([
+    '2026-02-29T00:00:00', '2026-04-31T12:00:00Z', '2026-12-01T24:00:00Z',
+    '2026-12-01T00:60:00Z', '2026-12-01T00:00:60Z', '2026-12-01T00:00:00+08:60',
+    '2026-12-01T00:00:00+24:00', '2026-12-01', '2026-12-01 00:00:00',
+    '2026-12-01T00:00Z', '2026-12-01T00:00:00Z\n',
+  ])('does not invent a date from %j', (value) => {
+    expect(applicationCommunicationCalendarDate(value, 'Asia/Singapore', 'archive_utc')).toBeNull();
+  });
+
+  it('accepts leap dates and archive micros, but leaves bare event and invalid zone unknown', () => {
+    expect(applicationCommunicationCalendarDate('2024-02-29T16:05:00.123456', 'Asia/Singapore', 'archive_utc')).toBe('2024-03-01');
+    expect(applicationCommunicationCalendarDate('2026-11-24T15:59:59.999999', 'Asia/Singapore', 'archive_utc')).toBe('2026-11-24');
+    expect(applicationCommunicationCalendarDate('2026-11-24T23:59:59.999999+08:00', 'Asia/Singapore', 'event_rfc3339')).toBe('2026-11-24');
+    expect(applicationCommunicationCalendarDate('2026-11-30T16:05:00', 'Asia/Singapore', 'event_rfc3339')).toBeNull();
+    expect(applicationCommunicationCalendarDate('2026-12-01T00:05:00+08:00', 'Invalid/Zone', 'event_rfc3339')).toBeNull();
+    const result = buildApplicationCommunicationDraft({
+      kind: 'thank_you', application, snapshot, outcome: interviewOutcome,
+      event: { ...interviewEvent, scheduled_at: '2026-11-30T16:05:00' }, timeZone: 'Asia/Singapore',
+    });
+    expect(result.evidenceLabels).toContain('日程 #31 · 第 2 轮面试');
+  });
+
 });
