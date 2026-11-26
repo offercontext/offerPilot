@@ -9,6 +9,7 @@ import { Input, Select } from 'antd';
 import dayjs from 'dayjs';
 import { listApplications } from '@/services/applications';
 import { listEvents } from '@/services/events';
+import { eventCollectionEvidence } from '@/lib/eventCollectionEvidence';
 import { listOffers } from '@/services/offers';
 import { getPracticeStats } from '@/services/questions';
 import {
@@ -88,7 +89,8 @@ export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInte
   }, []);
 
   const { data: rawApps = [] } = useQuery({ queryKey: ['applications'], queryFn: () => listApplications() });
-  const { data: rawEvents = [] } = useQuery({ queryKey: ['events'], queryFn: () => listEvents() });
+  const eventsQ = useQuery({ queryKey: ['events'], queryFn: () => listEvents() });
+  const { events } = eventCollectionEvidence(eventsQ);
   const { data: rawOffers = [] } = useQuery({ queryKey: ['offers'], queryFn: () => listOffers() });
   const reminderCandidatesQ = useReminderCandidates();
   const practiceStatsQ = useQuery({
@@ -99,7 +101,6 @@ export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInte
 
   // Backend serializes empty []T as JSON `null`; coalesce to [] for safe iteration.
   const apps = rawApps ?? [];
-  const events = rawEvents ?? [];
   const offers = rawOffers ?? [];
 
   const insights = useMemo(

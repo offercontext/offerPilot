@@ -2,14 +2,17 @@ import { t, useLocale } from '@/i18n';
 import dayjs from 'dayjs';
 import { Button } from 'antd';
 import type { ScheduleEvent } from '@/types/event';
+import type { EventCollectionState } from '@/lib/eventCollectionEvidence';
 import { EVENT_TYPE_LABELS } from '@/types/event';
 import styles from '../dashboard.module.css';
 
 export default function UpcomingSchedule({
   events,
+  sourceState,
   onOpenCalendar,
 }: {
   events: ScheduleEvent[];
+  sourceState: EventCollectionState;
   onOpenCalendar?: () => void;
 }) {
   useLocale();
@@ -24,7 +27,11 @@ export default function UpcomingSchedule({
         <div className={styles.cardTitle}>{t("近期日程")}</div>
         {onOpenCalendar ? <Button type="link" onClick={onOpenCalendar}>{t("打开日历")}</Button> : null}
       </div>
-      {upcoming.length === 0 ? (
+      {sourceState === 'loading' ? (
+        <div className={styles.empty} role="status">{t("正在加载日程")}</div>
+      ) : sourceState !== 'ready' ? (
+        <div className={styles.empty} role="alert">{t("加载日程失败")}</div>
+      ) : upcoming.length === 0 ? (
         <div className={styles.empty}>{t("暂无安排")}</div>
       ) : (
         upcoming.map((e) => {
