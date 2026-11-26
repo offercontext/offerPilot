@@ -13,7 +13,7 @@ export interface ApplicationCommunicationDraftInput {
   event?: ScheduleEvent | null;
   recipientName?: string;
   highlight?: string;
-  timezoneOffsetMinutes: number;
+  timeZone: string;
 }
 
 export interface ApplicationCommunicationDraft {
@@ -40,20 +40,49 @@ const RESULT_LABELS: Record<ApplicationOutcome['result'], string> = {
   get other() { return t("其他"); },
 };
 
-function safeCalendarDate(value: string, timezoneOffsetMinutes: number): string | null {
-  if (!Number.isFinite(timezoneOffsetMinutes)) return null;
-  const instant = Date.parse(value);
+export type CommunicationDateSource = 'archive_utc' | 'event_rfc3339';
+
+const TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})?$/;
+
+export function applicationCommunicationCalendarDate(
+  value: string,
+  timeZone: string,
+  source: CommunicationDateSource,
+): string | null {
+  const match = typeof value === 'string' ? TIMESTAMP.exec(value) : null;
+  if (!match || match[0] !== value) return null;
+  const [, y, m, d, h, min, sec, offset] = match;
+  // Only submission/outcome archive timestamps are confirmed legacy bare UTC.
+  // A bare scheduled event is missing its wire time zone and must stay unknown.
+  if (!offset && source !== 'archive_utc') return null;
+  const year = Number(y);
+  const month = Number(m);
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const monthDays = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+  if (year < 1 || month < 1 || month > 12 || Number(d) < 1 || Number(d) > monthDays[month - 1]
+    || Number(h) > 23 || Number(min) > 59 || Number(sec) > 59
+    || (offset && offset !== 'Z' && (Number(offset.slice(1, 3)) > 23 || Number(offset.slice(4)) > 59))) return null;
+  // Date.parse is safe after strict shape and calendar validation; Intl uses the
+  // offset at this instant, not today's offset (DST or historical transitions).
+  const instant = Date.parse(offset ? value : value + 'Z');
   if (!Number.isFinite(instant)) return null;
-  const local = new Date(instant - timezoneOffsetMinutes * 60_000);
-  const year = local.getUTCFullYear();
-  const month = String(local.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(local.getUTCDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  try {
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone, calendar: 'gregory', numberingSystem: 'latn',
+      year: 'numeric', month: '2-digit', day: '2-digit', era: 'short',
+    }).formatToParts(instant);
+    const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value;
+    const localYear = read('year');
+    const localMonth = read('month');
+    const localDay = read('day');
+    return read('era') === 'AD' && localYear && /^[0-9]{1,4}$/.test(localYear) && localMonth && localDay
+      ? `${localYear.padStart(4, '0')}-${localMonth}-${localDay}` : null;
+  } catch {
+    return null;
+  }
 }
 
-function chineseDate(value: string, timezoneOffsetMinutes: number): string | null {
-  const date = safeCalendarDate(value, timezoneOffsetMinutes);
-  if (!date) return null;
+function localizedDraftDate(date: string): string {
   const [year, month, day] = date.split('-').map(Number);
   return t("{value0}年{value1}月{value2}日", { value0: year, value1: month, value2: day });
 }
@@ -95,8 +124,7 @@ export function buildApplicationCommunicationDraft(
     }
   }
   const highlight = normalizedHighlight(input.highlight);
-  const submittedDate = safeCalendarDate(snapshot.submitted_at, input.timezoneOffsetMinutes);
-  const submittedDateChinese = chineseDate(snapshot.submitted_at, input.timezoneOffsetMinutes);
+  const submittedDate = applicationCommunicationCalendarDate(snapshot.submitted_at, input.timeZone, 'archive_utc');
   const position = application.position_name.trim() || t("应聘岗位");
   const evidenceLabels = [
     t("投递档案 #{value0} · {value1} · JD v{value2}", { value0: snapshot.id, value1: snapshot.resume_title, value2: snapshot.jd_version_number }),
@@ -104,7 +132,7 @@ export function buildApplicationCommunicationDraft(
   if (submittedDate) evidenceLabels.push(t("投递时间 · {value0}", { value0: submittedDate }));
   if (outcome) evidenceLabels.push(t("结果 #{value0} · {value1} · {value2}", { value0: outcome.id, value1: STAGE_LABELS[outcome.stage], value2: RESULT_LABELS[outcome.result] }));
   if (event) {
-    const eventDate = safeCalendarDate(event.scheduled_at, input.timezoneOffsetMinutes);
+    const eventDate = applicationCommunicationCalendarDate(event.scheduled_at, input.timeZone, 'event_rfc3339');
     const round = Number.isInteger(event.round) && event.round > 0 ? t("第 {value0} 轮", { value0: event.round }) : '';
     const eventName = event.event_type === 'interview' ? t("{value0}面试", { value0: round }) : t("关联日程");
     evidenceLabels.push(t("日程 #{value0} · {value1}{value2}", { value0: event.id, value1: eventName, value2: eventDate ? ` · ${eventDate}` : '' }));
@@ -131,8 +159,8 @@ export function buildApplicationCommunicationDraft(
     };
   }
 
-  const submittedParagraph = submittedDateChinese
-    ? t("我于 {value0}提交了贵公司「{value1}」职位的申请，想礼貌了解目前的招聘进展。", { value0: submittedDateChinese, value1: position })
+  const submittedParagraph = submittedDate
+    ? t("我于 {value0}提交了贵公司「{value1}」职位的申请，想礼貌了解目前的招聘进展。", { value0: localizedDraftDate(submittedDate), value1: position })
     : t("我此前提交了贵公司「{value0}」职位的申请，想礼貌了解目前的招聘进展。", { value0: position });
   return {
     subject: t("关于「{value0}」申请进展的跟进", { value0: position }),

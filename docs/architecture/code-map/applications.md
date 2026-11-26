@@ -42,7 +42,7 @@
 
 `create_application_submission_snapshot` → [ApplicationOutcomesRepository.create_snapshot](../../../src/offerpilot/repositories/application_outcomes.py) 冻结简历/JD/可选材料包与正文摘要；后来改源不重写历史。`create_outcome` 要求快照和可选日程属于同一投递，只追加结果，不自动改变投递阶段。
 
-[buildApplicationCommunicationDraft](../../../web/src/lib/applicationCommunicationDraft.ts) 只用选中的档案、面试结果、可选日程和用户填写的亮点生成跟进/感谢文案。复制到剪贴板不代表邮件发送，也不创建后台任务。来源失效后旧草稿的 UI 清理在 `ApplicationCommunicationDraftPanel`。
+[buildApplicationCommunicationDraft](../../../web/src/lib/applicationCommunicationDraft.ts) 只用选中的档案、面试结果、可选日程和用户填写的亮点生成跟进/感谢文案。草稿和证据共用日期投影：投递档案、结果的旧无时区值按确认的 UTC 契约解析，关联日程必须有 RFC3339 时区；按浏览器命名时区在实际时间点取日历日期，不猜测无效值。复制到剪贴板不代表邮件发送，也不创建后台任务。来源失效后旧草稿的 UI 清理在 `ApplicationCommunicationDraftPanel`。
 
 依据：[结果反馈设计](../../superpowers/specs/2026-08-12-application-outcome-feedback-design.md)、[沟通草稿设计](../../superpowers/specs/2026-08-12-application-communication-drafts-design.md)。
 
