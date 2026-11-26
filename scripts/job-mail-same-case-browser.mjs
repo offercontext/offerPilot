@@ -102,7 +102,8 @@ export async function saveAndUpdateJourneyMaterials({ context, base, api, output
     const preparation = await openPreparation(page, base, app);
     await preparation.getByText('当前 JD · 版本 1', { exact: true }).waitFor();
     const drawer = await openFacts(preparation, page);
-    await drawer.getByRole('combobox', { name: '实际提交的简历' }).click();
+    // Ant's selected label covers the read-only search input; use its real keyboard control.
+    await drawer.getByRole('combobox', { name: '实际提交的简历' }).press('ArrowDown');
     await visibleOption(page, archivedResume.title).click();
     await drawer.getByRole('textbox', { name: '投递备注' }).fill(snapshotNote);
     const [saveResponse] = await Promise.all([
@@ -182,7 +183,7 @@ export async function copyJourneyFollowUp({ page, base, api, output, journey, ev
     const button = label => panel.getByRole('button').filter({ hasText: label });
     await button('投递跟进信').click();
     const picker = panel.getByRole('combobox', { name: '投递档案' });
-    await picker.click();
+    await picker.press('ArrowDown');
     await visibleOption(page, '2026-01-12 · 合成 A 独有简历 · JD v1').waitFor({ state: 'hidden' });
     const option = `${submittedDay} · ${archivedRecord.resume_title} · JD v1`;
     await visibleOption(page, option).click();
