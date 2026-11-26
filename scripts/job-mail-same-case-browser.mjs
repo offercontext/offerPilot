@@ -6,7 +6,7 @@ const archivedJd = '合成旧岗位说明\n' + '旧版 JD 完整内容。'.repea
 const jd = '合成岗位资料：维护 Python API 和 SQL 服务。';
 const submittedAt = '2026-01-15T04:30:00.000Z';
 const submittedDay = '2026-01-15';
-const snapshotNote = '合成 B：实际提交的第一版，未替换。';
+const snapshotNote = 'Synthetic B v1 archive.';
 
 function visibleOption(page, label) {
   return page.locator('.ant-select-dropdown:visible').getByText(label, { exact: true });
@@ -105,7 +105,9 @@ export async function saveAndUpdateJourneyMaterials({ context, base, api, output
     // Ant's selected label covers the read-only search input; use its real keyboard control.
     await drawer.getByRole('combobox', { name: '实际提交的简历' }).press('ArrowDown');
     await visibleOption(page, archivedResume.title).click();
-    await drawer.getByRole('textbox', { name: '投递备注' }).fill(snapshotNote);
+    const note = drawer.getByRole('textbox', { name: '投递备注' });
+    await note.pressSequentially(snapshotNote);
+    assert.equal(await note.inputValue(), snapshotNote);
     const [saveResponse] = await Promise.all([
       responseFor(base, archivePath, 'POST', page),
       drawer.getByRole('button').filter({ hasText: '直接保存档案' }).click(),
@@ -114,6 +116,7 @@ export async function saveAndUpdateJourneyMaterials({ context, base, api, output
     const body = saveResponse.request().postDataJSON();
     assert.equal(body.resume_id, archivedResume.id);
     assert.equal(body.jd_version_id, archivedVersion.id);
+    assert.equal(body.note, snapshotNote, 'The real form must submit the typed optional note');
     assert.equal(Date.parse(body.submitted_at), new Date(submittedAt).getTime());
     assert.equal(archivedRecord.application_id, app.id);
     assert.notEqual(archivedRecord.id, archiveA.id);
