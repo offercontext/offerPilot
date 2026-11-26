@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { copyJourneyFollowUp, saveAndUpdateJourneyMaterials } from './job-mail-same-case-browser.mjs';
 import { verifyCommunicationDates } from './job-mail-communication-dates-browser.mjs';
 import { waitForMailState } from './job-mail-browser-wait.mjs';
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
@@ -13,12 +14,21 @@ assert.equal(new URL(base).hostname, '127.0.0.1');
 const output = path.resolve(process.env.MAIL_EVIDENCE_DIR || 'artifacts/job-mail-browser');
 await fs.mkdir(output, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/usr/bin/chromium', headless: true, chromiumSandbox: true });
-const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
+const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN', timezoneId: 'Asia/Singapore' });
+await context.addInitScript(() => {
+  Object.defineProperty(navigator, 'clipboard', { configurable: true,
+    value: { writeText: async text => { window.__sameCaseClipboard = text; } },
+  });
+});
 const blocked = [];
 const preparationWrites = [];
 const presenceHeartbeats = [];
 const archivedReads = [];
 let auditPreparation = false;
+let auditConfirmation = false;
+const confirmWrites = [];
+const rejectedConfirmationWrites = [];
+const isMailConfirm = pathname => /^\/api\/job-mail\/suggestions\/[^/]+\/confirm$/.test(pathname);
 await context.route('**/*', route => {
   const target = new URL(route.request().url());
   if (target.origin !== new URL(base).origin) { blocked.push(target.origin); return route.abort(); }
@@ -31,6 +41,12 @@ await context.route('**/*', route => {
     // endpoint only updates presence and does not reconcile or call models.
     presenceHeartbeats.push(target.pathname);
     return route.continue();
+  }
+  if (auditConfirmation && target.pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)
+    && !(method === 'POST' && target.pathname === '/api/companion/presence')) {
+    const write = `${method} ${target.pathname}`;
+    if (method === 'POST' && isMailConfirm(target.pathname) && confirmWrites.length === 0) confirmWrites.push(write);
+    else { rejectedConfirmationWrites.push(write); return route.abort(); }
   }
   if (auditPreparation && target.pathname.startsWith('/api/') && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
     // Fail the assertion below without letting a regressed CTA mutate the
@@ -77,7 +93,8 @@ try {
   waitDiagnostic = { legacyResult, legacyCalls, explicitResult, explicitCalls };
   console.log(JSON.stringify({ waitDiagnostic }));
 
-  const app = await api('/applications', { method: 'POST', data: { company_name: '合成星河科技', position_name: '后端工程师' } });
+  const journey = await saveAndUpdateJourneyMaterials({ context, base, api, output, pageErrors });
+  const { app, archivedJd, jd, jdVersion, archivePath, archivedRecord, archiveBefore } = journey;
   await page.goto(base + '/?view=settings');
   await page.getByRole('heading', { name: '求职邮箱', exact: true }).waitFor();
   const settings = page.locator('section[aria-labelledby="job-mail-settings-title"]');
@@ -119,7 +136,9 @@ try {
   await snap('03-pending-mail-evidence', inbox);
   await inbox.getByRole('button', { name: /【合成样本】面试邀请/ }).click();
   const dialog = page.getByRole('dialog');
-  await dialog.getByLabel('目标投递', { exact: true }).selectOption(String(app.id));
+  const targetApplication = dialog.getByLabel('目标投递', { exact: true });
+  await targetApplication.locator(`option[value="${journey.appA.id}"]`).waitFor({ state: 'attached' });
+  await targetApplication.selectOption(String(app.id));
   assert.equal(await dialog.locator('input[type=checkbox]').count(), 0);
   await snap('04a-editable-mail-form');
   await dialog.getByLabel('时长', { exact: true }).fill('');
@@ -168,7 +187,17 @@ try {
   }), Boolean, { timeoutMs: 3000, pollMs: 100 });
   assert.equal(await page.getByRole('button', { name: '打开 OfferPilot 领航员', exact: true }).isVisible(), true);
   await snap('04d-desktop-modal-clear-confirmation');
-  await confirmButton.click();
+  auditConfirmation = true;
+  const [confirmResponse] = await Promise.all([
+    page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).origin === new URL(base).origin
+      && isMailConfirm(new URL(response.url()).pathname)),
+    confirmButton.click(),
+  ]);
+  assert.ok(confirmResponse.ok());
+  const liveReceipt = await confirmResponse.json();
+  assert.equal(confirmResponse.request().postDataJSON().application_id, app.id);
+  assert.equal(liveReceipt.application_id, app.id);
   await dialog.getByText('已确认写入', { exact: true }).waitFor();
   await snap('05-atomic-write-receipt', dialog);
   const events = await api('/application-events');
@@ -177,8 +206,16 @@ try {
   assert.equal(events[0].duration_minutes, 45);
   assert.equal(events[0].location, '合成会议室 B');
   const eventB = events[0];
+  assert.equal(liveReceipt.application_event_id, eventB.id);
+  assert.equal(liveReceipt.after.application_id, app.id);
+  assert.equal(liveReceipt.after.event_type, 'interview');
+  assert.equal(Date.parse(liveReceipt.after.scheduled_at), scheduledB.getTime());
   assert.equal(Date.parse(eventB.scheduled_at), scheduledB.getTime());
   assert.equal((await api('/applications/' + app.id)).status, app.status);
+  assert.deepEqual(confirmWrites, [`POST /api/job-mail/suggestions/${liveReceipt.suggestion_id}/confirm`]);
+  assert.deepEqual(rejectedConfirmationWrites, []);
+  assert.equal((await api('/job-mail/fixture-safety')).preparation_model_calls, 0);
+  auditConfirmation = false;
   const receiptFocus = await dialog.evaluate(element => ({
     tag: document.activeElement?.tagName,
     label: document.activeElement?.getAttribute('aria-label'),
@@ -230,33 +267,14 @@ try {
   assert.equal(eventA.application_id, eventB.application_id);
   assert.ok(Date.parse(eventA.scheduled_at) > Date.now());
   assert.ok(Date.parse(eventA.scheduled_at) < Date.parse(eventB.scheduled_at));
-  const archivedJd = '合成旧岗位说明\n' + '旧版 JD 完整内容。'.repeat(600) + '\n归档末行：完整词尾';
-  const archivedVersion = await api(`/applications/${app.id}/job-description/versions`, { method: 'POST', data: {
-    jd_text: archivedJd, expected_current_version_id: null, idempotency_key: 'synthetic-old-interview-jd',
-  } });
-  const jd = '合成岗位资料：维护 Python API 和 SQL 服务。';
-  const jdVersion = await api(`/applications/${app.id}/job-description/versions`, { method: 'POST', data: {
-    jd_text: jd, expected_current_version_id: archivedVersion.id, idempotency_key: 'synthetic-mail-exact-interview-jd',
-  } });
   const resumeTitle = '合成面试准备简历';
   const resume = await api('/resumes/from-sample', { method: 'POST', data: { sample_id: 'backend', title: resumeTitle } });
-  // The existing readiness flow can identify a single visible resume on its
-  // own. Two viable fixtures let us exercise a real manual choice.
-  const archivedResume = await api('/resumes', { method: 'POST', data: {
-    title: '合成归档简历', text: '合成提取原文',
-    content_json: { experience: [{ company: '合成历史公司', highlights: ['归档的实际结构化成绩'] }], raw_text: '合成提取原文' },
-  } });
-  const archivePath = `/applications/${app.id}/submission-snapshots`;
-  const archivedRecord = await api(archivePath, { method: 'POST', data: {
-    resume_id: archivedResume.id, jd_version_id: archivedVersion.id, material_kit_id: null,
-    submitted_at: new Date(Date.now() - 86400_000).toISOString(), note: '', idempotency_key: 'synthetic-explicit-archive',
-  } });
-  const archiveBefore = await api(archivePath);
   const processed = await api('/job-mail/suggestions?status=processed');
   const invitation = processed.items.find(item => item.evidence?.subject === '【合成样本】面试邀请');
   assert.ok(invitation, 'Confirmed invitation must remain in Processed');
   const suggestionPath = `/job-mail/suggestions/${encodeURIComponent(invitation.id)}`;
   const receiptBefore = (await api(suggestionPath)).receipt;
+  assert.deepEqual(receiptBefore, liveReceipt);
   assert.equal(receiptBefore.application_id, app.id);
   assert.equal(receiptBefore.application_event_id, eventB.id);
   const eventsBefore = await api(`/application-events?application_id=${app.id}`);
@@ -348,6 +366,17 @@ try {
   const proposalsPath = `/applications/${app.id}/interview-preparation-proposals`;
   assert.deepEqual(await api(proposalsPath), [], 'First open did not implicitly prepare a proposal');
   assert.equal((await api('/job-mail/fixture-safety')).preparation_model_calls, 0);
+
+  // Finish the ordinary same-case journey while B is still at the confirmed
+  // schedule, before the independent fake-model/reschedule regression below.
+  auditPreparation = true;
+  const copiedJourney = await copyJourneyFollowUp({ page, base, api, output, journey, eventB, taskKey });
+  assert.deepEqual(preparationWrites, [], 'Only the earlier explicit B archive, JD and mail-confirm actions may write; follow-up must not');
+  auditPreparation = false;
+  assert.deepEqual((await api(suggestionPath)).receipt, liveReceipt);
+  const sameCaseJourney = { ...copiedJourney, confirmationWrites: confirmWrites.length,
+    unexpectedApiWrites: [...rejectedConfirmationWrites, ...preparationWrites], preparationModelCalls: 0 };
+  checks.push('Same-company A/B journey: real UI saves B v1, updates B live JD to v2, confirms exact B interview, reads frozen B v1, then edits and copies a B v1-bound follow-up without writes; A stays unchanged');
 
   // Fixture-only seed via the real API and its fixed, in-process fake model.
   // This deliberate pre-move setup is not a browser navigation side effect.
@@ -464,7 +493,7 @@ try {
   assert.deepEqual(pageErrors, []);
   const communicationDates = await verifyCommunicationDates({ browser, base, output });
   checks.push('Communication drafts project normal API timestamps in Singapore and New York; editable copy does not write or send');
-  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, communicationDates, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, sameCaseJourney, communicationDates, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));
