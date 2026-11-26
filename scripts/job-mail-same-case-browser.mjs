@@ -1,6 +1,7 @@
 // Same-company decoys exercise real UI ownership with a loopback-only fixture.
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { waitForMailState } from './job-mail-browser-wait.mjs';
 
 const archivedJd = '合成旧岗位说明\n' + '旧版 JD 完整内容。'.repeat(600) + '\n归档末行：完整词尾';
 const jd = '合成岗位资料：维护 Python API 和 SQL 服务。';
@@ -24,6 +25,8 @@ async function openFacts(preparation, page) {
   await preparation.getByRole('button', { name: '投递事实与结果', exact: true }).click();
   const drawer = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: / · 投递事实与结果$/ }) });
   await drawer.waitFor();
+  await waitForMailState(() => page.locator('.ant-drawer-content-wrapper').evaluateAll(elements =>
+    elements.every(element => element.getAnimations().every(animation => animation.playState !== 'running'))), Boolean);
   return drawer;
 }
 
@@ -105,9 +108,13 @@ export async function saveAndUpdateJourneyMaterials({ context, base, api, output
     // Ant's selected label covers the read-only search input; use its real keyboard control.
     await drawer.getByRole('combobox', { name: '实际提交的简历' }).press('ArrowDown');
     await visibleOption(page, archivedResume.title).click();
+    await visibleOption(page, archivedResume.title).waitFor({ state: 'hidden' });
     const note = drawer.getByRole('textbox', { name: '投递备注' });
-    await note.pressSequentially(snapshotNote);
-    assert.equal(await note.inputValue(), snapshotNote);
+    await note.click();
+    assert.equal(await note.evaluate(element => document.activeElement === element), true, 'The visible note owns focus');
+    await note.pressSequentially(snapshotNote, { delay: 20 });
+    assert.equal(await note.inputValue(), snapshotNote, 'The visible note retains normal keyboard input');
+    assert.equal(await note.evaluate(element => document.activeElement === element), true, 'Typing does not transfer focus');
     const [saveResponse] = await Promise.all([
       responseFor(base, archivePath, 'POST', page),
       drawer.getByRole('button').filter({ hasText: '直接保存档案' }).click(),
