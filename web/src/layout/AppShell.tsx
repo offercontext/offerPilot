@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button, Layout, Spin, Tabs, message } from 'antd';
 import { listApplications } from '@/services/applications';
 import { listEvents } from '@/services/events';
+import { eventCollectionEvidence, type EventCollectionState } from '@/lib/eventCollectionEvidence';
 import { listOffers } from '@/services/offers';
 import { ONBOARDING_QUERY_KEY } from '@/services/onboarding';
 import { listResumes } from '@/services/resumes';
@@ -769,7 +770,7 @@ type UniqueInterviewEventResult =
   | { readonly ok: true; readonly event: ScheduleEvent }
   | { readonly ok: false };
 
-export type InterviewEventSourceState = 'loading' | 'error' | 'ready' | 'absent' | 'unknown';
+export type InterviewEventSourceState = EventCollectionState | 'absent';
 
 export interface ExactInterviewTaskInput {
   readonly taskId: 'application.interview_prepare' | 'application.interview_review';
@@ -1245,13 +1246,10 @@ function AppShellContent() {
   // explicit null-coalesce is needed to keep downstream iterators safe.
   const apps = Array.isArray(applications) ? applications : [];
   const evs = Array.isArray(eventsData) ? eventsData : [];
-  const eventSourceState: InterviewEventSourceState = eventsLoading
-    ? 'loading'
-    : eventsError
-      ? 'error'
-      : Array.isArray(eventsData)
-        ? 'ready'
-        : 'unknown';
+  const eventEvidence = eventCollectionEvidence({
+    data: eventsData, isLoading: eventsLoading, isError: eventsError,
+  });
+  const { state: eventSourceState, events: completeEvents } = eventEvidence;
   const ofrs = Array.isArray(offersData) ? offersData : [];
   const resumes = Array.isArray(resumesData) ? resumesData : [];
   const [suggestionSessionStates, setSuggestionSessionStates] = useState<Record<string, SuggestionSessionState>>({});
@@ -1381,9 +1379,9 @@ function AppShellContent() {
 
   const reminderCandidatesQ = useReminderCandidates();
   const pipelineActions = useMemo(
-    () => derivePipelineInsights({ apps, events: evs, offers: ofrs, practiceStats,
+    () => derivePipelineInsights({ apps, events: completeEvents, offers: ofrs, practiceStats,
       reminderCandidates: reminderCandidatesQ.isError ? [] : reminderCandidatesQ.data, now }),
-    [apps, evs, ofrs, practiceStats, reminderCandidatesQ.data, reminderCandidatesQ.isError, now, getLocale()]
+    [apps, completeEvents, ofrs, practiceStats, reminderCandidatesQ.data, reminderCandidatesQ.isError, now, getLocale()]
   );
   const actions = useMemo(() => toLegacyActionItems(pipelineActions), [pipelineActions]);
 
@@ -2442,10 +2440,10 @@ function AppShellContent() {
           {view === 'dashboard' && (
             <DashboardView
               applications={apps}
-              events={evs}
+              eventEvidence={eventEvidence}
               offers={ofrs}
               practiceStats={practiceStats}
-              dataState={{ eventsLoading, eventsError, offersLoading, offersError, practiceLoading, practiceError }}
+              dataState={{ offersLoading, offersError, practiceLoading, practiceError }}
               onNavigate={navigateToView}
               onOpenDetailById={goDetailById}
               onAddApplication={() => setAddOpen(true)}

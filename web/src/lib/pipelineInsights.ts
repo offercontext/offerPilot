@@ -91,7 +91,8 @@ interface MaterialKitState {
 
 interface DerivePipelineInsightsInput {
   apps: Application[];
-  events: ScheduleEvent[];
+  // undefined is unavailable; [] is affirmative evidence of an empty full collection.
+  events: ScheduleEvent[] | undefined;
   offers: Offer[];
   materialKits?: MaterialKitState[];
   reminderCandidates?: ReminderCandidate[];
@@ -214,7 +215,7 @@ export function derivePipelineInsights({
 
   const appsWithFutureEvents = new Set(
     events
-      .filter((event) => {
+      ?.filter((event) => {
         const scheduledAt = parseStrictDate(event.scheduled_at);
         return event.status === 'todo' && Boolean(scheduledAt?.isAfter(current));
       })
@@ -224,7 +225,7 @@ export function derivePipelineInsights({
   for (const app of apps) {
     if (app.closed_at || app.deleted_at || app.status === 'closed') continue;
 
-    if (app.status === 'interview' && !appsWithFutureEvents.has(app.id)) {
+    if (events && app.status === 'interview' && !appsWithFutureEvents.has(app.id)) {
       insights.push({
         id: `no-next-${app.id}`,
         kind: 'no_next_event',

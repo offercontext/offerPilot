@@ -24,7 +24,7 @@ describe('DashboardView onboarding actions', () => {
 
   it('consumes shell-owned workspace data without refetching the same collections', () => {
     expect(source).toContain('applications: Application[];');
-    expect(source).toContain('events: ScheduleEvent[];');
+    expect(source).toContain('eventEvidence: EventCollectionEvidence;');
     expect(source).toContain('offers: Offer[];');
     expect(source).not.toContain("queryKey: ['applications']");
     expect(source).not.toContain("queryKey: ['events']");

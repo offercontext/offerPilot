@@ -11,7 +11,7 @@ import {
 
 export interface ActionHintInput {
   apps: Application[];
-  events: ScheduleEvent[];
+  events: ScheduleEvent[] | undefined;
   offers: Offer[];
   reminderCandidates?: ReminderCandidate[];
   practiceStats?: PracticeStats | null;

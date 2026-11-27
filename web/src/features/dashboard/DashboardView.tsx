@@ -36,6 +36,7 @@ import {
 import { deriveTodayWorkspace, deriveWeeklyCompletedHighlight } from './todayWorkspace';
 import type { Application } from '@/types/application';
 import type { ScheduleEvent } from '@/types/event';
+import type { EventCollectionEvidence } from '@/lib/eventCollectionEvidence';
 import type { Offer } from '@/types/offer';
 import type { PracticeStats } from '@/types/question';
 
@@ -58,12 +59,10 @@ function findInsightAction(item: PipelineInsight, actionId: string): DetailActio
 
 interface Props {
   applications: Application[];
-  events: ScheduleEvent[];
+  eventEvidence: EventCollectionEvidence;
   offers: Offer[];
   practiceStats?: PracticeStats;
   dataState?: {
-    eventsLoading?: boolean;
-    eventsError?: boolean;
     offersLoading?: boolean;
     offersError?: boolean;
     practiceLoading?: boolean;
@@ -75,9 +74,11 @@ interface Props {
   onOnboardingAction: (action: OnboardingAction) => void;
 }
 
+const NO_EVENTS: ScheduleEvent[] = [];
+
 export default function DashboardView({
   applications: apps,
-  events,
+  eventEvidence,
   offers,
   practiceStats,
   dataState,
@@ -127,9 +128,11 @@ export default function DashboardView({
   const funnel = useMemo(() => computeFunnel(apps), [apps, getLocale()]);
   const momentum = useMemo(() => computeMomentum(apps, 4, now), [apps, now, getLocale()]);
   const reminderCandidatesQ = useReminderCandidates();
+  const { state: eventCollectionState, events: completeEvents } = eventEvidence;
+  const events = completeEvents ?? NO_EVENTS;
   const insights = useMemo(
-    () => deriveActionHints({ apps, events, offers, practiceStats, reminderCandidates: reminderCandidatesQ.isError ? [] : reminderCandidatesQ.data, now }),
-    [apps, events, offers, practiceStats, reminderCandidatesQ.data, reminderCandidatesQ.isError, now, getLocale()],
+    () => deriveActionHints({ apps, events: completeEvents, offers, practiceStats, reminderCandidates: reminderCandidatesQ.isError ? [] : reminderCandidatesQ.data, now }),
+    [apps, completeEvents, offers, practiceStats, reminderCandidatesQ.data, reminderCandidatesQ.isError, now, getLocale()],
   );
   const health = useMemo(() => summarizePipelineHealth(apps, insights, undefined, now), [apps, insights, now]);
   const mission = useMemo(
@@ -148,12 +151,12 @@ export default function DashboardView({
   );
   const missionUnavailableKinds = useMemo(() => {
     const kinds: MissionMetricKind[] = [];
-    if (dataState?.eventsLoading || dataState?.eventsError) kinds.push('interviews');
+    if (eventCollectionState !== 'ready') kinds.push('interviews');
     if (dataState?.offersLoading || dataState?.offersError) kinds.push('offers');
     if (dataState?.practiceLoading || dataState?.practiceError) kinds.push('practice');
     if (hasPartialMaterialKitCoverage || materialKitsQ.isLoading || materialKitsQ.isError) kinds.push('materials');
     return kinds;
-  }, [dataState?.eventsError, dataState?.eventsLoading, hasPartialMaterialKitCoverage, materialKitsQ.isError, materialKitsQ.isLoading, dataState?.offersError, dataState?.offersLoading, dataState?.practiceError, dataState?.practiceLoading]);
+  }, [eventCollectionState, hasPartialMaterialKitCoverage, materialKitsQ.isError, materialKitsQ.isLoading, dataState?.offersError, dataState?.offersLoading, dataState?.practiceError, dataState?.practiceLoading]);
 
   const todayWorkspace = useMemo(
     () => deriveTodayWorkspace({ actions: mission.actions, events, now }),
@@ -287,7 +290,7 @@ export default function DashboardView({
 
       <div className={styles.todayLowerGrid}>
         <section aria-label={t("未来 7 天日程")}>
-          <UpcomingSchedule events={todayWorkspace.upcomingEvents} onOpenCalendar={() => onNavigate('calendar')} />
+          <UpcomingSchedule events={todayWorkspace.upcomingEvents} sourceState={eventCollectionState} onOpenCalendar={() => onNavigate('calendar')} />
         </section>
         <section aria-label={t("本周进度")}>
           <WeeklyMissionPanel metrics={mission.metrics} unavailableKinds={missionUnavailableKinds} onNavigate={onNavigate} />
