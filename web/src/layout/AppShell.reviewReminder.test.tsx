@@ -17,7 +17,7 @@ const mock = vi.hoisted(() => ({
   noteFetching: false, noteError: false, eventFetching: false,
 }));
 const timestamp = '2026-11-27T08:30:00Z';
-const start = '2026-11-27T06:00:00Z';
+const start = '2026-11-27T06:00:00.123Z';
 const startSeconds = Date.parse(start) / 1000;
 const makeApp = (id: number, position_name: string): Application => ({
   id, company_name: '同一家公司', position_name, status: 'interview', job_url: '', source: '', notes: '',
@@ -222,9 +222,12 @@ describe('exact review reminder across mounted surfaces', () => {
     expect(mock.save).not.toHaveBeenCalled();
   });
 
-  it.each(['missing', 'cancelled', 'event read rejected', 'note read rejected', 'malformed notes', 'expired'] as const)('does not launch or write when %s', async fault => {
+  it.each(['missing', 'cancelled', 'event read rejected', 'note read rejected', 'malformed notes', 'moved within the same second', 'expired'] as const)('does not launch or write when %s', async fault => {
     if (fault === 'missing') mock.events.mockResolvedValue([firstB]);
     if (fault === 'cancelled') mock.events.mockResolvedValue([firstB, { ...secondB, status: 'cancelled' }]);
+    if (fault === 'moved within the same second') {
+      mock.events.mockResolvedValue([firstB, { ...secondB, scheduled_at: start.replace('.123', '.987') }]);
+    }
     if (fault === 'event read rejected') mock.events.mockRejectedValue(new Error('event unavailable'));
     if (fault === 'note read rejected') mock.notes.mockRejectedValue(new Error('note unavailable'));
     if (fault === 'malformed notes') mock.notes.mockResolvedValue([note(1, 222, 11)]);
@@ -365,3 +368,4 @@ describe('exact review reminder across mounted surfaces', () => {
     expect(facts.map(fact => fact.event_id)).toEqual([111, 221]);
   });
 });
+

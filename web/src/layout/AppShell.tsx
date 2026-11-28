@@ -1946,9 +1946,13 @@ function AppShellContent() {
       const exact = resolveExecutableInterviewTask({ taskId: 'application.interview_review', applicationId, eventId,
         events, sourceState: 'ready', now: Date.now() });
       const note = resolveExactReviewNote(notes, applicationId, eventId);
+      // Date.parse retains milliseconds; the server's Unix timestamp can also
+      // retain finer digits. Match only the same parsed millisecond.
+      const eventMs = exact.ok ? Date.parse(exact.event.scheduled_at) : Number.NaN;
+      const scheduleMatches = scheduledAt >= eventMs / 1000 && scheduledAt < (eventMs + 1) / 1000;
       if (revision !== readRevisions() || !app || app.deleted_at || app.closed_at || app.status === 'closed'
         || !apps.some(row => row.id === applicationId) || !exact.ok || exact.event.status !== 'done'
-        || !note.ready || Math.floor(Date.parse(exact.event.scheduled_at) / 1000) !== scheduledAt
+        || !note.ready || !scheduleMatches
         || !exactReviewReminder(item, action, Date.now())) { warn(); return; }
       if (hasLivePilotWork() || (owner?.ref.taskId === 'application.interview_review'
         && owner.ref.applicationId === applicationId && owner.ref.eventId === eventId
@@ -2950,3 +2954,4 @@ function AppShellContent() {
     </DndContext>
   );
 }
+
