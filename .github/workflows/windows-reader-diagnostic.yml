@@ -1,0 +1,36 @@
+name: Windows reader diagnostic (not a merge gate)
+on:
+  push:
+    branches: ['test/20261128-windows-reader-diagnostic']
+    paths: ['.github/workflows/windows-reader-diagnostic.yml', 'tests/evaluation/test_failure_observations.py']
+permissions:
+  contents: read
+jobs:
+  windows-reader-diagnostic:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    env:
+      LITELLM_LOCAL_MODEL_COST_MAP: "True"
+      PYTHONUTF8: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+        with:
+          version: '0.12.19'
+      - name: Install frozen test dependencies
+        run: uv sync --frozen
+      - name: Repeat only the synthetic reader failure
+        run: |
+          foreach ($iteration in 1..12) {
+            Write-Host "Reader probe ${iteration}/12"
+            uv run --frozen python -m pytest -q "tests/evaluation/test_budget_denial_attribution.py::test_matching_denial_admits_cancellation_without_claiming_http_causality"
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Check both neighboring fixture suites
+        run: uv run --frozen python -m pytest -q tests/evaluation/test_budget_denial_attribution.py tests/evaluation/test_failure_observations.py

@@ -168,7 +168,13 @@ def make_subject(tmp_path, monkeypatch, raw, *, mode="normal", previous_events=N
         previous_events if previous_events is not None else [], time.monotonic() + 60,
         ledger if ledger is not None else SimpleNamespace(reserve=reserve))
     subject.reader.join(3)
-    assert not subject.reader.is_alive()
+    if subject.reader.is_alive():
+        observation = subject.control_observation()
+        trace = {
+            key: observation.get(key)
+            for key in ("phase", "last_validated_seq", "last_persisted_seq", "last_ack_seq")
+        }
+        pytest.fail(f"Control reader did not exit within 3s: {trace}")
     subject.stderr.close()
     return subject, process, writes
 
