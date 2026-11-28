@@ -13,9 +13,13 @@ jobs:
       LITELLM_LOCAL_MODEL_COST_MAP: "True"
       PYTHONUTF8: "1"
       PYTHONUNBUFFERED: "1"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      ONNXRUNTIME_NODE_INSTALL: skip
+      OFFERPILOT_P0_DIAGNOSTIC_CONTEXT: shard
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
@@ -25,12 +29,35 @@ jobs:
           version: '0.12.19'
       - name: Install frozen test dependencies
         run: uv sync --frozen
-      - name: Repeat only the synthetic reader failure
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install the shard's locked frontend dependencies
+        run: npm.cmd ci --prefix web
+      - name: Replay the three observed nodes after full collection
+        env:
+          OFFERPILOT_P0_DIAGNOSTICS: ${{ runner.temp }}/p0-diagnostics
         run: |
-          foreach ($iteration in 1..12) {
-            Write-Host "Reader probe ${iteration}/12"
-            uv run --frozen python -m pytest -q "tests/evaluation/test_budget_denial_attribution.py::test_matching_denial_admits_cancellation_without_claiming_http_causality"
+          @'
+          import pytest
+          
+          expected = ["tests/evaluation/test_budget_denial_attribution.py::test_denied_row_is_durable_without_counting_or_refunding_another_send","tests/evaluation/test_budget_denial_attribution.py::test_failed_durable_record_does_not_create_a_typed_refusal","tests/evaluation/test_budget_denial_attribution.py::test_matching_denial_admits_cancellation_without_claiming_http_causality"]
+          
+          class Prefix:
+              @pytest.hookimpl(trylast=True)
+              def pytest_collection_modifyitems(self, config, items):
+                  selected = [item for item in items if item.nodeid in expected]
+                  if [item.nodeid for item in selected] != expected:
+                      raise pytest.UsageError("Failed shard prefix did not match collection order")
+                  removed = [item for item in items if item.nodeid not in expected]
+                  print(f"Collected {len(items)} tests before order-preserving filter")
+                  items[:] = selected
+                  config.hook.pytest_deselected(items=removed)
+          
+          raise SystemExit(pytest.main(["-v", "-x", "--durations=20"], plugins=[Prefix()]))
+          '@ | Set-Content -Encoding UTF8 "$env:RUNNER_TEMP/replay_reader_prefix.py"
+          foreach ($iteration in 1..3) {
+            Write-Host "Shard prefix ${iteration}/3"
+            uv run --frozen python "$env:RUNNER_TEMP/replay_reader_prefix.py"
             if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           }
-      - name: Check both neighboring fixture suites
-        run: uv run --frozen python -m pytest -q tests/evaluation/test_budget_denial_attribution.py tests/evaluation/test_failure_observations.py
