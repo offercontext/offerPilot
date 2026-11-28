@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { copyJourneyFollowUp, saveAndUpdateJourneyMaterials } from './job-mail-same-case-browser.mjs';
+import { verifyExactDebrief } from './job-mail-exact-debrief-browser.mjs';
 import { verifyCommunicationDates } from './job-mail-communication-dates-browser.mjs';
 import { waitForMailState } from './job-mail-browser-wait.mjs';
 const { chromium } = await import(pathToFileURL(process.env.PLAYWRIGHT_MODULE).href);
@@ -493,7 +494,11 @@ try {
   assert.deepEqual(pageErrors, []);
   const communicationDates = await verifyCommunicationDates({ browser, base, output });
   checks.push('Communication drafts project normal API timestamps in Singapore and New York; editable copy does not write or send');
-  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, sameCaseJourney, communicationDates, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
+  const exactDebrief = await verifyExactDebrief({ context, base, api, pageErrors });
+  checks.push('Exact B2 debrief writes one note then refreshes reminders; A and B1 stay visible and B2 is removed');
+  assert.deepEqual(pageErrors, []);
+  assert.deepEqual(blocked, []);
+  await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, sameCaseJourney, communicationDates, exactDebrief, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));
   console.log(JSON.stringify({ passed: true, checks, output }));
 } catch (error) {
   await page.locator('input[type=password]').evaluateAll(inputs => inputs.forEach(input => { input.value = ''; }));

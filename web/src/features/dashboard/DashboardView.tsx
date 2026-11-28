@@ -2,7 +2,7 @@ import { pipelineActionId } from '@/lib/pipelineInsights';
 import { t, useLocale, getLocale } from '@/i18n';
 import TodayInboxSummary from './TodayInboxSummary';
 import { useReminderCandidates } from '@/lib/useReminderCandidates';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Alert, Button, Collapse, Empty } from 'antd';
 import dayjs from 'dayjs';
@@ -70,6 +70,7 @@ interface Props {
   };
   onNavigate: (v: ViewMode) => void;
   onOpenDetailById: (id: number) => void;
+  onOpenReviewReminder?: (item: PipelineInsight, action: ActionCommand, isCurrent: () => boolean) => void;
   onAddApplication: () => void;
   onOnboardingAction: (action: OnboardingAction) => void;
 }
@@ -84,6 +85,7 @@ export default function DashboardView({
   dataState,
   onNavigate,
   onOpenDetailById,
+  onOpenReviewReminder,
   onAddApplication,
   onOnboardingAction,
 }: Props) {
@@ -91,6 +93,11 @@ export default function DashboardView({
   const queryClient = useQueryClient();
   const [now, setNow] = useState(() => dayjs());
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const reviewIntent = useRef(0);
+  const selectInsight = (id: string | null) => {
+    reviewIntent.current += 1;
+    setSelectedInsightId(id);
+  };
 
   useEffect(() => {
     const id = window.setInterval(() => setNow(dayjs()), 60_000);
@@ -173,19 +180,24 @@ export default function DashboardView({
 
   useEffect(() => {
     if (selectedInsightId && !selectedInsight) {
-      setSelectedInsightId(null);
+      selectInsight(null);
     }
   }, [selectedInsight, selectedInsightId]);
 
   const handleAction = (item: PipelineInsight) => {
-    setSelectedInsightId(item.id);
+    selectInsight(item.id);
   };
 
   const runInsightAction = (item: PipelineInsight, actionId: string) => {
     const action = findInsightAction(item, actionId);
     const appId = action.appId ?? item.appId;
 
-    setSelectedInsightId(null);
+    if (action.target === 'interview_review') {
+      const intent = ++reviewIntent.current;
+      onOpenReviewReminder?.(item, action, () => intent === reviewIntent.current);
+      return;
+    }
+    selectInsight(null);
     if (action.target === 'board' && appId) {
       onOpenDetailById(appId);
       return;
@@ -235,7 +247,7 @@ export default function DashboardView({
       <ActionDetailDrawer
         insight={selectedInsight}
         open={!!selectedInsight}
-        onClose={() => setSelectedInsightId(null)}
+        onClose={() => selectInsight(null)}
         onRunAction={runInsightAction}
       />
     );

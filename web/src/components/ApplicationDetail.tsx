@@ -1,3 +1,4 @@
+import { resolveExactReviewNote } from '@/lib/interviewReviewReminder';
 import { liveText } from '@/i18n/liveText';
 import { t, useLocale } from '@/i18n';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
@@ -519,6 +520,8 @@ export default function ApplicationDetail({ initialTab = 'overview', application
   }
   const effectiveTaskController = taskController ?? standaloneTaskControllerRef.current!;
   const localTaskSurfaceGuardRef = useRef({ pending: false, unsaved: false });
+  const lockedReviewWrite = useRef<number | null>(null);
+  const [lockedReviewDraft, setLockedReviewDraft] = useState<{ generation: number; input: CreateNoteInput } | null>(null);
   const taskSurfaceState = useSyncExternalStore(
     effectiveTaskController.subscribe,
     effectiveTaskController.getState,
@@ -950,7 +953,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
       ),
       resultUnknown: localResultUnknown,
     };
-  }, [activeTask, application?.id, interviewPreparationAttempts, interviewReviewProposalAttempts, materialKitOwnerState, noteRecords, notesQuery.data, opportunityFitOwnerState.pending, opportunityFitOwnerState.resultUnknown]);
+  }, [activeTask, application?.id, createEventNoteMut.isPending, interviewPreparationAttempts, interviewReviewProposalAttempts, materialKitOwnerState, noteRecords, notesQuery.data, opportunityFitOwnerState.pending, opportunityFitOwnerState.resultUnknown]);
 
   const taskSnapshot = useMemo<FrozenApplicationTaskSnapshot>(() => {
     if (!application) return emptyTaskSnapshot();
@@ -1075,6 +1078,11 @@ export default function ApplicationDetail({ initialTab = 'overview', application
     [resolverNow, taskSnapshot],
   );
   const taskOwnerOpen = taskSurfaceState.phase !== 'closing';
+  useEffect(() => {
+    setLockedReviewDraft(current => current && (
+      !taskOwnerOpen || activeTask?.generation !== current.generation
+    ) ? null : current);
+  }, [activeTask?.generation, taskOwnerOpen]);
   const launchMaterialKit = (
     prefill: { resumeID?: number; jdSnapshot?: string; jdVersionID?: number } = {},
     confirmedFitToMaterial = false,
@@ -1226,7 +1234,23 @@ export default function ApplicationDetail({ initialTab = 'overview', application
       case 'application.interview_review':
       case 'application.general_review': {
         const eventId = active.ref.eventId;
-        if (eventId !== undefined) {
+        const locked = active.request.source === 'review_reminder' && eventId !== undefined;
+        const lockedRows = locked ? allEvents.filter(event => event.id === eventId) : [];
+        const lockedEvent = lockedRows.length === 1 && lockedRows[0].application_id === application.id
+          && lockedRows[0].event_type === 'interview' ? lockedRows[0] : undefined;
+        const lockedNote = locked ? resolveExactReviewNote(notesQuery.data, application.id, eventId) : undefined;
+        if (locked && (eventsQuery.isFetching || notesQuery.isFetching || eventsQuery.isLoading || notesQuery.isLoading)) {
+          return <div role="status">{t("正在核对面试资料，请稍候。")}</div>;
+        }
+        if (locked && (eventsQuery.isError || notesQuery.isError || !lockedEvent || lockedEvent.status !== 'done'
+          || !Number.isFinite(Date.parse(lockedEvent.scheduled_at))
+          || projectApplicationEvent(lockedEvent, undefined, resolverNow).lifecycle !== 'completed'
+          || !lockedNote?.ready || (active.request.focus === 'history' && !lockedNote.note))) {
+          return <div role="status">{t("这场面试的复盘暂时无法读取，请刷新后重试。")}</div>;
+        }
+        // The reminder entry already owns a verified exact event. An unrelated
+        // material/offer read cannot prevent checking its existing review.
+        if (eventId !== undefined && !locked) {
           const reviewTask = applicationTaskResolution.tasks.find(
             (task) => task.taskId === 'application.interview_review' && task.ref.eventId === eventId,
           );
@@ -1237,7 +1261,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
             return <div role="status">{t("该面试当前不可复盘，请先确认日程状态。")}</div>;
           }
         }
-        const note = eventId === undefined
+        const note = lockedNote?.ready ? lockedNote.note ?? undefined : eventId === undefined
           ? noteRecords.find((item) => item.application_event_id === null)
           : noteRecords.find((item) => item.application_event_id === eventId);
         const compatibleEditingNote = editingNote && (
@@ -1245,7 +1269,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
             ? editingNote.application_event_id === null
             : editingNote.application_event_id === eventId
         ) ? editingNote : undefined;
-        const ownerNote = note ?? compatibleEditingNote;
+        const ownerNote = note ?? (locked ? undefined : compatibleEditingNote);
         if (eventId !== undefined && note) {
           return (
             <InterviewReviewProposalDrawer
@@ -1277,9 +1301,38 @@ export default function ApplicationDetail({ initialTab = 'overview', application
             initialApplication={application}
             note={ownerNote}
             initialEventID={eventId ?? null}
+            lockedEvent={lockedEvent}
+            lockedDraft={locked && lockedReviewDraft?.generation === active.generation ? lockedReviewDraft.input : undefined}
+            onLockedDraftChange={locked ? (input) => {
+              if (isCurrent()) setLockedReviewDraft({ generation: active.generation, input });
+            } : undefined}
             saving={updateNoteMut.isPending || createEventNoteMut.isPending}
             onSubmit={(input) => {
               if (!isCurrent()) return;
+              if (locked) {
+                const liveEvents = queryClient.getQueryState?.<ScheduleEvent[]>(['events', application.id]);
+                const liveNotes = queryClient.getQueryState?.<InterviewNote[]>(['notes', application.id]);
+                const latestEventRows = liveEvents?.data ?? allEvents;
+                const latestMatches = Array.isArray(latestEventRows) ? latestEventRows.filter(row => row?.id === eventId) : [];
+                const latestNote = resolveExactReviewNote(liveNotes?.data ?? notesQuery.data, application.id, eventId);
+                if (lockedReviewWrite.current === active.generation || createEventNoteMut.isPending
+                  || [liveEvents, liveNotes].some(source => source && (source.fetchStatus !== 'idle' || source.status !== 'success'))
+                  || latestMatches.length !== 1 || latestMatches[0].application_id !== application.id
+                  || latestMatches[0].status !== 'done' || latestMatches[0].event_type !== 'interview'
+                  || !Number.isFinite(Date.parse(latestMatches[0].scheduled_at))
+                  || !latestNote.ready || latestNote.note) return;
+                lockedReviewWrite.current = active.generation;
+                createEventNoteMut.mutate(
+                  { ...input, application_id: application.id, application_event_id: eventId },
+                  {
+                    onSuccess: () => setLockedReviewDraft(current => current?.generation === active.generation ? null : current),
+                    onError: () => {
+                      if (lockedReviewWrite.current === active.generation) lockedReviewWrite.current = null;
+                    },
+                  },
+                );
+                return;
+              }
               const currentNote = ownerNote;
               if (currentNote) updateNoteMut.mutate({ id: currentNote.id, input });
               else createEventNoteMut.mutate(input);
@@ -1287,7 +1340,11 @@ export default function ApplicationDetail({ initialTab = 'overview', application
             onClose={() => {
               if (!isTaskGenerationCurrent(active.generation)) return;
               setEditingNote(null);
-              close();
+              if (locked && close()) {
+                setLockedReviewDraft(current => current?.generation === active.generation ? null : current);
+              } else if (!locked) {
+                close();
+              }
             }}
           />
         );
@@ -1350,6 +1407,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
         && (materialKitOwnerState.pending || materialKitOwnerState.resultUnknown || materialKitOwnerState.sourceConflict))
       || (active.ref.taskId === 'application.interview_prepare' && active.ref.eventId !== undefined
         && interviewPreparationAttempts?.[`${application.id}:${active.ref.eventId}`])
+      || (active.ref.taskId === 'application.interview_review' && active.request.source === 'review_reminder' && createEventNoteMut.isPending)
       || (active.ref.taskId === 'application.interview_review' && active.ref.eventId !== undefined
         && reviewNote && (
           interviewReviewProposalAttempts?.[reviewNote.id]
@@ -1375,6 +1433,8 @@ export default function ApplicationDetail({ initialTab = 'overview', application
       || active.ref.taskId === 'application.interview_prepare'
         && active.ref.eventId !== undefined
         && interviewPreparationDrafts?.[`${application?.id}:${active.ref.eventId}`]
+      || active.ref.taskId === 'application.interview_review' && active.request.source === 'review_reminder'
+        && !reviewNote && lockedReviewDraft?.generation === active.generation
       || active.ref.taskId === 'application.interview_review'
         && reviewNote
         && Object.values(reviewReadinessDrafts ?? {}).some((draft) => (
@@ -1388,7 +1448,7 @@ export default function ApplicationDetail({ initialTab = 'overview', application
       : false;
     localTaskSurfaceGuardRef.current = { pending, unsaved };
     onTaskSurfaceGuardChange?.({ pending, unsaved });
-  }, [activeTask, application?.id, interviewPreparationAttempts, interviewPreparationDrafts, interviewReviewProposalAttempts, materialKitOwnerSnapshot, materialKitOwnerState, materialKitPrefill, noteRecords, notesQuery.data, offerNegotiationDrafts, offers, onTaskSurfaceGuardChange, opportunityFitOwnerState.pending, opportunityFitOwnerState.resultUnknown, opportunityFitOwnerState.unsaved, reviewReadinessDrafts]);
+  }, [activeTask, application?.id, interviewPreparationAttempts, interviewPreparationDrafts, interviewReviewProposalAttempts, lockedReviewDraft, materialKitOwnerSnapshot, materialKitOwnerState, materialKitPrefill, noteRecords, notesQuery.data, offerNegotiationDrafts, offers, onTaskSurfaceGuardChange, opportunityFitOwnerState.pending, opportunityFitOwnerState.resultUnknown, opportunityFitOwnerState.unsaved, reviewReadinessDrafts]);
 
   if (!application || !open) return null;
 

@@ -6562,6 +6562,19 @@
       "level": "test",
       "estimated_seconds": null
     },
+    "web/src/layout/AppShell.reviewReminder.test.tsx": {
+      "modules": [
+        "frontend"
+      ],
+      "priority": "p0",
+      "surface": "frontend",
+      "requires": [],
+      "risk_tags": [
+        "conservative_initial_baseline"
+      ],
+      "level": "test",
+      "estimated_seconds": null
+    },
     "web/src/layout/AppShell.test.ts": {
       "modules": [
         "frontend"

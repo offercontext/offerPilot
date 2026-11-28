@@ -20,7 +20,7 @@ export type PipelineInsightKind =
   | 'pipeline_bottleneck'
   | 'weekly_goal_gap';
 
-export type ActionCommandTarget = 'board' | 'calendar' | 'offers' | 'questions';
+export type ActionCommandTarget = 'board' | 'calendar' | 'offers' | 'questions' | 'interview_review';
 
 export interface ActionCommand {
   label: string;
@@ -43,6 +43,7 @@ export interface PipelineInsight {
   reason: string;
   evidence: string[];
   primaryAction: ActionCommand;
+  secondaryActions?: ActionCommand[];
   sortKey: number;
   appId?: number;
   offerId?: number;
@@ -150,7 +151,7 @@ export function formatPipelineHealthLabel(label: PipelineHealth['label']): strin
 }
 
 /** Presentation only. The server owns eligibility, source identity and windows. */
-export function reminderCandidateInsight(candidate: ReminderCandidate, current: dayjs.Dayjs): PipelineInsight | null {
+export function reminderCandidateInsight(candidate: ReminderCandidate, current: dayjs.Dayjs, events?: ScheduleEvent[]): PipelineInsight | null {
   const now = current.valueOf() / 1000;
   if (now < candidate.display_from || (candidate.display_until !== null && now >= candidate.display_until)) return null;
   const hours = (candidate.due_at - now) / 3600;
@@ -176,9 +177,20 @@ export function reminderCandidateInsight(candidate: ReminderCandidate, current: 
   const label = formatCompanyPosition(candidate.company, candidate.position) || t("已安排日程");
   const evidence = [t("日程时间：{value}", { value: dayjs(candidate.due_at * 1000).format('YYYY-MM-DD HH:mm') })];
   if (candidate.reason_code === 'review') {
+    const matches = (Array.isArray(events) ? events : []).filter(event => event?.id === candidate.event_id
+      && event.application_id === candidate.application_id && event.event_type === 'interview');
+    const round = matches?.length === 1 ? matches[0].round : undefined;
+    const exactIds = Number.isSafeInteger(common.appId) && common.appId! > 0
+      && Number.isSafeInteger(common.eventId) && common.eventId! > 0;
+    const roundLabel = typeof round === 'number' && Number.isSafeInteger(round) && round > 0
+      ? t("第 {value0} 轮", { value0: round }) : exactIds ? t("面试 #{value0}", { value0: common.eventId }) : '';
+    const candidateLabel = [formatCompanyPosition(candidate.company, candidate.position), roundLabel].filter(Boolean).join(' · ');
+    const calendar = makeAction(t("打开日历"), 'calendar', refs);
     return { ...common, kind: 'interview_review', priority: 'p2',
-      title: t("面试复盘提醒"), reason: t("面试结束，可记录复盘"), evidence,
-      primaryAction: makeAction(t("打开日历"), 'calendar', refs), sortKey: 250 };
+      title: candidateLabel ? t("{value0} · 面试复盘提醒", { value0: candidateLabel }) : t("面试复盘提醒"),
+      reason: t("面试结束，可记录复盘"), evidence,
+      primaryAction: exactIds ? makeAction(t("记录这场面试的复盘"), 'interview_review', refs) : calendar,
+      secondaryActions: exactIds ? [calendar] : undefined, sortKey: 250 };
   }
   if (candidate.reason_code === 'event_upcoming') {
     return { ...common, kind: 'event_upcoming', priority: hours <= 24 ? 'p0' : 'p1',
@@ -209,7 +221,7 @@ export function derivePipelineInsights({
   const insights: PipelineInsight[] = [];
 
   for (const candidate of reminderCandidates) {
-    const insight = reminderCandidateInsight(candidate, current);
+    const insight = reminderCandidateInsight(candidate, current, events);
     if (insight) insights.push(insight);
   }
 
