@@ -10,6 +10,8 @@ import numpy as np
 import sherpa_onnx
 from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
 
+from .tts import LocalTts
+
 
 class TurnDetector(LocalSmartTurnAnalyzerV3):
     def __init__(self):
@@ -29,11 +31,9 @@ class TurnDetector(LocalSmartTurnAnalyzerV3):
 class LocalModels:
     def __init__(self):
         self.asr_lock = threading.Lock()
-        self.tts_lock = threading.Lock()
         root = Path(os.environ["OFFERPILOT_SPEECH_MODELS"])
         asr = root / "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
-        tts = root / "vits-icefall-zh-aishell3"
-        required = [
+        required_asr = [
             asr / name
             for name in (
                 "tokens.txt",
@@ -41,19 +41,9 @@ class LocalModels:
                 "decoder-epoch-99-avg-1.onnx",
                 "joiner-epoch-99-avg-1.int8.onnx",
             )
-        ] + [
-            tts / name
-            for name in (
-                "model.onnx",
-                "lexicon.txt",
-                "tokens.txt",
-                "phone.fst",
-                "date.fst",
-                "number.fst",
-            )
         ]
-        if any(not path.is_file() or path.stat().st_size == 0 for path in required):
-            raise ValueError("Local model installation is incomplete")
+        if any(not path.is_file() or path.stat().st_size == 0 for path in required_asr):
+            raise ValueError("Local ASR model installation is incomplete")
         self.recognizer = sherpa_onnx.OnlineRecognizer.from_transducer(
             tokens=str(asr / "tokens.txt"),
             encoder=str(asr / "encoder-epoch-99-avg-1.int8.onnx"),
@@ -63,19 +53,11 @@ class LocalModels:
             sample_rate=16000,
             enable_endpoint_detection=False,
         )
-        config = sherpa_onnx.OfflineTtsConfig(
-            model=sherpa_onnx.OfflineTtsModelConfig(
-                vits=sherpa_onnx.OfflineTtsVitsModelConfig(
-                    model=str(tts / "model.onnx"),
-                    lexicon=str(tts / "lexicon.txt"),
-                    tokens=str(tts / "tokens.txt"),
-                ),
-                num_threads=2,
-            ),
-            rule_fsts=",".join(str(tts / name) for name in ("phone.fst", "date.fst", "number.fst")),
-        )
-        self.tts = sherpa_onnx.OfflineTts(config)
         self.detector = TurnDetector()
+        self.tts_path = root / "vits-icefall-zh-aishell3"
+
+    def make_tts(self) -> LocalTts:
+        return LocalTts(self.tts_path)
 
     def stream(self):
         return self.recognizer.create_stream()
@@ -89,14 +71,3 @@ class LocalModels:
             while self.recognizer.is_ready(stream):
                 self.recognizer.decode_stream(stream)
             return self.recognizer.get_result(stream).strip()
-
-    def synthesize(self, text: str, cancelled: threading.Event):
-        with self.tts_lock:
-            if cancelled.is_set():
-                return None
-            return self.tts.generate(
-                text,
-                sid=0,
-                speed=1.0,
-                callback=lambda _samples, _progress: int(not cancelled.is_set()),
-            )

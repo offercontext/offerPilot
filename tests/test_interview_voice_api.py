@@ -12,7 +12,7 @@ from test_mock_interview_api import _client
 def ready_runtime(monkeypatch):
     async def request(path, payload=None):
         if path == "/health":
-            return {"ready": True, "protocol": "offerpilot-voice-v1"}
+            return {"ready": True, "protocol": "offerpilot-voice-v2"}
         return {"sdp": "answer", "type": "answer"}
     monkeypatch.setattr(routes, "runtime_request", request)
 
@@ -110,6 +110,36 @@ def test_capabilities_fail_closed_and_answers_reject_forged_auto_metadata(tmp_pa
         "input_source": "voice", "acceptance_method": "session_auto",
     })
     assert response.status_code == 422
+
+
+def test_v2_main_refuses_legacy_runtime_and_binds_v2_offer(tmp_path, monkeypatch):
+    protocol = "offerpilot-voice-v1"
+
+    async def request(path, payload=None):
+        if path == "/health":
+            return {"ready": True, "protocol": protocol}
+        assert path == "/offer"
+        assert payload["protocol"] == "offerpilot-voice-v2"
+        return {"sdp": "answer", "type": "answer"}
+
+    monkeypatch.setattr(routes, "runtime_request", request)
+    client, _base, attempt, context = start(tmp_path)
+    create = {
+        **context, "attempt_id": attempt, "turn_no": 1, "request_key": "grant",
+        "consent": True, "consent_revision": "interview-realtime-v1",
+    }
+    capabilities = client.get("/api/interview-voice/capabilities").json()
+    assert capabilities["available"] is False
+    assert "版本不匹配" in capabilities["reason"]
+    assert client.post("/api/interview-voice/sessions", json=create).status_code == 503
+
+    protocol = "offerpilot-voice-v2"
+    assert client.get("/api/interview-voice/capabilities").json()["available"] is True
+    grant = client.post("/api/interview-voice/sessions", json=create).json()
+    offer = client.post(f"/api/interview-voice/sessions/{grant['session_id']}/offer", json={
+        "token": grant["token"], "sdp": "offer", "type": "offer",
+    })
+    assert offer.status_code == 200
 
 
 @pytest.mark.parametrize("url", ["https://remote.example", "http://127.0.0.1.evil/", "http://localhost/path", "http://user:pw@localhost"])

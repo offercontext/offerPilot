@@ -5,6 +5,8 @@ import {
 import type { InterviewStudioContext } from '@/services/mockInterviews';
 import type { AnswerAcceptance } from '@/types/mockInterview';
 
+export type PlaybackIssue = 'unavailable' | 'failed' | 'browser';
+
 export interface RealtimeState {
   status: 'idle' | 'connecting' | 'listening' | 'waiting' | 'submitting' | 'paused' | 'manual';
   locked: boolean;
@@ -12,6 +14,8 @@ export interface RealtimeState {
   supplemental: boolean;
   message: string;
   revocationPending?: boolean;
+  readQuestions: boolean;
+  playbackIssue?: PlaybackIssue;
 }
 export interface RealtimeAnswer {
   text: string; turnNo: number; turnKey: string; acceptance: AnswerAcceptance;
@@ -28,7 +32,7 @@ interface Options {
   onAnswer: (answer: RealtimeAnswer) => Promise<'saved' | 'unknown' | 'failed'>;
 }
 export const initialRealtimeState: RealtimeState = {
-  status: 'idle', locked: false, transcript: '', supplemental: false, message: '',
+  status: 'idle', locked: false, transcript: '', supplemental: false, message: '', readQuestions: false,
 };
 
 export class RealtimeVoiceController {
@@ -54,16 +58,16 @@ export class RealtimeVoiceController {
     this.state = { ...this.state, ...data };
     this.options.onState(this.state);
   }
-  async start(input: {
+  async start({ readQuestions = false, ...input }: {
     context: InterviewStudioContext; attemptId: number; turnNo: number;
-    consentRevision: string; takeover: boolean;
+    consentRevision: string; takeover: boolean; readQuestions?: boolean;
   }) {
     if (this.state.locked || this.businessPending || this.state.transcript.trim()) return;
     const generation = ++this.generation;
     this.turnNo = input.turnNo;
     this.sealedTurn = 0;
     this.lastRevision = -1;
-    this.patch({ status: 'connecting', locked: true, message: '', transcript: '', supplemental: false, revocationPending: false });
+    this.patch({ status: 'connecting', locked: true, message: '', transcript: '', supplemental: false, revocationPending: false, readQuestions, playbackIssue: undefined });
     try {
       const grant = await this.deps.create({ ...input, requestKey: this.deps.key() });
       if (generation !== this.generation) {
@@ -80,7 +84,7 @@ export class RealtimeVoiceController {
       const media = await this.deps.connect(grant,
         (data) => { if (generation === this.generation) void this.receive(data); },
         () => { if (generation === this.generation) void this.pause('媒体连接中断，已停止麦克风。'); },
-        this.abort.signal,
+        this.abort.signal, { readQuestions, turnNo: input.turnNo },
       );
       if (generation !== this.generation) { media.close(); return; }
       this.media = media;
@@ -97,7 +101,18 @@ export class RealtimeVoiceController {
     if (!this.grant || !this.state.locked || typeof raw !== 'object' || !raw) return;
     const data = raw as Record<string, unknown>;
     if (data.type === 'expired') { await this.pause('语音授权已失效，请主动重新开启。'); return; }
+    if (data.type === 'browser_playback_issue') {
+      if (this.state.readQuestions && this.state.playbackIssue !== 'browser') this.patch({ playbackIssue: 'browser' });
+      return;
+    }
     if (data.turn_no !== this.turnNo) return;
+    if (data.type === 'playback_issue') {
+      if (this.state.readQuestions && !this.state.playbackIssue
+          && (data.reason === 'unavailable' || data.reason === 'failed')) {
+        this.patch({ playbackIssue: data.reason });
+      }
+      return;
+    }
     if (data.type === 'manual' || (data.type === 'control' && data.intent === 'manual')) {
       const supplemental = this.businessPending || this.sealedTurn === this.turnNo;
       this.patch({ transcript: typeof data.text === 'string' ? data.text : this.state.transcript, supplemental });
@@ -111,7 +126,7 @@ export class RealtimeVoiceController {
         supplemental: data.supplemental === true });
     } else if (data.type === 'control') {
       this.patch({ status: 'waiting', transcript: '', message: '继续思考，准备好后直接开口。' });
-      if (data.intent === 'repeat') this.media?.send({ type: 'repeat' });
+      if (data.intent === 'repeat') this.repeat();
     } else if (data.type === 'candidate') {
       if (this.businessPending || this.sealedTurn === this.turnNo || !['listening', 'waiting'].includes(this.state.status)) return;
       if (typeof data.text !== 'string' || !data.text.trim() || data.text.length > 30000) {
@@ -140,10 +155,15 @@ export class RealtimeVoiceController {
     }
     this.turnNo = turnNo;
     this.lastRevision = -1;
-    this.patch({ status: 'listening', transcript: '', supplemental: false, message: '正在听取回答。' });
-    this.media.send({ type: 'sync' });
+    this.patch({ status: 'listening', transcript: '', supplemental: false, message: '正在听取回答。',
+      playbackIssue: this.state.playbackIssue === 'browser' ? 'browser' : undefined });
+    this.media.send({ type: 'sync', turn_no: turnNo, read_questions: this.state.readQuestions && this.state.playbackIssue !== 'browser' });
   }
-  repeat() { this.media?.send({ type: 'repeat' }); }
+  repeat() {
+    if (this.state.readQuestions && this.state.playbackIssue !== 'browser') {
+      this.media?.send({ type: 'repeat', read_questions: true });
+    }
+  }
   stopForReview() { void this.pause('已停止收音，请核对现有转写；末尾可能尚未识别完整。', true); }
   discardTranscript() {
     if (this.state.locked || this.businessPending) return;
@@ -174,25 +194,49 @@ export class RealtimeVoiceController {
 
 export async function connectMedia(
   grant: VoiceGrant, message: (data: unknown) => void, disconnected: () => void,
-  signal: AbortSignal,
+  signal: AbortSignal, playbackOptions?: { readQuestions: boolean; turnNo: number },
 ): Promise<MediaConnection> {
+  const readQuestions = playbackOptions?.readQuestions === true;
+  let currentTurn = playbackOptions?.turnNo;
   const peer = new RTCPeerConnection({ iceServers: [] });
   let stream: MediaStream | undefined;
-  let audio: HTMLAudioElement;
+  let audio: HTMLAudioElement | undefined;
   let channel: RTCDataChannel;
   try {
-    audio = new Audio();
     channel = peer.createDataChannel('pipecat');
   } catch (error) { peer.close(); throw error; }
-  audio.autoplay = true;
+  let browserPlaybackFailed = false;
+  const playbackFailed = () => {
+    if (closed || browserPlaybackFailed) return;
+    browserPlaybackFailed = true;
+    if (audio) audio.muted = true;
+    message({ type: 'browser_playback_issue' });
+  };
   let closed = false;
   let playback = -1;
   let playbackStart = -1;
   let questionId: unknown;
   let ping: ReturnType<typeof setInterval> | undefined;
+  const playAudio = () => {
+    if (!audio?.srcObject || closed || browserPlaybackFailed) return;
+    const requestedTurn = currentTurn;
+    const requestedPlayback = playback;
+    try {
+      void audio.play().catch(() => {
+        if (requestedTurn === currentTurn && requestedPlayback === playback) playbackFailed();
+      });
+    } catch { playbackFailed(); }
+  };
   const media: MediaConnection = {
-    send: (data) => { if (channel.readyState === 'open') channel.send(JSON.stringify(data)); },
+    send: (data) => {
+      if ('type' in data && data.type === 'sync' && 'turn_no' in data && typeof data.turn_no === 'number') {
+        currentTurn = data.turn_no;
+        if (audio) audio.muted = true;
+      }
+      if (channel.readyState === 'open') channel.send(JSON.stringify(data));
+    },
     mute: () => {
+      if (!audio) return;
       audio.muted = true;
       media.send({ type: 'interrupt', playback_id: playback, question_id: questionId,
         position_seconds: Math.max(0, audio.currentTime - playbackStart) });
@@ -201,13 +245,20 @@ export async function connectMedia(
       closed = true;
       clearInterval(ping);
       stream?.getTracks().forEach((track) => track.stop());
-      audio.pause(); audio.srcObject = null;
+      if (audio) { audio.pause(); audio.srcObject = null; }
       channel.close(); peer.close();
     },
   };
   signal.addEventListener('abort', media.close, { once: true });
   if (signal.aborted) { media.close(); throw new Error('Voice connection cancelled'); }
   try {
+    if (readQuestions) {
+      try {
+        audio = new Audio();
+        audio.muted = true;
+        audio.onerror = playbackFailed;
+      } catch { playbackFailed(); }
+    }
     const opened = await navigator.mediaDevices.getUserMedia({ audio: {
       echoCancellation: true, noiseSuppression: true, autoGainControl: true,
     } });
@@ -219,8 +270,11 @@ export async function connectMedia(
       track.onended = () => { if (!closed) disconnected(); };
     });
     peer.ontrack = (event) => {
-      audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-      void audio.play().catch(() => { if (!closed) disconnected(); });
+      if (!audio || closed || browserPlaybackFailed) return;
+      try {
+        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+        if (playbackStart >= 0 && !audio.muted) playAudio();
+      } catch { playbackFailed(); }
     };
     peer.onconnectionstatechange = () => {
       if (!closed && ['failed', 'disconnected', 'closed'].includes(peer.connectionState)) disconnected();
@@ -229,17 +283,20 @@ export async function connectMedia(
     channel.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'interrupted') {
+        if (audio && data.type === 'interrupted') {
           audio.muted = true;
           media.send({ type: 'playback_receipt', playback_id: playback, question_id: questionId,
             position_seconds: Math.max(0, audio.currentTime - playbackStart) });
           playback = data.playback_id;
           playbackStart = -1;
         }
-        if (data.type === 'playback' && data.playback_id >= playback) {
-          if (playbackStart < 0 || data.playback_id !== playback || questionId !== data.question_id) playbackStart = audio.currentTime;
+        if (audio && !browserPlaybackFailed && data.type === 'playback' && data.turn_no === currentTurn && data.playback_id >= playback) {
+          const newPlayback = playbackStart < 0 || data.playback_id !== playback || questionId !== data.question_id;
+          if (newPlayback) playbackStart = audio.currentTime;
           questionId = data.question_id;
-          playback = data.playback_id; audio.muted = false;
+          playback = data.playback_id;
+          audio.muted = false;
+          if (newPlayback) playAudio();
         }
         message(data);
       } catch { /* malformed data is never a business command */ }
@@ -249,7 +306,7 @@ export async function connectMedia(
       channel.onopen = () => {
         clearTimeout(timer);
         ping = setInterval(() => { if (channel.readyState === 'open') channel.send('ping'); }, 1000);
-        media.send({ type: 'ready' }); resolve();
+        media.send({ type: 'ready', read_questions: readQuestions && !browserPlaybackFailed }); resolve();
       };
     });
     // Attach a rejection handler while SDP exchange is still in flight.

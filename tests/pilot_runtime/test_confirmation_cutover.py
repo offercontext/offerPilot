@@ -25,6 +25,7 @@ from offerpilot.pilot_runtime.composition import (
     _SourceAdapter,
 )
 from offerpilot.pilot_runtime.contracts import ConfirmationRequest
+from offerpilot.pilot_runtime.errors import RuntimeFailureCode
 from offerpilot.pilot_runtime.service import (
     PilotRuntime,
     ResolvedModel,
@@ -204,6 +205,21 @@ def test_confirmation_explicit_null_edited_args_remains_422(
     assert "edited_args must be a JSON object" in response.text
 
 
+def _confirmation_error_diagnostic(response) -> str:
+    """Expose only a known machine code, never raw HTTP or persisted content."""
+    try:
+        body = response.json()
+    except ValueError:
+        return "confirmation error_code=<non-json>"
+    code = body.get("error_code") if type(body) is dict else None
+    if type(code) is str:
+        try:
+            return f"confirmation error_code={RuntimeFailureCode(code).value}"
+        except ValueError:
+            pass
+    return "confirmation error_code=<missing-or-unrecognized>"
+
+
 @pytest.mark.parametrize("endpoint", ("/api/chat/confirm", "/api/chat/confirm/stream"))
 @pytest.mark.parametrize(
     ("field", "proposed", "approved"),
@@ -224,7 +240,7 @@ def test_offer_user_edit_receipt_is_durable_and_replay_does_not_reexecute(
         assert offer.json()["id"] == 1
         pending = _propose(client)
         response = _confirm(client, endpoint, pending, edited_args={field: approved})
-        assert response.status_code == 200
+        assert response.status_code == 200, _confirmation_error_diagnostic(response)
         assert len(model.calls) == 1
         if endpoint.endswith("/stream"):
             events = _sse_events(response.text)
