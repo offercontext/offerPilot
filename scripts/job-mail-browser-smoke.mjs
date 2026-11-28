@@ -498,6 +498,7 @@ try {
   const exactDebrief = await verifyExactDebrief({ context, base, api, pageErrors });
   const applicationStrategy = await verifyApplicationStrategy({ browser, base });
   checks.push('Exact B2 debrief writes one note then refreshes reminders; A and B1 stay visible and B2 is removed');
+  checks.push('Only B2’s exact screening result can close the strategy; receipt, archive and interview identities match');
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(blocked, []);
   await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ passed: true, checks, exactPreparation, sameCaseJourney, communicationDates, exactDebrief, applicationStrategy, externalRequests: blocked, pageErrors, waitDiagnostic, syntheticOnly: true }, null, 2));

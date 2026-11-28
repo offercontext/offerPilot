@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Literal
 
-from sqlalchemy import select, text
+from sqlalchemy import Row, Select, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from offerpilot.application_strategy.models import ApplicationStrategyChange, ApplicationStrategyReceipt
@@ -24,6 +24,7 @@ from offerpilot.repositories.application_strategy_evidence import (
 
 _KEY = re.compile(r"[A-Za-z0-9_-]{16,128}")
 _MAX_EVIDENCE_ID = 2**63 - 1
+_ArchiveRow = tuple[int, int, datetime, str, str, str, str, int]
 
 
 class StrategyConflict(ValueError):
@@ -226,7 +227,7 @@ class ApplicationStrategyRepository:
         return StrategyState(origin, change, _archive_label(label), outcomes)
 
 
-def _archive_label_query():
+def _archive_label_query() -> Select[_ArchiveRow]:
     # Only labels are read here; never load resume, JD, or material bodies to populate a selector.
     return (
         select(
@@ -245,8 +246,8 @@ def _archive_label_query():
     )
 
 
-def _archive_label(row) -> StrategyArchiveLabel:
-    archive_id, app_id, submitted, company, position, title, name, jd_version = row
+def _archive_label(row: Row[_ArchiveRow]) -> StrategyArchiveLabel:
+    archive_id, app_id, submitted, company, position, title, name, jd_version = row._tuple()
     return StrategyArchiveLabel(archive_id, app_id, submitted, company, position, title or name or "", jd_version)
 
 

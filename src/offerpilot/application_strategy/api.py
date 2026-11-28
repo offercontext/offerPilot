@@ -17,6 +17,7 @@ from offerpilot.application_strategy.repository import (
     DecideChange,
     ProposeChange,
     StrategyArchiveLabel,
+    StrategyCommand,
     StrategyConflict,
     StrategyState,
 )
@@ -54,7 +55,9 @@ class _Decision(_WritePayload):
     decision: Literal["keep", "revise", "drop"]
 
 
-_COMMAND = TypeAdapter(Annotated[_Proposal | _Confirmation | _Decision, Field(discriminator="action")])
+_COMMAND: TypeAdapter[_Proposal | _Confirmation | _Decision] = TypeAdapter(
+    Annotated[_Proposal | _Confirmation | _Decision, Field(discriminator="action")]
+)
 
 
 def register_application_strategy_routes(app: FastAPI, session_factory: sessionmaker[Session]) -> None:
@@ -88,6 +91,7 @@ def register_application_strategy_routes(app: FastAPI, session_factory: sessionm
         except ValidationError:
             return _error(422, "application_strategy_invalid")
 
+        command: StrategyCommand
         if isinstance(payload, _Proposal):
             command = ProposeChange(payload.proposal)
         elif isinstance(payload, _Confirmation):

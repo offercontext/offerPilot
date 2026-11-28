@@ -141,6 +141,7 @@ def _schema(db: sqlite3.Connection) -> list[tuple[Any, ...]]:
 def _additive_schema() -> tuple[tuple[str, dict[tuple[str, str, str, str], str]], ...]:
     from sqlalchemy.dialects.sqlite import dialect
     from sqlalchemy.schema import CreateIndex, CreateTable
+    from offerpilot.application_strategy.models import ApplicationStrategyChange, ApplicationStrategyReceipt
     from offerpilot.confirmed_memory.models import ConfirmedMemoryVersionMetadata
     from offerpilot.models import InterviewVoiceSession, MockInterviewAnswerAcceptance
 
@@ -160,6 +161,9 @@ def _additive_schema() -> tuple[tuple[str, dict[tuple[str, str, str, str], str]]
         ("memory_metadata_v1", entries(cast(Table, ConfirmedMemoryVersionMetadata.__table__))),
         ("interview_voice_v1", entries(
             cast(Table, InterviewVoiceSession.__table__), cast(Table, MockInterviewAnswerAcceptance.__table__),
+        )),
+        ("application_strategy_v1", entries(
+            cast(Table, ApplicationStrategyChange.__table__), cast(Table, ApplicationStrategyReceipt.__table__),
         )),
     )
 
@@ -216,12 +220,11 @@ def validate_database(root: Path, reference_db: Path, *, allow_predecessor: bool
         if actual_schema != expected_schema:
             actual, expected = set(actual_schema), set(expected_schema)
             absent = expected - actual
-            memory, voice = (set(ddl) for _, ddl in _additive_schema())
-            # Supported history: previous master did not have any voice schema;
-            # the older master also lacked the confirmed memory metadata table.
-            if not (allow_predecessor and actual <= expected and (
-                absent == voice or absent == memory | voice
-            )):
+            memory, voice, strategy = (set(ddl) for _, ddl in _additive_schema())
+            # Admit only the ordered historical omissions. Partial strategy objects,
+            # a missing older feature with strategy present, or altered DDL are not predecessors.
+            supported = (strategy, strategy | voice, strategy | voice | memory)
+            if not (allow_predecessor and actual <= expected and absent in supported):
                 raise ValueError("archive_schema_mismatch")
         if db.execute("PRAGMA quick_check").fetchall() != [("ok",)] or db.execute(
             "PRAGMA foreign_key_check"

@@ -54,7 +54,7 @@ export async function verifyApplicationStrategy({ browser, base }) {
   }
   const option = label => page.locator('.ant-select-dropdown:visible').getByText(label, { exact: true });
   async function select(control, label) {
-    await control.click();
+    await control.press('ArrowDown');
     await option(label).click();
   }
   async function openFacts(companyName) {
@@ -93,7 +93,7 @@ export async function verifyApplicationStrategy({ browser, base }) {
     await select(bFacts.getByLabel('关联投递档案', { exact: true }), archiveLabel(b1, '10:00'));
     await select(bFacts.getByLabel('关联投递档案', { exact: true }), archiveLabel(b2, '15:00'));
     const eventControl = bFacts.getByLabel('关联日程（可选）', { exact: true });
-    await eventControl.click();
+    await eventControl.press('ArrowDown');
     await option(rounds[0]).waitFor();
     await option(rounds[1]).click();
     const observed = page.waitForResponse(response => response.url().endsWith('/api' + bOutcomePath) && response.request().method() === 'POST');
