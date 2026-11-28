@@ -1,5 +1,6 @@
 // The Mail workflow's loopback-only fixture also exercises the next journey step.
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import { waitForMailState } from './job-mail-browser-wait.mjs';
 
 export async function verifyExactDebrief({ context, base, api, pageErrors }) {
@@ -22,6 +23,28 @@ export async function verifyExactDebrief({ context, base, api, pageErrors }) {
   const unexpected = [];
   const reflection = '仅保存 B 岗位第 2 轮的合成复盘。';
   let saveArmed = false;
+  const reads = [];
+  const relevantApp = new Set([a.id, b.id]);
+  page.on('response', async response => {
+    try {
+      const request = response.request();
+      const url = new URL(response.url());
+      if (request.method() !== 'GET' || url.origin !== new URL(base).origin
+        || !['/api/reminders/candidates', '/api/application-events'].includes(url.pathname)) return;
+      const entry = { path: url.pathname, status: response.status(), rows: [] };
+      reads.push(entry);
+      if (!response.ok()) return;
+      const payload = await response.json();
+      const rows = Array.isArray(payload) ? payload : payload?.items;
+      entry.shape = Array.isArray(rows) ? 'rows' : 'unexpected';
+      if (Array.isArray(rows)) entry.rows = rows.filter(row => relevantApp.has(row.application_id)).map(row => ({
+        applicationId: row.application_id, eventId: row.event_id ?? row.id, round: row.round,
+        status: row.status, reason: row.reason_code, displayFrom: row.display_from, displayUntil: row.display_until,
+      }));
+    } catch (error) {
+      if (reads.length < 30) reads.push({ responseReadError: String(error.message).slice(0, 160) });
+    }
+  });
   await page.route('**/*', route => {
     const request = route.request();
     const url = new URL(request.url());
@@ -100,7 +123,27 @@ export async function verifyExactDebrief({ context, base, api, pageErrors }) {
     assert.deepEqual(writes, ['POST /api' + notePath]);
     assert.deepEqual(unexpected, []);
     return { a: a1.id, b1: b1.id, b2: b2.id, noteId: notesB[0].id, retained: ids(persisted.items), writes: writes.length, saveTriggeredRefresh: true };
+  } catch (error) {
+    const visible = await page.evaluate(() => ({
+      view: new URL(location.href).searchParams.get('view'), language: document.documentElement.lang,
+      browserLanguage: navigator.language, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      now: Date.now(),
+      state: Array.from(document.querySelectorAll('[role=status], [role=alert]')).filter(el => el.getClientRects().length)
+        .map(el => (el.textContent ?? '').trim().slice(0, 120)).slice(0, 8),
+      buttons: Array.from(document.querySelectorAll('button')).filter(el => el.getClientRects().length)
+        .map(el => (el.textContent ?? '').trim().slice(0, 160)).filter(Boolean).slice(0, 45),
+    })).catch(() => null);
+    console.error('Exact debrief diagnostics: ' + JSON.stringify({
+      visible, reads: reads.slice(-20), pageErrors: pageErrors.slice(-4), writes, unexpected,
+      fixture: { a: a1.id, b1: b1.id, b2: b2.id },
+    }));
+    await page.screenshot({
+      path: path.resolve(process.env.MAIL_EVIDENCE_DIR || 'artifacts/job-mail-browser', 'exact-debrief-failure.png'),
+      timeout: 5000,
+    }).catch(() => {});
+    throw error;
   } finally {
     await page.close();
   }
 }
+
