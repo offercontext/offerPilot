@@ -24,6 +24,7 @@ from offerpilot.knowledge import note_lifecycle as _knowledge_note_lifecycle  # 
 from offerpilot.external_agents import models as _external_agent_models  # noqa: F401
 from offerpilot.external_agents.migration import ensure_business_schema
 from offerpilot.training_evidence import models as _training_evidence_models  # noqa: F401
+from offerpilot.application_strategy import models as _application_strategy_models  # noqa: F401
 
 SessionFactory = sessionmaker[Session]
 
@@ -118,6 +119,10 @@ def init_database(db_path: Path) -> SessionFactory:
     mock_interview_migration_needed = _prepare_event_bound_mock_interview_migration(engine)
     _reset_knowledge_legacy_tables(engine, db_path.parent)
     Base.metadata.create_all(engine)
+    _record_migration(
+        engine, "0042_application_strategy_changes",
+        "Add isolated user-confirmed application strategy changes and replay receipts",
+    )
     _record_migration(
         engine, "0041_interview_voice_sessions",
         "Add scoped voice session ownership and answer acceptance provenance",

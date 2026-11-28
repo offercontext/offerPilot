@@ -4,6 +4,7 @@ import type { ApplicationOutcome, ApplicationSubmissionSnapshot } from '@/types/
 import type { ScheduleEvent } from '@/types/event';
 import {
   applicationCommunicationCalendarDate,
+  applicationEvidenceTime,
   buildApplicationCommunicationDraft,
   isThankYouDraftAvailable,
 } from './applicationCommunicationDraft';
@@ -213,4 +214,12 @@ describe('applicationCommunicationDraft', () => {
     expect(result.evidenceLabels).toContain('日程 #31 · 第 2 轮面试');
   });
 
+});
+
+it('renders the evidence instant to local minutes without guessing ambiguous wire times', () => {
+  expect(applicationEvidenceTime('2026-08-11T18:00:00', 'Asia/Singapore', 'archive_utc')).toBe('2026-08-12 02:00');
+  expect(applicationEvidenceTime('2026-08-12T10:00:00+08:00', 'Asia/Singapore', 'event_rfc3339')).toBe('2026-08-12 10:00');
+  expect(applicationEvidenceTime('2026-08-12T15:00:00+08:00', 'Asia/Singapore', 'event_rfc3339')).toBe('2026-08-12 15:00');
+  expect(applicationEvidenceTime('2026-08-12T15:00:00', 'Asia/Singapore', 'event_rfc3339')).toBeNull();
+  expect(applicationEvidenceTime('2026-02-31T10:00:00Z', 'Asia/Singapore', 'archive_utc')).toBeNull();
 });

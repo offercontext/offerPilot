@@ -28,7 +28,9 @@ import {
   listSubmissionSnapshots,
 } from '@/services/applicationOutcomes';
 import { getApplicationMaterialKit } from '@/services/materialKits';
+import { applicationEvidenceTime } from '@/lib/applicationCommunicationDraft';
 import ApplicationCommunicationDraftPanel from './ApplicationCommunicationDraftPanel';
+import ApplicationStrategyPanel from './ApplicationStrategyPanel';
 import styles from './ApplicationOutcomeDrawer.module.css';
 
 interface Props {
@@ -156,6 +158,20 @@ const labels = Object.fromEntries([...STAGE_OPTIONS, ...RESULT_OPTIONS, ...TAG_O
     () => readPending(applicationId, 'outcome'),
   );
   const enabled = open && applicationId > 0;
+  const [activeStrategy, setActiveStrategy] = useState<{ appId: number; outcomeId: number }>();
+  useEffect(() => { if (!open) setActiveStrategy(undefined); }, [open]);
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  const eventLabel = (event: ScheduleEvent) => {
+    const type = event.event_type === 'interview'
+      ? t("第 {round} 轮面试", { round: event.round })
+      : EVENT_TYPE_LABELS[event.event_type];
+    const time = applicationEvidenceTime(event.scheduled_at, timeZone, 'event_rfc3339') ?? t("时间不可用");
+    return `${time} · ${type} · ${t("日程 #")}${event.id}`;
+  };
+  const archiveLabel = (item: { id: number; submitted_at: string; resume_title: string; jd_version_number: number }) => {
+    const time = applicationEvidenceTime(item.submitted_at, timeZone, 'archive_utc') ?? t("时间不可用");
+    return `${time} · ${item.resume_title} · JD v${item.jd_version_number} · ${t("档案 #")}${item.id}`;
+  };
   const snapshots = useQuery({ queryKey: ['application-submission-snapshots', applicationId], queryFn: () => listSubmissionSnapshots(applicationId), enabled });
   const outcomes = useQuery({ queryKey: ['application-outcomes', applicationId], queryFn: () => listApplicationOutcomes(applicationId), enabled });
   const summary = useQuery({ queryKey: ['application-outcome-summary', applicationId], queryFn: () => getApplicationOutcomeSummary(applicationId), enabled });
@@ -369,8 +385,8 @@ const labels = Object.fromEntries([...STAGE_OPTIONS, ...RESULT_OPTIONS, ...TAG_O
             <>
               <Form form={outcomeForm} layout="vertical" disabled={outcomePending?.resultUnknown} onFinish={submitOutcome}>
               <div className={styles.formGrid}>
-                <Form.Item name="snapshotId" label={t("关联投递档案")} rules={[{ required: true }]}><Select options={(snapshots.data ?? []).map((item) => ({ value: item.id, label: `${dayjs(item.submitted_at).format('YYYY-MM-DD')} · ${item.resume_title} · JD v${item.jd_version_number}` }))} /></Form.Item>
-                <Form.Item name="eventId" label={t("关联日程（可选）")}><Select allowClear options={events.map((item) => ({ value: item.id, label: `${dayjs(item.scheduled_at).format('MM-DD')} · ${EVENT_TYPE_LABELS[item.event_type]}` }))} /></Form.Item>
+                <Form.Item name="snapshotId" label={t("关联投递档案")} rules={[{ required: true }]}><Select options={(snapshots.data ?? []).map((item) => ({ value: item.id, label: archiveLabel(item) }))} /></Form.Item>
+                <Form.Item name="eventId" label={t("关联日程（可选）")}><Select allowClear options={events.filter(item => item.application_id === applicationId).map(item => ({ value: item.id, label: eventLabel(item) }))} /></Form.Item>
                 <Form.Item name="stage" label={t("阶段")} rules={[{ required: true }]}><Select options={STAGE_OPTIONS} /></Form.Item>
                 <Form.Item name="result" label={t("结果")} rules={[{ required: true }]}><Select options={RESULT_OPTIONS} /></Form.Item>
                 <Form.Item name="occurredAt" label={t("发生时间")} rules={[{ required: true }]}><DatePicker showTime style={{ width: '100%' }} /></Form.Item>
@@ -397,7 +413,7 @@ const labels = Object.fromEntries([...STAGE_OPTIONS, ...RESULT_OPTIONS, ...TAG_O
           <div className={styles.historyList}>
             {(snapshots.data ?? []).map((snapshot) => (
               <article className={styles.historyCard} key={`snapshot-${snapshot.id}`}>
-                <div className={styles.historyTop}><span className={styles.historyTitle}>{dayjs(snapshot.submitted_at).format('YYYY-MM-DD HH:mm')} · {snapshot.resume_title}</span><Tag>{snapshot.source_kind === 'pilot' ? t("Pilot 确认") : t("UI 保存")}</Tag></div>
+                <div className={styles.historyTop}><span className={styles.historyTitle}>{archiveLabel(snapshot)}</span><Tag>{snapshot.source_kind === 'pilot' ? t("Pilot 确认") : t("UI 保存")}</Tag></div>
                 <div className={styles.sourceRow}>{(['resume', 'jd', 'material'] as const).map((source) => <span key={source} className={`${styles.sourcePill} ${styles[snapshot.source_states[source]]}`}>{source === 'material' && snapshot.material_kit_id === null ? t("材料 · 未包含") : sourceLabel(source, snapshot.source_states[source])}</span>)}</div>
                 {snapshot.note ? <div className={styles.feedbackBlock}>{snapshot.note}</div> : null}
                 <details className={styles.snapshotDetails}>
@@ -408,13 +424,32 @@ const labels = Object.fromEntries([...STAGE_OPTIONS, ...RESULT_OPTIONS, ...TAG_O
                 </details>
               </article>
             ))}
-            {(outcomes.data ?? []).map((outcome) => (
-              <article className={styles.historyCard} key={`outcome-${outcome.id}`}>
+            {(outcomes.data ?? []).map((outcome) => {
+              const archived = snapshots.data?.find(item => item.id === outcome.submission_snapshot_id);
+              const linked = events.find(item => item.id === outcome.application_event_id && item.application_id === applicationId);
+              const exactSource = archived ? archiveLabel(archived) : `${t("档案 #")}${outcome.submission_snapshot_id} · ${t("档案暂不可用")}`;
+              const exactEvent = linked ? eventLabel(linked) : `${t("日程 #")}${outcome.application_event_id} · ${t("日程暂不可用")}`;
+              const isActive = open && activeStrategy?.appId === applicationId && activeStrategy.outcomeId === outcome.id;
+              return <article className={styles.historyCard} key={`outcome-${outcome.id}`}>
                 <div className={styles.historyTop}><span className={styles.historyTitle}>{labels[outcome.stage]} · {labels[outcome.result]}</span><Tag color={outcome.source_kind === 'pilot' ? 'cyan' : 'blue'}>{outcome.source_kind === 'pilot' ? t("Pilot 确认") : t("UI 记录")}</Tag></div>
+                <div className={styles.sourceRow}>
+                  <span>{applicationEvidenceTime(outcome.occurred_at, timeZone, 'archive_utc') ?? t("时间不可用")}</span>
+                  <span>{exactSource}</span>
+                  {outcome.application_event_id !== null ? <span>{exactEvent}</span> : null}
+                </div>
                 <div className={styles.tagRow}>{outcome.feedback_tags.map((tag) => <Tag key={tag}>{labels[tag]}</Tag>)}</div>
                 <div className={styles.feedbackBlock}>{outcome.feedback_text ? <div><b>{t("原始反馈：")}</b>{outcome.feedback_text}</div> : null}{outcome.reflection_text ? <div><b>{t("我的复盘：")}</b>{outcome.reflection_text}</div> : null}{outcome.next_action_text ? <div><b>{t("下次行动：")}</b>{outcome.next_action_text}</div> : null}</div>
-              </article>
-            ))}
+                {outcome.application_id === applicationId && outcome.stage === 'screening' && outcome.result === 'rejected' ? <>
+                  <Button size="small" aria-expanded={isActive}
+                    onClick={() => setActiveStrategy(isActive ? undefined : { appId: applicationId, outcomeId: outcome.id })}>
+                    {isActive ? t("收起改法跟进") : t("把改法带到下一次投递")}
+                  </Button>
+                  {isActive ? <ApplicationStrategyPanel key={`${applicationId}:${outcome.id}`}
+                    applicationId={applicationId} outcomeId={outcome.id} timeZone={timeZone}
+                    initialProposal={outcome.next_action_text} sourceLabel={exactSource} /> : null}
+                </> : null}
+              </article>;
+            })}
             {!loading && !(snapshots.data?.length || outcomes.data?.length) ? <Empty description={t("还没有投递事实档案")} /> : null}
           </div>
         </section>

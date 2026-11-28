@@ -44,11 +44,7 @@ export type CommunicationDateSource = 'archive_utc' | 'event_rfc3339';
 
 const TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(Z|[+-]\d{2}:\d{2})?$/;
 
-export function applicationCommunicationCalendarDate(
-  value: string,
-  timeZone: string,
-  source: CommunicationDateSource,
-): string | null {
+function applicationEvidenceInstant(value: string, source: CommunicationDateSource): number | null {
   const match = typeof value === 'string' ? TIMESTAMP.exec(value) : null;
   if (!match || match[0] !== value) return null;
   const [, y, m, d, h, min, sec, offset] = match;
@@ -66,6 +62,35 @@ export function applicationCommunicationCalendarDate(
   // offset at this instant, not today's offset (DST or historical transitions).
   const instant = Date.parse(offset ? value : value + 'Z');
   if (!Number.isFinite(instant)) return null;
+  return instant;
+}
+
+export function applicationEvidenceTime(
+  value: string,
+  timeZone: string,
+  source: CommunicationDateSource,
+): string | null {
+  const instant = applicationEvidenceInstant(value, source);
+  if (instant === null) return null;
+  try {
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone, calendar: 'gregory', numberingSystem: 'latn',
+      year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+    }).formatToParts(instant);
+    const read = (type: Intl.DateTimeFormatPartTypes) => parts.find(part => part.type === type)?.value ?? '';
+    return `${read('year').padStart(4, '0')}-${read('month')}-${read('day')} ${read('hour')}:${read('minute')}`;
+  } catch {
+    return null;
+  }
+}
+
+export function applicationCommunicationCalendarDate(
+  value: string,
+  timeZone: string,
+  source: CommunicationDateSource,
+): string | null {
+  const instant = applicationEvidenceInstant(value, source);
+  if (instant === null) return null;
   try {
     const parts = new Intl.DateTimeFormat('en', {
       timeZone, calendar: 'gregory', numberingSystem: 'latn',

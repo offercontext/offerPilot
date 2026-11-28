@@ -243,3 +243,24 @@
   .actionBar { flex-direction: column-reverse; }
   .actionBar :global(.ant-btn) { width: 100%; }
 }
+
+.strategy {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--ant-color-border, #dbe8ef);
+  border-radius: 10px;
+}
+
+.strategy h4,
+.strategy p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.strategy > :global(.ant-select),
+.strategy > :global(.ant-input) {
+  width: 100%;
+}
