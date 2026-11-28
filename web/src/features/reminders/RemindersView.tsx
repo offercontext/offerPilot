@@ -3,7 +3,7 @@ import { t, useLocale, getLocale } from '@/i18n';
 import ProactiveInbox from '@/components/ProactiveInbox';
 import { useReminderCandidates } from '@/lib/useReminderCandidates';
 import JobMailInbox from '@/features/jobMail/JobMailInbox';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Input, Select } from 'antd';
 import dayjs from 'dayjs';
@@ -29,6 +29,7 @@ interface Props {
   onOpenInterviewPreparation?: OpenMailInterviewPreparation;
   onNavigate: (v: ViewMode) => void;
   onOpenDetailById: (id: number) => void;
+  onOpenReviewReminder?: (item: PipelineInsight, action: ActionCommand, isCurrent: () => boolean) => void;
 }
 
 const GROUPS: { key: PipelinePriority; label: string }[] = [
@@ -76,10 +77,15 @@ function findInsightAction(item: PipelineInsight, actionId: string): DetailActio
   );
 }
 
-export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInterviewPreparation }: Props) {
+export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInterviewPreparation, onOpenReviewReminder }: Props) {
   useLocale();
   const [now, setNow] = useState(() => dayjs());
   const [selectedInsightId, setSelectedInsightId] = useState<string | null>(null);
+  const reviewIntent = useRef(0);
+  const selectInsight = (id: string | null) => {
+    reviewIntent.current += 1;
+    setSelectedInsightId(id);
+  };
   const [kind, setKind] = useState<PipelineInsightKind | 'all'>('all');
   const [keyword, setKeyword] = useState('');
 
@@ -133,7 +139,7 @@ export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInte
 
   useEffect(() => {
     if (selectedInsightId && !selectedInsight) {
-      setSelectedInsightId(null);
+      selectInsight(null);
     }
   }, [selectedInsight, selectedInsightId]);
 
@@ -141,7 +147,12 @@ export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInte
     const action = findInsightAction(item, actionId);
     const appId = action.appId ?? item.appId;
 
-    setSelectedInsightId(null);
+    if (action.target === 'interview_review') {
+      const intent = ++reviewIntent.current;
+      onOpenReviewReminder?.(item, action, () => intent === reviewIntent.current);
+      return;
+    }
+    selectInsight(null);
     if (action.target === 'board' && appId) {
       onOpenDetailById(appId);
       return;
@@ -154,7 +165,7 @@ export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInte
       <ActionDetailDrawer
         insight={selectedInsight}
         open={!!selectedInsight}
-        onClose={() => setSelectedInsightId(null)}
+        onClose={() => selectInsight(null)}
         onRunAction={runInsightAction}
       />
     );
@@ -200,7 +211,7 @@ export default function RemindersView({ onNavigate, onOpenDetailById, onOpenInte
                   type="button"
                   className={styles.item}
                   style={{ animationDelay: `${i * 40}ms` }}
-                  onClick={() => setSelectedInsightId(item.id)}
+                  onClick={() => selectInsight(item.id)}
                 >
                   <span className={`${styles.dot} ${styles[item.priority]}`} aria-hidden />
                   <span className={styles.body}>

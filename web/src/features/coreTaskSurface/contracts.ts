@@ -36,6 +36,7 @@ export const CORE_TASK_ENTRYPOINT_CATEGORIES = [
 
 export type TaskLaunchSource =
   | 'job_mail'
+  | 'review_reminder'
   | 'application_header'
   | 'application_task_card'
   | 'interview_event_card'

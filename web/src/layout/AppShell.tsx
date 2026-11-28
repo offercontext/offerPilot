@@ -16,6 +16,8 @@ import { Button, Layout, Spin, Tabs, message } from 'antd';
 import { listApplications } from '@/services/applications';
 import { listEvents } from '@/services/events';
 import { eventCollectionEvidence, type EventCollectionState } from '@/lib/eventCollectionEvidence';
+import { listNotesByApp } from '@/services/notes';
+import { exactReviewReminder, resolveExactReviewNote } from '@/lib/interviewReviewReminder';
 import { listOffers } from '@/services/offers';
 import { ONBOARDING_QUERY_KEY } from '@/services/onboarding';
 import { listResumes } from '@/services/resumes';
@@ -63,6 +65,7 @@ import {
   derivePipelineInsights,
   toLegacyActionItems,
   type PipelineInsight,
+  type ActionCommand,
 } from '@/lib/pipelineInsights';
 import { getPracticeStats } from '@/services/questions';
 import { useReminderCandidates, REMINDER_CANDIDATES_QUERY_KEY } from '@/lib/useReminderCandidates';
@@ -1108,7 +1111,7 @@ function AppShellContent() {
   const [pilotInterviewPreparationApplicationId, setPilotInterviewPreparationApplicationId] = useState<number | null>(null);
   const [pilotInterviewPreparationEventId, setPilotInterviewPreparationEventId] = useState<number | null>(null);
   const [mailInterviewSeed, setMailInterviewSeed] = useState<{ generation: number; app: Application; event: ScheduleEvent; appsRevision: number; eventsRevision: number } | null>(null);
-  const mailNavigationEpoch = useRef(0);
+  const exactTaskNavigationEpoch = useRef(0);
   const [interviewPreparationSelection, setInterviewPreparationSelection] = useState<InterviewPreparationSelection | null>(null);
   const [interviewStudioContext, setInterviewStudioContext] = useState<(RealInterviewStudioContext | QuickPracticeStudioContext) | null>(null);
   const [interviewStudioHaruVisible, setInterviewStudioHaruVisible] = useState(false);
@@ -1352,8 +1355,8 @@ function AppShellContent() {
 
   useEffect(() => subscribeToWorkspaceView((nextView) => {
     if (nextView === currentViewRef.current) return;
-    // Browser history changes bypass navigateToView; invalidate before React unmounts Mail.
-    mailNavigationEpoch.current += 1;
+    // Browser history changes bypass navigateToView; invalidate pending exact-task reads before React unmounts their source.
+    exactTaskNavigationEpoch.current += 1;
     skipNextHistorySyncRef.current = true;
     closeCoreTaskSurface();
     setSelected(null);
@@ -1596,7 +1599,7 @@ function AppShellContent() {
   };
 
   const navigateToView = (nextView: ViewMode, { preserveEvidenceFocus = false }: { preserveEvidenceFocus?: boolean } = {}) => {
-    mailNavigationEpoch.current += 1;
+    exactTaskNavigationEpoch.current += 1;
     if (nextView !== 'pilot') lastNonPilotViewRef.current = nextView;
     const activeBeforeNavigation = coreTaskController.getState().active;
     closeCoreTaskSurface();
@@ -1850,7 +1853,7 @@ function AppShellContent() {
     }
     const result = launchCoreTask(request);
     if (result.kind !== 'launched' && result.kind !== 'focused_existing') return result;
-    if (fresh) setMailInterviewSeed({ ...fresh, generation: result.generation });
+    if (fresh && request.source === 'job_mail') setMailInterviewSeed({ ...fresh, generation: result.generation });
     setPilotApplicationContext(null);
     setPilotInterviewPreparationApplicationId(null);
     setPilotInterviewPreparationEventId(null);
@@ -1894,7 +1897,7 @@ function AppShellContent() {
   // Mail receipts identify an exact persisted event, never a default neighbouring
   // interview. Read current sources on click; late reads cannot take over a route.
   const openMailInterviewPreparation = async (applicationId: number, eventId: number, isCurrent: () => boolean): Promise<boolean> => {
-    const epoch = ++mailNavigationEpoch.current;
+    const epoch = ++exactTaskNavigationEpoch.current;
     const owner = coreTaskController.getState().active;
     const readRevisions = () => ({
       appsRevision: qc.getQueryState?.(['applications'])?.dataUpdateCount ?? mailSourceRevisions.current.appsRevision,
@@ -1904,7 +1907,7 @@ function AppShellContent() {
     const [currentApps, currentEvents] = await Promise.all([
       listApplications(), listEvents({ application_id: applicationId }),
     ]);
-    if (!isCurrent() || epoch !== mailNavigationEpoch.current || coreTaskController.getState().active !== owner) return false;
+    if (!isCurrent() || epoch !== exactTaskNavigationEpoch.current || coreTaskController.getState().active !== owner) return false;
     const finished = readRevisions();
     if (started.appsRevision !== finished.appsRevision || started.eventsRevision !== finished.eventsRevision) return false;
     const matches = currentApps.filter((app) => app.id === applicationId && !app.deleted_at);
@@ -1914,6 +1917,62 @@ function AppShellContent() {
     const result = openExactInterviewTask({ ref: { taskId: 'application.interview_prepare', applicationId, eventId },
       source: 'job_mail', focus: 'current' }, { app: matches[0], event: exact.event, ...started });
     return result.kind === 'launched' || result.kind === 'focused_existing';
+  };
+
+  const openReviewReminder = async (item: PipelineInsight, action: ActionCommand, isCurrent = () => true) => {
+    const target = exactReviewReminder(item, action, Date.now());
+    const warn = () => message.warning(liveText(() => t("这条复盘提醒已变化或暂时无法核对，请刷新提醒或打开日历核对。")));
+    if (!target) { warn(); return; }
+    const { applicationId, eventId, scheduledAt } = target;
+    const epoch = ++exactTaskNavigationEpoch.current;
+    const startView = currentViewRef.current;
+    const owner = coreTaskController.getState().active;
+    const current = () => isCurrent() && epoch === exactTaskNavigationEpoch.current
+      && startView === currentViewRef.current && owner === coreTaskController.getState().active;
+    const eventKey = ['events', applicationId];
+    const noteKey = ['notes', applicationId];
+    const readRevisions = () => [ ['applications'], ['events'], eventKey, noteKey ].map(key => {
+      const query = qc.getQueryState(key);
+      return `${query?.dataUpdateCount ?? 0}:${query?.errorUpdateCount ?? 0}`;
+    }).join('|');
+    const revision = readRevisions();
+    try {
+      const [freshApps, events, notes] = await Promise.all([
+        listApplications(), listEvents({ application_id: applicationId }), listNotesByApp(applicationId),
+      ]);
+      if (!current()) return;
+      const matches = Array.isArray(freshApps) ? freshApps.filter(app => app?.id === applicationId) : [];
+      const app = matches.length === 1 ? matches[0] : null;
+      const exact = resolveExecutableInterviewTask({ taskId: 'application.interview_review', applicationId, eventId,
+        events, sourceState: 'ready', now: Date.now() });
+      const note = resolveExactReviewNote(notes, applicationId, eventId);
+      if (revision !== readRevisions() || !app || app.deleted_at || app.closed_at || app.status === 'closed'
+        || !apps.some(row => row.id === applicationId) || !exact.ok || exact.event.status !== 'done'
+        || !note.ready || Math.floor(Date.parse(exact.event.scheduled_at) / 1000) !== scheduledAt
+        || !exactReviewReminder(item, action, Date.now())) { warn(); return; }
+      if (hasLivePilotWork() || (owner?.ref.taskId === 'application.interview_review'
+        && owner.ref.applicationId === applicationId && owner.ref.eventId === eventId
+        && owner.request.source !== 'review_reminder')) {
+        message.warning(liveText(() => t("当前任务还有未完成内容，请先处理后再切换投递")));
+        return;
+      }
+      const result = openExactInterviewTask({
+        ref: { taskId: 'application.interview_review', applicationId, eventId },
+        source: 'review_reminder',
+        focus: note.note ? 'history' : 'current',
+      }, { app, event: exact.event, appsRevision, eventsRevision });
+      if (result.kind === 'replacement_denied') {
+        message.warning(liveText(() => t("当前任务还有未完成内容，请先处理后再切换投递")));
+        return;
+      }
+      if (result.kind !== 'launched' && result.kind !== 'focused_existing') return;
+      // Bind the existing owner to the just-checked app-scoped sources. The
+      // mounted task revalidates both before it offers create or history.
+      qc.setQueryData(eventKey, events);
+      qc.setQueryData(noteKey, notes);
+    } catch {
+      if (current()) warn();
+    }
   };
 
   function launchTaskFromApplicationDetail(request: TaskLaunchRequest): CoreTaskLaunchResult {
@@ -2177,6 +2236,10 @@ function AppShellContent() {
   };
 
   const runPipelineAction = (item: PipelineInsight) => {
+    if (item.primaryAction.target === 'interview_review') {
+      void openReviewReminder(item, item.primaryAction);
+      return;
+    }
     if (item.primaryAction.target === 'board' && item.appId) {
       goDetailById(item.appId);
       return;
@@ -2446,6 +2509,7 @@ function AppShellContent() {
               dataState={{ offersLoading, offersError, practiceLoading, practiceError }}
               onNavigate={navigateToView}
               onOpenDetailById={goDetailById}
+              onOpenReviewReminder={openReviewReminder}
               onAddApplication={() => setAddOpen(true)}
               onOnboardingAction={handleOnboardingAction}
             />
@@ -2479,7 +2543,7 @@ function AppShellContent() {
             />
           )}
           {view === 'reminders' && (
-            <RemindersView onOpenInterviewPreparation={openMailInterviewPreparation} onNavigate={navigateToView} onOpenDetailById={goDetailById} />
+            <RemindersView onOpenReviewReminder={openReviewReminder} onOpenInterviewPreparation={openMailInterviewPreparation} onNavigate={navigateToView} onOpenDetailById={goDetailById} />
           )}
           {view === 'offers' && (
             <OfferCenterView

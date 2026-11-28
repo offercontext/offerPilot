@@ -1,6 +1,6 @@
 import { useLocalizedValidation } from '@/components/applicationUiText';
 import { t, useLocale } from '@/i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeftOutlined } from '@ant-design/icons';
 import { Button, Form, Input, Select, Space } from 'antd';
 import type { Application } from '@/types/application';
@@ -20,6 +20,9 @@ interface Props {
   initialApplication?: Application | null;
   note?: InterviewNote | null;
   initialEventID?: number | null;
+  lockedEvent?: ScheduleEvent;
+  lockedDraft?: CreateNoteInput;
+  onLockedDraftChange?: (input: CreateNoteInput) => void;
   saving?: boolean;
   onSubmit: (input: CreateNoteInput) => void;
   onClose: () => void;
@@ -31,6 +34,9 @@ export default function ReviewFormDrawer({
   initialApplication,
   note,
   initialEventID,
+  lockedEvent,
+  lockedDraft,
+  onLockedDraftChange,
   saving = false,
   onSubmit,
   onClose,
@@ -40,6 +46,9 @@ export default function ReviewFormDrawer({
   useLocalizedValidation(form);
   const [interviewEvents, setInterviewEvents] = useState<ScheduleEvent[]>([]);
   const editing = !!note;
+  const retainedDraft = useRef(lockedDraft);
+  retainedDraft.current = lockedDraft;
+  const lockedEventId = lockedEvent?.id;
 
   async function loadInterviewEvents(applicationID?: number) {
     if (!applicationID) {
@@ -77,16 +86,17 @@ export default function ReviewFormDrawer({
     form.resetFields();
     if (initialApplication) {
       form.setFieldsValue({
-        application_id: initialApplication.id,
-        application_event_id: initialEventID ?? undefined,
         company: initialApplication.company_name,
         position: initialApplication.position_name,
+        ...(lockedEventId === undefined ? {} : retainedDraft.current),
+        application_id: initialApplication.id,
+        application_event_id: lockedEventId ?? initialEventID ?? undefined,
       });
-      void loadInterviewEvents(initialApplication.id);
+      if (lockedEventId === undefined) void loadInterviewEvents(initialApplication.id);
     } else {
       setInterviewEvents([]);
     }
-  }, [open, note, initialApplication, initialEventID, form]);
+  }, [open, note, initialApplication, initialEventID, lockedEventId, form]);
 
   function handleApplicationChange(appID?: number) {
     const app = applications.find((item) => item.id === appID);
@@ -145,7 +155,8 @@ export default function ReviewFormDrawer({
           </Space>
         </Space>
       </div>
-      <Form form={form} layout="vertical" onFinish={handleSubmit}>
+      <Form form={form} layout="vertical" onFinish={handleSubmit}
+        onValuesChange={lockedEvent ? (_changed, values) => onLockedDraftChange?.(values) : undefined}>
         <Form.Item name="application_id" label={t("关联投递")}>
           <Select
             allowClear
@@ -153,7 +164,7 @@ export default function ReviewFormDrawer({
             placeholder={t("可选")}
             optionFilterProp="label"
             onChange={handleApplicationChange}
-            disabled={editing}
+            disabled={editing || Boolean(lockedEvent)}
             options={applications.map((app) => ({
               value: app.id,
               label: `${app.company_name} / ${app.position_name}`,
@@ -164,11 +175,16 @@ export default function ReviewFormDrawer({
         <Form.Item name="application_event_id" label={t("绑定面试事件")}>
           <Select
             allowClear
-            disabled={!form.getFieldValue('application_id')}
+            disabled={Boolean(lockedEvent) || !form.getFieldValue('application_id')}
             placeholder={t("可选，仅支持面试事件")}
-            options={interviewEvents.map((event) => ({
+            options={(lockedEvent ? [lockedEvent] : interviewEvents).map((event) => ({
               value: event.id,
-              label: t("{type} / {date}", { type: event.subtype || t('面试', undefined, 'interview.event'), date: event.scheduled_at }),
+              label: t("{type} / {date}", {
+                type: lockedEvent && Number.isSafeInteger(event.round) && event.round > 0
+                  ? t("第 {value0} 轮", { value0: event.round })
+                  : event.subtype || t('面试', undefined, 'interview.event'),
+                date: event.scheduled_at,
+              }),
             }))}
           />
         </Form.Item>

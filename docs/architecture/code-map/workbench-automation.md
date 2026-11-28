@@ -21,6 +21,8 @@ Offer 日期截止按请求 IANA 展示时区解释；Offer 和部分日程候�
 
 前端 [`eventCollectionEvidence`](../../../web/src/lib/eventCollectionEvidence.ts) 只从全量 `['events']` 查询确认缺少后续日程：首次加载、失败（包括有旧缓存）或无法识别的响应都不生成 `no_next_event`，不影响独立提醒。今日概览的日程卡仍只显示未来 7 天；成功空窗与无法读取分别呈现。独立的月历与单投递日程不作全量缺失依据。见 [AppShell mounted 回归](../../../web/src/layout/AppShell.calendarEvidence.test.tsx)。
 
+「记录这场面试的复盘」由 [`reminderCandidateInsight`](../../../web/src/lib/pipelineInsights.ts) 保留候选的投递及场次，首页、今日待办和命令面板交给 [AppShell](../../../web/src/layout/AppShell.tsx) `openReviewReminder → openExactInterviewTask`。点击时读取当前同投递的事件和笔记；已有本场记录只打开该记录，不猜默认场次，无法核对时保留日历入口。新建表单只锁这次 owner 的投递和场次；重验期间保留同一 owner 的草稿但禁止保存，写入后由 notes 查询撤回原候选。现有 24 小时窗口及其他入口不变。见 [mounted 回归](../../../web/src/layout/AppShell.reviewReminder.test.tsx) 与 [实际单场写入和候选撤回](../../../tests/test_reminder_candidates.py)。
+
 前端 `deriveMaterialKitFact` 把未加载完整/读取失败保留为 unknown；完整且没有匹配项才是 known-null。下一步建议不能因请求失败就推荐重建已存在成果。页面推荐的目标跳转、草稿所有者和后续用户动作仍需单独检查。
 
 ## 3. 主动任务执行链

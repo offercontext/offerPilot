@@ -16,6 +16,7 @@ from offerpilot.proactive.candidates import DAY, reminder_source, source_candida
 from offerpilot.proactive.contracts import ProactivePolicy, ProactivePolicyUpdate
 from offerpilot.proactive.models import ProactiveJob
 from offerpilot.proactive.repository import ProactiveRepository
+from offerpilot.repositories.notes import NoteBindingError, NoteCreate, NotesRepository
 
 CORPUS = json.loads((Path(__file__).parents[1] / "contracts/reminder-candidates.v1.json").read_text())
 
@@ -214,3 +215,45 @@ def test_display_only_events_never_become_queue_sources_after_revision_changes(t
         session.get(Application, 1).status = "closed"
         session.commit()
     assert repository.reminder_candidates(now) == []
+
+
+def test_saving_exact_review_retracts_only_that_reminder(tmp_path):
+    sessions = init_database(tmp_path / "exact-review.db")
+    begin = date("2026-11-27T06:00:00Z")
+    with sessions() as session:
+        session.add_all([
+            Application(id=11, company_name="Acme", position_name="Role A", status="interview"),
+            Application(id=22, company_name="Acme", position_name="Role B", status="interview"),
+        ])
+        session.flush()
+        session.add_all([
+            ApplicationEvent(id=event_id, application_id=app_id, round=round_number,
+                             event_type="interview", status="done", scheduled_at=begin,
+                             duration_minutes=60)
+            for event_id, app_id, round_number in [(111, 11, 1), (221, 22, 1), (222, 22, 2)]
+        ])
+        session.commit()
+
+    reminders = ProactiveRepository(sessions)
+
+    def review_ids(at):
+        return {row["event_id"] for row in reminders.reminder_candidates(at, "UTC")
+                if row["reason_code"] == "review"}
+
+    now = begin.timestamp()
+    assert review_ids(now - 1) == set()
+    assert review_ids(now) == {111, 221, 222}
+    assert review_ids(now + DAY - 1) == {111, 221, 222}
+    assert review_ids(now + DAY) == set()
+    notes = NotesRepository(sessions)
+    assert notes.list(application_id=22) == []
+    request = NoteCreate(company="Acme", position="Role B", application_id=22,
+                         application_event_id=222, self_reflection="Synthetic note")
+    saved = notes.create(request)
+    assert (saved.application_id, saved.application_event_id) == (22, 222)
+    with pytest.raises(NoteBindingError) as duplicate:
+        notes.create(request)
+    assert duplicate.value.status_code == 409
+    assert [row.id for row in notes.list(application_id=22)] == [saved.id]
+    assert notes.list(application_id=11) == []
+    assert review_ids(now + 3600) == {111, 221}
