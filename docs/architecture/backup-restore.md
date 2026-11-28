@@ -6,11 +6,11 @@
 
 `backup_export.export_archive` 使用 SQLite backup 快照，并将最终 ZIP 交给 `backup_archive.stage_archive` 再校验。二者使用同一预检约束：压缩包 256 MiB、展开总量 1 GiB、20,000 条目、单条压缩比 1000、manifest 8 MiB。路径限 32 层、总 UTF-8 长度 2048 字节、单段 240 字节。目录读取失败会使导出失败，不能静默遗漏。
 
-新包含 `offerpilot-backup.json` 文件摘要清单；旧包无清单时只能验证现有结构、schema 和附件，不能证明原始备份完整。预检要求数据库 schema 与当前工作区完全一致，不对上传库执行迁移；SQLite WAL/SHM/journal sidecar 包被拒绝。
+新包含 `offerpilot-backup.json` 文件摘要清单；旧包无清单时只能验证现有结构、schema 和附件，不能证明原始备份完整。预检要求数据库 schema 与当前工作区完全一致，或仅缺少一组明确支持的完整历史增量：投递策略、投递策略与语音面试、或再加确认记忆元数据。预检只在临时候选目录执行应用生成的新增 DDL，再重新校验完整 schema 和附件；不会执行上传包里的 DDL 或普通启动迁移。SQLite WAL/SHM/journal sidecar 包被拒绝。
 
 真实历史样本来自 `d0cd40688f9ec4802c760d7ae8e868516ca3ba9f`（首次 ZIP 导出实现）。[生成脚本](../../scripts/generate_legacy_backup_fixture.py)执行该提交原始 db/models 模块及 AST 提取的原始导出函数，仅写入合成记录；[fixture](../../tests/fixtures/backups/legacy-d0cd4068.json)保留源代码摘要、ZIP 摘要及内容。[测试](../../tests/test_backup_legacy.py)验证旧 schema 被拒绝、原工作区和 ZIP 不变。它不证明支持该版本迁移，也不代表所有历史版本已测试。
 
-遇到 schema 不兼容，应保留原 ZIP 与原工作区，在独立目录使用匹配的历史版本读取数据；不要用当前版本直接打开唯一的旧数据库尝试升级。跨版本自动恢复需另行验证迁移链，当前没有此保证。
+遇到 schema 不兼容，应保留原 ZIP 与原工作区，在独立目录使用匹配的历史版本读取数据；不要用当前版本直接打开唯一的旧数据库尝试升级。上述明确支持的前序结构可由预检在隔离区补齐；其他跨版本包不保证可恢复。
 
 ## 图片、Journal 与 ledger
 
@@ -31,5 +31,7 @@ API 为 GET /api/backups/restore 与 POST preview/confirm/cancel，沿用应用�
 ## 验证范围
 
 [冷启动 API 测试](../../tests/test_backup_restore_api.py)以合成 Knowledge bundle 贯通上传、导出、确认、进程退出、冷启动安装，在源路径不可用后核对主文件、PNG 字节、附件/evidence 关联和原目录保留。[历史包测试](../../tests/test_backup_legacy.py)另经预检 API 验证 schema 拒绝后工作区文件摘要不变，不代表所有旧版本兼容。
+
+[投递策略恢复测试](../../tests/test_application_strategy_backup.py)核对已知前序 schema 预检、确认、冷启动与精确投递档案、附件字节读回；同版本包保留决定和回执，缺少部分策略对象或改变 DDL 的包仍被拒绝。
 
 [云端回归](../../.github/workflows/backup-restore.yml)在 Linux/Windows 运行恢复专项，并使用真实恢复组件、HTTP 路由与进程重启检查双语 UI。测试宿主不是已安装 Electron，也不代表完整设置页导航验收；仅构建宿主不能算浏览器通过。完整 release gate 仍须独立通过。

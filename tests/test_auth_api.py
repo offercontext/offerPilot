@@ -91,3 +91,17 @@ def test_put_settings_preserves_blank_auth_token(tmp_path):
     assert response.json()["has_auth_token"] is True
     assert "auth_token" not in response.json()
     assert load_config(tmp_path).auth_token == "existing-token"
+
+
+def test_application_strategy_routes_stay_behind_app_auth(tmp_path):
+    save_config(tmp_path, Config(auth_enabled=True, auth_token="synthetic-strategy-token"))
+    path = "/api/applications/1/outcomes/1/strategy"
+    auth = {"Authorization": "Bearer synthetic-strategy-token"}
+    data = {"action": "propose", "idempotency_key": "strategy-auth-key", "proposal": "确认一次下一步"}
+    with TestClient(create_app(data_dir=tmp_path)) as client:
+        assert client.get(path).status_code == 401
+        assert client.get(path + "/target-snapshots?target_application_id=2").status_code == 401
+        assert client.post(path, json=data).status_code == 401
+        # With authentication, the actual routes run and reject nonexistent evidence.
+        assert client.get(path, headers=auth).json() == {"error_code": "application_strategy_evidence_unavailable"}
+        assert client.post(path, headers=auth, json=data).status_code == 404

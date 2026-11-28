@@ -36,6 +36,10 @@ const state = vi.hoisted(() => ({
   listOutcomes: vi.fn(),
   getSummary: vi.fn(),
   getMaterialKit: vi.fn(),
+  getStrategy: vi.fn(),
+  listStrategyArchives: vi.fn(),
+  writeStrategy: vi.fn(),
+  listApplications: vi.fn(),
 }));
 
 vi.mock('@/services/applicationOutcomes', () => ({
@@ -45,6 +49,10 @@ vi.mock('@/services/applicationOutcomes', () => ({
   listApplicationOutcomes: state.listOutcomes,
   getApplicationOutcomeSummary: state.getSummary,
 }));
+vi.mock('@/services/applicationStrategy', () => ({
+  getStrategy: state.getStrategy, listStrategyArchives: state.listStrategyArchives, writeStrategy: state.writeStrategy,
+}));
+vi.mock('@/services/applications', () => ({ listApplications: state.listApplications }));
 vi.mock('@/services/materialKits', () => ({ getApplicationMaterialKit: state.getMaterialKit }));
 
 const { default: ApplicationOutcomeDrawer } = await import('./ApplicationOutcomeDrawer');
@@ -107,6 +115,10 @@ beforeEach(() => {
     next_actions_pending: 0,
   });
   state.getMaterialKit.mockReset().mockResolvedValue(null);
+  state.getStrategy.mockReset();
+  state.listStrategyArchives.mockReset();
+  state.writeStrategy.mockReset();
+  state.listApplications.mockReset().mockResolvedValue([]);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -236,4 +248,60 @@ describe('ApplicationOutcomeDrawer', () => {
     expect([...document.body.querySelectorAll('button')].some((button) => button.textContent?.includes('使用原尝试重试'))).toBe(false);
     expect(sessionStorage.getItem('offerpilot:application-outcome:7:snapshot')).toBeNull();
   });
+});
+
+it('shows the exact archive and round in history and retries the same strategy command after response loss', async () => {
+  const later = { ...frozenSnapshot, id: 12, submitted_at: '2026-08-12T14:00:00Z' };
+  const rejected = {
+    id: 50, application_id: 7, submission_snapshot_id: 12, application_event_id: null,
+    stage: 'screening', result: 'rejected', feedback_text: '', reflection_text: '',
+    next_action_text: '量化可核实的项目结果', feedback_tags: [], source_kind: 'ui',
+    occurred_at: '2026-08-14T10:00:00Z', created_at: '2026-08-14T10:00:00Z',
+  };
+  const roundOne = { id: 71, application_id: 7, event_type: 'interview', round: 1, scheduled_at: '2026-08-15T10:00:00Z' } as never;
+  const roundTwo = { id: 72, application_id: 7, event_type: 'interview', round: 2, scheduled_at: '2026-08-15T15:00:00Z' } as never;
+  const interview = {
+    ...rejected, id: 51, stage: 'interview', result: 'advanced', application_event_id: 72,
+    occurred_at: '2026-08-15T16:00:00Z', next_action_text: '面试反馈标记',
+  };
+  state.listSnapshots.mockResolvedValue([later, frozenSnapshot]);
+  state.listOutcomes.mockResolvedValue([interview, rejected]);
+  const empty = { origin: { ...rejected, has_external_feedback: false }, change: null, target: null, comparable_outcomes: [] };
+  state.getStrategy.mockResolvedValue(empty);
+  state.writeStrategy.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({
+    ...empty, change: { revision: 0, proposal: rejected.next_action_text, applied_detail: null, decision: null, decided_outcome_id: null },
+  });
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  act(() => root?.render(<QueryClientProvider client={queryClient}>
+    <AntApp><ApplicationOutcomeDrawer application={application} open onClose={vi.fn()}
+      resumes={[resume]} currentJd={currentJd} events={[roundOne, roundTwo]} /></AntApp>
+  </QueryClientProvider>));
+  await settle();
+  const card = [...document.querySelectorAll('article')].find(item => item.textContent?.includes('面试反馈标记'));
+  expect(card?.textContent).toContain('第 2 轮面试');
+  expect(card?.textContent).toContain('日程 #72');
+  expect(card?.textContent).toContain('档案 #12');
+  expect(card?.textContent).not.toContain('日程 #71');
+
+  const click = (label: string) => {
+    const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === label);
+    expect(button).toBeDefined();
+    act(() => button?.click());
+  };
+  expect(state.getStrategy).not.toHaveBeenCalled();
+  click('把改法带到下一次投递');
+  await settle();
+  expect(state.getStrategy).toHaveBeenCalledWith(7, 50, expect.anything());
+  expect(state.writeStrategy).not.toHaveBeenCalled();
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="下一次的具体改法"]')?.value).toBe(rejected.next_action_text);
+  click('保存改法');
+  await settle();
+  click('重试同一请求');
+  await settle();
+  expect(state.writeStrategy).toHaveBeenCalledTimes(2);
+  expect(state.writeStrategy.mock.calls[0]).toEqual(state.writeStrategy.mock.calls[1]);
+  expect(state.writeStrategy.mock.calls[0]).toEqual([7, 50, expect.objectContaining({ action: 'propose', proposal: rejected.next_action_text })]);
+  expect(document.body.textContent).toContain('只有已在某份投递实际使用，才确认归档');
+  expect(state.createOutcome).not.toHaveBeenCalled();
+  expect(state.createSnapshot).not.toHaveBeenCalled();
 });

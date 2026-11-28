@@ -138,7 +138,7 @@ export async function saveAndUpdateJourneyMaterials({ context, base, api, output
     assert.equal(archivedRecord.submitted_at, '2026-01-15T04:30:00');
     assert.equal(archivedRecord.source_states.jd, 'current');
     assert.deepEqual(await api(archivePath), [archivedRecord]);
-    await drawer.getByText(new RegExp(`^2026-01-15 \\d{2}:\\d{2} · ${archivedResume.title}$`)).waitFor();
+    await drawer.getByRole('article').filter({ has: page.getByText(snapshotNote, { exact: true }) }).getByText(new RegExp(`^2026-01-15 \\d{2}:\\d{2} · ${archivedResume.title} · JD v1 · 档案 #${archivedRecord.id}$`)).waitFor();
     await drawer.screenshot({ path: path.join(output, 'same-case-ui-save-v1.png') });
     console.log('Same-case journey: UI archive saved and read back for B v1');
 

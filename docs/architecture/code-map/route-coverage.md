@@ -33,6 +33,8 @@
 | [已保存简历导出](materials.md#21-已保存版本-pdfdocx-导出) | `POST /api/resumes/{id}/export-preview` | [register_resume_export_routes](../../../src/offerpilot/resume_export_routes.py) |
 | [已保存简历导出](materials.md#21-已保存版本-pdfdocx-导出) | `POST /api/resumes/{id}/export` | 同上 |
 
+2026-11-28 投递结果策略增量（历史总数不变）：`GET/POST /api/applications/{app_id}/outcomes/{outcome_id}/strategy`、`GET .../strategy/target-snapshots` 由 [register_application_strategy_routes](../../../src/offerpilot/application_strategy/api.py) 注册。三项归属[投递与日程](applications.md#4-归档反馈与沟通草稿)，使用全局认证，仅用于用户界面，不注册为 Pilot 工具。
+
 ## 2. 注册位置与下钻
 
 | 业务 | 注册文件 / 前缀 | 数量 | 定位符号示例 |

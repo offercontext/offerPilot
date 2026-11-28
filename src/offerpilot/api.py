@@ -86,6 +86,7 @@ from offerpilot.job_mail.transport import MailTransport
 from offerpilot.job_mail.model_adapter import Extractor
 from offerpilot.confirmed_memory.api import register_memory_routes
 from offerpilot.training_evidence.api import register_training_evidence_routes
+from offerpilot.application_strategy.api import register_application_strategy_routes
 from offerpilot.context_sources.api import register_context_policy_routes
 from offerpilot.context_sources.readiness_api import register_readiness_context_routes
 from offerpilot.context_sources.summary_api import register_summary_routes
@@ -1349,6 +1350,7 @@ def create_app(
     )
     register_memory_routes(app, session_factory)
     register_training_evidence_routes(app, session_factory)
+    register_application_strategy_routes(app, session_factory)
     register_companion_routes(app, session_factory)
     register_context_policy_routes(app, session_factory)
     register_readiness_context_routes(app, session_factory)
