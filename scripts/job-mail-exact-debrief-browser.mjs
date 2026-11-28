@@ -70,7 +70,13 @@ export async function verifyExactDebrief({ context, base, api, pageErrors }) {
   });
   try {
     assert.deepEqual(ids((await api(listPath)).items), [a1.id, b1.id, b2.id]);
+    // Earlier archive/date checks set the shared BrowserContext clock to an
+    // historical date. Use the same live-relative instant that seeded the
+    // server-side review window, without replacing browser timers.
+    await page.clock.setFixedTime(new Date(seedNow));
     await page.goto(base + '/?view=reminders');
+    assert.equal(await page.evaluate(() => Date.now()), seedNow,
+      'Browser and synthetic seed must use the same review-window instant');
     await Promise.all([button(a, 1), button(b, 1), button(b, 2)].map(card => card.waitFor({ timeout: 15000 })));
     await button(b, 2).click();
     await page.getByRole('button', { name: '记录这场面试的复盘', exact: true }).click();
@@ -146,4 +152,5 @@ export async function verifyExactDebrief({ context, base, api, pageErrors }) {
     await page.close();
   }
 }
+
 
